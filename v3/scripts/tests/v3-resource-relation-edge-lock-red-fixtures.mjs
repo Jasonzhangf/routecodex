@@ -145,7 +145,9 @@ const cases = [
     name: 'same node edge',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: function(source) {
-      return source.replace('to_node: V3Config02AuthoringParsed', 'to_node: V3Config01FileSource');
+      return mutateYaml(source, (document) => {
+        edge(document, 'v3-cfg-01').to_node = 'V3Config01FileSource';
+      });
     },
     diagnostic: /from_node and to_node must differ/u,
   },

@@ -1,6 +1,12 @@
 # V3 Module Decomposition SOP（巨型文件拆解标准作业程序）
 
-Status: design SOP, execution not started.
+Status: partial execution; scoped changes recorded below.
+Scoped split (2026-09-05): `anthropic_relay_runtime/response_closeout.rs` owns
+JSON/SSE normalization and shared Resp03-Resp06 closeout. Kernel submodules
+`direct_execution_control.rs` and `direct_runtime_timing.rs` own control resolution
+and timing finalization. Kernel retains lifecycle orchestration and error projection.
+Function bodies, node order, public entrypoints and protocol behavior remain unchanged;
+this records only these module moves, not completion of the full decomposition plan.
 Plan truth: `docs/goals/v3-god-file-decomposition-plan.md`.
 Feature id: `v3.module_decomposition`（`docs/architecture/v3-function-map.yml`，status=design_pending）.
 Review surface: `docs/architecture/wiki/html/v3-mainline-caller-flow.html`.

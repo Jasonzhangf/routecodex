@@ -2576,6 +2576,9 @@ features:
   owner_kind: rust_project_v3_structure_gate
   owner_scope: 'V3 god-file decomposition governance: file-size ratchet, phase SOP, and zero-behavior-change module split verification.'
   owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
   - v3/config/v3-file-size-policy.json

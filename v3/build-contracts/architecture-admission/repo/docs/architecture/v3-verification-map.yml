@@ -1707,6 +1707,8 @@ features:
   - Unknown Responses item types fail at the protocol codec boundary.
   - Rewrite hooks cannot alter identity, item type, terminality, framing, or control state.
   - Protocol metadata does not enter normal provider or client payloads.
+  - Responses response.instructions is typed through JSON and SSE; the Resp03 model-identity owner removes only provider identity instructions and preserves ordinary instructions and response.model.
+  - Relay and Direct typed Responses hooks register one shared Resp03 model-identity rewrite owner; no second cleanup exists in framing or projection.
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-sse --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_sse_tree --lib
@@ -1840,6 +1842,7 @@ features:
     save without MetadataCenter, headers, or outbound repair.
   - Responses text.verbosity remains output verbosity. Anthropic consumes valid low/medium/high values only as a registered local style hint; it never maps them to output_config.effort because that field
     is reasoning effort, not verbosity.
+  - "Responses text.format.json_schema.name is a source-only schema identity: inbound preserves it, while Anthropic outbound consumes it and emits only the target-valid `{type:json_schema,schema}` format. Unknown nested format fields and malformed strict values remain explicit outbound failures."
   - ? Responses custom tool declarations map exactly to native OpenAI Chat custom tools. Anthropic uses the registered `v3.custom_tool.anthropic_string_input_wrapper.v1` compatibility projection
     : exact raw input becomes `tool_use.input={"input":raw}`, declaration description/schema carries free-form or exact grammar information without claiming native enforcement, and reverse projection requires
       governed custom declaration identity plus the exact wrapper shape. Responses web_search/web_search_preview maps to OpenAI Chat web_search_options only for the text-only target subset, while image
@@ -1873,6 +1876,8 @@ features:
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
+  - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
+  - anthropic_consumes_responses_json_schema_name_in_outbound_projection
   - openai_chat_wire_projects_responses_web_search_tool_to_options
   - responses_openai_chat_field_parity_direct_kernel_preserves_responses_input_include_and_tool_history
   - openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context
@@ -2571,6 +2576,9 @@ features:
   owner_kind: rust_project_v3_structure_gate
   owner_scope: 'V3 god-file decomposition governance: file-size ratchet, phase SOP, and zero-behavior-change module split verification.'
   owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_execution_control.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
   - v3/config/v3-file-size-policy.json
@@ -2580,6 +2588,9 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-provider-responses
   design:
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
@@ -3433,15 +3444,16 @@ features:
   required_positive:
   - disabled mode preserves payload identity
   - direct and relay Req04 compile one tool_thinking_json_v2 request-local contract without changing tool order, system/developer/history order, or static tool registries
-  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input three-field guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments three-field guidance
-  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason, goal_alignment_confidence, and the model's own true self-reported model_id; no request_id, client/request model, route alias, selected target, or provider-bound wire model is copied into model_id guidance, and Gemini is excluded
-  - every eligible free-form custom tool is wrapped by Req04 with input plus all three required auxiliary fields, then restored after Resp03 with byte-stable custom input; registered raw exceptions remain unchanged
+  - Anthropic provider-facing system and tool descriptions contain only native tool_use/input two-field guidance, while Responses/OpenAI Chat provider-facing guidance contains only arguments two-field guidance
+  - OpenAI Chat, Responses, and Anthropic eligible tool parameter schemas require reason and goal_alignment_confidence; Req04 emits no model_id guidance or schema field, legacy model_id is only accepted for Resp03 stripping, and Gemini is excluded
+  - every eligible free-form custom tool is wrapped by Req04 with input plus the two required auxiliary fields, then restored after Resp03 with byte-stable custom input; registered raw exceptions remain unchanged
   - provenance-matched custom calls with valid string input are restored for OK, MISSING, INVALID, and MISPLACED statuses; only OK authorizes reasoning
   - Direct retries reuse the Req04 typed context without duplicate guidance, schema mutation, or provenance reconstruction
   - provider-bound snapshots prove the governed contract survives every protocol projection, including Responses-to-OpenAI-Chat custom wrapping
   - RespInbound02 preserves the complete provider-native parameter container until Resp03
   - protocol adapters retain exact complete parameter JSON bytes and Resp03 rejects duplicate reserved keys without first-wins or last-wins collapse
-  - Resp03 alone validates reason and any supplied diagnostics; one valid reason authorizes all-or-nothing reserved-key removal and exactly one typed terminal turn result
+  - Resp03 alone validates reason and any supplied diagnostics; one valid reason authorizes all-or-nothing active reason/confidence removal and exactly one typed terminal turn result, while legacy model_id is independently removed only at an identified native tool-call envelope/parameter boundary
+  - Resp03 is the only model-identity instruction cleanup owner: provider identity instructions are removed from Responses JSON and typed SSE for Relay and Direct, while ordinary instructions and the legal response model remain unchanged
   - an OK result projects one separate normal reasoning item immediately before the first native tool call while every provider-native reasoning item remains byte-identical and ordered
   - every observed tool turn emits exactly one OK, MISSING, INVALID, or MISPLACED terminal observation with the existing canonical session_id and request_id
   - a parallel tool turn is OK only when every eligible call is valid; a mixed turn emits one deterministic non-OK status and no Tool-Thinking reasoning
@@ -3449,8 +3461,9 @@ features:
   - v3.response.tool_thinking_turn_result carries projection authorization only as a request-local typed resource and is released after observation/client projection
   required_negative:
   - provider-facing guidance never contains another protocol's wire wrapper, field container, or positive example
-  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, reserved-key removal, or any tool-call rewrite; absent diagnostics alone remain response-compatible
+  - missing, empty, or wrong-type reason; wrong-type or out-of-range supplied diagnostics; duplicate or misplaced active reserved fields; malformed JSON; and incomplete native calls never authorize reasoning, active-field removal, or any tool-call rewrite; legacy model_id cleanup is response-only compatibility and malformed custom wrappers remain unchanged
   - malformed custom wrappers or non-string custom input are never guessed or repaired
+  - provider model-identity instruction text never reaches the client business payload or gets reconstructed from the response model field
   - ordinary model reasoning, thinking, text, history, descriptions, and legacy fences are never parsed as Tool-Thinking
   - visible rcc_reason_* IDs, 调用工具 prefixes, pending ordinary message text, marker characters, and content equality never authorize, replay, suppress, or deduplicate Tool-Thinking
   - custom provenance never enters request/response payload, protocol metadata, provider options, history, continuation, debug payload, or MetadataCenter
@@ -3465,6 +3478,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib tool_thinking_custom -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime model_identity -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime ordinary_response_instructions -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_toolreason -- --nocapture
   - native-reasoning preservation and separate-item projection tests pass for Responses JSON/SSE, OpenAI Chat JSON/SSE, and Anthropic JSON/SSE
   - prefix, marker, visible-ID, and content-collision negative tests prove no semantic fallback
@@ -3505,10 +3520,12 @@ features:
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
+  - History writes compact oldest raw rows atomically before the byte limit, keep the new row, and remain bounded across repeated writes.
   required_negative:
   - Projection state does not enter provider/client payload, protocol metadata, continuation, or history.
   - Ordinary listeners do not expose /api/observability snapshot, stats, or events routes.
   - Admin does not use SSE, snapshot polling, or loopback HTTP transport to read request records.
+  - An oversized new row or corrupt existing JSONL fails explicitly without overwriting the store.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store

@@ -4035,14 +4035,47 @@ features:
   status: phase0_gate_active_modules_pending
   design_truth: docs/goals/v3-god-file-decomposition-plan.md
   sop: docs/architecture/wiki/v3-module-decomposition-sop.md
+  decomposed_modules:
+  - path: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs
+    owner: anthropic_relay_runtime
+    responsibility: Normalize JSON/SSE responses and run shared Resp03 through Resp06 closeout.
+  - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_execution_control.rs
+    owner: kernel
+    responsibility: Resolve supplied or manifest-declared typed request execution control.
+  - path: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
+    owner: kernel
+    responsibility: Finalize typed timing for committed SSE, live SSE and JSON.
+  decomposition_edges:
+  - caller: execute_v3_anthropic_relay_runtime_inner
+    callees: [closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response]
+  - caller: execute_v3_responses_direct_runtime_kernel_core_resident
+    callees: [resolve_v3_direct_request_execution_control, finish_v3_direct_runtime_timing]
   owner_crates:
   - routecodex-v3-server
   - routecodex-v3-runtime
+  - provider-compat-core
+  - routecodex-v3-config
+  - routecodex-v3-provider-responses
   owner_files:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/provider-compat-core/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+  - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/scripts/architecture/verify-v3-file-size.mjs
   - v3/scripts/tests/v3-file-size-red-fixtures.mjs
   - v3/config/v3-file-size-policy.json
@@ -4068,6 +4101,9 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server
   - v3/crates/routecodex-v3-runtime
+  - v3/crates/provider-compat-core
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-provider-responses
   - docs/goals/v3-god-file-decomposition-plan.md
   - docs/architecture/wiki/v3-module-decomposition-sop.md
   - docs/architecture/v3-function-map.yml
@@ -4081,8 +4117,6 @@ features:
   forbidden_paths:
   - src
   - sharedmodule
-  - v3/crates/routecodex-v3-config
-  - v3/crates/routecodex-v3-provider-responses
   required_gates:
   - npm run verify:v3-file-size
   - npm run test:v3-file-size-red-fixtures
@@ -5421,6 +5455,7 @@ features:
   status: source_controlled_pending_online_matrix
   change_risk: high
   owner_kind: rust_v3_chat_process_tool_thinking_hook
+  owner_scope: Resp03 is the sole semantic owner for Toolreason response compatibility, including provider model-identity instruction cleanup; Direct and Relay response paths only invoke or register this owner.
   owner_modules:
   - routecodex-v3-runtime
   owner_files:
@@ -5446,6 +5481,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
   - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
   test_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks_anthropic_native_tests.rs
@@ -5460,6 +5496,9 @@ features:
   - v3.response.client_payload
   entry_symbols:
   - inject_v3_tool_thinking_guidance_at_req04
+  - scrub_v3_provider_model_identity_instruction
+  - scrub_v3_provider_model_identity_instructions
+  - scrub_v3_provider_model_identity_instructions_from_typed_sse
   - map_v3_toolreason_to_reasoning_content_at_resp03
   - map_v3_toolreason_stream_event_at_resp03
   - V3DirectSseContentConsumer::take_toolreason_reasoning_projection
@@ -5515,19 +5554,21 @@ features:
   - continuation stores
   contract_version: tool_thinking_json_v2
   contract_rules:
-  - Req04 requires reason, goal_alignment_confidence, and the model's own true self-reported model_id in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; RouteCodex never binds, prefills, or derives model_id from request identity, requested/client model, route selection, or provider wire identity, while Resp03 separately accepts reason-only provider output for compatibility
-  - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input three-field instructions, while Responses/OpenAI Chat tools receive only arguments three-field instructions; wire examples from another protocol are forbidden
+  - Req04 requires reason and goal_alignment_confidence in each eligible non-Gemini structured tool schema and wraps eligible free-form custom tools as request-local structured provider contracts; Req04 does not inject model_id into provider-facing guidance or schemas, while Resp03 separately accepts and strips legacy model_id when present
+  - Req04 guidance is protocol-pure at the provider-facing slice: Anthropic native tools receive only tool_use/input two-field instructions, while Responses/OpenAI Chat tools receive only arguments two-field instructions; wire examples from another protocol are forbidden
   - Req04 records original custom-tool provenance only in v3.request.tool_thinking_turn_context; that resource never enters payload, metadata, history, or continuation
   - Req04 compilation is atomic and runs once per execution; Direct retries reuse its typed context and may not recompile from an already governed tool list
   - downstream protocol projection preserves the Req04 contract mechanically and never performs a second semantic injection
   - RespInbound02 preserves the complete native parameter container; custom input is not unwrapped before Resp03
   - protocol adapters retain exact complete native parameter JSON bytes so Resp03 can reject duplicate reserved keys without first-wins or last-wins collapse
-  - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes all-or-nothing removal of supplied auxiliary keys and one typed turn result
-  - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced reserved fields; and incomplete or malformed native calls never authorize reasoning or any tool-call rewrite; absent diagnostics alone remain response-compatible
+  - Resp03 alone classifies reason and any supplied diagnostics; only one valid non-empty reason authorizes reasoning and all-or-nothing removal of the active reason/confidence keys, while legacy model_id is independently removed only at an identified native tool-call envelope/parameter boundary
+  - missing, empty, or invalid reason; invalid supplied diagnostics; duplicate or misplaced active reserved fields; and incomplete native calls never authorize reasoning or active-field rewrite; legacy model_id cleanup remains response-only compatibility, and malformed JSON/custom wrappers stay unchanged
   - a parallel tool turn is OK only when every eligible native call is valid; mixed status produces one deterministic non-OK terminal result and no reasoning
   - provenance-matched custom restoration is an independent mechanical inverse and preserves valid custom input for every terminal status
   - the typed turn result projects one separate normal reasoning item before the first native tool call without changing provider-native reasoning
   - visible IDs, 调用工具 text, ordinary reasoning, pending message text, and legacy fences are not identity or active sources; their parsers and replay paths are physically removed
+  - Resp03 removes only the provider model-identity instruction shape identified by both canonical identity markers; ordinary client instructions and the legal response model field remain unchanged
+  - Relay and Direct typed Responses SSE catalogs register the same Resp03 model-identity cleanup function; provider, generic SSE framing, handler, and client projection layers do not implement a second scrubber
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib req04_tool_thinking -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib resp03_ -- --nocapture
@@ -5594,6 +5635,7 @@ features:
   - v3.sse.responses.protocol_metadata
   - v3.sse.responses.hook_effect
   - v3.sse.chat.json_document
+  - v3.sse.relay.typed_hook_catalog
   - v3.sse.direct.typed_hook_catalog
   entry_symbols:
   - classify_v3_responses_sse_output_item
@@ -5603,7 +5645,10 @@ features:
   - V3OpenAiChatJsonDocument::from_json
   - V3OpenAiChatJsonDocument::to_normalized_value
   - V3ResponsesSseHookInput
+  - V3ResponsesSseResponseContainer
+  - parse_response_container
   - V3HubRelayResponseHookRegistry::typed_sse_catalog
+  - V3RelaySseHookCatalog::rewrite_responses
   - V3DirectSseTypedHookCatalog::new
   - V3DirectSseTypedHookCatalog::with_responses
   - V3DirectSseTypedHookCatalog::with_chat
@@ -5929,7 +5974,8 @@ features:
   required_gates:
   - request mutex critical sections perform no open/write/flush
   - active and recent-terminal in-memory rows have explicit limits
-  - history files enforce a hard byte cap and startup loading is bounded
+  - history files enforce a hard byte cap by atomically reclaiming the oldest raw rows before append; the current row is never dropped and startup loading is bounded
+  - retention compaction validates all existing rows and preserves raw lifecycle rows within the configured retention window
   - config publishes path/policy but does not own runtime append execution
   - npm run verify:v3-execution-control-payload-architecture
   - git diff --check

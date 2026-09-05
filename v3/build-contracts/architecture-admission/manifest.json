@@ -6,8 +6,8 @@
     {
       "output_path": "repo/.agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md",
       "source_path": ".agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md",
-      "source_commit": "4b5af07352a847dd6be0b9b6a10240b4116dab3d",
-      "sha256": "2fa2b13815f1664c3020aced295965a94a8444ae11a869a8cdc70969462a81ad"
+      "source_commit": "af440f40a4a7a11c83146e3ca77e1c284730ea69",
+      "sha256": "414e188592576aae6f697ccffd553e1403fa8f9a38dd7a69890e322191556d9f"
     },
     {
       "output_path": "repo/.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md",
@@ -540,7 +540,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml",
-      "source_commit": "1d47a2b44a63b023fe80755b491f710ac19fa515",
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
       "sha256": "3acc7932754e9c39d2dd407c07c0e66bc516b812b107d5b589d817e7cc094315"
     },
     {
@@ -786,7 +786,7 @@
     {
       "output_path": "repo/docs/architecture/v3-architecture-audit-locks.yml",
       "source_path": "docs/architecture/v3-architecture-audit-locks.yml",
-      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
       "sha256": "eba0a7ee4d72469417a9237433bccb1d6676adfb207a89229b9523087962d29c"
     },
     {
@@ -804,8 +804,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "1e06fb2f28402f3fd1413d2d2516171cb3a702fb",
-      "sha256": "2b1c066e5b77ec420caf5c85e1c8d7b888e467b00f944dd9752b09d182258bcd"
+      "source_commit": "356a3147e86bebd76bcae03d38d0c939d0782187",
+      "sha256": "7af72e40d6ad762117c090daf37c4d2e0a9bca503f11c4e4618efc6412ea2dd2"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -816,14 +816,14 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "1e06fb2f28402f3fd1413d2d2516171cb3a702fb",
-      "sha256": "9b5387e7c444113f83e0974a1015343d5052ed51498d1ab4d8b0fce13c320c8c"
+      "source_commit": "cdbcacf23242f60dc9d30dc0bc8b7adbc7e3ac3b",
+      "sha256": "f6eefb0a6e93650f9e794527d98a0b22236829a7d204b84770d194ce06c8c4fd"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "1e06fb2f28402f3fd1413d2d2516171cb3a702fb",
-      "sha256": "c105918cd2551e168684ab3eab8767916cf5d288719042561c9b642947f897db"
+      "source_commit": "cdbcacf23242f60dc9d30dc0bc8b7adbc7e3ac3b",
+      "sha256": "484bc3a989db47b7f536080984f60679604184cce2c560cdb82d0362a044f013"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -834,8 +834,8 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "1e06fb2f28402f3fd1413d2d2516171cb3a702fb",
-      "sha256": "a702099cb4c6a80f3364fab32109d096c05fcad422cb929b2228b804f414d66b"
+      "source_commit": "356a3147e86bebd76bcae03d38d0c939d0782187",
+      "sha256": "6bbcd672e547c6a4e41f34fb23726032dca41f874622e22f70e2e989daf25e40"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1020,8 +1020,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
-      "sha256": "27153a77f7866c1a04b18fc612f97e278a783474934cf53ccb83c1b55ac28a8a"
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
+      "sha256": "2c6a5d77806592116b95f46331b46636356c676cfcd07abc9ade0db24640e981"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1032,7 +1032,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-openai-chat-relay-controlled-runtime.html",
       "source_path": "docs/architecture/wiki/html/v3-openai-chat-relay-controlled-runtime.html",
-      "source_commit": "16a80fa54ccdea27d4274d9cb976677db469e84d",
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
       "sha256": "a155753210c274db333750a1a52909fc2529ed200907fed361cd107caeba2c40"
     },
     {
@@ -1284,8 +1284,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "7f26de4f0efe754df1b97aff930e3f46d597e3eb",
-      "sha256": "842b2d4614c757e2b52a40c89d93f3a9f701458a93ccf7cf5d03437db7a3dcad"
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
+      "sha256": "fafba13523e84e4b355063203bdb042193a93eee63c7583ac0c1b8ea1543ba20"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -1303,7 +1303,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-module-decomposition-sop.md",
       "source_path": "docs/architecture/wiki/v3-module-decomposition-sop.md",
       "source_commit": "cff4be9dda548fabc24af6745e9407819e814c33",
-      "sha256": "fe01e23bc06aefc0dbe2f29f031f77e25279cd3fdcdfa80ba2d36eabcd4d4bb2"
+      "sha256": "192bb750cfcf39afcc28767798058db726fa16fee4ef9d44d7adf12245997b22"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-openai-chat-codec-characterization.md",
@@ -1314,7 +1314,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md",
       "source_path": "docs/architecture/wiki/v3-openai-chat-relay-controlled-runtime.md",
-      "source_commit": "d12bb67fa19c47ee6c7b5a210f5cb209c1802a92",
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
       "sha256": "ba8fa8713d0579e84dda548534797d875e7dc6d4cba80c920a280e7e6b971fb3"
     },
     {
@@ -2038,6 +2038,12 @@
       "sha256": "070583b9154ae914a2a7032283c8873ebf9ca80b03143cf57f08703049121173"
     },
     {
+      "output_path": "repo/docs/goals/v3-architecture-ablation-doc-correction-plan.md",
+      "source_path": "docs/goals/v3-architecture-ablation-doc-correction-plan.md",
+      "source_commit": "fdf5d76701bf83644ef772f3f9c0bb075f4f79b4",
+      "sha256": "a00e19a61b48982353abb106d1e8cb54bc680e0b3b9b34ad4431762529c73e62"
+    },
+    {
       "output_path": "repo/docs/goals/v3-architecture-audit-2026-07.md",
       "source_path": "docs/goals/v3-architecture-audit-2026-07.md",
       "source_commit": "365857667f45a69b4d8b038d8a50691fab74d15e",
@@ -2394,7 +2400,7 @@
     {
       "output_path": "repo/docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md",
       "source_path": "docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md",
-      "source_commit": "5bd01e5caf3e21b1b55f478555a0a2d4d4c34c57",
+      "source_commit": "da82e74a5a364c8ad57a2bfa99c4a9af919525be",
       "sha256": "7eeabf2a08d44730d6bf7d701bf58e984ddfd10201599c1e5c87abf58d56680e"
     },
     {
@@ -2796,8 +2802,8 @@
     {
       "output_path": "repo/docs/goals/v3-tool-thinking-hook-plan.md",
       "source_path": "docs/goals/v3-tool-thinking-hook-plan.md",
-      "source_commit": "37436db5a53e27da19fa2c30e682cedffcc696e7",
-      "sha256": "c4485e32e5ebe7ecdb5e26f853347fd52d65a92677c798f41c778b9816818ec0"
+      "source_commit": "238dbcf7f49941d7973a17c5e0b952ab0003c453",
+      "sha256": "6c1f5955581fc35667e4ade82af03e27ffd788173d6aedc199f0b61664c6d96c"
     },
     {
       "output_path": "repo/docs/goals/v3-v2-effort-regression-matrix.md",
@@ -2994,9 +3000,9 @@
     {
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
-      "source_commit": "abf91ff61bc112d581c7277a654acc58107b20d5",
-      "sha256": "5cc420540dffe755ef55174e73198b28d7b0142769fd3fbae89c5c8016250e79"
+      "source_commit": "356a3147e86bebd76bcae03d38d0c939d0782187",
+      "sha256": "102e679b9ef91aaaf8e49fad9aaa42d32f328c0b85dcc3f2fbf027b2776dd9f8"
     }
   ],
-  "manifest_digest": "136a43d6c1ae2bf31cab910e56184e590f802fb9babef67e120a8fe218b7dff8"
+  "manifest_digest": "c5de70ba2b0aaed5632dcf57fdc6c79214583686a5cd9f6b0d4952409fde20f4"
 }

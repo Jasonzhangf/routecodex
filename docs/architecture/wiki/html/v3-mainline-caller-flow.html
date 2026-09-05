@@ -4623,7 +4623,7 @@ flowchart TD
         <span class="summary-sub">9 edges · <code>v3.tool_thinking_hook_skeleton.mainline</code> · V3HubReqContinuation03Classified → V3DirectResp15ClientPayloadReady</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason, goal_alignment_confidence, and the model's own true self-reported model_id without request/route/wire-derived binding, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, performs all-or-nothing valid-key removal, mechanically restores custom shape, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.</p>
+        <p class="chain-summary">Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason and goal_alignment_confidence, never injects or requests model_id, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, removes active reason/confidence only after valid reason authorization, independently strips legacy model_id at identified native tool-call envelope/parameter boundaries, mechanically restores valid custom shape, preserves malformed custom wrappers, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.tool_thinking_hook_skeleton</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>
@@ -4686,7 +4686,7 @@ flowchart TD
         <span class="summary-sub">2 edges · <code>v3.server.internal_observability_projection</code> · V3ServerConsoleObservation → V3AdminObservabilityAggregation</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.</p>
+        <p class="chain-summary">Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; the store atomically reclaims oldest raw rows at its bounded history limit; Admin reads the retained raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.server_internal_observability_projection</code></span>
           <span>audit: <span class="status pending_review">pending review</span></span>

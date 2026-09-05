@@ -62,6 +62,10 @@ pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
 pub(crate) use direct_runtime_helpers_stream::wrap_direct_sse_provider_event_json_observation_stream_with_compat as wrap_direct_sse_provider_event_json_observation_stream_with_compat_hook;
 mod direct_sse_consumers;
+mod direct_execution_control;
+mod direct_runtime_timing;
+use direct_execution_control::resolve_v3_direct_request_execution_control;
+use direct_runtime_timing::finish_v3_direct_runtime_timing;
 pub(crate) use direct_sse_consumers::V3DirectSseTypedHookCatalog;
 mod v3_direct_protocol_codec;
 pub use v3_direct_protocol_codec::{
@@ -140,21 +144,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     trace.push("V3Req04StandardizedResponses");
-    let request_execution_control = match request_execution_control {
-        Some(control) => control,
-        None => match crate::nodes::V3RequestExecutionControl::from_manifest(
-            manifest,
-            &standardized.server_id,
-        ) {
-            Ok(control) => control,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3ExecutionAttemptBudget", error),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        },
+    let request_execution_control = match resolve_v3_direct_request_execution_control(
+        request_execution_control,
+        manifest,
+        &standardized.server_id,
+    ) {
+        Ok(control) => control,
+        Err(source) => return error_output(source, trace, &hook_registry),
     };
     let attempt_budget = request_execution_control.attempt_budget();
     if let Some(plan_trace) = initial_plan_trace {
@@ -1735,44 +1731,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
         trace.push("V3DirectResp15ClientPayloadReady");
         trace.push("V3Resp15ClientPayload");
-        let timing = if committed_client_sse {
-            match response_projection.stream_observation.as_ref() {
-                Some(observation) => match observation.snapshot() {
-                    Ok(snapshot) => snapshot.timing,
-                    Err(error) => {
-                        return error_output(
-                            runtime_source("V3RuntimeTimingObservation", error),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
-                },
-                None => None,
-            }
-        } else if live_client_sse {
-            None
-        } else {
-            match runtime_timing.finish_runtime() {
-                Ok(timing) => Some(timing),
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3RuntimeTimingTerminal", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            }
+        let timing = match finish_v3_direct_runtime_timing(
+            committed_client_sse,
+            live_client_sse,
+            response_projection.stream_observation.as_ref(),
+            &runtime_timing,
+        ) {
+            Ok(timing) => timing,
+            Err(source) => return error_output(source, trace, &hook_registry),
         };
-        if committed_client_sse && timing.is_none() {
-            return error_output(
-                runtime_source(
-                    "V3RuntimeTimingTerminal",
-                    "successful Direct SSE completed without typed timing",
-                ),
-                trace,
-                &hook_registry,
-            );
-        }
         let mut observability = build_v3_direct_runtime_observability(
             &policy.target,
             "responses",

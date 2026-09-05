@@ -2694,7 +2694,7 @@ flowchart TD
 
 ## v3.tool_thinking_hook_skeleton.mainline
 
-Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason, goal_alignment_confidence, and the model's own true self-reported model_id without request/route/wire-derived binding, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, performs all-or-nothing valid-key removal, mechanically restores custom shape, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
+Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason and goal_alignment_confidence, never injects or requests model_id, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, removes active reason/confidence only after valid reason authorization, independently strips legacy model_id at identified native tool-call envelope/parameter boundaries, mechanically restores valid custom shape, preserves malformed custom wrappers, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
 
 Owner feature: `v3.tool_thinking_hook_skeleton`
 
@@ -2747,7 +2747,7 @@ flowchart TD
 
 ## v3.server.internal_observability_projection
 
-Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; Admin reads raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.
+Server-owned typed diagnostic projection appends every lifecycle update to a per-listener JSONL store; the store atomically reclaims oldest raw rows at its bounded history limit; Admin reads the retained raw lifecycle rows, projects failed provider attempts, and folds terminal state without SSE or poll transport.
 
 Owner feature: `v3.server_internal_observability_projection`
 

@@ -719,7 +719,7 @@ resources:
     identity: [requestId, pipelineId]
     semantic_contract:
       request_owner: Req04 compiles the request-local tool_thinking_json_v2 contract and records only original custom-tool provenance in this typed resource.
-      guidance_contract: Req04 selects one protocol-pure provider-facing guidance slice and requires reason, goal_alignment_confidence, and the model's own true self-reported model_id together; model_id is never bound, prefilled, or derived from request_id, client/request model, route alias, selected target, or provider-bound wire model, and Anthropic native tool_use/input instructions and Responses/OpenAI Chat arguments instructions never share wire examples.
+      guidance_contract: Req04 selects one protocol-pure provider-facing guidance slice and requires reason and goal_alignment_confidence; model_id is not injected into provider-facing guidance or schemas, while legacy Resp03 responses may still be stripped of it, and Anthropic native tool_use/input instructions and Responses/OpenAI Chat arguments instructions never share wire examples.
       response_owner: Resp03 consumes the same-turn provenance after Phase 1 compatibility classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
       parser_boundary: protocol and SSE adapters may carry complete native parameter containers but may not parse, strip, infer, or project Tool-Thinking semantics.
       payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, continuation, response JSON, or client SSE.
@@ -743,8 +743,8 @@ resources:
     identity: [requestId, pipelineId]
     semantic_contract:
       producer: Resp03 finalizes exactly one typed status for an observed native tool-call turn after protocol completion.
-      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence and model ID are optional diagnostics validated when present.
-      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no redaction or reasoning.
+      valid_shape: Phase 1 OK carries a trimmed nonempty reason and one formatted projection text; confidence is an optional diagnostic validated when present, and legacy model_id is never projected.
+      invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no reasoning or active reason/confidence redaction; Resp03 may still remove legacy model_id at an identified native tool-call envelope/parameter boundary, while malformed JSON/custom wrappers remain unchanged.
       projection_boundary: registered client-protocol projectors consume this typed result without inspecting visible IDs, prefixes, markers, ordinary reasoning, or history.
       observation_boundary: exactly one canonical terminal observation consumes the same finalized result; projection diagnostics do not create a second terminal status.
       payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, continuation, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.
@@ -2045,12 +2045,15 @@ resources:
     semantic_contract:
       format: jsonl_envelope
       schema_version: 1
-      append_only: true
+      append_only: false
+      retention_policy: retain_recent_raw_rows_until_half_history_limit
+      compaction: deterministic_atomic_replace_before_append
       reader_folds_by_request_key: true
-      raw_lifecycle_preserved: true
+      raw_lifecycle_preserved: true_within_retention_window
+      current_row_never_dropped: true
       record_limit_bytes: internal_observability_max_record_bytes
       control_state_in_payload: forbidden
-    allowed_writers: [v3_webui_observability_append_row]
+    allowed_writers: [v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention]
     allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
     may_enter_provider_body: false
@@ -2106,7 +2109,12 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesSseSemanticObject
     identity: [responseId, outputIndex, itemId, contentIndex]
-    allowed_writers: [classify_v3_responses_sse_output_item, rewrite_v3_responses_sse_content, V3ResponsesSseReducerState::apply_event]
+    semantic_contract:
+      response_instructions: Responses response.instructions is carried as a typed optional field; ordinary client instructions remain visible.
+      model_identity_instruction_owner: Resp03 exclusively removes provider model-identity instruction text identified by both canonical markers; the legal response model field is preserved.
+      typed_projection_paths: Relay and Direct catalogs invoke the same Resp03 rewrite function; no provider, generic SSE, handler, or client projection scrubber exists.
+      payload_boundary: provider model-identity instructions do not enter the client business payload, while ordinary instructions and the legal model field remain protocol-visible.
+    allowed_writers: [classify_v3_responses_sse_output_item, rewrite_v3_responses_sse_content, V3ResponsesSseReducerState::apply_event, scrub_v3_provider_model_identity_instructions_from_typed_sse]
     allowed_readers: [V3ResponsesSseHookInput, responses_provider_event_codec]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
@@ -2121,7 +2129,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesJsonDocument
     identity: [responseId, outputIndex, itemId]
-    allowed_writers: [V3ResponsesJsonDocument::from_json, V3ResponsesJsonDocument::to_normalized_value]
+    allowed_writers: [V3ResponsesJsonDocument::from_json, V3ResponsesJsonDocument::to_normalized_value, scrub_v3_provider_model_identity_instructions]
     allowed_readers: [run_json_response_hooks]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, MetadataCenter, request.normal_payload, response.client_payload, provider.wire_payload]
     may_enter_provider_body: false
@@ -2304,6 +2312,9 @@ resources:
     owner_module: relay_sse_hooks
     owner_node: V3RelaySseHookCatalog
     identity: [protocol, hook_kind, registration_revision]
+    semantic_contract:
+      responses_rewrite_owner: Resp03's scrub_v3_provider_model_identity_instructions_from_typed_sse is the single registered Responses rewrite owner; this catalog only stores and invokes it.
+      preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3RelaySseHookCatalog::new, V3RelaySseHookCatalog::with_responses, V3RelaySseHookCatalog::with_chat]
     allowed_readers: [responses_provider_event_codec, provider_stream_materialization, openai_chat_relay_runtime]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
@@ -2320,6 +2331,9 @@ resources:
     owner_module: direct_sse_consumers
     owner_node: V3DirectSseTypedHookCatalog
     identity: [protocol, hook_kind, registration_revision]
+    semantic_contract:
+      responses_rewrite_owner: Resp03's scrub_v3_provider_model_identity_instructions_from_typed_sse is the single registered Responses rewrite owner; this catalog only stores and invokes it.
+      preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3DirectSseTypedHookCatalog::new, V3DirectSseTypedHookCatalog::with_responses, V3DirectSseTypedHookCatalog::with_chat]
     allowed_readers: [V3DirectSseContentConsumer::consume, project_direct_typed_protocol_data]
     forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
