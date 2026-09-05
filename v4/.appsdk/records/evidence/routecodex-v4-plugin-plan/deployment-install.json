@@ -1,12 +1,14 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "evidence_id": "deployment-install",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "experiment_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
-  "phase": "artifact",
-  "kind": "artifact",
+  "phase": "deployment_install",
+  "kind": "install",
   "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
   "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
-  "execution_surface": "development_whitebox",
+  "execution_surface": "deployed_blackbox",
+  "environment_id": "local-artifact-routecodex-v4-plugin-plan",
+  "entrypoint": "artifact://routecodex-v4-plugin-plan",
   "scope": {
     "module_id": "routecodex-v4-plugin-plan",
     "feature_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
@@ -16,8 +18,18 @@
     "adapter": "project::lifecycle_adapter",
     "identity": "routecodex-v4-plugin-plan:56b4f1335363a766349577a48b33516c7698a68b"
   },
+  "command_argv": [
+    "/bin/sh",
+    "-c",
+    "test -f \"$1\" && cmp -s \"$2\" \"$1\"",
+    "artifact-install",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-plugin-plan-8rKuaq/plugin-plan.contract.json",
+    "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-integration-20260905-r5/v4/generated/modules/routecodex-v4-plugin-plan/lib/plugin-plan.contract.json"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "result": "pass",
-  "created_at": "2026-09-05T08:26:17.355Z",
+  "created_at": "2026-09-05T08:26:18.654Z",
   "expires_at": "2026-09-12T08:26:17.292Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",

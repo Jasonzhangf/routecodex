@@ -1,24 +1,24 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-plugin-plan-56b4f1335363",
-  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
-  "experiment_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "evidence_id": "evidence-fix-routecodex-v4-plugin-contract-56b4f1335363",
+  "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
+  "experiment_id": "fix-routecodex-v4-plugin-contract-56b4f1335363",
   "phase": "artifact",
   "kind": "artifact",
   "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
-  "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
+  "artifact_hash": "sha256:b6f875325045eec547de561a61409cf7b3e385081dbf42acd8de27cf5a9a8070",
   "execution_surface": "development_whitebox",
   "scope": {
-    "module_id": "routecodex-v4-plugin-plan",
-    "feature_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
-    "entrypoint": "artifact://routecodex-v4-plugin-plan"
+    "module_id": "routecodex-v4-plugin-contract",
+    "feature_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
+    "entrypoint": "artifact://routecodex-v4-plugin-contract"
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-plugin-plan:56b4f1335363a766349577a48b33516c7698a68b"
+    "identity": "routecodex-v4-plugin-contract:56b4f1335363a766349577a48b33516c7698a68b"
   },
   "result": "pass",
-  "created_at": "2026-09-05T08:26:17.355Z",
-  "expires_at": "2026-09-12T08:26:17.292Z",
+  "created_at": "2026-09-05T08:26:13.889Z",
+  "expires_at": "2026-09-12T08:26:13.822Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

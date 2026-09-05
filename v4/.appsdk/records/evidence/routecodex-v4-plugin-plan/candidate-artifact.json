@@ -1,12 +1,14 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "evidence_id": "candidate-artifact",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "experiment_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
-  "phase": "artifact",
+  "phase": "fix_candidate",
   "kind": "artifact",
   "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
   "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
   "execution_surface": "development_whitebox",
+  "environment_id": "local-artifact-routecodex-v4-plugin-plan",
+  "entrypoint": "artifact://routecodex-v4-plugin-plan",
   "scope": {
     "module_id": "routecodex-v4-plugin-plan",
     "feature_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
@@ -16,6 +18,15 @@
     "adapter": "project::lifecycle_adapter",
     "identity": "routecodex-v4-plugin-plan:56b4f1335363a766349577a48b33516c7698a68b"
   },
+  "command_argv": [
+    "/Users/fanzhang/.cargo/bin/appsdk",
+    "compile-module",
+    ".",
+    "--module",
+    "routecodex-v4-plugin-plan"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:edb58907d7607068274a3e1965c9077dd51ec31e69123a028331ee7d7e8c453a",
   "result": "pass",
   "created_at": "2026-09-05T08:26:17.355Z",
   "expires_at": "2026-09-12T08:26:17.292Z",

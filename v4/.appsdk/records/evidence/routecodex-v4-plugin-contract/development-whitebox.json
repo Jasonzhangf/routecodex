@@ -1,0 +1,42 @@
+{
+  "evidence_id": "development-whitebox",
+  "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
+  "experiment_id": "fix-routecodex-v4-plugin-contract-56b4f1335363",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
+  "artifact_hash": "sha256:b6f875325045eec547de561a61409cf7b3e385081dbf42acd8de27cf5a9a8070",
+  "execution_surface": "development_whitebox",
+  "environment_id": "local-artifact-routecodex-v4-plugin-contract",
+  "entrypoint": "artifact://routecodex-v4-plugin-contract",
+  "scope": {
+    "module_id": "routecodex-v4-plugin-contract",
+    "feature_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
+    "entrypoint": "artifact://routecodex-v4-plugin-contract"
+  },
+  "producer": {
+    "adapter": "project::lifecycle_adapter",
+    "identity": "routecodex-v4-plugin-contract:56b4f1335363a766349577a48b33516c7698a68b"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "-p",
+    "routecodex-v4-plugin-contract",
+    "--locked"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:76946ac55a7ce8d14d1da951f49be68f52f762e2301023612754b107b10c0da3",
+  "result": "pass",
+  "created_at": "2026-09-05T08:26:14.159Z",
+  "expires_at": "2026-09-12T08:26:13.822Z",
+  "input_hashes": [
+    "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
+    "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
+    "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
+    "sha256:7c711ad4907b89132d965efefb6355f160b731f184ae759f593f71ffb8b10164",
+    "sha256:ddc8937a00a841de964dbbc038c021aaf6a5ee1cd4b9d9800c08f12c30776bab",
+    "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0"
+  ],
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

@@ -1,0 +1,15 @@
+{
+  "merge_id": "merge-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
+  "module_id": "routecodex-v4-plugin-plan",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "mainline_ref": "refs/remotes/origin/v4-cordis",
+  "candidate_commit": "56b4f1335363a766349577a48b33516c7698a68b",
+  "merge_commit": "56b4f1335363a766349577a48b33516c7698a68b",
+  "candidate_tree_hash": "b1d88e38e513d4c3eeb813f868ad2505d0592fd5",
+  "merged_tree_hash": "b1d88e38e513d4c3eeb813f868ad2505d0592fd5",
+  "change_identity": "exact",
+  "result": "pass",
+  "created_at": "2026-09-05T08:26:18.775Z"
+}

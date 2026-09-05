@@ -1,12 +1,14 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "evidence_id": "baseline-reproduction",
   "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
   "experiment_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
-  "phase": "artifact",
-  "kind": "artifact",
+  "phase": "baseline_reproduction",
+  "kind": "red_test",
   "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
   "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
   "execution_surface": "development_whitebox",
+  "environment_id": "local-artifact-routecodex-v4-plugin-plan",
+  "entrypoint": "artifact://routecodex-v4-plugin-plan",
   "scope": {
     "module_id": "routecodex-v4-plugin-plan",
     "feature_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
@@ -16,8 +18,14 @@
     "adapter": "project::lifecycle_adapter",
     "identity": "routecodex-v4-plugin-plan:56b4f1335363a766349577a48b33516c7698a68b"
   },
+  "command_argv": [
+    "node",
+    "scripts/architecture/verify-v4-production-mainline-red.mjs"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:bd7a4427337c970e409c5c060e76b857bbc63d4cf141b7becb1be3eccdfc9484",
   "result": "pass",
-  "created_at": "2026-09-05T08:26:17.355Z",
+  "created_at": "2026-09-05T08:26:17.292Z",
   "expires_at": "2026-09-12T08:26:17.292Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",

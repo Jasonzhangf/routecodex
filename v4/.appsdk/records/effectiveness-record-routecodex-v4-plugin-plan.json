@@ -1,0 +1,31 @@
+{
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
+  "module_id": "routecodex-v4-plugin-plan",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "architecture_review_id": "review-fix-routecodex-v4-plugin-plan-56b4f1335363",
+  "reviewed_commit": "56b4f1335363a766349577a48b33516c7698a68b",
+  "reviewed_tree_hash": "b1d88e38e513d4c3eeb813f868ad2505d0592fd5",
+  "reproduction_input_hashes": [
+    "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
+    "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
+    "sha256:74bd83bbc0a921a11bb6a8eab9f8348eb7f0ec35db348602685edf36d803307f",
+    "sha256:7c711ad4907b89132d965efefb6355f160b731f184ae759f593f71ffb8b10164",
+    "sha256:ddc8937a00a841de964dbbc038c021aaf6a5ee1cd4b9d9800c08f12c30776bab",
+    "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0"
+  ],
+  "baseline_evidence_id": "baseline-reproduction",
+  "fixed_replay_evidence_id": "post-effectiveness-replay",
+  "positive_evidence_ids": [
+    "post-positive-intervention"
+  ],
+  "negative_evidence_ids": [
+    "post-negative-intervention"
+  ],
+  "blackbox_evidence_ids": [
+    "post-deployed-blackbox"
+  ],
+  "source_unchanged_since_review": true,
+  "result": "pass",
+  "created_at": "2026-09-05T08:26:18.775Z"
+}
