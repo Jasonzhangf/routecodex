@@ -1,10 +1,10 @@
 {
   "evidence_id": "post-negative-intervention",
   "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
-  "experiment_id": "fix-routecodex-v4-error-9c43b56939bc",
+  "experiment_id": "fix-routecodex-v4-error-7c6d86c7f1b6",
   "phase": "negative_intervention",
   "kind": "negative_test",
-  "source_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
   "artifact_hash": "sha256:5582ce42db95c1adc2d63f02df381f217100c450eaf55176db7f1a77965b65bb",
   "execution_surface": "development_whitebox",
   "environment_id": "local-artifact-routecodex-v4-error",
@@ -16,7 +16,7 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-error:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+    "identity": "routecodex-v4-error:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
   },
   "command_argv": [
     "node",
@@ -25,8 +25,8 @@
   "exit_status": 0,
   "output_hash": "sha256:bd7a4427337c970e409c5c060e76b857bbc63d4cf141b7becb1be3eccdfc9484",
   "result": "pass",
-  "created_at": "2026-09-05T07:59:53.668Z",
-  "expires_at": "2026-09-12T07:59:51.001Z",
+  "created_at": "2026-09-05T08:02:27.145Z",
+  "expires_at": "2026-09-12T08:02:25.893Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

@@ -407,7 +407,7 @@ writeJson(path.join(records, `freeze-record-${moduleId}.json`), {
   library_hash: artifactHash,
   public_api_hash: publicApiHash,
   review_id: reviewId,
-  previous_active_immutable: false,
+  previous_active_immutable: previousActiveVersion !== null,
   git_clean: true,
   clean_scope: {
     base_commit: base,

@@ -1,8 +1,8 @@
 {
-  "reproduction_id": "reproduction-fix-routecodex-v4-edge-9c43b56939bc",
+  "reproduction_id": "reproduction-fix-routecodex-v4-edge-7c6d86c7f1b6",
   "issue_id": "v4-cordis-routecodex-v4-edge-active-recovery",
   "module_id": "routecodex-v4-edge",
-  "worktree_id": "v4-cordis-merge-routecodex-v4-edge-9c43b56939bc",
+  "worktree_id": "v4-cordis-merge-routecodex-v4-edge-7c6d86c7f1b6",
   "base_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
@@ -15,5 +15,5 @@
   "baseline_evidence_id": "baseline-reproduction",
   "first_divergence": "appsdk-active-linked-module-artifact-and-record-graph-missing-after-governance-reset",
   "result": "reproduced",
-  "created_at": "2026-09-05T07:59:35.269Z"
+  "created_at": "2026-09-05T08:02:22.352Z"
 }

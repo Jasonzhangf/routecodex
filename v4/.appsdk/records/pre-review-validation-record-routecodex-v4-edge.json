@@ -1,14 +1,14 @@
 {
-  "validation_id": "pre-review-fix-routecodex-v4-edge-9c43b56939bc",
+  "validation_id": "pre-review-fix-routecodex-v4-edge-7c6d86c7f1b6",
   "issue_id": "v4-cordis-routecodex-v4-edge-active-recovery",
   "module_id": "routecodex-v4-edge",
-  "fix_candidate_id": "fix-routecodex-v4-edge-9c43b56939bc",
-  "candidate_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
-  "candidate_tree_hash": "253720ea286e061fd2e4e82de63760d85f469f8f",
+  "fix_candidate_id": "fix-routecodex-v4-edge-7c6d86c7f1b6",
+  "candidate_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+  "candidate_tree_hash": "5f99b29413b8ece7f8bf4539441b26d8aeb827a3",
   "artifact_hash": "sha256:64a9d127228cc987890d0f759dff38da4131db060b4be457afe65be80b26c44e",
   "whitebox_producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-edge:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+    "identity": "routecodex-v4-edge:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
   },
   "whitebox_evidence_ids": [
     "development-whitebox"
@@ -23,11 +23,11 @@
     "entrypoint": "artifact://routecodex-v4-edge",
     "producer": {
       "adapter": "project::lifecycle_adapter",
-      "identity": "routecodex-v4-edge:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+      "identity": "routecodex-v4-edge:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
     },
-    "observed_at": "2026-09-05T07:59:46.674Z"
+    "observed_at": "2026-09-05T08:02:23.736Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-09-05T07:59:46.674Z"
+  "created_at": "2026-09-05T08:02:23.736Z"
 }

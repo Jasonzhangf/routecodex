@@ -1,14 +1,14 @@
 {
-  "validation_id": "pre-review-fix-routecodex-v4-control-9c43b56939bc",
+  "validation_id": "pre-review-fix-routecodex-v4-control-7c6d86c7f1b6",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
   "module_id": "routecodex-v4-control",
-  "fix_candidate_id": "fix-routecodex-v4-control-9c43b56939bc",
-  "candidate_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
-  "candidate_tree_hash": "253720ea286e061fd2e4e82de63760d85f469f8f",
+  "fix_candidate_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
+  "candidate_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+  "candidate_tree_hash": "5f99b29413b8ece7f8bf4539441b26d8aeb827a3",
   "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
   "whitebox_producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-control:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+    "identity": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
   },
   "whitebox_evidence_ids": [
     "development-whitebox"
@@ -23,11 +23,11 @@
     "entrypoint": "artifact://routecodex-v4-control",
     "producer": {
       "adapter": "project::lifecycle_adapter",
-      "identity": "routecodex-v4-control:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+      "identity": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
     },
-    "observed_at": "2026-09-05T07:59:50.439Z"
+    "observed_at": "2026-09-05T08:02:25.337Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-09-05T07:59:50.439Z"
+  "created_at": "2026-09-05T08:02:25.337Z"
 }

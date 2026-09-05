@@ -1,10 +1,10 @@
 {
   "evidence_id": "post-deployed-blackbox",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "experiment_id": "fix-routecodex-v4-control-9c43b56939bc",
+  "experiment_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
   "phase": "deployed_blackbox",
   "kind": "runtime",
-  "source_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
   "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-artifact-routecodex-v4-control",
@@ -16,20 +16,20 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-control:9c43b56939bc466c928ea3ad97cc75a141bc6ffe"
+    "identity": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
   },
   "command_argv": [
     "node",
     "-e",
     "const fs=require(\"node:fs\"); const crypto=require(\"node:crypto\"); const p=process.argv[1]; const expected=process.argv[2]; const got=\"sha256:\"+crypto.createHash(\"sha256\").update(fs.readFileSync(p)).digest(\"hex\"); if(got!==expected) process.exit(1); console.log(got);",
-    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-control-frCcGj/libroutecodex_v4_control.rlib",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-control-q7fsSa/libroutecodex_v4_control.rlib",
     "sha256:fd16007795964d1fc5fc023bb52903858affcdd811f69b56e54542568e375d06"
   ],
   "exit_status": 0,
   "output_hash": "sha256:f04b496fe8512dfd2479b40653597e78ac5a9d7e0701e15183279eed78ccadb2",
   "result": "pass",
-  "created_at": "2026-09-05T07:59:50.672Z",
-  "expires_at": "2026-09-12T07:59:47.223Z",
+  "created_at": "2026-09-05T08:02:25.568Z",
+  "expires_at": "2026-09-12T08:02:24.273Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

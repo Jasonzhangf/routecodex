@@ -1,19 +1,19 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-control-9c43b56939bc",
+  "freeze_id": "freeze-fix-routecodex-v4-control-7c6d86c7f1b6",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
   "module_id": "routecodex-v4-control",
-  "promotion_id": "promotion-fix-routecodex-v4-control-9c43b56939bc",
-  "promotion_record_hash": "sha256:07da61c2244b96d9725ac2ba9c582da4e38121b6b009c912238a8c1b89b94955",
-  "artifact_record_id": "evidence-fix-routecodex-v4-control-9c43b56939bc",
-  "regression_report_id": "regression-fix-routecodex-v4-control-9c43b56939bc",
-  "regression_report_hash": "sha256:e9f82b6f4d0dbcaca5dfc9f182d4d42c80f249f0e6366ac08db8e043f177a29d",
-  "source_commit_or_tag": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
+  "promotion_id": "promotion-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "promotion_record_hash": "sha256:135666b6295b781cd518d3fc64b7f0c37375ed6f0b65eb016d7dfde1ed890f22",
+  "artifact_record_id": "evidence-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "regression_report_id": "regression-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "regression_report_hash": "sha256:b10c183855e555385d328d1ee547b40c39bd8df4c261d3906e7b20d16044716c",
+  "source_commit_or_tag": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
   "active_version": "active-v4",
   "previous_active_version": "active-v3",
   "library_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
   "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
-  "review_id": "review-fix-routecodex-v4-control-9c43b56939bc",
-  "previous_active_immutable": false,
+  "review_id": "review-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "previous_active_immutable": true,
   "git_clean": true,
   "clean_scope": {
     "base_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T07:59:50.439Z"
+  "created_at": "2026-09-05T08:02:25.337Z"
 }
