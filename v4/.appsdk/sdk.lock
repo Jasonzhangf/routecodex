@@ -1,6 +1,6 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:91f1db23322fe3c8a20e5d27d24f3d5e540fdb101f401da1714ef45497ed7429",
+  "bundle_digest": "sha256:860cf7411dae384138460a7c345d1950fbfd791e2be2703a939abaee37004c6f",
   "bundle_manifest_digest": "sha256:13fc02fb5a413309603cdb870d8e8d6d3201360bb361a3fd05708ca17bc1d768",
   "bundle_resources": {
     "contracts": [
@@ -65,9 +65,9 @@
       "skills/appsdk-project-governance/references/review-delivery.md"
     ]
   },
-  "compiler_digest": "sha256:7d8c9c1216e536837418018e3327be2eb077c1b95809c5e60f61afbf26c9c97b",
+  "compiler_digest": "sha256:1358f5a7f5bfe9ac451a59f925b6d72d87fdca81ccb42f8adde64f0b6cfc7973",
   "contract_schema": 1,
-  "digest": "sha256:7d8c9c1216e536837418018e3327be2eb077c1b95809c5e60f61afbf26c9c97b",
+  "digest": "sha256:1358f5a7f5bfe9ac451a59f925b6d72d87fdca81ccb42f8adde64f0b6cfc7973",
   "sdk": "appsdk",
   "version": "0.1.6"
 }

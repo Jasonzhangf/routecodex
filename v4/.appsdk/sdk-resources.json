@@ -1,5 +1,5 @@
 {
-  "bundle_digest": "sha256:91f1db23322fe3c8a20e5d27d24f3d5e540fdb101f401da1714ef45497ed7429",
+  "bundle_digest": "sha256:860cf7411dae384138460a7c345d1950fbfd791e2be2703a939abaee37004c6f",
   "manifest_digest": "sha256:13fc02fb5a413309603cdb870d8e8d6d3201360bb361a3fd05708ca17bc1d768",
   "resources": [
     {
@@ -28,31 +28,31 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:583aecdff0b4f720077af37c50282a2760fae932b3e86b9d92f69b8ede318a4c",
+      "digest": "sha256:007ff13d9272cc86cebc9d951145746f335cb7c2431843aa7ed142ab72bb8e72",
       "path": ".appsdk/contracts/maps/resource-map.json",
       "source": "contracts/maps/resource-map.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:18098d496aa23c0f668d79c4c8418471a8cd00e063290963294542419de488b5",
+      "digest": "sha256:5ffabfe7e7ae9b6ca9e9823cf1e5c8a0e3f0e644bb743c65d1895ce06391460b",
       "path": ".appsdk/contracts/maps/function-map.json",
       "source": "contracts/maps/function-map.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:ff56f6e5133f964fab394c2cc79bf84e3ec1337bf0ad6971f83c8ad19a1c00e3",
+      "digest": "sha256:9c2532f632b19b830512db6135e12c66135f32285e25a77036b0ff7f048542d9",
       "path": ".appsdk/contracts/maps/mainline-call-map.json",
       "source": "contracts/maps/mainline-call-map.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:c3fede2ee148aaf078e52437efb068ec92cdf991f2a0047a20430075d4f6fb58",
+      "digest": "sha256:d44ed6d9ae85bc52bcd4c30b7a02e5f9970d3a0ba6ae019af98a308dcca81799",
       "path": ".appsdk/contracts/maps/verification-map.json",
       "source": "contracts/maps/verification-map.json"
     },
     {
       "class": "contracts",
-      "digest": "sha256:c64c41460f8901e28d30333daf47c4426cf529bfd10a930e3adcd990644b3312",
+      "digest": "sha256:7c6ab66786559eb1da531f2b444f3a1f16b763f365dd670edc2c36c3f915cf65",
       "path": ".appsdk/contracts/migrations/sdk-0.1.5-to-0.1.6.json",
       "source": "contracts/migrations/sdk-0.1.5-to-0.1.6.json"
     },
@@ -220,7 +220,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:9b26964517d3fe7cec014c207b70e4a4e6e81927790862cc291fd55e8494c4c6",
+      "digest": "sha256:c419a0d86b971d1d0e1d637595d55670b02486bb25eb89d5201237cb1fe603dc",
       "path": ".appsdk/docs/design/appsdk-project-integration.md",
       "source": "docs/design/appsdk-project-integration.md"
     },
@@ -238,7 +238,7 @@
     },
     {
       "class": "docs",
-      "digest": "sha256:df32f3dcb942063b5f27684df38e6aa1469713db0349f77412c79a7e4b47f83f",
+      "digest": "sha256:d6b185fb567e471da80a80abb7015f082e3d04cb82cc489883dc7cb1cef0367f",
       "path": ".appsdk/docs/design/appsdk-guidance-framework.md",
       "source": "docs/design/appsdk-guidance-framework.md"
     },
@@ -262,13 +262,13 @@
     },
     {
       "class": "rules",
-      "digest": "sha256:04e58b7f4d6c77d947509ce3bc16c2c384e9796ec87a2b83313cc12b6ad452de",
+      "digest": "sha256:55416e434af2dcba560cb970c5a7b736122c5259df1042ede97f1cfa6e2cb45f",
       "path": ".appsdk/rules/appsdk-project-governance.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:04e58b7f4d6c77d947509ce3bc16c2c384e9796ec87a2b83313cc12b6ad452de",
+      "digest": "sha256:55416e434af2dcba560cb970c5a7b736122c5259df1042ede97f1cfa6e2cb45f",
       "path": ".appsdk/skills/appsdk-project-governance/SKILL.md",
       "source": "skills/appsdk-project-governance/SKILL.md"
     },
@@ -292,13 +292,13 @@
     },
     {
       "class": "skills",
-      "digest": "sha256:54bf5fa5924593d08307d3c0300cc5aecc4708d9ae5665857e20cd6690a2a4ed",
+      "digest": "sha256:e006c7ba438937abf84ca73914c71cba16fed94a144a832ccfa79bb3020de05c",
       "path": ".appsdk/skills/appsdk-project-governance/references/contracts-and-failures.md",
       "source": "skills/appsdk-project-governance/references/contracts-and-failures.md"
     },
     {
       "class": "skills",
-      "digest": "sha256:8c10ef138b9428c7a9e32164b60b5f391c3fcb8752686b4fa4e7aaec23615d3a",
+      "digest": "sha256:3675b55b4dcd800fdbf83596c1eb41e53de157b5071369591d87908b2c4412be",
       "path": ".appsdk/skills/appsdk-project-governance/references/development-debug.md",
       "source": "skills/appsdk-project-governance/references/development-debug.md"
     },
@@ -310,7 +310,7 @@
     },
     {
       "class": "skills",
-      "digest": "sha256:e95a951d0609bdeeca580e6c6cbe29a303cd15c4ec54a6aac75cbdfb4b51a3aa",
+      "digest": "sha256:b82312f494036c9edba1dd7aea670f4cf6747b77cd381c4b4c4b2b98cf847d61",
       "path": ".appsdk/skills/appsdk-project-governance/references/process-control-harness.md",
       "source": "skills/appsdk-project-governance/references/process-control-harness.md"
     },
