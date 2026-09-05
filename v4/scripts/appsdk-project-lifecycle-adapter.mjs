@@ -60,9 +60,18 @@ const currentActive = fs.existsSync(currentActiveFile)
   : null;
 const previousActiveVersion = currentActive?.version ?? null;
 const previousActiveHash = currentActive?.artifact_hash ?? null;
+const legacyHistoryRoot = path.join(root, 'protected', 'history-versions', moduleId);
+const legacyVersions = fs.existsSync(legacyHistoryRoot)
+  ? fs.readdirSync(legacyHistoryRoot)
+    .map((entry) => /^active-v(\d+)$/.exec(entry)?.[1])
+    .filter(Boolean)
+    .map(Number)
+  : [];
 const nextActiveVersion = (() => {
   const match = previousActiveVersion?.match(/^active-v(\d+)$/);
-  return match ? `active-v${Number(match[1]) + 1}` : 'active-v1';
+  const currentNext = match ? Number(match[1]) + 1 : 1;
+  const historyNext = legacyVersions.length ? Math.max(...legacyVersions) + 1 : 1;
+  return `active-v${Math.max(currentNext, historyNext)}`;
 })();
 
 const records = path.join(root, '.appsdk', 'records');
