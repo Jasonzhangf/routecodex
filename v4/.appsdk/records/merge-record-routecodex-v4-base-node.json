@@ -1,15 +1,15 @@
 {
-  "merge_id": "merge-fix-routecodex-v4-base-node-e7edd70dd6a8",
+  "merge_id": "merge-fix-routecodex-v4-base-node-029db82edaa6",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
   "module_id": "routecodex-v4-base-node",
-  "fix_candidate_id": "fix-routecodex-v4-base-node-e7edd70dd6a8",
-  "effectiveness_id": "effectiveness-fix-routecodex-v4-base-node-e7edd70dd6a8",
+  "fix_candidate_id": "fix-routecodex-v4-base-node-029db82edaa6",
+  "effectiveness_id": "effectiveness-fix-routecodex-v4-base-node-029db82edaa6",
   "mainline_ref": "refs/heads/v4-cordis",
-  "candidate_commit": "e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7",
-  "merge_commit": "e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7",
-  "candidate_tree_hash": "b11f4fb8f8fe4dbcbba580981059d1122e4954ac",
-  "merged_tree_hash": "b11f4fb8f8fe4dbcbba580981059d1122e4954ac",
+  "candidate_commit": "029db82edaa63e67ccbf27f7bf2a7991a824cc9c",
+  "merge_commit": "029db82edaa63e67ccbf27f7bf2a7991a824cc9c",
+  "candidate_tree_hash": "aac8c8b7b826166ad6554d5407cda9da53deb4d6",
+  "merged_tree_hash": "aac8c8b7b826166ad6554d5407cda9da53deb4d6",
   "change_identity": "exact",
   "result": "pass",
-  "created_at": "2026-09-05T05:30:20.149Z"
+  "created_at": "2026-09-05T05:31:05.123Z"
 }

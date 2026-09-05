@@ -1,10 +1,10 @@
 {
   "evidence_id": "deployment-install",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
-  "experiment_id": "fix-routecodex-v4-base-node-e7edd70dd6a8",
+  "experiment_id": "fix-routecodex-v4-base-node-029db82edaa6",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7",
+  "source_commit": "029db82edaa63e67ccbf27f7bf2a7991a824cc9c",
   "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-artifact-routecodex-v4-base-node",
@@ -16,21 +16,21 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-base-node:e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7"
+    "identity": "routecodex-v4-base-node:029db82edaa63e67ccbf27f7bf2a7991a824cc9c"
   },
   "command_argv": [
     "/bin/sh",
     "-c",
     "test -f \"$1\" && cmp -s \"$2\" \"$1\"",
     "artifact-install",
-    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-base-node-G1wVzh/libroutecodex_v4_base_node.rlib",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-base-node-h4rUYk/libroutecodex_v4_base_node.rlib",
     "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-merge-20260905/v4/generated/modules/routecodex-v4-base-node/lib/libroutecodex_v4_base_node.rlib"
   ],
   "exit_status": 0,
   "output_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "result": "pass",
-  "created_at": "2026-09-05T05:30:20.036Z",
-  "expires_at": "2026-09-12T05:30:19.676Z",
+  "created_at": "2026-09-05T05:31:05.001Z",
+  "expires_at": "2026-09-12T05:31:04.602Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
