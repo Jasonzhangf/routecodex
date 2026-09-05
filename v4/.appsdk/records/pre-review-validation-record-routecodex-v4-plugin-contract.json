@@ -1,14 +1,14 @@
 {
-  "validation_id": "pre-review-fix-routecodex-v4-plugin-contract-56b4f1335363",
+  "validation_id": "pre-review-fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
   "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
   "module_id": "routecodex-v4-plugin-contract",
-  "fix_candidate_id": "fix-routecodex-v4-plugin-contract-56b4f1335363",
-  "candidate_commit": "56b4f1335363a766349577a48b33516c7698a68b",
-  "candidate_tree_hash": "b1d88e38e513d4c3eeb813f868ad2505d0592fd5",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
+  "candidate_commit": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
+  "candidate_tree_hash": "8062c800e4c812a301e4051e6f2728e5c80c9852",
   "artifact_hash": "sha256:b6f875325045eec547de561a61409cf7b3e385081dbf42acd8de27cf5a9a8070",
   "whitebox_producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-plugin-contract:56b4f1335363a766349577a48b33516c7698a68b"
+    "identity": "routecodex-v4-plugin-contract:6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e"
   },
   "whitebox_evidence_ids": [
     "development-whitebox"
@@ -23,11 +23,11 @@
     "entrypoint": "artifact://routecodex-v4-plugin-contract",
     "producer": {
       "adapter": "project::lifecycle_adapter",
-      "identity": "routecodex-v4-plugin-contract:56b4f1335363a766349577a48b33516c7698a68b"
+      "identity": "routecodex-v4-plugin-contract:6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e"
     },
-    "observed_at": "2026-09-05T08:26:16.210Z"
+    "observed_at": "2026-09-05T08:30:05.564Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-09-05T08:26:16.210Z"
+  "created_at": "2026-09-05T08:30:05.564Z"
 }

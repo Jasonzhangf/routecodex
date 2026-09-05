@@ -1,10 +1,10 @@
 {
   "evidence_id": "deployment-install",
   "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
-  "experiment_id": "fix-routecodex-v4-plugin-contract-56b4f1335363",
+  "experiment_id": "fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
   "phase": "deployment_install",
   "kind": "install",
-  "source_commit": "56b4f1335363a766349577a48b33516c7698a68b",
+  "source_commit": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
   "artifact_hash": "sha256:b6f875325045eec547de561a61409cf7b3e385081dbf42acd8de27cf5a9a8070",
   "execution_surface": "deployed_blackbox",
   "environment_id": "local-artifact-routecodex-v4-plugin-contract",
@@ -16,21 +16,21 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-plugin-contract:56b4f1335363a766349577a48b33516c7698a68b"
+    "identity": "routecodex-v4-plugin-contract:6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e"
   },
   "command_argv": [
     "/bin/sh",
     "-c",
     "test -f \"$1\" && cmp -s \"$2\" \"$1\"",
     "artifact-install",
-    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-plugin-contract-hEqCDP/libroutecodex_v4_plugin_contract.rlib",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/routecodex-v4-routecodex-v4-plugin-contract-BgzTiX/libroutecodex_v4_plugin_contract.rlib",
     "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-integration-20260905-r5/v4/generated/modules/routecodex-v4-plugin-contract/lib/libroutecodex_v4_plugin_contract.rlib"
   ],
   "exit_status": 0,
   "output_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "result": "pass",
-  "created_at": "2026-09-05T08:26:16.090Z",
-  "expires_at": "2026-09-12T08:26:13.822Z",
+  "created_at": "2026-09-05T08:30:05.449Z",
+  "expires_at": "2026-09-12T08:30:04.701Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

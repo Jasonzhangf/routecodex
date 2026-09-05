@@ -1,11 +1,11 @@
 {
-  "fix_candidate_id": "fix-routecodex-v4-plugin-contract-56b4f1335363",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
   "issue_id": "v4-cordis-routecodex-v4-plugin-contract-active-recovery",
   "module_id": "routecodex-v4-plugin-contract",
-  "worktree_id": "v4-cordis-merge-routecodex-v4-plugin-contract-56b4f1335363",
+  "worktree_id": "v4-cordis-merge-routecodex-v4-plugin-contract-6f4a8a4a1bf0",
   "base_commit": "438b92f4fba705c546f939d10bb9fe9362418c71",
-  "head_commit": "56b4f1335363a766349577a48b33516c7698a68b",
-  "tree_hash": "b1d88e38e513d4c3eeb813f868ad2505d0592fd5",
+  "head_commit": "6f4a8a4a1bf040fa32a36c4f269dfb391fc6303e",
+  "tree_hash": "8062c800e4c812a301e4051e6f2728e5c80c9852",
   "diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "design_id": "v4-cordis-mainline-migration-plan",
   "owner": "routecodex-v4-plugin-contract",
@@ -17,5 +17,5 @@
     "positive-intervention",
     "negative-intervention"
   ],
-  "created_at": "2026-09-05T08:26:13.889Z"
+  "created_at": "2026-09-05T08:30:04.762Z"
 }
