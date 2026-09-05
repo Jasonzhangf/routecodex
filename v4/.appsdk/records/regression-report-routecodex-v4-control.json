@@ -1,12 +1,5 @@
 {
-  "regression_report_id": "regression-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "module_id": "routecodex-v4-control",
-  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
   "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
-  "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
-  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "input_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
-  "suite_id": "v4-control-regression",
   "command": {
     "args": [
       "test",
@@ -17,18 +10,25 @@
     "program": "cargo",
     "working_directory": "."
   },
-  "test_count": 1,
-  "passed": 1,
+  "created_at": "2026-09-05T08:02:25.337Z",
   "failed": 0,
-  "skipped": 0,
-  "result": "pass",
+  "input_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
+  "module_id": "routecodex-v4-control",
+  "passed": 1,
   "producer": {
     "adapter": "project::lifecycle_adapter",
     "identity": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
   },
+  "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
+  "regression_report_id": "regression-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "result": "pass",
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "skipped": 0,
+  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+  "suite_id": "v4-control-regression",
   "test_characteristics": {
-    "whitebox": true,
-    "blackbox": true
+    "blackbox": true,
+    "whitebox": true
   },
-  "created_at": "2026-09-05T08:02:25.337Z"
+  "test_count": 1
 }

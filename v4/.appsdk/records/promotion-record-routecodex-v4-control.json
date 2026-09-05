@@ -1,25 +1,15 @@
 {
-  "promotion_id": "promotion-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "experiment_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
-  "module_id": "routecodex-v4-control",
-  "worktree_record_id": "v4-cordis-merge-routecodex-v4-control-7c6d86c7f1b6",
-  "reproduction_record_id": "reproduction-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "fix_candidate_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
   "architecture_review_id": "review-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "merge_record_id": "merge-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
+  "base_artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "base_commit": "9c43b56939bc466c928ea3ad97cc75a141bc6ffe",
   "candidate_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
-  "merged_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
-  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
-  "previous_active_version": "active-v3",
-  "new_active_version": "active-v4",
-  "base_artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
-  "artifact_hash": "sha256:5d6f11f28ba16d06c555e03db4fd725b0c38615805ecec26007f9be36b831811",
-  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
-  "review_id": "review-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
+  "change_set_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
+  "compatibility_level": "compatible",
+  "created_at": "2026-09-05T08:02:25.337Z",
+  "design_id": "v4-cordis-mainline-migration-plan",
+  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-control-7c6d86c7f1b6",
   "evidence_ids": [
     "evidence-fix-routecodex-v4-control-7c6d86c7f1b6",
     "baseline-reproduction",
@@ -36,24 +26,34 @@
     "post-deployed-blackbox",
     "post-effectiveness-replay"
   ],
+  "experiment_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
+  "fix_candidate_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
+  "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
+  "merge_record_id": "merge-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "merged_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+  "migration_id": null,
+  "module_id": "routecodex-v4-control",
+  "new_active_version": "active-v4",
+  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "previous_active_version": "active-v3",
+  "promotion_id": "promotion-fix-routecodex-v4-control-7c6d86c7f1b6",
+  "public_api_hash": "sha256:fb96f2db57588b5c28dc3cd96535d4375f03a1e1d23d71cfde7ceccb19d0c9ef",
+  "reproduction_record_id": "reproduction-fix-routecodex-v4-control-7c6d86c7f1b6",
   "required_gate_results": [
     {
       "gate_id": "v4-control-regression",
-      "result": "pass",
-      "producer": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
+      "producer": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+      "result": "pass"
     },
     {
       "gate_id": "v4-node-graph",
-      "result": "pass",
-      "producer": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa"
+      "producer": "routecodex-v4-control:7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+      "result": "pass"
     }
   ],
-  "change_set_id": "fix-routecodex-v4-control-7c6d86c7f1b6",
-  "migration_id": null,
-  "compatibility_level": "compatible",
+  "review_id": "review-fix-routecodex-v4-control-7c6d86c7f1b6",
   "root_cause": "governance reset removed current candidate lifecycle records and Active-linked module artifact bindings.",
-  "design_id": "v4-cordis-mainline-migration-plan",
-  "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
-  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-control-7c6d86c7f1b6",
-  "created_at": "2026-09-05T08:02:25.337Z"
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "source_commit": "7c6d86c7f1b6dff6ddb0a37216a32ebcd22ebdaa",
+  "worktree_record_id": "v4-cordis-merge-routecodex-v4-control-7c6d86c7f1b6"
 }
