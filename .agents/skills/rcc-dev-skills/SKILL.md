@@ -5,6 +5,8 @@ description: "RouteCodex V3 evidence-first development: query resource/function/
 
 # RouteCodex V3 Development
 
+This skill owns V3 command and gate sequencing. Inherit general methods from `coding-principals` and boundaries from project `AGENTS.md`; do not also run a generic development phase workflow. Pure instruction/document edits validate affected references and contracts; runtime build/install/restart/replay applies only when runtime behavior or its delivery changes.
+
 ## Command-First Flow
 
 1. Read `AGENTS.md`.
@@ -31,20 +33,11 @@ npm run verify:v3-architecture-ci
 ```
 
 9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay.
-10. Replay exact old sample or same-entry semantic equivalent. Review only after verification.
+10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. Review only after verification; do not repeat an unchanged replay solely for this step.
 
 ## Review Gate
 
-Before commit/merge, review the new or modified source against:
-
-- No side-channel control/config: no payload, metadata, debug log, or implicit context carries control truth.
-- One function, one owner, one implementation: no duplicate path, reroute, fallback, or dual implementation.
-- Ablation: not adding behavior unless required.
-- Configuration-first: if an operation/hook can be configured, do not add inline branching or new skeleton logic.
-- Shared functions: repeated semantics use one shared function; independent implementations exist only when genuinely different.
-- Missing operator/hook/gate fails explicitly or is skipped with a recorded reason; no mock success.
-
-Existing-code violations are advisory findings, not mandatory rewrites. New-code violations block review until fixed and affected gates are rerun.
+After verification and before commit/merge, use the reviewer selected by global AGENTS.md and its shared review standards. Apply project Semantic Invariants and mapped owner/edge/gate bindings. Preserve declared Target reselection and registered Direct/Relay codec differences; they do not authorize an undeclared reroute or compensating implementation. Do not maintain a second copy of the global ablation checklist or historical-finding policy here.
 
 ## Routes
 

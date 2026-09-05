@@ -10,12 +10,13 @@
 
 ## Semantic Invariants
 
+- General safety, ablation, rule precedence, and review policy inherit the global AGENTS.md. This section adds RouteCodex protocol and ownership constraints.
 - Proxy behavior stays transparent: preserve request, response, history, and observable protocol meaning.
 - Inbound parses and normalizes fields; Chat Process governs semantics; adjacent outbound codecs project target protocol.
 - Unsupported or lossy mapping fails explicitly at the owning adjacent boundary.
 - No guessed repair, fallback, downgrade, silent drop, hidden history rewrite, or success-wrapped error.
 - Control state uses typed control resources or Error chain only. Business payload cannot carry or reconstruct it.
-- One semantic owner and one implementation. Request, response, and error graphs remain separate.
+- Request, response, and error graphs remain separate.
 
 ## Runtime Ownership
 
@@ -45,6 +46,8 @@
 - PASS proves Git protection only.
 
 ## Task Routing
+
+Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply methods only. This contract describes V3; work under a separately governed subtree must load its scoped AGENTS.md and skill before applying V3 commands or gates.
 
 | Need | Read |
 | --- | --- |
