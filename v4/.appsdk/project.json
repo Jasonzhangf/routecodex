@@ -443,7 +443,7 @@
         "suite_id": "v4-error-regression"
       },
       "source_owner": "routecodex-v4-error",
-      "stage": "architecture_stable"
+      "stage": "frozen"
     },
     {
       "active_artifact": "active/lib/routecodex-v4-plugin-runtime/**",

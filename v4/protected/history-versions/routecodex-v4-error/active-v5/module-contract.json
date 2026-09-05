@@ -1,0 +1,58 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-error/**",
+  "artifact_paths": [
+    "libroutecodex_v4_error.rlib"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "cargo run --quiet --release -p routecodex-v4-build-link -- build-consumer --root . --consumer routecodex-v4-error --deps routecodex-v4-base-node --out generated/modules/routecodex-v4-error/lib/libroutecodex_v4_error.rlib"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-outcome.schema.json",
+    "contracts/data-control-boundary.contract.json"
+  ],
+  "dependency_modules": [
+    "routecodex-v4-base-node"
+  ],
+  "generated_outputs": [
+    "generated/modules/routecodex-v4-error/**"
+  ],
+  "module_id": "routecodex-v4-error",
+  "owned_paths": [
+    "crates/routecodex-v4-error/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-error",
+        "--locked"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-error/**",
+      "contracts/**"
+    ],
+    "minimum_test_count": 1,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "artifact_change",
+      "dependency_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-error-regression"
+  },
+  "source_owner": "routecodex-v4-error",
+  "stage": "frozen"
+}
