@@ -1,0 +1,27 @@
+{
+  "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
+  "artifact_paths": [
+    "plugin-plan.contract.json"
+  ],
+  "artifact_schema": 1,
+  "artifacts": [
+    {
+      "hash": "sha256:805792caef8a752aff7e17efd74f3a1108f3b71ed7400faa06e1d430a7db7192",
+      "path": "plugin-plan.contract.json"
+    }
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "mkdir -p generated/modules/routecodex-v4-plugin-plan/lib && printf '{\"module_id\":\"routecodex-v4-plugin-plan\"}\\n' > generated/modules/routecodex-v4-plugin-plan/lib/plugin-plan.contract.json"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_hash": "sha256:299923dfbfca82e5baf759d1fc785e723842dcad5a6b8fd69416f9672814f531",
+  "dependency_hashes": [],
+  "module_id": "routecodex-v4-plugin-plan",
+  "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
+  "source_hash": "sha256:c53b40a834443828744b9164d993a519b0d9ad244835bce8dfdbb3df0187dab6",
+  "stage": "frozen"
+}

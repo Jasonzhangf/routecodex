@@ -1,25 +1,15 @@
 {
-  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
-  "experiment_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "module_id": "routecodex-v4-plugin-plan",
-  "worktree_record_id": "v4-cordis-merge-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "reproduction_record_id": "reproduction-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "architecture_review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "merge_record_id": "merge-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
+  "base_artifact_hash": null,
   "base_commit": "c47a8736afa0b3202527133cb5537033522899eb",
   "candidate_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
-  "merged_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
-  "source_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
-  "previous_active_version": null,
-  "new_active_version": "active-v1",
-  "base_artifact_hash": null,
-  "artifact_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
-  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
-  "review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
+  "change_set_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "compatibility_level": "compatible",
+  "created_at": "2026-09-05T08:38:09.623Z",
+  "design_id": "v4-cordis-mainline-migration-plan",
+  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "evidence_ids": [
     "evidence-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
     "baseline-reproduction",
@@ -36,24 +26,34 @@
     "post-deployed-blackbox",
     "post-effectiveness-replay"
   ],
+  "experiment_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "fix_candidate_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
+  "merge_record_id": "merge-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "merged_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+  "migration_id": null,
+  "module_id": "routecodex-v4-plugin-plan",
+  "new_active_version": "active-v1",
+  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "previous_active_version": null,
+  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
+  "reproduction_record_id": "reproduction-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "required_gate_results": [
     {
       "gate_id": "v4-plugin-plan-regression",
-      "result": "pass",
-      "producer": "routecodex-v4-plugin-plan:da219c1f2fcd3bade4eb00f9c1c8d98398894462"
+      "producer": "routecodex-v4-plugin-plan:da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+      "result": "pass"
     },
     {
       "gate_id": "v4-node-graph",
-      "result": "pass",
-      "producer": "routecodex-v4-plugin-plan:da219c1f2fcd3bade4eb00f9c1c8d98398894462"
+      "producer": "routecodex-v4-plugin-plan:da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+      "result": "pass"
     }
   ],
-  "change_set_id": "fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "migration_id": null,
-  "compatibility_level": "compatible",
+  "review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "root_cause": "governance reset removed current candidate lifecycle records and Active-linked module artifact bindings.",
-  "design_id": "v4-cordis-mainline-migration-plan",
-  "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
-  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "created_at": "2026-09-05T08:38:09.623Z"
+  "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "source_commit": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
+  "worktree_record_id": "v4-cordis-merge-routecodex-v4-plugin-plan-da219c1f2fcd"
 }

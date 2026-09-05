@@ -1,0 +1,57 @@
+{
+  "active_artifact": "active/lib/routecodex-v4-plugin-plan/**",
+  "artifact_paths": [
+    "plugin-plan.contract.json"
+  ],
+  "build": {
+    "args": [
+      "-c",
+      "mkdir -p generated/modules/routecodex-v4-plugin-plan/lib && printf '{\"module_id\":\"routecodex-v4-plugin-plan\"}\\n' > generated/modules/routecodex-v4-plugin-plan/lib/plugin-plan.contract.json"
+    ],
+    "program": "sh",
+    "working_directory": "."
+  },
+  "contract_paths": [
+    "contracts/node-container.contract.json",
+    "contracts/node-plugin.contract.json"
+  ],
+  "dependency_modules": [],
+  "generated_outputs": [
+    "generated/modules/routecodex-v4-plugin-plan/**"
+  ],
+  "module_id": "routecodex-v4-plugin-plan",
+  "owned_paths": [
+    "crates/routecodex-v4-plugin-plan/**"
+  ],
+  "regression": {
+    "allow_skipped": false,
+    "command": {
+      "args": [
+        "test",
+        "-p",
+        "routecodex-v4-plugin-plan",
+        "--locked"
+      ],
+      "program": "cargo",
+      "working_directory": "."
+    },
+    "input_paths": [
+      "crates/routecodex-v4-plugin-plan/**",
+      "contracts/node-container.contract.json",
+      "contracts/node-plugin.contract.json"
+    ],
+    "minimum_test_count": 1,
+    "ordinary_mode_after_freeze": "disabled",
+    "reenable_on": [
+      "source_change",
+      "contract_change",
+      "public_api_change",
+      "dependency_change",
+      "artifact_change"
+    ],
+    "required_before_freeze": true,
+    "suite_id": "v4-plugin-plan-regression"
+  },
+  "source_owner": "routecodex-v4-plugin-plan",
+  "stage": "frozen"
+}

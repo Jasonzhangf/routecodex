@@ -1,36 +1,36 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
-  "module_id": "routecodex-v4-plugin-plan",
-  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "promotion_record_hash": "sha256:627eaca8ff9ae163747a02a7f137a09c3d8fad7b86f414e5be6c613172114d4b",
-  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "regression_report_id": "regression-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "regression_report_hash": "sha256:1a3d3db19d2b44a04f9eebca7020932274120c8642e7a7e3f958ea57a2508b49",
-  "source_commit_or_tag": "da219c1f2fcd3bade4eb00f9c1c8d98398894462",
   "active_version": "active-v1",
-  "previous_active_version": null,
-  "library_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
-  "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
-  "review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
-  "previous_active_immutable": false,
-  "git_clean": true,
+  "artifact_record_id": "evidence-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
   "clean_scope": {
     "base_commit": "c47a8736afa0b3202527133cb5537033522899eb",
     "changed_paths": [],
+    "generated_policy": "excluded_from_source_clean",
     "ignored_paths": [
       "v4/generated/**",
       "v4/active/**",
       "v4/target/**"
-    ],
-    "generated_policy": "excluded_from_source_clean"
+    ]
   },
+  "created_at": "2026-09-05T08:38:09.623Z",
+  "freeze_id": "freeze-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "git_clean": true,
+  "issue_id": "v4-cordis-routecodex-v4-plugin-plan-active-recovery",
+  "library_hash": "sha256:d89871886da0445fcd3e5cc77818c6088e0e5d74bdff4b2ab2e617c18dfc61ae",
+  "module_id": "routecodex-v4-plugin-plan",
   "owners": {
-    "vcs": "git",
-    "compiler": "appsdk-0.1.6",
     "api_extractor": "appsdk-0.1.6",
+    "artifact_registry": "appsdk::lifecycle",
+    "compiler": "appsdk-0.1.6",
     "review": "project::architecture_review",
-    "artifact_registry": "appsdk::lifecycle"
+    "vcs": "git"
   },
-  "created_at": "2026-09-05T08:38:09.623Z"
+  "previous_active_immutable": false,
+  "previous_active_version": null,
+  "promotion_id": "promotion-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "promotion_record_hash": "sha256:7d35ccea248279216c2b8a0e7ac085785aba66846d5266f26c7dc2a239d40a84",
+  "public_api_hash": "sha256:02680f3f193e4d01e65c8241ec5e152b98680cf40f5ee245d79562e38a196351",
+  "regression_report_hash": "sha256:a1ff6395e8e08709673e3a4e6d96d4e34b0092fdad41060da99eb46104fa7be5",
+  "regression_report_id": "regression-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "review_id": "review-fix-routecodex-v4-plugin-plan-da219c1f2fcd",
+  "source_commit_or_tag": "da219c1f2fcd3bade4eb00f9c1c8d98398894462"
 }
