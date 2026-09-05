@@ -1,0 +1,40 @@
+{
+  "evidence_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f-deployment_install",
+  "issue_id": "v4-cli-governance-closeout",
+  "experiment_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "phase": "deployment_install",
+  "kind": "install",
+  "source_commit": "9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "artifact_hash": "sha256:94074d67835b081a643a46751a8ddc813a09289f0e77b64478f2d2bda129eafd",
+  "execution_surface": "deployed_blackbox",
+  "environment_id": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb",
+  "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin",
+  "scope": {
+    "module_id": "routecodex-v4-cli-plugin",
+    "feature_id": "v4-cli-governance-closeout",
+    "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin"
+  },
+  "producer": {
+    "adapter": "project::deployment_adapter",
+    "identity": "routecodex-v4-cli-plugin:9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f"
+  },
+  "command_argv": [
+    "/usr/bin/install",
+    "-m",
+    "755",
+    "/Users/fanzhang/Documents/github/routecodex/playground/v4-cordis-integration-20260905-r5/v4/generated/modules/routecodex-v4-cli-plugin/lib/rccv4-plugin",
+    "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "result": "pass",
+  "created_at": "2026-09-05T13:02:46.928Z",
+  "expires_at": "2026-09-06T13:02:48.467Z",
+  "input_hashes": [
+    "sha256:f83e5e6555ae28c397079bec01259f02cd29869af628d66cd5a8892a9ac4eb9b",
+    "sha256:bae31c2a59ec817425dce44b576f343bd9f66874ea00f48cb7afd509e0adfbb4",
+    "sha256:88d94f35b9c3bbc61981245ab47a60301bc643269cf16bd6f70a960ed632c596",
+    "sha256:0a91e448c11a257b3c5dccd4d703570fe2ab20606ac7de0fec5f8da6042c6c22"
+  ],
+  "scope_hash": "sha256:def4b1d863df9b6fc1189dbac7b778f784539206615fb62500d3d24315bc32e3"
+}

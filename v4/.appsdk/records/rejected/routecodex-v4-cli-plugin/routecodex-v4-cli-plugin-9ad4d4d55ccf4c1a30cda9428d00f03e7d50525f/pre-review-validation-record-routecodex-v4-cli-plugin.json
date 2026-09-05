@@ -1,0 +1,32 @@
+{
+  "validation_id": "pre-review-routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "issue_id": "v4-cli-governance-closeout",
+  "module_id": "routecodex-v4-cli-plugin",
+  "fix_candidate_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "candidate_commit": "9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "candidate_tree_hash": "81360e9fd32dd46b51bec4a4f905ed9341cf5743",
+  "artifact_hash": "sha256:94074d67835b081a643a46751a8ddc813a09289f0e77b64478f2d2bda129eafd",
+  "whitebox_producer": {
+    "adapter": "project::whitebox_adapter",
+    "identity": "routecodex-v4-cli-plugin:9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f"
+  },
+  "whitebox_evidence_ids": [
+    "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f-development_whitebox"
+  ],
+  "blackbox_evidence_ids": [
+    "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f-deployed_blackbox"
+  ],
+  "deployment": {
+    "environment_id": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb",
+    "install_receipt_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f-deployment_install",
+    "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin",
+    "producer": {
+      "adapter": "project::deployment_adapter",
+      "identity": "routecodex-v4-cli-plugin:9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f"
+    },
+    "observed_at": "2026-09-05T13:02:48.408Z"
+  },
+  "source_unchanged": true,
+  "result": "pass",
+  "created_at": "2026-09-05T13:02:48.510Z"
+}

@@ -14,6 +14,34 @@ const moduleId = process.argv[process.argv.indexOf('--module') + 1];
 if (!process.argv.includes('--module') || moduleId !== 'routecodex-v4-cli-plugin') {
   throw new Error('LIFECYCLE_CAPABILITY_MISSING: only routecodex-v4-cli-plugin has a deployed CLI producer');
 }
+// Recovery of this producer's rejected identifier attempt preserves every byte.
+// It does not turn the rejected observation into admission or delete evidence.
+if (process.argv.includes('--archive-invalid-identifiers')) {
+  const owner = spawnSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' });
+  if (owner.status !== 0 || !owner.stdout.trim().startsWith('codex/')) {
+    throw new Error('OWNER_WORKTREE_REQUIRED');
+  }
+  const records = path.join(root, '.appsdk/records');
+  const candidateFile = `fix-candidate-record-${moduleId}.json`;
+  const validationFile = `pre-review-validation-record-${moduleId}.json`;
+  const candidate = JSON.parse(fs.readFileSync(path.join(records, candidateFile), 'utf8'));
+  const validation = JSON.parse(fs.readFileSync(path.join(records, validationFile), 'utf8'));
+  const candidateId = candidate.fix_candidate_id;
+  if (!/^[a-z][a-z0-9-]+$/.test(candidateId)
+      || candidate.module_id !== moduleId || validation.module_id !== moduleId
+      || validation.fix_candidate_id !== candidateId
+      || !candidate.verification_evidence_ids.some((id) => id.includes('_'))) {
+    throw new Error('NOT_AN_INVALID_IDENTIFIER_ATTEMPT');
+  }
+  const archive = path.join(records, 'rejected', moduleId, candidateId);
+  fs.mkdirSync(archive, { recursive: true });
+  for (const file of [candidateFile, validationFile]) {
+    fs.copyFileSync(path.join(records, file), path.join(archive, file), fs.constants.COPYFILE_EXCL);
+  }
+  for (const file of [candidateFile, validationFile]) fs.unlinkSync(path.join(records, file));
+  console.log(JSON.stringify({ preserved_rejected_attempt: archive, evidence_retained: true }));
+  process.exit(0);
+}
 const run = (program, args) => {
   const result = spawnSync(program, args, {
     cwd: root, encoding: 'utf8', timeout: 1_800_000, maxBuffer: 32 * 1024 * 1024,
@@ -74,7 +102,7 @@ const deploymentProducer = { adapter: 'project::deployment_adapter', identity };
 const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 const issueId = 'v4-cli-governance-closeout';
 const evidence = (phase, kind, receipt, producer, surface) => ({
-  evidence_id: `${candidateId}-${phase}`, issue_id: issueId, experiment_id: candidateId,
+  evidence_id: `${candidateId}-${phase.replaceAll('_', '-')}`, issue_id: issueId, experiment_id: candidateId,
   phase, kind, source_commit: head, artifact_hash: artifact.artifact_hash,
   execution_surface: surface, environment_id: deployment, entrypoint: installed,
   scope: { module_id: moduleId, feature_id: issueId, entrypoint: installed },

@@ -1,0 +1,38 @@
+{
+  "evidence_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f-development_whitebox",
+  "issue_id": "v4-cli-governance-closeout",
+  "experiment_id": "routecodex-v4-cli-plugin-9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "source_commit": "9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f",
+  "artifact_hash": "sha256:94074d67835b081a643a46751a8ddc813a09289f0e77b64478f2d2bda129eafd",
+  "execution_surface": "development_whitebox",
+  "environment_id": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb",
+  "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin",
+  "scope": {
+    "module_id": "routecodex-v4-cli-plugin",
+    "feature_id": "v4-cli-governance-closeout",
+    "entrypoint": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/rccv4-cli-admission-kcqlNb/bin/rccv4-plugin"
+  },
+  "producer": {
+    "adapter": "project::whitebox_adapter",
+    "identity": "routecodex-v4-cli-plugin:9ad4d4d55ccf4c1a30cda9428d00f03e7d50525f"
+  },
+  "command_argv": [
+    "sh",
+    "-c",
+    "node --test scripts/test-lifecycle-adapter.test.mjs && cargo test --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && cargo build --release --manifest-path Cargo.toml -p routecodex-v4-cli-plugin --locked && node scripts/test-cli-plugin.mjs"
+  ],
+  "exit_status": 0,
+  "output_hash": "sha256:718b5124074eb7fba227e832aeb006023e06d109d17a9e565e246f0717190e3f",
+  "result": "pass",
+  "created_at": "2026-09-05T13:02:46.923Z",
+  "expires_at": "2026-09-06T13:02:48.467Z",
+  "input_hashes": [
+    "sha256:f83e5e6555ae28c397079bec01259f02cd29869af628d66cd5a8892a9ac4eb9b",
+    "sha256:bae31c2a59ec817425dce44b576f343bd9f66874ea00f48cb7afd509e0adfbb4",
+    "sha256:88d94f35b9c3bbc61981245ab47a60301bc643269cf16bd6f70a960ed632c596",
+    "sha256:0a91e448c11a257b3c5dccd4d703570fe2ab20606ac7de0fec5f8da6042c6c22"
+  ],
+  "scope_hash": "sha256:def4b1d863df9b6fc1189dbac7b778f784539206615fb62500d3d24315bc32e3"
+}
