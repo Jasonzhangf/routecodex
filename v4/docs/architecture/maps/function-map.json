@@ -567,26 +567,18 @@
       ]
     },
     {
-      "function_id": "v4.provider.v3_profile_boundary",
+      "function_id": "v4.provider.transport_boundary",
       "owner": "routecodex-v4-provider",
       "entry_symbols": [
         "load_profile",
         "validate_auth_alias",
-        "resolve_model",
         "verify_profile_auth",
-        "build_openai_chat_wire",
-        "build_anthropic_messages_wire",
-        "build_protocol_wire",
-        "ProviderProfile::responses_continuation",
-        "send_responses",
-        "send_openai_chat",
-        "send_anthropic_messages",
         "send_openai_chat_streaming",
         "send_anthropic_messages_streaming",
-        "normalize_provider_response",
-        "normalize_provider_sse_frame",
-        "send_responses_streaming",
-        "send_protocol"
+        "send_protocol",
+        "ProviderTransportRequest",
+        "ProviderTransportPort::execute",
+        "write_provider_profile"
       ],
       "required_gates": [
         "v4_provider_l2_regression",

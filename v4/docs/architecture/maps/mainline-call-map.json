@@ -983,8 +983,8 @@
     },
     {
       "from": "routecodex-v4-runtime::ExecutionReport::provider_wire_value",
-      "to": "routecodex-v4-provider::send_protocol",
-      "owner": "routecodex-v4-provider::send_protocol",
+      "to": "routecodex-v4-provider::ProviderTransportPort::execute",
+      "owner": "routecodex-v4-provider::ProviderTransportPort::execute",
       "edge_type": "provider_wire_transport_consume",
       "caller_feature_id": "v4.runtime.production_request_chain",
       "callee_feature_id": "v4.runtime.independent_admission",
@@ -1002,9 +1002,9 @@
       "status": "active"
     },
     {
-      "from": "routecodex-v4-runtime-bin::send_target_nonstream|send_target_streaming",
-      "to": "routecodex-v4-provider::send_protocol",
-      "owner": "routecodex-v4-provider::send_protocol",
+      "from": "routecodex-v4-runtime-bin::execute_provider_transport",
+      "to": "routecodex-v4-provider::ProviderTransportPort::execute",
+      "owner": "routecodex-v4-provider::ProviderTransportPort::execute",
       "edge_type": "session_scoped_availability",
       "caller_feature_id": "v4.runtime.provider_error_projection",
       "callee_feature_id": "v4.provider.availability",

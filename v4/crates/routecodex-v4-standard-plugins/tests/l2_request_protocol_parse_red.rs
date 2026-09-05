@@ -39,6 +39,7 @@ fn execute(data: Value) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutp
             data,
             control: json!({}),
             information: json!({}),
+            transport: None,
         },
         &StandardHandleRegistry::new(),
     );

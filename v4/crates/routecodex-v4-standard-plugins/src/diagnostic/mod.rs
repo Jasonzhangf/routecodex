@@ -94,6 +94,17 @@ pub fn format_chat_process_payload(
     direction: &str,
     payload: &serde_json::Value,
 ) -> Result<String, String> {
+    format_chat_process_payload_with_stream(direction, payload, None)
+}
+
+/// Render a request payload with a typed admission stream fact when the
+/// protocol body omitted its default. The override is diagnostic-only: it
+/// never mutates or re-serializes the business payload.
+pub fn format_chat_process_payload_with_stream(
+    direction: &str,
+    payload: &serde_json::Value,
+    stream_override: Option<bool>,
+) -> Result<String, String> {
     let object = payload
         .as_object()
         .ok_or_else(|| "Chat Process payload must be an object".to_string())?;
@@ -101,7 +112,10 @@ pub fn format_chat_process_payload(
         .get("model")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("-");
-    let stream = object.get("stream").and_then(serde_json::Value::as_bool);
+    let stream = object
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        .or(stream_override);
     let messages = object
         .get("messages")
         .and_then(serde_json::Value::as_array)

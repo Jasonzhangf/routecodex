@@ -15,6 +15,7 @@ use routecodex_v4_plugin_contract::{PluginEffect, ResourceRegistry};
 use routecodex_v4_plugin_plan::{compile_node_plan, AuthoringPlugin, NodePluginPlan, PlanError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 
 /// Reject free-form control objects at the typed bridge boundary. Control
 /// state must never be reconstructed from a JSON payload field.
@@ -116,6 +117,30 @@ pub struct DiagnosticFact {
     pub message: String,
 }
 
+/// Opaque, Arc-backed transport carrier for one already-framed wire unit.
+/// Transport bytes never enter the JSON data plane; semantic plugins opt in to
+/// this side channel through their typed handle context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedTransportCarrier(Arc<[u8]>);
+
+impl SharedTransportCarrier {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(Arc::from(bytes))
+    }
+
+    pub fn from_shared_bytes(bytes: Arc<[u8]>) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+
+    pub fn shares_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 /// Typed per-node execution input. Business data, typed control, and immutable
 /// information resources stay in separate fields; no synthetic metadata blob
 /// is accepted.
@@ -126,6 +151,8 @@ pub struct NodeExecutionInput {
     #[serde(deserialize_with = "deserialize_control_handle")]
     pub control: Value,
     pub information: Value,
+    #[serde(skip)]
+    pub transport: Option<SharedTransportCarrier>,
 }
 
 /// Typed per-node execution output.
@@ -254,6 +281,7 @@ struct ExecState {
     data: Value,
     control: Value,
     information: Value,
+    transport: Option<SharedTransportCarrier>,
     diagnostics: Vec<DiagnosticFact>,
 }
 
@@ -270,6 +298,13 @@ pub struct ExecCtx<'a> {
 impl ExecCtx<'_> {
     pub fn read_data(&self) -> &Value {
         &self.state.data
+    }
+
+    /// Read the opaque transport carrier without exposing wire bytes through
+    /// the normal JSON payload. Only transport-bound semantic plugins should
+    /// consume this side channel.
+    pub fn read_transport_bytes(&self) -> Option<&[u8]> {
+        self.state.transport.as_ref().map(SharedTransportCarrier::as_bytes)
     }
 
     pub fn read_information_resource(
@@ -346,6 +381,39 @@ impl ExecCtx<'_> {
         Ok(())
     }
 
+    pub fn write_information_resource(
+        &mut self,
+        resource_id: &str,
+        value: Value,
+    ) -> Result<(), BridgeError> {
+        if !matches!(self.effect, PluginEffect::Semantic) {
+            return Err(BridgeError::EffectViolation {
+                plugin_id: self.plugin_id.to_string(),
+                message: format!("effect {:?} cannot write information", self.effect),
+            });
+        }
+        if !self
+            .writes
+            .iter()
+            .any(|declared_id| declared_id == resource_id)
+        {
+            return Err(self.deny_resource_access(resource_id, "write"));
+        }
+        let Some(key) = information_resource_key(resource_id) else {
+            return Err(self.deny_resource_access(resource_id, "write"));
+        };
+        if !self.state.information.is_object() {
+            return Err(self.deny_resource_access(resource_id, "write to non-object carrier"));
+        }
+        let information = self
+            .state
+            .information
+            .as_object_mut()
+            .expect("information object checked before mutation");
+        information.insert(key.to_string(), value);
+        Ok(())
+    }
+
     pub fn write_control_resource(
         &mut self,
         resource_id: &str,
@@ -409,6 +477,8 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.control.error_chain" => Some("error_chain"),
         "v4.control.route_facts" => Some("route_facts"),
         "v4.control.target_selection" => Some("target_selection"),
+        "v4.control.request_admission_facts" => Some("request_admission_facts"),
+        "v4.control.stream_terminal" => Some("stream_terminal"),
         "v4.control.scope_command" => Some("scope_command"),
         _ => None,
     }
@@ -466,6 +536,7 @@ pub fn execute_plan(
         data: input.data,
         control: input.control,
         information: input.information,
+        transport: input.transport,
         diagnostics: Vec::new(),
     };
     for entry in &plan.entries {
@@ -508,6 +579,7 @@ pub fn execute_plan(
         data: state.data.clone(),
         control: state.control.clone(),
         information: state.information.clone(),
+        transport: state.transport.clone(),
         diagnostics: Vec::new(),
     };
     let sink: std::sync::Mutex<Vec<(usize, Result<Vec<DiagnosticFact>, BridgeError>)>> =

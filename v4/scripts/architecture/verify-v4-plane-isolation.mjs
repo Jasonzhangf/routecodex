@@ -324,8 +324,8 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       name: 'provider wire descriptor bypasses provider semantic',
       mutate(_map, _contract, sources) {
         sources.standardPlugins = sources.standardPlugins.replace(
-          '"v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
-          '"v4.request.normal_payload",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
+          '"v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n            "v4.information.model",\n            "v4.control.request_admission_facts",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
+          '"v4.request.normal_payload",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n            "v4.information.model",\n            "v4.control.request_admission_facts",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
         );
       },
       expected: ['PROVIDER_WIRE_SOURCE_BINDING'],

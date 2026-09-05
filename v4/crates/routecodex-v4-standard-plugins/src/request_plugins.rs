@@ -15,6 +15,9 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
 pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
+pub const REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str = "v4.std.request.admission_facts";
+pub const DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str =
+    "v4.std.direct.request.admission_facts";
 
 pub(crate) fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
     super::boundary::reject_control_fields(object)
@@ -89,6 +92,38 @@ pub(crate) fn request_protocol_parse(ctx: &mut ExecCtx<'_>) -> Result<(), String
     Ok(())
 }
 
+/// Extract request facts at the request-inbound NodePluginPlan boundary. The
+/// facts stay on the typed control carrier; production orchestration consumes
+/// this resource instead of parsing protocol JSON before node execution.
+pub(crate) fn request_admission_facts(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let object = require_object(ctx, "request_admission_facts")?;
+    reject_control(&object)?;
+    let model = object
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "request_admission_facts requires model".to_string())?;
+    let stream = object
+        .get("stream")
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| "request_admission_facts stream must be boolean".to_string())
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let has_previous_response = object.get("previous_response_id").is_some();
+    ctx.write_control_resource(
+        "v4.control.request_admission_facts",
+        serde_json::json!({
+            "model": model,
+            "stream": stream,
+            "has_previous_response_id": has_previous_response,
+        }),
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_governance")?;
     reject_control(&object)?;
@@ -104,11 +139,33 @@ pub(crate) fn request_governance(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let mut object = require_object(ctx, "wire_build")?;
     reject_control(&object)?;
-    object
-        .get("model")
+    let selected_wire_model = ctx
+        .read_control_resource("v4.control.target_selection")
+        .map_err(|error| error.to_string())?
+        .and_then(|value| value.get("wire_model"))
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "wire_build requires model".to_string())?;
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    let information_wire_model = ctx
+        .read_information_resource("v4.information.model")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    let wire_model = selected_wire_model
+        .or(information_wire_model)
+        .ok_or_else(|| "wire_build requires selected provider model information".to_string())?
+        ;
+    let admission_facts = ctx
+        .read_control_resource("v4.control.request_admission_facts")
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "wire_build requires request admission facts".to_string())?;
+    let stream = admission_facts
+        .get("stream")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "wire_build requires boolean stream admission fact".to_string())?;
+    object.insert("model".to_string(), Value::String(wire_model));
+    object.insert("stream".to_string(), Value::Bool(stream));
     let client_protocol = ctx
         .read_information_resource("v4.information.client_protocol")
         .map_err(|error| error.to_string())?
@@ -189,6 +246,32 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
             vec![],
         ),
         plugin(
+            REQUEST_ADMISSION_FACTS_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4HubReqInbound02Normalized",
+            "request_inbound",
+            Some(2),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Admission,
+            20,
+            vec!["v4.request.normal_payload"],
+            vec!["v4.control.request_admission_facts"],
+        ),
+        plugin(
+            DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID,
+            PluginCategory::Protocol,
+            "V4DirectReq01ClientProtocol",
+            "request_inbound",
+            Some(1),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Admission,
+            20,
+            vec!["v4.direct.request.client_payload"],
+            vec!["v4.control.request_admission_facts"],
+        ),
+        plugin(
             "v4.std.chat_process.request_governance",
             PluginCategory::ChatProcess,
             "V4HubReqChatProcess03Governed",
@@ -215,6 +298,9 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
                 "v4.request.provider_semantic",
                 "v4.information.client_protocol",
                 "v4.information.provider_protocol",
+                "v4.information.model",
+                "v4.control.request_admission_facts",
+                "v4.control.target_selection",
             ],
             vec!["v4.request.provider_wire_payload"],
         ),
@@ -225,6 +311,11 @@ pub(crate) fn handles() -> Vec<(&'static str, fn(&mut ExecCtx<'_>) -> Result<(),
     vec![
         (REQUEST_PROTOCOL_PARSE_PLUGIN_ID, request_protocol_parse),
         (REQUEST_NORMALIZE_PLUGIN_ID, request_normalize),
+        (REQUEST_ADMISSION_FACTS_PLUGIN_ID, request_admission_facts),
+        (
+            DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID,
+            request_admission_facts,
+        ),
         ("v4.std.chat_process.request_governance", request_governance),
         ("v4.std.request.responses_wire_build", wire_build),
     ]

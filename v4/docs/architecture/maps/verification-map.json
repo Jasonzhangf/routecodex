@@ -718,7 +718,7 @@
       "gate_id": "v4_provider_v3_profile_regression",
       "command": "cargo test --manifest-path v4/Cargo.toml -p routecodex-v4-provider --test l2_provider --locked",
       "required_for": [
-        "routecodex-v4-provider:v3_profile_boundary"
+        "routecodex-v4-provider:transport_boundary"
       ]
     },
     {

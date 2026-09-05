@@ -27,6 +27,7 @@ pub(crate) fn response_outbound_descriptors() -> Vec<StandardPlugin> {
             "v4.response.client_wire_payload",
             "v4.information.entry_protocol",
             "v4.information.stream_terminal",
+            "v4.control.stream_terminal",
         ],
         vec!["v4.response.client_object"],
     )]
@@ -248,9 +249,13 @@ fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 
     reject_control_fields(&semantic)?;
     let stream_terminal = ctx
-        .read_information_resource("v4.information.stream_terminal")
+        .read_control_resource("v4.control.stream_terminal")
         .map_err(|error| error.to_string())?
-        .cloned();
+        .cloned()
+        .or(ctx
+            .read_information_resource("v4.information.stream_terminal")
+            .map_err(|error| error.to_string())?
+            .cloned());
     if stream_terminal.as_ref().and_then(Value::as_bool).is_none()
         && !matches!(stream_terminal.as_ref(), Some(Value::Bool(_)))
     {

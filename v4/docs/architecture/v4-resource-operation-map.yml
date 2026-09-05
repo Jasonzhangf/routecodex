@@ -27,6 +27,37 @@ notes: '本注册表是 V4 真源资源图，binding_status 已按机器 gate
 
   '
 resources:
+- resource_id: v4.cordis.production_admission
+  axis: control
+  verification_gate:
+  - v4_cordis_production_admission
+  resource_kind: cordis_admission
+  lifecycle: v4.pipeline.admission
+  owner_crate: routecodex-v4-runtime-bin
+  owner_node: V4Runtime01MainlineKernel
+  owner_symbols:
+  - CordisAdmission
+  identity:
+  - graphHash
+  - manifestHash
+  - epochId
+  - generation
+  semantic_contract:
+    cordis_handshake_required: true
+    active_epoch_identity_required: true
+    socket_path_from_environment: true
+  allowed_writers:
+  - routecodex-v4-runtime-bin::CordisAdmission
+  allowed_readers:
+  - routecodex-v4-runtime-bin
+  forbidden_writers:
+  - routecodex-v4-runtime
+  - routecodex-v4-standard-plugins
+  - SseIngressPlugin
+  - SseEgressPlugin
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
 - resource_id: v4.direct.request.client_payload
   axis: data
   verification_gate:
@@ -282,6 +313,8 @@ resources:
   allowed_readers:
   - V4HubReqTarget05Resolved
   - V4DirectReq02RelayContainer
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   forbidden_writers:
   - V4ControlMetadataCenter
   - V4DebugSnapshotLedger
@@ -329,6 +362,32 @@ resources:
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
+  binding_status: anchored
+- resource_id: v4.control.stream_terminal
+  axis: control
+  verification_gate:
+  - v4_direct_relay_sse
+  - v4_direct_relay_sse_red
+  - v4_parity_gate_standard_plugins
+  resource_kind: stream_terminal
+  lifecycle: v4.pipeline.response
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ProviderRespInbound01Raw
+  owner_symbols:
+  - provider_sse_decode
+  allowed_writers:
+  - V4ProviderRespInbound01Raw
+  - V4DirectResp01ProviderRaw
+  allowed_readers:
+  - V4DirectResp03ClientProtocol
+  - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - V4HubRespChatProcess04Governed
+  - V4HubRespOutbound05ClientSemantic
+  - SseIngressPlugin
+  - SseEgressPlugin
+  may_enter_provider_body: false
+  may_enter_client_body: false
   binding_status: anchored
 - resource_id: v4.request.normal_payload
   axis: data
@@ -692,8 +751,45 @@ resources:
   allowed_readers:
   - V4HubReqExecution04Planned
   - V4HubReqTarget05Resolved
-  - V4DirectReq02RelayContainer
   forbidden_writers:
+  - V4HubReqChatProcess03Governed
+  - V4ProviderReqCompat07ProviderCompat
+  - V4HubRespOutbound05ClientSemantic
+  - V4DebugSnapshotLedger
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.request_admission_facts
+  axis: control
+  verification_gate:
+  - v4_parity_gate_standard_plugins
+  resource_kind: request_admission_control
+  lifecycle: v4.pipeline.admission
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4HubReqInbound02Normalized
+  owner_symbols:
+  - request_admission_facts
+  identity:
+  - requestId
+  - entryProtocol
+  - executionLane
+  semantic_contract:
+    typed_request_facts_only: true
+    payload_fields_forbidden: true
+    continuation_policy_consumer: routecodex-v4-runtime::SkeletonRuntime
+  allowed_writers:
+  - V4DirectReq01ClientProtocol
+  - V4HubReqInbound02Normalized
+  allowed_readers:
+  - routecodex-v4-runtime::SkeletonRuntime
+  - V4DirectReq02RelayContainer
+  - V4DirectReq01ClientProtocol
+  - V4HubReqInbound02Normalized
+  - V4HubReqChatProcess03Governed
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
+  forbidden_writers:
+  - V4ControlMetadataCenter
   - V4HubReqChatProcess03Governed
   - V4ProviderReqCompat07ProviderCompat
   - V4HubRespOutbound05ClientSemantic
@@ -723,11 +819,10 @@ resources:
     provider_specific_branch: forbidden
   allowed_writers:
   - V4HubReqTarget05Resolved
-  - V4DirectReq02RelayContainer
-  - V4Target07OpaqueTarget
   allowed_readers:
-  - V4HubReqOutbound06ProviderSemantic
-  - V4Error04RouterPolicyApplied
+  - V4DirectReq02RelayContainer
+  - V4ProviderReqCompat07ProviderCompat
+  - V4ProviderReqOutbound08WirePayload
   forbidden_writers:
   - V4HubReqChatProcess03Governed
   - V4ProviderReqCompat07ProviderCompat
@@ -2769,8 +2864,9 @@ resources:
   owner_symbols:
   - ProviderResponseStream
   - ProviderRawResponse
-  - send_responses
-  - send_responses_streaming
+  - send_protocol
+  - ProviderTransportPort
+  - ProviderTransportRequest
   identity:
   - requestId
   - providerId

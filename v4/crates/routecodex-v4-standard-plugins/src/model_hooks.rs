@@ -35,12 +35,27 @@ fn information_string(ctx: &mut ExecCtx<'_>, resource_id: &str) -> Result<String
 }
 
 pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let value = object(ctx, "direct_model_passthrough")?;
-    value
-        .get("model")
+    let mut value = object(ctx, "direct_model_passthrough")?;
+    let selected_wire_model = ctx
+        .read_control_resource("v4.control.target_selection")
+        .map_err(|error| error.to_string())?
+        .and_then(|selection| selection.get("wire_model"))
         .and_then(Value::as_str)
-        .filter(|model| !model.trim().is_empty())
-        .ok_or_else(|| "direct_model_passthrough requires model".to_string())?;
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    let wire_model = selected_wire_model
+        .or(Some(information_string(ctx, "v4.information.model")?))
+        .expect("information model fallback is always present");
+    let admission_facts = ctx
+        .read_control_resource("v4.control.request_admission_facts")
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "direct_model_passthrough requires request admission facts".to_string())?;
+    let stream = admission_facts
+        .get("stream")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "direct_model_passthrough requires boolean stream admission fact".to_string())?;
+    value.insert("model".to_string(), Value::String(wire_model));
+    value.insert("stream".to_string(), Value::Bool(stream));
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     if client_protocol != provider_protocol {
@@ -82,18 +97,10 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
-    // HTTP transport envelopes are an inbound carrier, not the client
-    // response shape. Decode the raw body at this direct response plugin
-    // boundary; transport remains byte-preserving and owns no projection.
-    let projected = match value.get("_provider_http_body").and_then(Value::as_str) {
-        Some(body) => serde_json::from_str(body)
-            .map_err(|error| format!("direct response JSON decode failed: {error}"))?,
-        None => Value::Object(value),
-    };
-    if !projected.is_object() {
-        return Err("direct response payload must be an object".to_string());
-    }
-    ctx.write_data(projected)
+    // Transport already supplies the raw provider body as the data-plane
+    // object. Direct response hooks validate protocol identity only; they do
+    // not unwrap a second synthetic HTTP envelope.
+    ctx.write_data(Value::Object(value))
         .map_err(|error| error.to_string())
 }
 
@@ -122,9 +129,13 @@ pub(crate) fn direct_response_client_validate(ctx: &mut ExecCtx<'_>) -> Result<(
         ));
     }
     let stream_terminal = ctx
-        .read_information_resource("v4.information.stream_terminal")
+        .read_control_resource("v4.control.stream_terminal")
         .map_err(|error| error.to_string())?
-        .and_then(Value::as_bool);
+        .and_then(Value::as_bool)
+        .or(ctx
+            .read_information_resource("v4.information.stream_terminal")
+            .map_err(|error| error.to_string())?
+            .and_then(Value::as_bool));
     if let Some(terminal) = stream_terminal {
         let entry_protocol = ctx
             .read_information_resource("v4.information.entry_protocol")
@@ -184,6 +195,7 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
                 "v4.information.provider_protocol",
                 "v4.information.entry_protocol",
                 "v4.information.stream_terminal",
+                "v4.control.stream_terminal",
             ],
             vec![],
         ),
@@ -214,6 +226,9 @@ pub(crate) fn descriptors() -> Vec<StandardPlugin> {
                 "v4.direct.request.client_payload",
                 "v4.information.client_protocol",
                 "v4.information.provider_protocol",
+                "v4.information.model",
+                "v4.control.request_admission_facts",
+                "v4.control.target_selection",
             ],
             vec!["v4.direct.request.provider_wire"],
         ),

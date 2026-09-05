@@ -73,6 +73,7 @@ fn positive_full_lifecycle_with_matching_hashes() {
                 data: Default::default(),
                 control: Default::default(),
                 information: Default::default(),
+                transport: None,
             },
             &EmptyRegistry,
         )
@@ -146,6 +147,7 @@ fn negative_execute_before_publish_is_rejected() {
                 data: Default::default(),
                 control: Default::default(),
                 information: Default::default(),
+                transport: None,
             },
             &EmptyRegistry,
         )
@@ -241,6 +243,7 @@ fn positive_execute_is_bound_to_active_plan_hash() {
                 data: Default::default(),
                 control: Default::default(),
                 information: Default::default(),
+                transport: None,
             },
             &EmptyRegistry,
         )
@@ -262,6 +265,7 @@ fn negative_execute_rejects_plan_hash_drift() {
                 data: Default::default(),
                 control: Default::default(),
                 information: Default::default(),
+                transport: None,
             },
             &EmptyRegistry,
         )

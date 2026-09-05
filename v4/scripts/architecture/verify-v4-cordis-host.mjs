@@ -17,7 +17,7 @@ const ratchetBaselineIds = [
   'discarded_node_output',
   'test_only_cordis_binding_in_production_shape',
 ];
-const ratchetCurrentExceptionIds = ['runtime_bin_direct_business_calls'];
+const ratchetCurrentExceptionIds = [];
 const ratchetCanonicalDocs = [
   'docs/architecture/v4-cordis-mainline-adr.md',
   'docs/goals/v4-cordis-mainline-migration-plan.md',
@@ -274,6 +274,17 @@ function runSelfTest() {
   const ratchet = JSON.parse(fs.readFileSync(ratchetPath, 'utf8'));
   const canonicalDocs = ratchetCanonicalDocs.filter((doc) => fs.existsSync(path.join(root, doc)));
   const migrationPlan = fs.readFileSync(path.join(root, 'docs/goals/v4-cordis-mainline-migration-plan.md'), 'utf8');
+  const ratchetEvidenceFixture = {
+    id: 'runtime_bin_direct_business_calls',
+    evidence: {
+      path: 'crates/routecodex-v4-runtime/src/production_pipeline.rs',
+      symbols: ['execute_request_json_scoped_for_target_with_lease'],
+    },
+  };
+  const ratchetWithRetiredException = {
+    ...ratchet,
+    known_exceptions: [ratchetEvidenceFixture],
+  };
   const cases = [
     ['real Cordis import removed', (candidate) => candidate.replace("from 'cordis'", "from 'fake-cordis'")],
     ['real Context removed', (candidate) => candidate.replace('new Context()', 'new FakeContext()')],
@@ -314,8 +325,8 @@ function runSelfTest() {
   if (missed > 0) process.exit(1);
   const ratchetCases = [
     ['new bypass exception', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'new_bypass', evidence: { path: 'new', symbols: ['new'] } }] } })],
-    ['retired bypass restored', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [...candidate.known_exceptions, { id: 'static_plugin_registry', evidence: candidate.known_exceptions[0].evidence }] } })],
-    ['evidence symbol missing', (candidate) => ({ ratchet: { ...candidate, known_exceptions: candidate.known_exceptions.map((entry) => ({ ...entry, evidence: { ...entry.evidence, symbols: ['missing_symbol'] } })) } })],
+    ['retired bypass restored', (candidate) => ({ ratchet: { ...candidate, known_exceptions: [ratchetEvidenceFixture, { id: 'static_plugin_registry', evidence: ratchetEvidenceFixture.evidence }] } })],
+    ['evidence symbol missing', () => ({ ratchet: { ...ratchetWithRetiredException, known_exceptions: ratchetWithRetiredException.known_exceptions.map((entry) => ({ ...entry, evidence: { ...entry.evidence, symbols: ['missing_symbol'] } })) } })],
     ['baseline drift', (candidate) => ({ ratchet: { ...candidate, baseline_exception_ids: ['new_bypass'] } })],
     ['plan reintroduces test bypass', (candidate) => ({ ratchet: candidate, migrationPlan: 'v4.test.fake production plan' })],
   ];

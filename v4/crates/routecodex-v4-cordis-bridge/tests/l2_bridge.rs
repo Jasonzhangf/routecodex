@@ -295,6 +295,7 @@ fn input(data: Value, control: Value) -> NodeExecutionInput {
         data,
         control,
         information: json!({}),
+        transport: None,
     }
 }
 

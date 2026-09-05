@@ -11,6 +11,7 @@ use routecodex_v4_cordis_bridge::ExecCtx;
 use serde_json::{json, Value};
 
 use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, StandardPlugin};
+use super::protocol::provider_response;
 
 const PLUGIN_ID: &str = "v4.std.response.protocol_decode";
 const PROVIDER_COMPAT_PLUGIN_ID: &str = "v4.std.response.provider_compat";
@@ -73,7 +74,10 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             PluginPhase::Semantic,
             150,
             vec!["v4.direct.response.provider_raw"],
-            vec!["v4.direct.response.provider_raw"],
+            vec![
+                "v4.direct.response.provider_raw",
+                "v4.control.stream_terminal",
+            ],
         ),
         plugin(
             PROVIDER_COMPAT_PLUGIN_ID,
@@ -102,7 +106,10 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             PluginPhase::Semantic,
             150,
             vec!["v4.response.provider_raw"],
-            vec!["v4.response.provider_raw"],
+            vec![
+                "v4.response.provider_raw",
+                "v4.control.stream_terminal",
+            ],
         ),
         plugin(
             PLUGIN_ID,
@@ -128,12 +135,7 @@ fn provider_raw_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    if ctx
-        .read_data()
-        .get("_sse_frame")
-        .and_then(Value::as_str)
-        .is_some()
-    {
+    if ctx.read_transport_bytes().is_some() {
         return Ok(());
     }
     let protocol = ctx
@@ -147,40 +149,33 @@ fn provider_compat(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         "openai-chat" => "chat",
         other => other,
     };
-    // HTTP transport hands this plugin a raw envelope. Parsing and provider
-    // protocol normalization belong to this response-inbound owner, never to
-    // runtime-bin orchestration.
-    let raw = ctx.read_data();
-    let semantic = if let Some(body) = raw
-        .get("_provider_http_body")
-        .and_then(Value::as_str)
-    {
-        serde_json::from_str(body).map_err(|error| {
-            format!("provider response JSON decode failed: {error}")
-        })?
-    } else {
-        raw.clone()
-    };
-    let normalized = routecodex_v4_provider::normalize_provider_response_for_relay(
+    // Transport hands this plugin the raw provider body as the data-plane
+    // value. HTTP status and content type are consumed by the typed transport
+    // error owner and are never encoded into this semantic payload.
+    let semantic = ctx.read_data().clone();
+    let normalized = provider_response::normalize_provider_response_for_relay(
         provider_protocol,
         &semantic,
     )
-    .map_err(|error| format!("{}: {}", error.code, error.message))?;
+    .map_err(|error| error.to_string())?;
     ctx.write_data(normalized)
         .map_err(|error| error.to_string())
 }
 
 fn provider_sse_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let Some(frame) = ctx.read_data().get("_sse_frame").and_then(Value::as_str) else {
+    let Some(frame) = ctx.read_transport_bytes() else {
         return Ok(());
     };
-    let decoded = decode_provider_sse_frame(frame.as_bytes())?;
+    let decoded = decode_provider_sse_frame(frame)?;
+    let terminal = !matches!(decoded.disposition, ProviderSseEventDisposition::Continue);
     let disposition = match decoded.disposition {
         ProviderSseEventDisposition::Continue => "continue".to_string(),
         ProviderSseEventDisposition::Completed => "completed".to_string(),
         ProviderSseEventDisposition::Failed { message } => format!("failed:{message}"),
     };
     ctx.emit("provider_sse_disposition", disposition);
+    ctx.write_control_resource("v4.control.stream_terminal", Value::Bool(terminal))
+        .map_err(|error| error.to_string())?;
     ctx.write_data(decoded.semantic)
         .map_err(|error| error.to_string())
 }
@@ -223,12 +218,12 @@ pub enum ProviderSseEventDisposition {
 /// Adjacent provider protocol codec. Transport framing is already complete;
 /// this owner parses one Responses event into its semantic object.
 pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
-    let normalized = routecodex_v4_provider::normalize_provider_sse_frame_for_relay("responses", frame)
+    let normalized = provider_response::normalize_provider_sse_frame_for_relay("responses", frame)
         .map_err(|error| {
-            if error.code == "provider_sse_malformed" {
-                format!("provider SSE data is invalid JSON: {}", error.message)
+            if error.starts_with("provider_sse_malformed:") {
+                format!("provider SSE data is invalid JSON: {error}")
             } else {
-                format!("provider SSE normalization failed: {}", error.message)
+                format!("provider SSE normalization failed: {error}")
             }
         })?;
     let text = std::str::from_utf8(&normalized)

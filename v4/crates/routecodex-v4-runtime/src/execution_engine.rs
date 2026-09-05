@@ -7,7 +7,9 @@
 //! edge, and `Terminal`/`Failure` close the request explicitly.
 
 use crate::RuntimeFault;
-use routecodex_v4_cordis_bridge::{DiagnosticFact, HandleRegistry, NodeExecutionInput};
+use routecodex_v4_cordis_bridge::{
+    DiagnosticFact, HandleRegistry, NodeExecutionInput, SharedTransportCarrier,
+};
 use routecodex_v4_node_container::{EpochLease, ExecutionEpochState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,6 +55,8 @@ pub struct NodeExecutionFrame {
     pub shared_information: crate::ImmutableInformationCarrier,
     #[serde(skip)]
     pub shared_diagnostic: crate::ImmutableDiagnosticCarrier,
+    #[serde(skip)]
+    pub transport: Option<SharedTransportCarrier>,
 }
 
 impl NodeExecutionFrame {
@@ -67,6 +71,7 @@ impl NodeExecutionFrame {
             shared_data,
             shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
             shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
+            transport: None,
         }
     }
 
@@ -81,6 +86,7 @@ impl NodeExecutionFrame {
             shared_data,
             shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
             shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
+            transport: None,
         }
     }
 
@@ -100,6 +106,7 @@ impl NodeExecutionFrame {
             shared_data,
             shared_information: crate::ImmutableInformationCarrier::new("unknown", "unknown"),
             shared_diagnostic: crate::ImmutableDiagnosticCarrier::new("unbound"),
+            transport: None,
         }
     }
 
@@ -120,7 +127,13 @@ impl NodeExecutionFrame {
             shared_data,
             shared_information,
             shared_diagnostic,
+            transport: None,
         }
+    }
+
+    pub fn with_transport(mut self, transport: SharedTransportCarrier) -> Self {
+        self.transport = Some(transport);
+        self
     }
 
     pub fn shares_immutable_carriers_with(&self, other: &Self) -> bool {
@@ -346,6 +359,7 @@ impl ExecutionEngine {
                         data: frame.data,
                         control: frame.control,
                         information: frame.information,
+                        transport: frame.transport.clone(),
                     },
                     registry,
                 )
@@ -361,6 +375,7 @@ impl ExecutionEngine {
                 plugin_id: node_id.clone(),
                 message: "executed".to_string(),
             });
+            let transport = frame.transport;
             frame = NodeExecutionFrame::with_shared_carriers(
                 output.data,
                 output.control,
@@ -370,6 +385,7 @@ impl ExecutionEngine {
                 frame.shared_information,
                 frame.shared_diagnostic,
             );
+            frame.transport = transport;
             frame.validate()?;
             if stop_node.is_some_and(|stop| stop == node_id) {
                 break;

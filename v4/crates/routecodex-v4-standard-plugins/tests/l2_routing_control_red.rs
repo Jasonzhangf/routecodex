@@ -32,6 +32,7 @@ fn execute(
             data: json!({"model":"m"}),
             control,
             information: json!({}),
+            transport: None,
         },
         &StandardHandleRegistry::new(),
     );
@@ -53,6 +54,34 @@ fn positive_route_facts_producer_writes_typed_control() {
     assert!(
         output.data.as_object().unwrap().get("route_facts").is_none(),
         "route facts must never enter data"
+    );
+}
+
+#[test]
+fn route_facts_producer_preserves_prebound_selection_facts() {
+    let output = execute(
+        "V4HubReqExecution04Planned",
+        4,
+        "v4.std.routing.route_facts_producer",
+        json!({
+            "route_facts": {
+                "route_group_id": "thinking",
+                "entry_protocol": "responses",
+                "execution_lane": "direct",
+                "unavailable_provider_ids": ["provider-a"]
+            }
+        }),
+    )
+    .expect("route facts producer executes with prebound facts");
+    assert_eq!(
+        output.control["route_facts"],
+        json!({
+            "route_group_id": "thinking",
+            "entry_protocol": "responses",
+            "execution_lane": "direct",
+            "unavailable_provider_ids": ["provider-a"],
+            "keyless": true
+        })
     );
 }
 

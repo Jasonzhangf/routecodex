@@ -2,11 +2,14 @@
 //!
 //! SSE transport has separate opaque-byte tests and is intentionally absent.
 
-use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
+use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput, SharedTransportCarrier};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::{compile_node_plan, PlanError};
 use routecodex_v4_standard_plugins::response_inbound::{
     decode_provider_sse_frame, ProviderSseEventDisposition,
+};
+use routecodex_v4_standard_plugins::protocol::provider_response::{
+    normalize_provider_response, normalize_provider_sse_frame,
 };
 use routecodex_v4_standard_plugins::response_outbound::{
     encode_client_error_sse_frame, encode_client_sse_frame,
@@ -17,6 +20,7 @@ use routecodex_v4_standard_plugins::{
     StandardHandleRegistry,
 };
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 fn execute(
     node_id: &str,
@@ -54,6 +58,7 @@ fn execute(
             data,
             control: json!({}),
             information,
+            transport: None,
         },
         &StandardHandleRegistry::new(),
     );
@@ -85,7 +90,7 @@ fn protocol_decode_preserves_provider_business_response() {
 }
 
 #[test]
-fn provider_compat_decodes_raw_http_envelope_inside_response_plan() {
+fn provider_compat_consumes_raw_provider_body_inside_response_plan() {
     let response = json!({
         "id": "resp-raw-1",
         "output": [{"type": "message", "content": [{"type": "output_text", "text": "hello"}]}]
@@ -94,11 +99,7 @@ fn provider_compat_decodes_raw_http_envelope_inside_response_plan() {
         "V4ProviderRespCompat02ProviderCompat",
         2,
         "v4.std.response.provider_compat",
-        json!({
-            "_provider_http_status": 200,
-            "_provider_http_content_type": "application/json",
-            "_provider_http_body": response.to_string()
-        }),
+        response.clone(),
         json!({"provider_protocol": "openai-responses"}),
     )
     .expect("raw provider envelope must be decoded by response plugin");
@@ -106,7 +107,162 @@ fn provider_compat_decodes_raw_http_envelope_inside_response_plan() {
 }
 
 #[test]
-fn direct_response_hook_decodes_transport_envelope() {
+fn provider_response_hooks_preserve_text_tools_and_usage() {
+    let openai = normalize_provider_response(
+        "openai",
+        &json!({
+            "id":"chat-1","model":"gpt-wire",
+            "choices":[{"message":{"content":"hello","tool_calls":[{"id":"call-1","function":{"name":"lookup","arguments":"{}"}}]}}],
+            "usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}
+        }),
+    )
+    .expect("openai normalized by response hook");
+    assert_eq!(openai["status"], "completed");
+    assert_eq!(openai["output"][0]["content"][0]["text"], "hello");
+    assert_eq!(openai["output"][1]["call_id"], "call-1");
+    assert_eq!(openai["usage"]["input_tokens"], 3);
+
+    let anthropic = normalize_provider_response(
+        "anthropic",
+        &json!({"id":"msg-1","model":"claude-wire","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":2,"output_tokens":5}}),
+    )
+    .expect("anthropic normalized by response hook");
+    assert_eq!(anthropic["output"][0]["content"][0]["text"], "hello");
+    assert_eq!(anthropic["usage"]["total_tokens"], 7);
+}
+
+#[test]
+fn provider_response_hook_consumes_gateway_diagnostics_and_rejects_unknown_control() {
+    let normalized = normalize_provider_response(
+        "responses",
+        &json!({
+            "id": "resp-1",
+            "status": "completed",
+            "output": [],
+            "extra_fields": {
+                "provider": "openai",
+                "provider_response_headers": {"x-request-id": "upstream"},
+                "latency": 12,
+                "resolved_model_used": "gpt-wire"
+            }
+        }),
+    )
+    .expect("known diagnostics are consumed by response hook");
+    assert!(normalized.get("extra_fields").is_none());
+    assert_eq!(normalized["id"], "resp-1");
+
+    let error = normalize_provider_response(
+        "responses",
+        &json!({"id":"resp-1","status":"completed","output":[],"extra_fields":{"unregistered_control":true}}),
+    )
+    .expect_err("unknown control fields fail closed at response hook");
+    assert!(error.contains("provider_response_control_envelope"));
+}
+
+#[test]
+fn provider_response_hooks_reject_instruction_injection() {
+    let error = normalize_provider_response(
+        "responses",
+        &json!({"id":"resp-1","status":"completed","instructions":"internal prompt","output":[]}),
+    )
+    .expect_err("provider instructions must not cross response boundary");
+    assert!(error.contains("provider_response_instructions_injected"));
+
+    let error = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp-1","instructions":"internal prompt"}}
+
+"#,
+    )
+    .expect_err("SSE provider instructions must not cross response boundary");
+    assert!(error.contains("provider_response_instructions_injected"));
+}
+
+#[test]
+fn provider_response_sse_hooks_project_text_and_terminal_events() {
+    let openai = normalize_provider_sse_frame(
+        "openai",
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n",
+    )
+    .expect("openai SSE normalized by response hook");
+    let text = String::from_utf8(openai).expect("utf8");
+    assert!(text.contains("response.output_text.delta"));
+    assert!(text.contains("response.completed"));
+
+    let anthropic = normalize_provider_sse_frame(
+        "anthropic",
+        b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    )
+    .expect("anthropic SSE normalized by response hook");
+    assert!(String::from_utf8(anthropic)
+        .expect("utf8")
+        .contains("response.completed"));
+
+    let responses = normalize_provider_sse_frame(
+        "responses",
+        br#"event: response.created
+data: {"type":"response.created","extra_fields":{"provider":"openai","latency":4},"response":{"id":"resp-1","extra_fields":{"chunk_index":0}}}
+
+"#,
+    )
+    .expect("Responses SSE diagnostics are consumed by response hook");
+    let text = String::from_utf8(responses).expect("utf8");
+    assert!(!text.contains("extra_fields"));
+    assert!(text.contains("response.created"));
+}
+
+#[test]
+fn provider_sse_uses_arc_transport_carrier_and_typed_terminal_control() {
+    let bytes: Arc<[u8]> = Arc::from(
+        b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"arc-1\"}}\n\n"
+            .as_slice(),
+    );
+    let carrier = SharedTransportCarrier::from_shared_bytes(Arc::clone(&bytes));
+    let plan = compile_standard_plan(
+        "V4ProviderRespInbound01Raw",
+        "response_inbound",
+        "relay_response",
+        1,
+        &["v4.std.response.sse_frame_boundary"],
+    )
+    .expect("provider SSE boundary plan compiles");
+    let hash = plan.plan_hash();
+    let bindings = PlanBindings {
+        graph_hash: hash.clone(),
+        manifest_hash: hash.clone(),
+        loaded_plan_hash: hash,
+    };
+    let mut container = NodeContainer::declare(
+        "V4ProviderRespInbound01Raw",
+        plan,
+        bindings,
+    )
+    .expect("provider SSE container binds");
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.publish().unwrap();
+    let output = container
+        .execute(
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!({}),
+                information: json!({"provider_protocol": "openai-responses"}),
+                transport: Some(carrier.clone()),
+            },
+            &StandardHandleRegistry::new(),
+        )
+        .expect("typed transport carrier reaches provider SSE plugin");
+    assert_eq!(output.data["type"], "response.completed");
+    assert_eq!(output.control["stream_terminal"], true);
+    assert!(output.data.get("_sse_frame").is_none());
+    assert!(carrier.shares_storage_with(&SharedTransportCarrier::from_shared_bytes(bytes)));
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
+fn direct_response_hook_consumes_raw_provider_body() {
     let response = json!({
         "id": "resp-direct-1",
         "object": "response",
@@ -116,11 +272,7 @@ fn direct_response_hook_decodes_transport_envelope() {
         "V4DirectResp02RelayContainer",
         2,
         "v4.hook.direct.response",
-        json!({
-            "_provider_http_status": 200,
-            "_provider_http_content_type": "application/json",
-            "_provider_http_body": response.to_string()
-        }),
+        response.clone(),
         json!({"provider_protocol": "responses", "client_protocol": "responses"}),
     )
     .expect("direct response plugin must decode transport envelope");

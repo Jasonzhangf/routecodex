@@ -61,26 +61,48 @@ impl PluginHandle for TargetSelectionHandle {
             .get("execution_lane")
             .and_then(Value::as_str)
             .unwrap_or("direct");
-        let group = facts
+        let route_group_id = facts
             .get("route_group_id")
             .and_then(Value::as_str)
-            .or_else(|| self.product.route_groups.first().map(|group| group.route_group_id.as_str()))
-            .ok_or_else(|| "compiled product has no route group".to_string())?;
-        let unavailable = facts
+            .map(str::to_string);
+        let unavailable_provider_ids = facts
             .get("unavailable_provider_ids")
             .and_then(Value::as_array)
-            .map(|ids| ids.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
-        let selected = select_product_target_with_unavailable(
-            &self.product,
-            group,
-            &model,
-            &protocol,
-            &[],
-            0,
-            &unavailable,
-        )
+        let required_capabilities = facts
+            .get("required_capabilities")
+            .and_then(Value::as_array)
+            .map(|values| values.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default();
+        let input_tokens = facts
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let mut request = TargetSelectionRequest::new(route_group_id, model, protocol, lane);
+        request.required_capabilities = required_capabilities;
+        request.input_tokens = input_tokens;
+        request.unavailable_provider_ids = unavailable_provider_ids;
+        let selected = TargetSelectionPort::select(&self.product, &request)
         .map_err(|error| error.to_string())?;
+        if let Some(prebound) = ctx
+            .read_control_resource("v4.control.target_selection")
+            .map_err(|error| error.to_string())?
+            .cloned()
+            .filter(|value| !value.is_null())
+        {
+            let prebound = selected_target_from_value(&prebound)?;
+            if prebound != selected {
+                return Err(
+                    "prebound target selection differs from compiled router decision".to_string(),
+                );
+            }
+        }
         ctx.write_control_resource(
             "v4.control.target_selection",
             serde_json::json!({
@@ -96,6 +118,30 @@ impl PluginHandle for TargetSelectionHandle {
     }
 }
 
+fn selected_target_from_value(value: &Value) -> Result<SelectedTarget, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "prebound target selection must be an object".to_string())?;
+    let required = |name: &str| {
+        object
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| format!("prebound target selection missing {name}"))
+    };
+    Ok(SelectedTarget {
+        provider_id: required("provider_id")?,
+        config_path: required("config_path")?,
+        protocol: required("protocol")?,
+        wire_model: required("wire_model")?,
+        auth_alias: object
+            .get("auth_alias")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedTarget {
     pub provider_id: String,
@@ -105,12 +151,29 @@ pub struct SelectedTarget {
     pub auth_alias: Option<String>,
 }
 
+impl SelectedTarget {
+    /// Serialize the router-owned decision onto the typed control carrier.
+    /// The production request plan consumes this exact value; callers must
+    /// not reconstruct a second target-selection JSON shape.
+    pub fn to_control_value(&self, execution_lane: &str) -> Value {
+        serde_json::json!({
+            "provider_id": self.provider_id,
+            "config_path": self.config_path,
+            "protocol": self.protocol,
+            "wire_model": self.wire_model,
+            "auth_alias": self.auth_alias,
+            "execution_lane": execution_lane,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetSelectionError {
     EmptyCandidates,
     EmptyRoutes,
     RouteTargetMissing(String),
     ProductRouteGroupMissing(String),
+    ProductRouteGroupRequired,
     ProductPoolUnavailable(String),
     ProductTargetMissing(String),
     ModelUnavailable(String),
@@ -130,6 +193,9 @@ impl std::fmt::Display for TargetSelectionError {
             Self::ProductRouteGroupMissing(group) => {
                 write!(f, "compiled product route group is missing: {group}")
             }
+            Self::ProductRouteGroupRequired => {
+                write!(f, "route group is required when multiple product route groups are configured")
+            }
             Self::ProductPoolUnavailable(group) => {
                 write!(f, "no product route pool serves request in group {group}")
             }
@@ -140,6 +206,108 @@ impl std::fmt::Display for TargetSelectionError {
                 )
             }
         }
+    }
+}
+
+/// Typed routing input consumed by the Cordis target-selection node.  The
+/// request contains only control-plane facts; business payload bytes never
+/// cross this port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetSelectionRequest {
+    pub route_group_id: Option<String>,
+    pub requested_model: String,
+    pub entry_protocol: String,
+    pub execution_lane: String,
+    pub required_capabilities: Vec<String>,
+    pub input_tokens: u64,
+    pub unavailable_provider_ids: Vec<String>,
+}
+
+impl TargetSelectionRequest {
+    pub fn new(
+        route_group_id: Option<String>,
+        requested_model: impl Into<String>,
+        entry_protocol: impl Into<String>,
+        execution_lane: impl Into<String>,
+    ) -> Self {
+        Self {
+            route_group_id,
+            requested_model: requested_model.into(),
+            entry_protocol: entry_protocol.into(),
+            execution_lane: execution_lane.into(),
+            required_capabilities: Vec::new(),
+            input_tokens: 0,
+            unavailable_provider_ids: Vec::new(),
+        }
+    }
+
+    pub fn resolved_route_group_id<'a>(
+        &self,
+        product: &'a RuntimeProductConfig,
+    ) -> Result<&'a str, TargetSelectionError> {
+        match self.route_group_id.as_deref() {
+            Some(route_group_id) => {
+                product
+                    .route_groups
+                    .iter()
+                    .find(|group| group.route_group_id == route_group_id)
+                    .map(|group| group.route_group_id.as_str())
+                    .ok_or_else(|| {
+                        TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string())
+                    })
+            }
+            None if product.route_groups.len() == 1 => {
+                Ok(product.route_groups[0].route_group_id.as_str())
+            }
+            None => Err(TargetSelectionError::ProductRouteGroupRequired),
+        }
+    }
+
+    /// Serialize the router input facts onto the typed control carrier. The
+    /// request payload is intentionally absent; only routing facts cross this
+    /// boundary and the producer may enrich them with its own typed fields.
+    pub fn to_route_facts_value(&self) -> Value {
+        serde_json::json!({
+            "route_group_id": self.route_group_id,
+            "entry_protocol": self.entry_protocol,
+            "execution_lane": self.execution_lane,
+            "required_capabilities": self.required_capabilities,
+            "input_tokens": self.input_tokens,
+            "unavailable_provider_ids": self.unavailable_provider_ids,
+        })
+    }
+}
+
+/// Typed production route-selection port.  It is the only caller-facing
+/// entry to product target selection; runtime-bin must not inspect route pools
+/// or deserialize a control JSON projection itself.
+pub struct TargetSelectionPort;
+
+impl TargetSelectionPort {
+    pub fn select(
+        product: &RuntimeProductConfig,
+        request: &TargetSelectionRequest,
+    ) -> Result<SelectedTarget, TargetSelectionError> {
+        let route_group_id = request.resolved_route_group_id(product)?;
+        let required_capabilities = request
+            .required_capabilities
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let unavailable_provider_ids = request
+            .unavailable_provider_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        select_product_target_with_unavailable(
+            product,
+            route_group_id,
+            &request.requested_model,
+            &request.entry_protocol,
+            &required_capabilities,
+            request.input_tokens,
+            &unavailable_provider_ids,
+        )
     }
 }
 
@@ -301,10 +469,35 @@ pub struct ProductErrorDecision {
     pub reason_code: Option<String>,
 }
 
+/// Typed owner for compiled provider-failure policy lookup.  Production
+/// callers use this port rather than importing the policy implementation
+/// itself; the returned value remains control-plane data.
+pub struct ProductErrorPolicyPort;
+
+impl ProductErrorPolicyPort {
+    pub fn evaluate(
+        product: &RuntimeProductConfig,
+        provider_id: &str,
+        status: u16,
+        response_body: &str,
+    ) -> Option<ProductErrorDecision> {
+        evaluate_product_error_policy(product, provider_id, status, response_body)
+    }
+}
+
 /// Apply the compiled product error policy. This produces typed control facts
 /// only; execution, cooldown storage and client projection remain downstream
 /// owners in the error/runtime chain.
 pub fn apply_product_error_policy(
+    product: &RuntimeProductConfig,
+    provider_id: &str,
+    status: u16,
+    response_body: &str,
+) -> Option<ProductErrorDecision> {
+    ProductErrorPolicyPort::evaluate(product, provider_id, status, response_body)
+}
+
+fn evaluate_product_error_policy(
     product: &RuntimeProductConfig,
     provider_id: &str,
     status: u16,

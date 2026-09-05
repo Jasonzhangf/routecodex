@@ -212,8 +212,11 @@ function validate(state) {
   if (!/registry\.contains\(&entry\.plugin_id\)/.test(state.source)) {
     failures.push(`${MODULE_ID}: handle preflight registration guard missing`);
   }
-  if (!/matches!\(self\.effect,\s*PluginEffect::Semantic\)/s.test(state.source)) {
-    failures.push(`${MODULE_ID}: normal-data write guard missing`);
+  const normalDataGuards = state.source.match(
+    /matches!\(self\.effect,\s*PluginEffect::Semantic\)/g,
+  )?.length ?? 0;
+  if (normalDataGuards !== 2) {
+    failures.push(`${MODULE_ID}: normal-data write guards must remain semantic-only (count=${normalDataGuards})`);
   }
   if (
     !/PluginEffect::Semantic\s*\|\s*PluginEffect::ControlOnly/.test(state.source)
@@ -371,7 +374,7 @@ function runSelfTest() {
       state.source = state.source.replace('#[serde(deny_unknown_fields)]', '#[serde(default)]');
     }],
     ['normal-data guard widened', (state) => {
-      state.source = state.source.replace(
+      state.source = state.source.replaceAll(
         'matches!(self.effect, PluginEffect::Semantic)',
         'matches!(self.effect, PluginEffect::Semantic | PluginEffect::ReadOnly)',
       );

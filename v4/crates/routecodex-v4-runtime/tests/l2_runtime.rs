@@ -265,6 +265,41 @@ fn responses_entry_runs_direct_lane_without_relay_projection() {
 }
 
 #[test]
+fn relay_request_rejects_prebound_target_selection_drift() {
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-target-selection-drift")
+        .expect("admission");
+    let error = runtime
+        .execute_request_json_scoped_for_target_with_route_facts_and_lease(
+            r#"{"model":"m","messages":[]}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-target-selection-drift",
+            5555,
+            "session-target-drift",
+            "conversation-target-drift",
+            Some("relay"),
+            Some(json!({
+                "route_group_id": "default",
+                "entry_protocol": "chat",
+                "execution_lane": "relay"
+            })),
+            Some(json!({
+                "provider_id": "mock",
+                "config_path": "mock-provider.toml",
+                "protocol": "responses",
+                "wire_model": "wrong-model"
+            })),
+            Some(&lease),
+        )
+        .expect_err("request plan must reject target-selection control drift");
+    assert!(error.message.contains("prebound target selection differs"));
+}
+
+#[test]
 fn relay_request_chat_to_responses_is_plugin_owned() {
     let runtime = active_runtime();
     let report = runtime
@@ -526,6 +561,68 @@ fn one_admission_lease_survives_request_provider_response_to_terminal() {
 }
 
 #[test]
+fn request_admission_facts_are_emitted_by_inbound_plan() {
+    let runtime = active_runtime();
+    let lease = runtime.admit_request("r-admission-plugin").expect("admission");
+    let facts = runtime
+        .execute_request_admission_with_lease(
+            br#"{"model":"admission-model","stream":true,"input":[]}"#,
+            "responses",
+            "direct",
+            &lease,
+        )
+        .expect("request inbound plugin plan");
+    assert_eq!(facts.model, "admission-model");
+    assert!(facts.stream);
+}
+
+#[test]
+fn request_admission_plugin_rejects_relay_continuation() {
+    let runtime = active_runtime();
+    let lease = runtime.admit_request("r-admission-continuation").expect("admission");
+    let error = runtime
+        .execute_request_admission_with_lease(
+            br#"{"model":"m","messages":[],"previous_response_id":"resp_1"}"#,
+            "chat",
+            "relay",
+            &lease,
+        )
+        .expect_err("relay continuation must fail at typed admission policy");
+    assert_eq!(error.code, "continuation_entry_protocol_mismatch");
+    assert!(error.message.contains("Responses entry protocol"));
+}
+
+#[test]
+fn production_error_path_executes_every_compiled_error_plugin() {
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-error-plan-production")
+        .expect("admission");
+    let fault = routecodex_v4_runtime::RuntimeFault::new(
+        "provider_http_error",
+        "upstream provider returned HTTP 502",
+    );
+    let trace = runtime
+        .execute_error_plan_with_lease(&fault, &lease)
+        .expect("error skeleton must execute through the admitted plan");
+    for plugin_id in [
+        "v4.std.error.typed_intake",
+        "v4.std.error.host_capture",
+        "v4.std.error.runtime_classify",
+        "v4.std.error.router_policy",
+        "v4.std.error.execution_decision",
+        "v4.std.error.projection_adapter",
+    ] {
+        assert!(
+            trace
+                .iter()
+                .any(|entry| entry.starts_with(&format!("{plugin_id}:plugin.executed:"))),
+            "production error plan must execute {plugin_id}; trace={trace:?}"
+        );
+    }
+}
+
+#[test]
 fn relay_operator_select_uses_typed_facts_only() {
     let relay = select_relay_operator(&ContinuationFacts::new("chat", "hub", "relay", "relay"))
         .expect("chat + relay owner selects relay operator");
@@ -682,11 +779,11 @@ fn positive_provider_response_chain_projects_client_frame() {
 }
 
 #[test]
-fn direct_response_chain_projects_raw_http_envelope_body() {
+fn direct_response_chain_projects_raw_provider_body() {
     let runtime = active_runtime();
     let report = runtime
         .execute_provider_response_scoped_for_target_with_lease(
-            r#"{"_provider_http_status":200,"_provider_http_content_type":"application/json","_provider_http_body":"{\"id\":\"resp_env\",\"object\":\"response\",\"output\":[]}"}"#,
+            r#"{"id":"resp_env","object":"response","output":[]}"#,
             "r-response-envelope",
             5555,
             "session-response-envelope",
@@ -703,7 +800,6 @@ fn direct_response_chain_projects_raw_http_envelope_body() {
     .expect("client frame is JSON");
     assert_eq!(frame["id"], "resp_env");
     assert_eq!(frame["object"], "response");
-    assert!(frame.get("_provider_http_body").is_none());
 }
 
 fn response_stream_processor(

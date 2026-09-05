@@ -272,6 +272,14 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Control,
             },
             ResourceEntry {
+                resource_id: "v4.control.request_admission_facts".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
+                resource_id: "v4.control.stream_terminal".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
                 resource_id: "v4.control.error_chain".to_string(),
                 axis: ResourceAxis::Control,
             },
@@ -348,6 +356,8 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
+        "v4.control.request_admission_facts".to_string(),
+        "v4.control.stream_terminal".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.lifecycle.payload_cycle".to_string(),
         "v4.config.manifest".to_string(),
@@ -376,6 +386,8 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.control.metadata_center".to_string(),
         "v4.control.route_facts".to_string(),
         "v4.control.target_selection".to_string(),
+        "v4.control.request_admission_facts".to_string(),
+        "v4.control.stream_terminal".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.lifecycle.payload_cycle".to_string(),
         "v4.control.side_channel".to_string(),
@@ -394,7 +406,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4DirectReq03ProviderWire" => {
             vec!["v4.direct.request.provider_wire".to_string()]
         }
-        "V4DirectReq01ClientProtocol" => vec!["v4.direct.request.client_payload".to_string()],
+        "V4DirectReq01ClientProtocol" => vec![
+            "v4.direct.request.client_payload".to_string(),
+            "v4.control.request_admission_facts".to_string(),
+        ],
         "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
         "V4DirectResp03ClientProtocol" => vec![
             "v4.direct.response.client_payload".to_string(),
@@ -402,11 +417,15 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.information.provider_protocol".to_string(),
             "v4.information.entry_protocol".to_string(),
             "v4.information.stream_terminal".to_string(),
+            "v4.control.stream_terminal".to_string(),
         ],
         "V4DirectReq02RelayContainer" => vec![
             "v4.direct.request.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.model".to_string(),
+            "v4.control.request_admission_facts".to_string(),
+            "v4.control.target_selection".to_string(),
         ],
         "V4DirectResp02RelayContainer" => vec![
             "v4.direct.response.provider_raw".to_string(),
@@ -418,10 +437,17 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
         ],
-        "V4HubReqInbound02Normalized" => vec!["v4.request.normal_payload".to_string()],
-        "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
+        "V4HubReqInbound02Normalized" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.request_admission_facts".to_string(),
+        ],
+        "V4HubReqChatProcess03Governed" => vec![
+            "v4.request.normal_payload".to_string(),
+            "v4.control.request_admission_facts".to_string(),
+        ],
         "V4HubReqTarget05Resolved" => vec![
             "v4.control.route_facts".to_string(),
+            "v4.control.target_selection".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.model".to_string(),
         ],
@@ -440,12 +466,18 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.request.provider_semantic".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.model".to_string(),
+            "v4.control.request_admission_facts".to_string(),
+            "v4.control.target_selection".to_string(),
         ],
         "V4ProviderReqOutbound08WirePayload" => vec![
             "v4.request.provider_semantic".to_string(),
             "v4.request.provider_wire_payload".to_string(),
+            "v4.control.target_selection".to_string(),
             "v4.information.client_protocol".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.information.model".to_string(),
+            "v4.control.request_admission_facts".to_string(),
         ],
         "V4ProviderReqOutbound09TransportRequest" => vec![
             "v4.request.provider_wire_payload".to_string(),
@@ -456,12 +488,13 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.response.client_wire_payload".to_string(),
             "v4.information.entry_protocol".to_string(),
             "v4.information.stream_terminal".to_string(),
+            "v4.control.stream_terminal".to_string(),
         ],
         "V4MetadataCenter01ScopeRegistry" => vec!["v4.control.metadata_center".to_string()],
         "V4PayloadCycleRegistry" => vec!["v4.lifecycle.payload_cycle".to_string()],
         "V4Error01SourceRaised" => vec!["v4.control.error_chain".to_string()],
         "V4Error06ClientProjected" => vec!["v4.control.error_chain".to_string()],
-        "V4HubReqExecution04Planned" => Vec::new(),
+        "V4HubReqExecution04Planned" => vec!["v4.control.route_facts".to_string()],
         "V4Router05RequestClassified" => vec!["v4.control.route_facts".to_string()],
         "V4Router06SelectionPlan" => vec!["v4.control.target_selection".to_string()],
         _ => Vec::new(),
@@ -479,9 +512,20 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
-        "V4HubReqInbound02Normalized" => Vec::new(),
-        "V4ProviderRespInbound01Raw" => vec!["v4.response.provider_raw".to_string()],
-        "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
+        "V4HubReqInbound02Normalized" => {
+            vec!["v4.control.request_admission_facts".to_string()]
+        },
+        "V4DirectReq01ClientProtocol" => {
+            vec!["v4.control.request_admission_facts".to_string()]
+        },
+        "V4ProviderRespInbound01Raw" => vec![
+            "v4.response.provider_raw".to_string(),
+            "v4.control.stream_terminal".to_string(),
+        ],
+        "V4DirectResp01ProviderRaw" => vec![
+            "v4.direct.response.provider_raw".to_string(),
+            "v4.control.stream_terminal".to_string(),
+        ],
         "V4HubReqChatProcess03Governed" => vec!["v4.request.normal_payload".to_string()],
         "V4HubRespInbound03Normalized" => vec!["v4.response.normal_payload".to_string()],
         "V4ProviderRespCompat02ProviderCompat" => vec!["v4.response.provider_raw".to_string()],
@@ -530,6 +574,9 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             "v4.request.provider_semantic",
             "v4.information.client_protocol",
             "v4.information.provider_protocol",
+            "v4.information.model",
+            "v4.control.request_admission_facts",
+            "v4.control.target_selection",
         ],
         vec!["v4.request.provider_wire_payload"],
     );
@@ -611,7 +658,10 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::DiagnosticOnly,
             PluginPhase::Observation,
             903,
-            vec!["v4.request.normal_payload"],
+            vec![
+                "v4.request.normal_payload",
+                "v4.control.request_admission_facts",
+            ],
             vec![],
         ),
         plugin(
@@ -637,7 +687,10 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::DiagnosticOnly,
             PluginPhase::Observation,
             903,
-            vec!["v4.direct.request.client_payload"],
+            vec![
+                "v4.direct.request.client_payload",
+                "v4.control.request_admission_facts",
+            ],
             vec![],
         ),
         plugin(
@@ -794,7 +847,7 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::ControlOnly,
             PluginPhase::Semantic,
             300,
-            vec![],
+            vec!["v4.control.route_facts"],
             vec!["v4.control.route_facts"],
         ),
         plugin(
@@ -809,6 +862,24 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             350,
             vec![
                 "v4.control.route_facts",
+                "v4.information.client_protocol",
+                "v4.information.model",
+            ],
+            vec![],
+        ),
+        plugin(
+            "v4.std.routing.target_selection",
+            PluginCategory::Routing,
+            "V4HubReqTarget05Resolved",
+            "request_execution",
+            Some(5),
+            PluginKind::Operator,
+            PluginEffect::ControlOnly,
+            PluginPhase::Semantic,
+            360,
+            vec![
+                "v4.control.route_facts",
+                "v4.control.target_selection",
                 "v4.information.client_protocol",
                 "v4.information.model",
             ],
@@ -1061,7 +1132,28 @@ fn response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Result<(), String> {
-    let line = diagnostic::format_chat_process_payload(direction, ctx.read_data())?;
+    let payload_stream = ctx
+        .read_data()
+        .get("stream")
+        .and_then(Value::as_bool);
+    let admission_stream = if direction == "request" && payload_stream.is_none() {
+        ctx.read_control_resource("v4.control.request_admission_facts")
+            .map_err(|error| error.to_string())?
+            .map(|facts| {
+                facts
+                    .get("stream")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| "request admission facts stream must be boolean".to_string())
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let line = diagnostic::format_chat_process_payload_with_stream(
+        direction,
+        ctx.read_data(),
+        admission_stream,
+    )?;
     ctx.emit("console.payload_ready", line);
     Ok(())
 }
@@ -1282,7 +1374,18 @@ fn required_string(object: &serde_json::Map<String, Value>, key: &str) -> Result
 }
 
 fn route_facts_produce(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    ctx.write_control_resource("v4.control.route_facts", json!({"keyless": true}))
+    let existing = ctx
+        .read_control_resource("v4.control.route_facts")
+        .map_err(|error| error.to_string())?
+        .cloned()
+        .filter(|value| !value.is_null())
+        .unwrap_or_else(|| json!({}));
+    let mut facts = existing
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "route facts must be a typed object".to_string())?;
+    facts.entry("keyless".to_string()).or_insert(json!(true));
+    ctx.write_control_resource("v4.control.route_facts", Value::Object(facts))
         .map_err(|error| error.to_string())
 }
 
@@ -1295,6 +1398,10 @@ fn route_facts_consume(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         return Err("route facts consumer requires typed route facts".to_string());
     }
     Ok(())
+}
+
+fn target_selection_external_binding(_ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    Err("target selection requires the routecodex-v4-router production binding".to_string())
 }
 
 fn transport_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
@@ -1361,6 +1468,10 @@ impl StandardHandleRegistry {
             ("v4.std.chat_process.tool_harvest", tool_harvest),
             ("v4.std.routing.route_facts_producer", route_facts_produce),
             ("v4.std.routing.route_facts_consumer", route_facts_consume),
+            (
+                "v4.std.routing.target_selection",
+                target_selection_external_binding,
+            ),
             ("v4.std.provider.transport_validate", transport_validate),
         ] {
             handles.insert(id, StandardHandle { execute_fn });
@@ -1491,6 +1602,7 @@ mod tests {
             "v4.std.chat_process.tool_harvest",
             "v4.std.routing.route_facts_producer",
             "v4.std.routing.route_facts_consumer",
+            "v4.std.routing.target_selection",
             "v4.std.provider.transport_validate",
             "v4.std.response.protocol_decode",
             "v4.std.response.frame_build",
@@ -1500,7 +1612,9 @@ mod tests {
             "v4.std.direct.response.sse_frame_boundary",
             "v4.std.request.responses_normalize",
             "v4.std.request.protocol_parse",
+            "v4.std.request.admission_facts",
             "v4.std.request.responses_wire_build",
+            "v4.std.direct.request.admission_facts",
             "v4.hook.direct.request",
             "v4.hook.relay.request",
             "v4.hook.direct.response",
@@ -1540,5 +1654,39 @@ mod tests {
             .plans
             .iter()
             .all(|plan| plan.entries.iter().all(|entry| !entry.plugin_id.is_empty())));
+    }
+
+    #[test]
+    fn sse_boundary_plans_can_publish_typed_terminal_information() {
+        for (node_id, plugin_id, resource_id) in [
+            (
+                "V4ProviderRespInbound01Raw",
+                "v4.std.response.sse_frame_boundary",
+                "v4.response.provider_raw",
+            ),
+            (
+                "V4DirectResp01ProviderRaw",
+                "v4.std.direct.response.sse_frame_boundary",
+                "v4.direct.response.provider_raw",
+            ),
+        ] {
+            let plan = compile_standard_plan(
+                node_id,
+                "response_inbound",
+                if node_id.starts_with("V4Direct") {
+                    "direct_response"
+                } else {
+                    "relay_response"
+                },
+                1,
+                &[plugin_id],
+            )
+            .expect("SSE boundary plan must compile");
+            assert!(plan.entries[0]
+                .writes
+                .iter()
+                .any(|resource| resource == "v4.control.stream_terminal"));
+            assert!(standard_node_allowed_writes(node_id).contains(&resource_id.to_string()));
+        }
     }
 }

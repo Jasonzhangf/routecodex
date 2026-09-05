@@ -19,13 +19,16 @@
 
 use routecodex_v4_base_node::Scope;
 use routecodex_v4_control::MetadataCenter;
-use routecodex_v4_cordis_bridge::{HandleRegistry, ScopeSessionCommand, ScopeSessionOperation};
+use routecodex_v4_cordis_bridge::{
+    HandleRegistry, ScopeSessionCommand, ScopeSessionOperation, SharedTransportCarrier,
+};
 use routecodex_v4_debug::{DiagnosticEventEnvelope, SubscriptionTopic, V4Debug02BusSubscription};
 use routecodex_v4_error::{
     ClientProjection, DecisionAction, ErrorCenter, ErrorChain, ErrorChainError, ExecutionDecision,
     RetryPolicy,
 };
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
+use routecodex_v4_router::{SelectedTarget, TargetSelectionRequest};
 use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
     sse_transport::SseTransportFrame, StandardHandleRegistry,
@@ -41,12 +44,16 @@ use std::fmt;
 mod control_resources;
 mod execution_engine;
 mod node_service;
+mod production_sse;
+
+pub mod production_pipeline;
 
 pub mod request_port;
 pub mod response_error_port;
 
 pub use control_resources::*;
 pub use execution_engine::{ExecutionEngine, ExecutionError, NodeExecutionFrame, NodeOutcome};
+pub use production_sse::{ProviderSseSource, SseTransportDriver};
 pub use node_service::{
     ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
     NodeServiceRegistry, ServiceError, ServiceLifecycle,
@@ -69,53 +76,50 @@ pub enum ResponsesProviderPayload {
     Sse(Vec<u8>),
 }
 
-/// Typed request facts extracted at the request-inbound owner boundary.
-/// Runtime-bin consumes these facts for routing and transport selection; it
-/// must not parse protocol payload fields itself.
+/// Typed request facts emitted by the request-inbound NodePluginPlan. Runtime
+/// orchestration consumes this control projection for routing and transport
+/// selection; it never parses request protocol fields itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestAdmissionFacts {
     pub model: String,
     pub stream: bool,
+    pub has_previous_response_id: bool,
 }
 
-pub fn parse_request_admission_facts(
-    raw_body: &[u8],
-    entry_protocol: &str,
-    continuation_owner: &str,
-) -> Result<RequestAdmissionFacts, RuntimeFault> {
-    let body: Value = serde_json::from_slice(raw_body)
-        .map_err(|error| RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")))?;
-    if entry_protocol == "responses"
-        && continuation_owner == "relay"
-        && body.get("previous_response_id").is_some()
-    {
-        return Err(RuntimeFault::new(
-            "continuation_unsupported",
-            "local relay continuation is not implemented",
-        ));
-    }
-    if entry_protocol != "responses" && body.get("previous_response_id").is_some() {
-        return Err(RuntimeFault::new(
-            "continuation_entry_protocol_mismatch",
-            "previous_response_id is only valid on the Responses entry protocol",
-        ));
-    }
-    let model = body
+fn decode_request_admission_facts(control: &Value) -> Result<RequestAdmissionFacts, RuntimeFault> {
+    let facts = control
+        .get("request_admission_facts")
+        .ok_or_else(|| RuntimeFault::new("request_admission_facts_missing", "request inbound plan produced no admission facts"))?;
+    let object = facts.as_object().ok_or_else(|| {
+        RuntimeFault::new(
+            "request_admission_facts_invalid",
+            "request admission facts control resource must be an object",
+        )
+    })?;
+    let model = object
         .get("model")
         .and_then(Value::as_str)
-        .filter(|model| !model.is_empty())
-        .ok_or_else(|| RuntimeFault::new("invalid_request", "model is required"))?
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| RuntimeFault::new("request_admission_facts_invalid", "model is missing"))?
         .to_string();
-    let stream = body
+    let stream = object
         .get("stream")
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| RuntimeFault::new("invalid_request", "stream must be a boolean"))
-        })
-        .transpose()?
-        .unwrap_or(false);
-    Ok(RequestAdmissionFacts { model, stream })
+        .and_then(Value::as_bool)
+        .ok_or_else(|| RuntimeFault::new("request_admission_facts_invalid", "stream is missing or not boolean"))?;
+    let has_previous_response_id = object
+        .get("has_previous_response_id")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            RuntimeFault::new(
+                "request_admission_facts_invalid",
+                "has_previous_response_id is missing or not boolean",
+            )
+        })?;
+    Ok(RequestAdmissionFacts {
+        model,
+        stream,
+        has_previous_response_id,
+    })
 }
 
 /// Build the only provider-bound Responses request shape. The input is the
@@ -782,8 +786,8 @@ struct ControlFrame {
     relay_operator_selected: bool,
     governance_applied: bool,
     execution_plan: Option<String>,
-    route_facts: Option<String>,
-    target_selection: Option<String>,
+    route_facts: Option<Value>,
+    target_selection: Option<Value>,
     route_exit: Option<String>,
     continuation_committed: bool,
     continuation_restored: bool,
@@ -978,6 +982,18 @@ impl ExecutionContext {
                     .or_else(|| (!value.is_null()).then(|| value.to_string()))
             })
         };
+        let control_value_string = |name: &str| {
+            control_object.get(name).and_then(|value| {
+                if value.is_null() {
+                    None
+                } else {
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .or_else(|| Some(value.to_string()))
+                }
+            })
+        };
         let control = ControlFrame {
             continuation_scope: control_string("continuation_scope"),
             continuation_owner: control_string("continuation_owner"),
@@ -991,8 +1007,8 @@ impl ExecutionContext {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             execution_plan: control_string("execution_plan"),
-            route_facts: control_string("route_facts"),
-            target_selection: control_string("target_selection"),
+            route_facts: control_object.get("route_facts").cloned(),
+            target_selection: control_object.get("target_selection").cloned(),
             route_exit: control_string("route_exit"),
             continuation_committed: control_object
                 .get("continuation_committed")
@@ -1009,8 +1025,8 @@ impl ExecutionContext {
         context.control.relay_operator_selected = control.relay_operator_selected;
         context.control.governance_applied = control.governance_applied;
         context.control.execution_plan = control.execution_plan;
-        context.control.route_facts = control.route_facts;
-        context.control.target_selection = control.target_selection;
+        context.control.route_facts = control_value_string("route_facts");
+        context.control.target_selection = control_value_string("target_selection");
         context.control.route_exit = control.route_exit;
         context.control.continuation_committed = control.continuation_committed;
         context.control.continuation_restored = control.continuation_restored;
@@ -1033,6 +1049,14 @@ impl ExecutionContext {
     }
 
     fn into_frame(self, chain_id: &str) -> Result<crate::NodeExecutionFrame, RuntimeFault> {
+        self.into_frame_with_transport(chain_id, None)
+    }
+
+    fn into_frame_with_transport(
+        self,
+        chain_id: &str,
+        transport: Option<SharedTransportCarrier>,
+    ) -> Result<crate::NodeExecutionFrame, RuntimeFault> {
         let control = ControlFrame {
             continuation_scope: self.control.continuation_scope,
             continuation_owner: self.control.continuation_owner,
@@ -1040,8 +1064,8 @@ impl ExecutionContext {
             relay_operator_selected: self.control.relay_operator_selected,
             governance_applied: self.control.governance_applied,
             execution_plan: self.control.execution_plan,
-            route_facts: self.control.route_facts,
-            target_selection: self.control.target_selection,
+            route_facts: control_resource_value(self.control.route_facts),
+            target_selection: control_resource_value(self.control.target_selection),
             route_exit: self.control.route_exit,
             continuation_committed: self.control.continuation_committed,
             continuation_restored: self.control.continuation_restored,
@@ -1062,20 +1086,28 @@ impl ExecutionContext {
                 if matches!(chain_id, "response" | "direct_response" | "relay_response") {
                     "raw_parse"
                 } else {
-                    "execution_frame_data"
+                    "request_json_invalid"
                 },
                 error.to_string(),
             )
         })?;
-        Ok(crate::NodeExecutionFrame::with_information(
+        let mut frame = crate::NodeExecutionFrame::with_information(
             data,
             serde_json::to_value(control)
                 .map_err(|error| RuntimeFault::new("execution_frame_control", error.to_string()))?,
             serde_json::to_value(self.information).map_err(|error| {
                 RuntimeFault::new("execution_frame_information", error.to_string())
             })?,
-        ))
+        );
+        frame.transport = transport;
+        Ok(frame)
     }
+}
+
+fn control_resource_value(value: Option<String>) -> Option<Value> {
+    value.map(|value| {
+        serde_json::from_str(&value).unwrap_or(Value::String(value))
+    })
 }
 
 /// Plane isolation is structural: data and control are disjoint typed views.
@@ -1722,12 +1754,10 @@ impl ResponseStreamProcessor {
                 "provider emitted a semantic frame after stream terminal",
             ));
         }
-        let provider_frame = serde_json::json!({
-            "_sse_frame": String::from_utf8(frame.as_bytes().to_vec())
-                .map_err(|error| RuntimeFault::new("provider_sse_decode", error.to_string()))?
-        });
-        let report = runtime.execute_provider_response_scoped_for_target_with_lease(
-            &provider_frame.to_string(),
+        let transport = SharedTransportCarrier::from_shared_bytes(frame.shared_bytes());
+        let report = runtime
+            .execute_provider_response_scoped_for_target_with_transport_and_lease(
+            "{}",
             self.request_lease.request_id(),
             self.port,
             &self.session_scope,
@@ -1735,6 +1765,7 @@ impl ResponseStreamProcessor {
             &self.entry_protocol,
             &self.provider_protocol,
             &self.continuation_owner,
+            Some(transport),
             Some(&self.request_lease),
         )?;
         let disposition = report.trace.iter().find_map(|entry| {
@@ -1758,7 +1789,7 @@ impl ResponseStreamProcessor {
             ));
         }
         let terminal = disposition == "completed";
-        let client_frame = report.client_frame.clone().ok_or_else(|| {
+        report.client_frame.as_ref().ok_or_else(|| {
             RuntimeFault::new(
                 "response_frame_missing",
                 "response chain produced no client frame",
@@ -1819,6 +1850,7 @@ impl ResponseStreamProcessor {
                 "response stream failure was already projected",
             ));
         }
+        runtime.execute_error_plan_with_lease(&fault, &self.request_lease)?;
         let mut chain = ErrorChain::new(self.request_scope.clone());
         let projection = project_runtime_fault(&mut chain, fault).map_err(|error| {
             RuntimeFault::new(
@@ -1973,40 +2005,124 @@ impl SkeletonRuntime {
         })
     }
 
-    /// Execute the Cordis-owned route-facts and target-selection nodes before
-    /// provider protocol dispatch. Runtime callers receive only the typed
-    /// control projection; they never invoke router selection helpers.
-    pub fn execute_target_selection(
+    /// Execute only the request-inbound prefix and consume its typed control
+    /// projection. Protocol admission is owned by the request NodePluginPlan;
+    /// callers cannot recover model/stream facts by parsing the raw payload.
+    pub fn execute_request_admission_with_lease(
         &self,
-        request_id: &str,
+        raw_body: &[u8],
+        entry_protocol: &str,
+        continuation_owner: &str,
+        lease: &RuntimeLease,
+    ) -> Result<RequestAdmissionFacts, RuntimeFault> {
+        if lease.request_id().is_empty() {
+            return Err(RuntimeFault::new(
+                "request_identity",
+                "request admission requires a non-empty request identity",
+            ));
+        }
+        let (chain_id, stop_node, canonical_protocol) = match (entry_protocol, continuation_owner) {
+            ("responses", "direct") => (
+                "direct_request",
+                "V4DirectReq01ClientProtocol",
+                "openai-responses",
+            ),
+            ("chat", "relay") => (
+                "relay_request",
+                "V4HubReqInbound02Normalized",
+                "openai-chat",
+            ),
+            (entry, owner) => {
+                return Err(RuntimeFault::new(
+                    "execution_lane_invalid",
+                    format!("unsupported request admission lane entry={entry} owner={owner}"),
+                ))
+            }
+        };
+        let data: Value = serde_json::from_slice(raw_body)
+            .map_err(|error| RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")))?;
+        if !data.is_object() {
+            return Err(RuntimeFault::new(
+                "invalid_request",
+                "request body must be an object",
+            ));
+        }
+        let frame = NodeExecutionFrame::with_information(
+            data,
+            Value::Object(Default::default()),
+            serde_json::json!({
+                "entry_protocol": canonical_protocol,
+                "execution_lane": continuation_owner,
+                "client_protocol": canonical_protocol,
+            }),
+        );
+        let outcome = ExecutionEngine::execute_pinned_node_from(
+            chain_id,
+            None,
+            frame,
+            lease.epoch_lease(),
+            self.handle_registry.as_ref(),
+            Some(stop_node),
+        )
+        .map_err(|error| RuntimeFault::new("request_admission", error.to_string()))?;
+        let control = match outcome {
+            NodeOutcome::Continue { control, .. } => control,
+            NodeOutcome::Failure { error } => {
+                return Err(RuntimeFault::new(
+                    error
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .unwrap_or("request_admission"),
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("request admission plugin failed"),
+                ));
+            }
+            NodeOutcome::Branch { .. } | NodeOutcome::Terminal { .. } => {
+                return Err(RuntimeFault::new(
+                    "request_admission",
+                    "request inbound plan did not return a continuation frame",
+                ))
+            }
+        };
+        let facts = decode_request_admission_facts(&control)?;
+        if facts.has_previous_response_id && entry_protocol != "responses" {
+            return Err(RuntimeFault::new(
+                "continuation_entry_protocol_mismatch",
+                "continuation requires the Responses entry protocol",
+            ));
+        }
+        if facts.has_previous_response_id && continuation_owner == "relay" {
+            return Err(RuntimeFault::new(
+                "continuation_unsupported",
+                "local or relay continuation is not supported; use provider-owned Direct continuation",
+            ));
+        }
+        Ok(facts)
+    }
+
+    /// Execute the Cordis-owned route-facts and target-selection nodes using
+    /// the request's already-admitted lease. Selection returns a typed target
+    /// and never exposes the control-resource JSON to runtime-bin.
+    pub fn execute_target_selection_with_lease(
+        &self,
+        lease: &RuntimeLease,
         port: u16,
         session_scope: &str,
         conversation_scope: &str,
-        client_protocol: &str,
-        execution_lane: &str,
-        model: &str,
-        route_group_id: &str,
-        unavailable_provider_ids: &[String],
-    ) -> Result<Value, RuntimeFault> {
-        let lease = self
-            .epoch_store
-            .admit()
-            .map_err(|error| RuntimeFault::new("execution_epoch", error.to_string()))?;
+        request: &TargetSelectionRequest,
+    ) -> Result<SelectedTarget, RuntimeFault> {
         let control = serde_json::json!({
-            "route_facts": {
-                "route_group_id": route_group_id,
-                "entry_protocol": client_protocol,
-                "execution_lane": execution_lane,
-                "unavailable_provider_ids": unavailable_provider_ids,
-            }
+            "route_facts": request.to_route_facts_value(),
         });
         let information = serde_json::json!({
-            "client_protocol": client_protocol,
-            "execution_lane": execution_lane,
-            "model": model,
+            "client_protocol": request.entry_protocol,
+            "execution_lane": request.execution_lane,
+            "model": request.requested_model,
         });
         let frame = NodeExecutionFrame::with_information(
-            serde_json::json!({"model": model}),
+            serde_json::json!({}),
             control,
             information,
         );
@@ -2014,7 +2130,7 @@ impl SkeletonRuntime {
             "relay_request",
             Some("V4HubReqExecution04Planned"),
             frame,
-            &lease,
+            lease.epoch_lease(),
             self.handle_registry.as_ref(),
             Some("V4HubReqTarget05Resolved"),
         )
@@ -2034,11 +2150,35 @@ impl SkeletonRuntime {
                 ));
             }
         };
-        control
+        let selection = control
             .as_object()
             .and_then(|object| object.get("target_selection"))
             .cloned()
             .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target node produced no selection"))
+            ?;
+        let selection = selection
+            .as_object()
+            .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection is not an object"))?;
+        let string_field = |name: &str| {
+            selection
+                .get(name)
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| RuntimeFault::new("target_selection", format!("Cordis target selection missing {name}")))
+        };
+        let auth_alias = selection
+            .get("auth_alias")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let _ = (port, session_scope, conversation_scope, lease.request_id());
+        Ok(SelectedTarget {
+            provider_id: string_field("provider_id")?,
+            config_path: string_field("config_path")?,
+            protocol: string_field("protocol")?,
+            wire_model: string_field("wire_model")?,
+            auth_alias,
+        })
     }
 
     /// Scope claim: a request id may only have one active closed loop.
@@ -2183,12 +2323,49 @@ impl SkeletonRuntime {
         client_protocol: &str,
         provider_protocol: &str,
         wire_model: &str,
-        stream: bool,
+        _stream: bool,
         request_id: &str,
         port: u16,
         session_scope: &str,
         conversation_scope: &str,
         continuation_owner: Option<&str>,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_request_json_scoped_for_target_with_route_facts_and_lease(
+            body,
+            client_protocol,
+            provider_protocol,
+            wire_model,
+            _stream,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            continuation_owner,
+            None,
+            None,
+            request_lease,
+        )
+    }
+
+    /// Execute a request chain with routing decisions already produced by the
+    /// typed router NodeContainer. The prebound route/target resources remain
+    /// on the control carrier so the request plan validates and consumes the
+    /// same decision instead of selecting a second provider.
+    pub fn execute_request_json_scoped_for_target_with_route_facts_and_lease(
+        &self,
+        body: &str,
+        client_protocol: &str,
+        provider_protocol: &str,
+        wire_model: &str,
+        _stream: bool,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        continuation_owner: Option<&str>,
+        route_facts: Option<Value>,
+        target_selection: Option<Value>,
         request_lease: Option<&RuntimeLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
@@ -2199,15 +2376,6 @@ impl SkeletonRuntime {
                 ));
             }
         }
-        let mut value: Value = serde_json::from_str(body)
-            .map_err(|error| RuntimeFault::new("request_json_invalid", error.to_string()))?;
-        let object = value.as_object_mut().ok_or_else(|| {
-            RuntimeFault::new("request_json_invalid", "request body must be an object")
-        })?;
-        object.insert("model".to_string(), Value::String(wire_model.to_string()));
-        object.insert("stream".to_string(), Value::Bool(stream));
-        let raw = serde_json::to_string(&value)
-            .map_err(|error| RuntimeFault::new("request_json_encode", error.to_string()))?;
         if request_lease.is_none() {
             self.claim(request_id)?;
         }
@@ -2236,12 +2404,27 @@ impl SkeletonRuntime {
             session_scope,
             conversation_scope,
             |ctx| {
-                ctx.data.raw_entry = Some(raw);
+                // Keep the client payload byte-for-byte intact at the runtime
+                // boundary. Request NodePluginPlan owns JSON validation,
+                // admission facts, and model/stream projection into provider
+                // wire; runtime must not inject those fields itself.
+                ctx.data.raw_entry = Some(body.to_string());
                 ctx.information.protocol = Some(client_protocol.to_string());
                 ctx.information.execution_lane = Some(execution_lane.to_string());
                 ctx.information.client_protocol = Some(client_protocol.to_string());
                 ctx.information.provider_protocol = Some(provider_protocol.to_string());
                 ctx.information.model = Some(wire_model.to_string());
+                if let Some(route_facts) = route_facts.as_ref() {
+                    ctx.control.route_facts = Some(
+                        serde_json::to_string(route_facts).expect("route facts are serializable"),
+                    );
+                }
+                if let Some(target_selection) = target_selection.as_ref() {
+                    ctx.control.target_selection = Some(
+                        serde_json::to_string(target_selection)
+                            .expect("target selection is serializable"),
+                    );
+                }
                 if let Some(owner) = continuation_owner {
                     ctx.control.continuation_owner = Some(owner.to_string());
                 }
@@ -2384,6 +2567,33 @@ impl SkeletonRuntime {
         continuation_owner: &str,
         request_lease: Option<&RuntimeLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_provider_response_scoped_for_target_with_transport_and_lease(
+            provider_raw,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            entry_protocol,
+            provider_protocol,
+            continuation_owner,
+            None,
+            request_lease,
+        )
+    }
+
+    fn execute_provider_response_scoped_for_target_with_transport_and_lease(
+        &self,
+        provider_raw: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        entry_protocol: &str,
+        provider_protocol: &str,
+        continuation_owner: &str,
+        transport: Option<SharedTransportCarrier>,
+        request_lease: Option<&RuntimeLease>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
                 return Err(RuntimeFault::new(
@@ -2407,7 +2617,7 @@ impl SkeletonRuntime {
                 ))
             }
         };
-        let result = self.execute_path(
+        let result = self.execute_path_with_transport(
             chain_id,
             request_id,
             port,
@@ -2441,6 +2651,7 @@ impl SkeletonRuntime {
                 });
             },
             request_lease.map(RuntimeLease::epoch_lease),
+            transport,
         );
         if request_lease.is_none() {
             self.release(request_id);
@@ -2468,6 +2679,123 @@ impl SkeletonRuntime {
             .merge_retry(request_id)
             .map(|_| ())
             .map_err(|error| RuntimeFault::new("payload_cycle", error.to_string()))
+    }
+
+    /// Execute the compiled error skeleton for a fault already bound to an
+    /// admitted request lease.  The error crate remains the semantic owner of
+    /// classification/policy/projection; this adapter makes the production
+    /// NodeContainer/NodePluginPlan path a mandatory, observable boundary.
+    pub fn execute_error_plan_with_lease(
+        &self,
+        fault: &RuntimeFault,
+        lease: &RuntimeLease,
+    ) -> Result<Vec<String>, RuntimeFault> {
+        if lease.request_id().is_empty() {
+            return Err(RuntimeFault::new(
+                "error_plan_request_identity",
+                "error plan requires a non-empty request identity",
+            ));
+        }
+        let error_chain = serde_json::json!({
+            "code": fault.code,
+            "message": fault.message,
+            "node": fault.node_id.as_deref().unwrap_or("unknown"),
+            "stage": "source_raised",
+        });
+        let frame = NodeExecutionFrame::with_information(
+            serde_json::json!({}),
+            serde_json::json!({"error_chain": error_chain}),
+            serde_json::json!({"execution_lane": "error"}),
+        );
+        let outcome = ExecutionEngine::execute_pinned_node(
+            "error",
+            frame,
+            lease.epoch_lease(),
+            self.handle_registry.as_ref(),
+        )
+        .map_err(|error| RuntimeFault::new("error_plan_execution", error.to_string()))?;
+        let (control, events) = match outcome {
+            NodeOutcome::Continue {
+                control, events, ..
+            }
+            | NodeOutcome::Branch {
+                control, events, ..
+            } => (control, events),
+            NodeOutcome::Failure { error } => {
+                return Err(RuntimeFault::new(
+                    error
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .unwrap_or("error_plan_execution"),
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("error plan plugin failed"),
+                ));
+            }
+            NodeOutcome::Terminal { .. } => {
+                return Err(RuntimeFault::new(
+                    "error_plan_terminal",
+                    "error skeleton terminated before the client projection boundary",
+                ));
+            }
+        };
+        let chain = control
+            .get("error_chain")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                RuntimeFault::new(
+                    "error_plan_control_missing",
+                    "error skeleton produced no typed error-chain control resource",
+                )
+            })?;
+        if chain.get("stage").and_then(Value::as_str) != Some("execution_decision")
+            || chain
+                .get("error_projection")
+                .and_then(|value| value.get("projected"))
+                .and_then(Value::as_bool)
+                != Some(true)
+        {
+            return Err(RuntimeFault::new(
+                "error_plan_incomplete",
+                "error skeleton did not reach the declared client projection boundary",
+            ));
+        }
+        let compiled = lease
+            .epoch_lease()
+            .plugin_ids_for_chain("error")
+            .map_err(|error| RuntimeFault::new("error_plan_missing", error.to_string()))?;
+        let executed = events
+            .iter()
+            .filter(|event| event.kind == "plugin.executed")
+            .map(|event| event.plugin_id.as_str())
+            .collect::<HashSet<_>>();
+        if let Some(missing) = compiled
+            .iter()
+            .find(|plugin_id| !executed.contains(plugin_id.as_str()))
+        {
+            return Err(RuntimeFault::new(
+                "error_plan_plugin_not_executed",
+                format!("compiled error plugin {missing} did not execute"),
+            ));
+        }
+        Ok(events
+            .into_iter()
+            .filter(|event| event.kind != "node.entry" && event.kind != "node.exit")
+            .map(|event| format!("{}:{}:{}", event.plugin_id, event.kind, event.message))
+            .collect())
+    }
+
+    /// Execute an error plan for a pre-admission fault.  The temporary lease
+    /// is owned and released by this method; callers cannot synthesize a
+    /// release or accidentally retain the epoch across requests.
+    pub fn execute_error_plan(
+        &self,
+        request_id: &str,
+        fault: &RuntimeFault,
+    ) -> Result<Vec<String>, RuntimeFault> {
+        let lease = self.admit_request(request_id)?;
+        self.execute_error_plan_with_lease(fault, &lease)
     }
 
     /// Close a payload cycle as success terminal.
@@ -2511,6 +2839,29 @@ impl SkeletonRuntime {
         seed: impl FnOnce(&mut ExecutionContext),
         provided_lease: Option<&routecodex_v4_node_container::EpochLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        self.execute_path_with_transport(
+            chain_id,
+            request_id,
+            port,
+            session_scope,
+            conversation_scope,
+            seed,
+            provided_lease,
+            None,
+        )
+    }
+
+    fn execute_path_with_transport(
+        &self,
+        chain_id: &str,
+        request_id: &str,
+        port: u16,
+        session_scope: &str,
+        conversation_scope: &str,
+        seed: impl FnOnce(&mut ExecutionContext),
+        provided_lease: Option<&routecodex_v4_node_container::EpochLease>,
+        transport: Option<SharedTransportCarrier>,
+    ) -> Result<ExecutionReport, RuntimeFault> {
         let owned_lease = if provided_lease.is_none() {
             Some(
                 self.epoch_store
@@ -2538,7 +2889,7 @@ impl SkeletonRuntime {
             conversation_scope,
         );
         seed(&mut ctx);
-        let initial_frame = ctx.clone().into_frame(chain_id)?;
+        let initial_frame = ctx.clone().into_frame_with_transport(chain_id, transport)?;
         let outcome = match ExecutionEngine::execute_pinned_node(
             chain_id,
             initial_frame,

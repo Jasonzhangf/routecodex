@@ -248,6 +248,28 @@
       "status": "active"
     },
     {
+      "resource_id": "v4.control.request_admission_facts",
+      "owner": "routecodex-v4-standard-plugins::V4HubReqInbound02Normalized",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
+      "resource_id": "v4.control.stream_terminal",
+      "owner": "routecodex-v4-standard-plugins::provider_sse_decode",
+      "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",
+      "allowed_operations": [
+        "read",
+        "validate",
+        "write"
+      ],
+      "status": "active"
+    },
+    {
       "resource_id": "v4.control.target_selection",
       "owner": "routecodex-v4-router::V4HubReqTarget05Resolved",
       "truth_store": "v4/docs/architecture/v4-resource-operation-map.yml",

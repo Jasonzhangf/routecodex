@@ -90,7 +90,7 @@ function validateCodeBinding(runtimeSource, engineSource, runtimeBinSource, skel
   if (/struct RuntimeExecutionState\s*\{[\s\S]*?\bctx\s*:/.test(runtimeSource)) {
     problems.push('runtime: RuntimeExecutionState must not own a ctx business-data carrier');
   }
-  if (!/ctx\.clone\(\)\.into_frame\s*\(chain_id\)/.test(runtimeSource)
+  if (!/ctx\.clone\(\)\.into_frame(?:_with_transport)?\s*\(chain_id(?:\s*,|\s*\))/.test(runtimeSource)
       || !/ctx\.from_frame\s*\([\s\S]*NodeExecutionFrame::with_side_channels/.test(runtimeSource)
       || !/NodeExecutionInput\s*\{[\s\S]*data:\s*frame\.data,[\s\S]*control:\s*frame\.control,[\s\S]*information:\s*frame\.information/.test(engineSource)) {
     problems.push('runtime: adjacent node data/control/information must enter and leave through NodeExecutionFrame');
@@ -166,7 +166,10 @@ function runSelfTest() {
       s.runtime = `${s.runtime}\nstruct RuntimeExecutionState { ctx: ExecutionContext }`;
     }, 'RuntimeExecutionState must not own a ctx business-data carrier'],
     ['frame handoff removed', (s) => {
-      s.runtime = s.runtime.replace('ctx.clone().into_frame(chain_id)', 'ctx.clone().into_payload(chain_id)');
+      s.runtime = s.runtime.replace(
+        'ctx.clone().into_frame_with_transport(chain_id, transport)',
+        'ctx.clone().into_payload(chain_id)',
+      );
     }, 'adjacent node data/control/information must enter and leave through NodeExecutionFrame'],
     ['local epoch activation restored', (s) => {
       s.runtime = `${s.runtime}\nfn ghost() { let _ = ActiveEpochStore::new(candidate); }`;
@@ -178,7 +181,10 @@ function runSelfTest() {
       s.runtime = `${s.runtime}\nfn execute_local_plugin(plugin_id: &str) { match plugin_id { _ => {} } }`;
     }, 'plugin-id execution dispatcher'],
     ['pinned lease execution removed', (s) => {
-      s.runtime = s.runtime.replace('ExecutionEngine::execute_pinned_node(', 'ExecutionEngine::execute_unpinned_node(');
+      // The production path can execute more than one pinned node.  Mutate
+      // every call so the red fixture cannot remain green because one later
+      // occurrence was left untouched by String#replace's first-match rule.
+      s.runtime = s.runtime.replaceAll('ExecutionEngine::execute_pinned_node(', 'ExecutionEngine::execute_unpinned_node(');
     }, 'request path must execute the admitted EpochLease'],
     ['lease container execution removed', (s) => {
       s.engine = s.engine.replace(/lease\s*\.\s*execute\s*\(/, 'lease.ghost_execute(');

@@ -19,7 +19,7 @@ function run(...args) {
 assert.match(run('version'), /^rccv4-plugin version \S+ owner routecodex-v4-standard-plugins$/);
 
 const plugins = JSON.parse(run('list-plugins'));
-assert.equal(plugins.length, 39);
+assert.equal(plugins.length, 42);
 assert.ok(plugins.includes('v4.std.provider.wire_build'));
 assert.ok(plugins.includes('v4.std.provider.transport_validate'));
 
@@ -35,12 +35,16 @@ assert.deepEqual(permissions.reads, [
   'v4.response.client_wire_payload',
   'v4.information.entry_protocol',
   'v4.information.stream_terminal',
+  'v4.control.stream_terminal',
 ]);
 assert.deepEqual(permissions.writes, ['v4.response.client_object']);
 
 const zeroPermissions = JSON.parse(run('node-permissions', 'V4HubReqInbound02Normalized'));
-assert.deepEqual(zeroPermissions.reads, ['v4.request.normal_payload']);
-assert.deepEqual(zeroPermissions.writes, []);
+assert.deepEqual(zeroPermissions.reads, [
+  'v4.request.normal_payload',
+  'v4.control.request_admission_facts',
+]);
+assert.deepEqual(zeroPermissions.writes, ['v4.control.request_admission_facts']);
 
 const surface = JSON.parse(run('surface'));
 assert.ok(surface.reads.includes('v4.response.client_wire_payload'));

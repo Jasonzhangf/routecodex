@@ -95,6 +95,38 @@ pub struct ClientProjection {
     pub message: String,
 }
 
+/// Provider failure input for the error-chain owner.  The runtime supplies
+/// only typed failure identity and the already-selected policy/decision; this
+/// module owns the six-stage error transition and client projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderFailure {
+    pub code: String,
+    pub message: String,
+    pub node: String,
+    pub policy: RetryPolicy,
+    pub decision: ExecutionDecision,
+}
+
+pub fn project_provider_failure(
+    scope: Scope,
+    failure: ProviderFailure,
+) -> Result<ClientProjection, ErrorChainError> {
+    let mut chain = ErrorChain::new(scope);
+    let control_digest = format!("provider-failure:{}:{}", failure.code, failure.node);
+    chain.raise(
+        &failure.code,
+        Some(&control_digest),
+        Some(&format!("node:{}", failure.node)),
+    )?;
+    let captured = chain.capture()?;
+    let mut center = ErrorCenter::new(chain.scope().clone());
+    let witness = center.classify(captured)?;
+    chain.classify(witness)?;
+    chain.apply_policy(failure.policy)?;
+    chain.decide(failure.decision)?;
+    chain.project(&failure.message)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorChainRecord {
     pub record_id: String,

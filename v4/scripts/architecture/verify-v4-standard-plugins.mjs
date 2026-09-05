@@ -101,19 +101,24 @@ const REQUIRED_SOURCE = [
 
 const NODE_PERMISSIONS = new Map([
   ['V4DirectReq01ClientProtocol', {
-    reads: ['v4.direct.request.client_payload'], writes: [],
+    reads: ['v4.direct.request.client_payload', 'v4.control.request_admission_facts'],
+    writes: ['v4.control.request_admission_facts'],
   }],
   ['V4DirectReq03ProviderWire', {
     reads: ['v4.direct.request.provider_wire'], writes: [],
   }],
   ['V4DirectResp01ProviderRaw', {
-    reads: ['v4.direct.response.provider_raw'], writes: ['v4.direct.response.provider_raw'],
+    reads: ['v4.direct.response.provider_raw'],
+    writes: ['v4.direct.response.provider_raw', 'v4.control.stream_terminal'],
   }],
   ['V4DirectReq02RelayContainer', {
     reads: [
       'v4.direct.request.client_payload',
       'v4.information.client_protocol',
       'v4.information.provider_protocol',
+      'v4.information.model',
+      'v4.control.request_admission_facts',
+      'v4.control.target_selection',
     ],
     writes: ['v4.direct.request.provider_wire'],
   }],
@@ -132,6 +137,7 @@ const NODE_PERMISSIONS = new Map([
       'v4.information.provider_protocol',
       'v4.information.entry_protocol',
       'v4.information.stream_terminal',
+      'v4.control.stream_terminal',
     ],
     writes: [],
   }],
@@ -139,14 +145,17 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.request.normal_payload'], writes: [],
   }],
   ['V4HubReqInbound02Normalized', {
-    reads: ['v4.request.normal_payload'], writes: [],
+    reads: ['v4.request.normal_payload', 'v4.control.request_admission_facts'],
+    writes: ['v4.control.request_admission_facts'],
   }],
   ['V4HubReqChatProcess03Governed', {
-    reads: ['v4.request.normal_payload'], writes: ['v4.request.normal_payload'],
+    reads: ['v4.request.normal_payload', 'v4.control.request_admission_facts'],
+    writes: ['v4.request.normal_payload'],
   }],
   ['V4HubReqTarget05Resolved', {
     reads: [
       'v4.control.route_facts',
+      'v4.control.target_selection',
       'v4.information.client_protocol',
       'v4.information.model',
     ],
@@ -163,7 +172,8 @@ const NODE_PERMISSIONS = new Map([
     writes: ['v4.response.provider_raw'],
   }],
   ['V4ProviderRespInbound01Raw', {
-    reads: ['v4.response.provider_raw'], writes: ['v4.response.provider_raw'],
+    reads: ['v4.response.provider_raw'],
+    writes: ['v4.response.provider_raw', 'v4.control.stream_terminal'],
   }],
   ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],
@@ -190,6 +200,9 @@ const NODE_PERMISSIONS = new Map([
       'v4.request.provider_semantic',
       'v4.information.client_protocol',
       'v4.information.provider_protocol',
+      'v4.information.model',
+      'v4.control.request_admission_facts',
+      'v4.control.target_selection',
     ], writes: ['v4.request.provider_wire_payload'],
   }],
   ['V4ProviderReqOutbound08WirePayload', {
@@ -198,6 +211,9 @@ const NODE_PERMISSIONS = new Map([
       'v4.request.provider_wire_payload',
       'v4.information.client_protocol',
       'v4.information.provider_protocol',
+      'v4.information.model',
+      'v4.control.request_admission_facts',
+      'v4.control.target_selection',
     ],
     writes: ['v4.request.provider_wire_payload'],
   }],
@@ -214,6 +230,7 @@ const NODE_PERMISSIONS = new Map([
       'v4.response.client_wire_payload',
       'v4.information.entry_protocol',
       'v4.information.stream_terminal',
+      'v4.control.stream_terminal',
     ],
     writes: ['v4.response.client_object'],
   }],
@@ -242,15 +259,7 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.control.error_chain'], writes: ['v4.control.error_chain'],
   }],
   ['V4HubReqExecution04Planned', {
-    reads: [], writes: ['v4.control.route_facts'],
-  }],
-  ['V4HubReqTarget05Resolved', {
-    reads: [
-      'v4.control.route_facts',
-      'v4.information.client_protocol',
-      'v4.information.model',
-    ],
-    writes: ['v4.control.target_selection'],
+    reads: ['v4.control.route_facts'], writes: ['v4.control.route_facts'],
   }],
   ['V4Router05RequestClassified', {
     reads: ['v4.control.route_facts'], writes: [],
@@ -598,8 +607,8 @@ function validate(
     const testDescriptors = descriptors.filter(
       (descriptor) => descriptor.pluginId.startsWith('v4.std.test.'),
     );
-    if (activeDescriptors.length !== 39) {
-      failures.push(`${MODULE}: expected 39 active standard descriptors, got ${activeDescriptors.length}`);
+      if (activeDescriptors.length !== 42) {
+        failures.push(`${MODULE}: expected 42 active standard descriptors, got ${activeDescriptors.length}`);
     }
     if (!activeDescriptors.some(
       (descriptor) => descriptor.pluginId === 'v4.std.chat_process.tool_harvest',
@@ -797,8 +806,12 @@ function runSelfTest() {
     }],
     ['provider semantic reversal reintroduced', (state) => {
       state.source = source.replace(
-        'vec![\n            "v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
-        'vec![\n            "v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n        ],\n        vec!["v4.request.normal_payload"],',
+        '"V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {\n'
+          + '            vec!["v4.request.provider_wire_payload".to_string()]\n'
+          + '        }',
+        '"V4ProviderReqCompat07ProviderCompat" | "V4ProviderReqOutbound08WirePayload" => {\n'
+          + '            vec!["v4.request.normal_payload".to_string()]\n'
+          + '        }',
       );
     }],
     ['node permission broadened', (state) => {

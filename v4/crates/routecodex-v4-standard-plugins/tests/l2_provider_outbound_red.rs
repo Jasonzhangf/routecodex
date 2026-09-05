@@ -40,6 +40,7 @@ fn execute(
             data,
             control,
             information,
+            transport: None,
         },
         &StandardHandleRegistry::new(),
     );
@@ -55,8 +56,8 @@ fn positive_provider_wire_build_uses_typed_protocol_pair() {
         8,
         "v4.std.provider.wire_build",
         json!({"model":"m","messages":[{"role":"user","content":"hi"}]}),
-        json!({"client_protocol":"openai-chat","provider_protocol":"openai-responses"}),
-        json!({}),
+        json!({"client_protocol":"openai-chat","provider_protocol":"openai-responses","model":"m"}),
+        json!({"request_admission_facts":{"model":"m","stream":false,"has_previous_response_id":false}}),
     )
     .expect("wire build executes");
     assert_eq!(output.data["protocol"], json!("responses"));
@@ -72,8 +73,8 @@ fn negative_provider_wire_build_rejects_missing_protocol() {
         8,
         "v4.std.provider.wire_build",
         json!({"model":"m","messages":[]}),
-        json!({}),
-        json!({}),
+        json!({"model":"m"}),
+        json!({"request_admission_facts":{"model":"m","stream":false,"has_previous_response_id":false}}),
     )
     .expect_err("wire build requires typed protocol information");
     assert!(matches!(

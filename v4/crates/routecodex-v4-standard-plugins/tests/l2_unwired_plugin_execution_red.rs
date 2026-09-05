@@ -63,6 +63,7 @@ fn execute_plugin(
             data,
             control,
             information,
+            transport: None,
         },
         &registry,
     );
