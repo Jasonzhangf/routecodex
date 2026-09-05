@@ -1,24 +1,24 @@
 {
-  "review_id": "review-fix-routecodex-v4-error-0bbb36550d47",
+  "review_id": "review-fix-routecodex-v4-error-636fa58b9d17",
   "review_kind": "architecture",
   "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
-  "promotion_id": "promotion-fix-routecodex-v4-error-0bbb36550d47",
-  "fix_candidate_id": "fix-routecodex-v4-error-0bbb36550d47",
-  "pre_review_validation_id": "pre-review-fix-routecodex-v4-error-0bbb36550d47",
+  "promotion_id": "promotion-fix-routecodex-v4-error-636fa58b9d17",
+  "fix_candidate_id": "fix-routecodex-v4-error-636fa58b9d17",
+  "pre_review_validation_id": "pre-review-fix-routecodex-v4-error-636fa58b9d17",
   "reviewer": {
     "adapter": "project::architecture_review",
-    "identity": "routecodex-v4-error:0bbb36550d47c2fd3df60e9d4679a52576bf7157"
+    "identity": "routecodex-v4-error:636fa58b9d171df3c1370137d311d69c277bf05c"
   },
   "verdict": "pass",
   "evidence_ids": [
-    "evidence-fix-routecodex-v4-error-0bbb36550d47",
+    "evidence-fix-routecodex-v4-error-636fa58b9d17",
     "candidate-artifact",
     "development-whitebox",
     "positive-intervention",
     "negative-intervention"
   ],
-  "reviewed_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
-  "reviewed_tree_hash": "b42fe7b0afbd0806e431d991042b98cfa3d75cbf",
+  "reviewed_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
+  "reviewed_tree_hash": "ce6ee4bb6fa01a0007964be09178d8789174492c",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_artifact_hash": "sha256:e6d25210cd117eda15d8a83a8ce62a93802bd15ec7ef331e1b263f8bbe10c269",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -28,5 +28,5 @@
   "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
   "ai_confidence": 1,
   "confidence_rationale": "Current-tree architecture gates and mapped module regression passed.",
-  "created_at": "2026-09-05T07:50:11.968Z"
+  "created_at": "2026-09-05T07:52:33.146Z"
 }

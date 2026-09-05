@@ -1,27 +1,27 @@
 {
-  "promotion_id": "promotion-fix-routecodex-v4-control-0bbb36550d47",
+  "promotion_id": "promotion-fix-routecodex-v4-control-636fa58b9d17",
   "issue_id": "v4-cordis-routecodex-v4-control-active-recovery",
-  "experiment_id": "fix-routecodex-v4-control-0bbb36550d47",
+  "experiment_id": "fix-routecodex-v4-control-636fa58b9d17",
   "module_id": "routecodex-v4-control",
-  "worktree_record_id": "v4-cordis-merge-routecodex-v4-control-0bbb36550d47",
-  "reproduction_record_id": "reproduction-fix-routecodex-v4-control-0bbb36550d47",
-  "fix_candidate_id": "fix-routecodex-v4-control-0bbb36550d47",
-  "architecture_review_id": "review-fix-routecodex-v4-control-0bbb36550d47",
-  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-control-0bbb36550d47",
-  "merge_record_id": "merge-fix-routecodex-v4-control-0bbb36550d47",
+  "worktree_record_id": "v4-cordis-merge-routecodex-v4-control-636fa58b9d17",
+  "reproduction_record_id": "reproduction-fix-routecodex-v4-control-636fa58b9d17",
+  "fix_candidate_id": "fix-routecodex-v4-control-636fa58b9d17",
+  "architecture_review_id": "review-fix-routecodex-v4-control-636fa58b9d17",
+  "effectiveness_record_id": "effectiveness-fix-routecodex-v4-control-636fa58b9d17",
+  "merge_record_id": "merge-fix-routecodex-v4-control-636fa58b9d17",
   "base_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
-  "candidate_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
-  "merged_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
-  "source_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
+  "candidate_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
+  "merged_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
+  "source_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
   "previous_active_version": "active-v3",
   "new_active_version": "active-v4",
   "base_artifact_hash": "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676",
   "artifact_hash": "sha256:b77a0edf18e2f20e413cc9818332713575d20199e693eb6e9f516eb05301fb5f",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "public_api_hash": "sha256:1105562d84253eecb09d20605cf84245f606879a87a4cce10f4f14c547307823",
-  "review_id": "review-fix-routecodex-v4-control-0bbb36550d47",
+  "review_id": "review-fix-routecodex-v4-control-636fa58b9d17",
   "evidence_ids": [
-    "evidence-fix-routecodex-v4-control-0bbb36550d47",
+    "evidence-fix-routecodex-v4-control-636fa58b9d17",
     "baseline-reproduction",
     "candidate-artifact",
     "development-whitebox",
@@ -40,20 +40,20 @@
     {
       "gate_id": "v4-control-regression",
       "result": "pass",
-      "producer": "routecodex-v4-control:0bbb36550d47c2fd3df60e9d4679a52576bf7157"
+      "producer": "routecodex-v4-control:636fa58b9d171df3c1370137d311d69c277bf05c"
     },
     {
       "gate_id": "v4-node-graph",
       "result": "pass",
-      "producer": "routecodex-v4-control:0bbb36550d47c2fd3df60e9d4679a52576bf7157"
+      "producer": "routecodex-v4-control:636fa58b9d171df3c1370137d311d69c277bf05c"
     }
   ],
-  "change_set_id": "fix-routecodex-v4-control-0bbb36550d47",
+  "change_set_id": "fix-routecodex-v4-control-636fa58b9d17",
   "migration_id": null,
   "compatibility_level": "compatible",
   "root_cause": "governance reset removed current candidate lifecycle records and Active-linked module artifact bindings.",
   "design_id": "v4-cordis-mainline-migration-plan",
   "change_reason_comment": "Rebuild current-tree lifecycle evidence through the project-owned adapter.",
-  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-control-0bbb36550d47",
-  "created_at": "2026-09-05T07:50:10.306Z"
+  "playground_cleanup_record_id": "cleanup-fix-routecodex-v4-control-636fa58b9d17",
+  "created_at": "2026-09-05T07:52:31.517Z"
 }

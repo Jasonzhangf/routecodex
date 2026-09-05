@@ -1,18 +1,18 @@
 {
-  "freeze_id": "freeze-fix-routecodex-v4-edge-0bbb36550d47",
+  "freeze_id": "freeze-fix-routecodex-v4-edge-636fa58b9d17",
   "issue_id": "v4-cordis-routecodex-v4-edge-active-recovery",
   "module_id": "routecodex-v4-edge",
-  "promotion_id": "promotion-fix-routecodex-v4-edge-0bbb36550d47",
-  "promotion_record_hash": "sha256:f8f6341d5c9c1b6b81d2d0c97dc013e856102f073b8670c9459db833cf9bfea3",
-  "artifact_record_id": "evidence-fix-routecodex-v4-edge-0bbb36550d47",
-  "regression_report_id": "regression-fix-routecodex-v4-edge-0bbb36550d47",
-  "regression_report_hash": "sha256:f0ae3034ea6bb3d066c7d77ed90bf0bc6bdd907fe7e950811486c1c27ef5524c",
-  "source_commit_or_tag": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
+  "promotion_id": "promotion-fix-routecodex-v4-edge-636fa58b9d17",
+  "promotion_record_hash": "sha256:6273bf059be220de2cdd4d43b4e5a9d64b2bc587b9876b20f92cad2eb7659802",
+  "artifact_record_id": "evidence-fix-routecodex-v4-edge-636fa58b9d17",
+  "regression_report_id": "regression-fix-routecodex-v4-edge-636fa58b9d17",
+  "regression_report_hash": "sha256:ac8dc6898d2bfc247d463e5e2b52c36f33fbab1cd1e46674eef79658cb685a51",
+  "source_commit_or_tag": "636fa58b9d171df3c1370137d311d69c277bf05c",
   "active_version": "active-v5",
   "previous_active_version": "active-v4",
   "library_hash": "sha256:e91d1efa513b4b6b64681eb5a6c6de791a98a166afd699245c827970ec624619",
   "public_api_hash": "sha256:04f0f7fdae3ab4c13a9c3180427c8cf9e73d035aeef536a94b5d4951e9f919a2",
-  "review_id": "review-fix-routecodex-v4-edge-0bbb36550d47",
+  "review_id": "review-fix-routecodex-v4-edge-636fa58b9d17",
   "previous_active_immutable": false,
   "git_clean": true,
   "clean_scope": {
@@ -32,5 +32,5 @@
     "review": "project::architecture_review",
     "artifact_registry": "appsdk::lifecycle"
   },
-  "created_at": "2026-09-05T07:50:08.694Z"
+  "created_at": "2026-09-05T07:52:29.911Z"
 }

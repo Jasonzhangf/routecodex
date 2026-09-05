@@ -1,11 +1,11 @@
 {
-  "fix_candidate_id": "fix-routecodex-v4-error-0bbb36550d47",
+  "fix_candidate_id": "fix-routecodex-v4-error-636fa58b9d17",
   "issue_id": "v4-cordis-routecodex-v4-error-active-recovery",
   "module_id": "routecodex-v4-error",
-  "worktree_id": "v4-cordis-merge-routecodex-v4-error-0bbb36550d47",
+  "worktree_id": "v4-cordis-merge-routecodex-v4-error-636fa58b9d17",
   "base_commit": "e3c72cc7c9fa5626473837b8f1cde7f923fc7487",
-  "head_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
-  "tree_hash": "b42fe7b0afbd0806e431d991042b98cfa3d75cbf",
+  "head_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
+  "tree_hash": "ce6ee4bb6fa01a0007964be09178d8789174492c",
   "diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "design_id": "v4-cordis-mainline-migration-plan",
   "owner": "routecodex-v4-error",
@@ -17,5 +17,5 @@
     "positive-intervention",
     "negative-intervention"
   ],
-  "created_at": "2026-09-05T07:50:10.913Z"
+  "created_at": "2026-09-05T07:52:32.133Z"
 }

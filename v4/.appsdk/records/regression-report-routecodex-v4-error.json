@@ -1,7 +1,7 @@
 {
-  "regression_report_id": "regression-fix-routecodex-v4-error-0bbb36550d47",
+  "regression_report_id": "regression-fix-routecodex-v4-error-636fa58b9d17",
   "module_id": "routecodex-v4-error",
-  "source_commit": "0bbb36550d47c2fd3df60e9d4679a52576bf7157",
+  "source_commit": "636fa58b9d171df3c1370137d311d69c277bf05c",
   "artifact_hash": "sha256:e6d25210cd117eda15d8a83a8ce62a93802bd15ec7ef331e1b263f8bbe10c269",
   "public_api_hash": "sha256:869e2a1f88bc8cc40c19cfe956f460978ee122fc7214312570c0886bad98cd1e",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -24,11 +24,11 @@
   "result": "pass",
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-error:0bbb36550d47c2fd3df60e9d4679a52576bf7157"
+    "identity": "routecodex-v4-error:636fa58b9d171df3c1370137d311d69c277bf05c"
   },
   "test_characteristics": {
     "whitebox": true,
     "blackbox": true
   },
-  "created_at": "2026-09-05T07:50:11.968Z"
+  "created_at": "2026-09-05T07:52:33.146Z"
 }
