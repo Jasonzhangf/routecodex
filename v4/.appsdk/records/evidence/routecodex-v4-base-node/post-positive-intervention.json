@@ -1,9 +1,9 @@
 {
-  "evidence_id": "effectiveness-replay",
+  "evidence_id": "post-positive-intervention",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
   "experiment_id": "fix-routecodex-v4-base-node-e7edd70dd6a8",
-  "phase": "post_architecture_effectiveness",
-  "kind": "sample_replay",
+  "phase": "positive_intervention",
+  "kind": "positive_test",
   "source_commit": "e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7",
   "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "execution_surface": "development_whitebox",
@@ -19,16 +19,13 @@
     "identity": "routecodex-v4-base-node:e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7"
   },
   "command_argv": [
-    "cargo",
-    "test",
-    "-p",
-    "routecodex-v4-base-node",
-    "--locked"
+    "node",
+    "scripts/architecture/verify-v4-node-graph.mjs"
   ],
   "exit_status": 0,
-  "output_hash": "sha256:e25578db938607f98192ce46f6416a7f4331843a99f38b2b77ef6de8e26cec6d",
+  "output_hash": "sha256:1099e03221bf8ee74f96c75e75e264cf2d1536c4b8d0ffa5b6ba10919de782e7",
   "result": "pass",
-  "created_at": "2026-09-05T05:30:20.149Z",
+  "created_at": "2026-09-05T05:30:20.230Z",
   "expires_at": "2026-09-12T05:30:19.676Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",

@@ -1,7 +1,7 @@
 {
-  "regression_report_id": "regression-fix-routecodex-v4-base-node-3910b11c662e",
+  "regression_report_id": "regression-fix-routecodex-v4-base-node-e7edd70dd6a8",
   "module_id": "routecodex-v4-base-node",
-  "source_commit": "3910b11c662eaa955a3a5071a2dba692d4590b11",
+  "source_commit": "e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7",
   "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "public_api_hash": "sha256:7ea54624ce8b9e1bbf64281a86251ec51ce6ee24ead640eaa98432b257717ab7",
   "scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -24,11 +24,11 @@
   "result": "pass",
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-base-node:3910b11c662eaa955a3a5071a2dba692d4590b11"
+    "identity": "routecodex-v4-base-node:e7edd70dd6a82af7f04e51225ed3f2ff18ba0dc7"
   },
   "test_characteristics": {
     "whitebox": true,
     "blackbox": true
   },
-  "created_at": "2026-09-05T05:28:58.398Z"
+  "created_at": "2026-09-05T05:30:20.149Z"
 }

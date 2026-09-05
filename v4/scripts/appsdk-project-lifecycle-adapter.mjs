@@ -256,6 +256,12 @@ writeJson(path.join(records, `review-record-${moduleId}.json`), {
   confidence_rationale: 'Current-tree architecture gates and mapped module regression passed.',
   created_at: effectivenessAt,
 });
+const postPositiveAt = now();
+const postPositive = run('node', ['scripts/architecture/verify-v4-node-graph.mjs']);
+evidence('post-positive-intervention', 'positive_intervention', 'positive_test', postPositive, postPositive.output, 'development_whitebox', postPositiveAt);
+const postNegativeAt = now();
+const postNegative = run('node', ['scripts/architecture/verify-v4-production-mainline-red.mjs']);
+evidence('post-negative-intervention', 'negative_intervention', 'negative_test', postNegative, postNegative.output, 'development_whitebox', postNegativeAt);
 const regressionOutput = whitebox.output;
 const countMatch = regressionOutput.match(/(\d+) passed/);
 const testCount = Math.max(1, Number(countMatch?.[1] ?? 1));
@@ -292,8 +298,8 @@ writeJson(path.join(records, `effectiveness-record-${moduleId}.json`), {
   reproduction_input_hashes: inputHashes,
   baseline_evidence_id: 'baseline-reproduction',
   fixed_replay_evidence_id: 'effectiveness-replay',
-  positive_evidence_ids: ['positive-intervention'],
-  negative_evidence_ids: ['negative-intervention'],
+  positive_evidence_ids: ['post-positive-intervention'],
+  negative_evidence_ids: ['post-negative-intervention'],
   blackbox_evidence_ids: ['deployed-blackbox'],
   source_unchanged_since_review: true,
   result: 'pass',
