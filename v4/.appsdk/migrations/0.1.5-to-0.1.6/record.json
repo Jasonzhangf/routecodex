@@ -1,33 +1,12 @@
 {
-  "bundle_digest": "sha256:4813363da77e9eec678bb7e4bbc8664beec920479aa61677c5991d4e45f82018",
-  "created_at": "2026-09-05T00:21:24.452897+00:00",
-  "frozen_reviews": [
-    {
-      "module_id": "routecodex-v4-base-node",
-      "review_id": "v4-cordis-base-node-review"
-    },
-    {
-      "module_id": "routecodex-v4-edge",
-      "review_id": "v4-cordis-edge-review"
-    },
-    {
-      "module_id": "routecodex-v4-control",
-      "review_id": "v4-cordis-control-architecture-review-current"
-    },
-    {
-      "module_id": "routecodex-v4-error",
-      "review_id": "v4-cordis-error-review-current"
-    },
-    {
-      "module_id": "routecodex-v4-plugin-contract",
-      "review_id": "v4-cordis-plugin-contract-review-current"
-    }
-  ],
+  "bundle_digest": "sha256:0c1a89374554df6d5ea7ea6492a54bb3bc4f7946218b674c4a2b7c75dc0e1df3",
+  "created_at": "2026-09-05T00:42:01.709785+00:00",
+  "frozen_reviews": [],
   "legacy_reconciled_reviews": [],
   "maps": [
     {
       "canonical_source_digest": "sha256:67f189bf15330e542bc82349b78a1d7e29ec050b112ecffa165173b078d9204e",
-      "canonical_target_digest": "sha256:eb77a58cdb8cfad7de11b347a5e5b1f32da2c4e9c36cff2bd45aad7f45b8c70d",
+      "canonical_target_digest": "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0",
       "name": "resource-map.json",
       "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/resource-map.json",
       "source_digest": "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0",
@@ -35,7 +14,7 @@
     },
     {
       "canonical_source_digest": "sha256:69f16dfe5d056634f6164cd325dbdbdf134588890b69f101c0d9045e6a01d776",
-      "canonical_target_digest": "sha256:4096b1d62300baf3cb7de299afc572690274fbd647e56cbed3d6002b9730ddf3",
+      "canonical_target_digest": "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
       "name": "function-map.json",
       "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/function-map.json",
       "source_digest": "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
@@ -43,7 +22,7 @@
     },
     {
       "canonical_source_digest": "sha256:c36e4f9d5cff527d7f98b339772a53c87f420db58bb2215b6b68210e01124673",
-      "canonical_target_digest": "sha256:29a90a662498711d5d7b2ca195d1651d4c01f249f0b56719b37fb846c7020668",
+      "canonical_target_digest": "sha256:ddc8937a00a841de964dbbc038c021aaf6a5ee1cd4b9d9800c08f12c30776bab",
       "name": "mainline-call-map.json",
       "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/mainline-call-map.json",
       "source_digest": "sha256:ddc8937a00a841de964dbbc038c021aaf6a5ee1cd4b9d9800c08f12c30776bab",
@@ -51,7 +30,7 @@
     },
     {
       "canonical_source_digest": "sha256:8dcc1e9444f62f7e407fa1e37a6c8d004de55587950f8e600dc5f3c711981230",
-      "canonical_target_digest": "sha256:099403913775f220f0a4648cebc4ecdf2d5e4cea22d988149606224b64e5f9ac",
+      "canonical_target_digest": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
       "name": "verification-map.json",
       "snapshot_path": ".appsdk/migrations/0.1.5-to-0.1.6/maps/verification-map.json",
       "source_digest": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

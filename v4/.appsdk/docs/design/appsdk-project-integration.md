@@ -116,9 +116,9 @@ Ignore:
 
 消费者只使用全局安装的 AppSDK Bundle。Bundle 版本必须同时绑定 Rust CLI、machine contracts、文档、规则和 skills；不能让项目自行扫描一个不受版本控制的全局目录。Bundle manifest 是机器真源，`init`/`new` 将其中声明的 Skill、规则和文档安装到项目 `.appsdk/`，并生成 `.appsdk/sdk-resources.json`。
 
-项目中的手动合同（例如 `project.json`、records、maps）由 AI/开发者维护，SDK 只校验 schema、引用、owner、scope 和生命周期关系。`.appsdk/sdk-resources.json` 是自动生成文件，只能由 SDK 重建；`verify` 会校验资源文件摘要和 Bundle digest，发现手工改写立即 fail-fast。
+项目中的手动合同（例如 `project.json`、records、maps）由 AI/开发者维护，SDK 只校验 schema、引用、owner、scope 和生命周期关系。`.appsdk/sdk-resources.json` 是自动生成文件，只能由 SDK 重建；`verify` 会校验项目资源文件自身的摘要，发现手工改写立即 fail-fast，但不把当前全局 Bundle 身份当作项目开发门禁。
 
-`contracts/sdk-bundle.manifest.json` 声明当前 Bundle 的资源集合和安装位置；初始化后项目内的机器真源位于 `.appsdk/contracts/sdk-bundle.manifest.json`。它和 binary 同版本发布；`pin-lock` 把 binary digest、Bundle digest、manifest digest 和资源集合一起写入锁。执行 `pin-lock` 的 binary 必须与 `--binary` 指向的文件字节一致，防止旧 CLI 把新 binary 与旧 embedded Bundle 拼成伪锁。
+`contracts/sdk-bundle.manifest.json` 声明当前 Bundle 的资源集合和安装位置；初始化后项目内的机器真源位于 `.appsdk/contracts/sdk-bundle.manifest.json`。它和 binary 同版本发布；`pin-lock` 可把 binary digest、Bundle digest、manifest digest 和资源集合写入迁移审计锁。普通 `verify`/`compile` 不比较全局 binary、Bundle 或其摘要；`--binary` 文件只作为显式迁移输入，不得因当前执行文件不同而阻断项目开发。
 
 `.appsdk/sdk.lock` binds the project to the external implementation:
 
@@ -142,51 +142,6 @@ The lock is committed. A template may retain the two documented `replace-with-*`
 
 Runtime may consume only the compiled manifest and verified Active artifact. Runtime must not scan `.appsdk-control/`, Playground, Protected source, or arbitrary instruction files to reconstruct capability.
 
-## Development Process Control Harness
-
-The Harness is an agent-facing governance control plane, not a business runtime
-capability. `.appsdk/project.json#/guidance/rule_sources` explicitly declares
-project AGENTS, Skills, and their machine JSON contracts. `appsdk guide compile`
-reads only those paths and writes deterministic `.appsdk/guidance/compiled.json`.
-Markdown is digest-bound context for the agent; AppSDK validates only declared
-JSON nodes, edges, severity, and evidence contracts.
-
-Active PlanRecord and append-only PlanRevisionRecord/StepExecutionRecord events
-live under ignored `.appsdk-control/guidance/<task-id>/`. Existing AppSDK records
-remain the lifecycle truth. Missing Harness state does not block ordinary
-`verify` or `compile`; projects opt in and default to advisory guidance.
-
-After `new`, or `init` on a project with an approved Guidance declaration,
-follow the printed onboarding route:
-
-```bash
-appsdk guide compile <project>
-appsdk guide init <project> --task <task-id> --mode <develop|debug> --module <module-id>
-```
-
-The read-only intake names declared AGENTS/local Skill sources, questions still
-requiring user confirmation, exact Skill invocation suggestions, and the next
-guide commands. It never scans undeclared directories or writes an intake
-record. The Agent asks only unresolved questions and persists the confirmed
-technical plan through `appsdk guide plan`.
-
-If an existing governed project has no Guide declaration, rerun `appsdk init`
-idempotently. It preserves existing project/maps/records/Active/Protected truth,
-installs missing Guide resources, and prints:
-
-```bash
-appsdk guide init <project> --task guidance-setup --mode bootstrap --module <module-id>
-```
-
-The Agent reads the returned root AGENTS, bundled AppSDK Skill, and direct
-project-local Skill candidates, then proposes reusable workflows, project
-commands, evidence, severity, and source ownership. No durable rule is written
-or compiled before explicit user approval. After approval, update AGENTS, the
-project-local Skill and machine contract, and
-`.appsdk/project.json#/guidance/rule_sources` in a clean owner worktree; then run
-`appsdk guide compile` and `appsdk verify`. This setup proposal is project-level
-and must not be replaced by a task PlanProposal.
-
 Frozen artifacts must be reproducible across clean worktree locations. The canonical module build runner appends a Rust `--remap-path-prefix` from the current project root to a stable logical path while preserving existing `RUSTFLAGS`. This removes absolute checkout paths from compiler metadata without changing source, payload, or lifecycle hashes. `rehydrate-frozen` and normal module compilation use the same runner; a path-dependent artifact is rejected rather than reconciled by copying or editing a frozen hash.
 
 ## Bootstrap
@@ -198,11 +153,6 @@ appsdk prepare ./existing-workspace
 ```
 
 AI 使用 `.appsdk-prepare.json` 模板向用户确认：这是新项目、模块重构、项目重构还是 debug；新项目根目录是什么；旧代码和 V3 等 legacy roots 是什么；新代码、Protected 和禁止修改边界是什么。用户确认后将 `status` 更新为 `confirmed`，然后才能执行 `init`。没有确认记录时，`init` 会 fail-fast。
-
-已经存在 `.appsdk/project.json` 的治理根可以直接幂等重跑 `appsdk init`，用于补齐
-当前 SDK 的 Guide 等 bundle 资源。此路径以现有项目合同作为 root 真源，不要求重新
-创建 preparation record，也不覆盖项目合同或 lifecycle truth。新建、迁移到新 root、
-或通过 `--project-root` 创建尚不存在的治理根仍必须走 confirmed preparation。
 
 对已有工作区，confirmed preparation 后必须先进入旧状态迁移预检：
 

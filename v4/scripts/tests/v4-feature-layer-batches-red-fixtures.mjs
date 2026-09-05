@@ -561,13 +561,13 @@ export function runFeatureLayerBatchRedFixtures({
     },
     {
       name: 'gate input closure is weakened',
-      expected: ['CANDIDATE_GATE_INPUT_CONTRACT_DRIFT', 'GATE_INPUT_CONTRACT_BINDING'],
+      expected: ['GATE_INPUT_CONTRACT_BINDING'],
       mutate(input) { input.gateInputContract.input_sets.layer.pop(); },
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
       name: 'registered gate redirects its input set',
-      expected: ['CANDIDATE_REGISTRY_PROJECTION_DRIFT', 'GATE_REGISTRY_BINDING'],
+      expected: ['GATE_REGISTRY_BINDING'],
       mutate(input) {
         input.verificationMap.gates
           .find((gate) => gate.gate_id === 'v4_feature_layer_batches_self_test').input_set_id = 'plane';

@@ -84,7 +84,7 @@ function validatePhysicalSources(sourceInputs, failures) {
     failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
       'provider/client response boundaries must reject control fields before projection'));
   }
-  const providerWirePair = /vec!\[[\s\S]{0,500}?"v4\.request\.provider_semantic"[\s\S]{0,500}?\],[\s\S]{0,100}?vec!\["v4\.request\.provider_wire_payload"\]/g;
+  const providerWirePair = /"V4ProviderReqOutbound08WirePayload"\s*=>\s*vec!\[[\s\S]{0,500}?"v4\.request\.provider_semantic"\.to_string\(\),[\s\S]{0,500}?"v4\.request\.provider_wire_payload"\.to_string\(\),[\s\S]{0,500}?"v4\.control\.target_selection"\.to_string\(\),/g;
   if ((sourceInputs.standardPlugins.match(providerWirePair) ?? []).length !== 1
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.request.provider_wire_payload"')
       || sourceInputs.standardPlugins.includes('write_control_resource("v4.response.client_wire_payload"')) {
@@ -324,8 +324,8 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       name: 'provider wire descriptor bypasses provider semantic',
       mutate(_map, _contract, sources) {
         sources.standardPlugins = sources.standardPlugins.replace(
-          '"v4.request.provider_semantic",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n            "v4.information.model",\n            "v4.control.request_admission_facts",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
-          '"v4.request.normal_payload",\n            "v4.information.client_protocol",\n            "v4.information.provider_protocol",\n            "v4.information.model",\n            "v4.control.request_admission_facts",\n        ],\n        vec!["v4.request.provider_wire_payload"],',
+          '"v4.request.provider_semantic".to_string(),\n            "v4.request.provider_wire_payload".to_string(),\n            "v4.control.target_selection".to_string(),',
+          '"v4.request.normal_payload".to_string(),\n            "v4.request.provider_wire_payload".to_string(),\n            "v4.control.target_selection".to_string(),',
         );
       },
       expected: ['PROVIDER_WIRE_SOURCE_BINDING'],
