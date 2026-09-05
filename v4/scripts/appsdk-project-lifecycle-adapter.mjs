@@ -33,7 +33,6 @@ const run = (program, args, options = {}) => {
 };
 const sha = (value) => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 const fileHash = (file) => sha(fs.readFileSync(file));
-const jsonHash = (value) => sha(JSON.stringify(value));
 const now = () => new Date().toISOString();
 const head = run('git', ['rev-parse', 'HEAD']).output;
 const base = run('git', ['merge-base', 'HEAD', 'origin/v4-cordis']).output;
@@ -268,7 +267,7 @@ const regressionRecord = {
   artifact_hash: artifactHash,
   public_api_hash: publicApiHash,
   scope_hash: scopeHash,
-  input_hash: jsonHash({ inputHashes, command: regressionSpec }),
+  input_hash: artifactHash,
   suite_id: module.regression.suite_id,
   command: regressionSpec,
   test_count: testCount,

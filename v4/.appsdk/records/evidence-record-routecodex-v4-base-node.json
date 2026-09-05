@@ -1,10 +1,10 @@
 {
-  "evidence_id": "evidence-fix-routecodex-v4-base-node-ca3804923302",
+  "evidence_id": "evidence-fix-routecodex-v4-base-node-3910b11c662e",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
-  "experiment_id": "fix-routecodex-v4-base-node-ca3804923302",
+  "experiment_id": "fix-routecodex-v4-base-node-3910b11c662e",
   "phase": "artifact",
   "kind": "artifact",
-  "source_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
+  "source_commit": "3910b11c662eaa955a3a5071a2dba692d4590b11",
   "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "execution_surface": "development_whitebox",
   "scope": {
@@ -14,11 +14,11 @@
   },
   "producer": {
     "adapter": "project::lifecycle_adapter",
-    "identity": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+    "identity": "routecodex-v4-base-node:3910b11c662eaa955a3a5071a2dba692d4590b11"
   },
   "result": "pass",
-  "created_at": "2026-09-05T05:27:15.787Z",
-  "expires_at": "2026-09-12T05:27:15.731Z",
+  "created_at": "2026-09-05T05:28:57.990Z",
+  "expires_at": "2026-09-12T05:28:57.934Z",
   "input_hashes": [
     "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
     "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",

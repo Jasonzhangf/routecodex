@@ -1,13 +1,13 @@
 {
-  "review_id": "review-fix-routecodex-v4-base-node-ca3804923302",
+  "review_id": "review-fix-routecodex-v4-base-node-3910b11c662e",
   "review_kind": "architecture",
   "issue_id": "v4-cordis-routecodex-v4-base-node-active-recovery",
-  "promotion_id": "promotion-fix-routecodex-v4-base-node-ca3804923302",
-  "fix_candidate_id": "fix-routecodex-v4-base-node-ca3804923302",
-  "pre_review_validation_id": "pre-review-fix-routecodex-v4-base-node-ca3804923302",
+  "promotion_id": "promotion-fix-routecodex-v4-base-node-3910b11c662e",
+  "fix_candidate_id": "fix-routecodex-v4-base-node-3910b11c662e",
+  "pre_review_validation_id": "pre-review-fix-routecodex-v4-base-node-3910b11c662e",
   "reviewer": {
     "adapter": "project::architecture_review",
-    "identity": "routecodex-v4-base-node:ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b"
+    "identity": "routecodex-v4-base-node:3910b11c662eaa955a3a5071a2dba692d4590b11"
   },
   "verdict": "pass",
   "evidence_ids": [
@@ -16,8 +16,8 @@
     "positive-intervention",
     "negative-intervention"
   ],
-  "reviewed_commit": "ca3804923302f3c4cd3adc1e2f9248d9d7fcfe0b",
-  "reviewed_tree_hash": "10efca7c4331c3da4ee3177411b4602758d54431",
+  "reviewed_commit": "3910b11c662eaa955a3a5071a2dba692d4590b11",
+  "reviewed_tree_hash": "f6c75150c703e4c90556b3478efe5ff03e9feb8f",
   "reviewed_diff_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "reviewed_artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
   "reviewed_scope_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -27,5 +27,5 @@
   "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
   "ai_confidence": 1,
   "confidence_rationale": "Current-tree architecture gates and mapped module regression passed.",
-  "created_at": "2026-09-05T05:27:16.201Z"
+  "created_at": "2026-09-05T05:28:58.398Z"
 }
