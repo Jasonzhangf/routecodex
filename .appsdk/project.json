@@ -133,7 +133,11 @@
       },
       "contract_paths": [
         ".appsdk/**",
-        "contracts/**"
+        "contracts/**",
+        "AGENTS.md",
+        ".agents/skills/rcc-dev-skills/SKILL.md",
+        "docs/agent-routing/40-task-memory-routing.md",
+        "memory/**"
       ],
       "dependency_modules": [],
       "generated_outputs": [
@@ -142,7 +146,12 @@
       "module_id": "routecodex-governance",
       "owned_paths": [
         ".appsdk/**",
-        "docs/goals/routecodex-appsdk-migration-plan.md"
+        "AGENTS.md",
+        ".agents/skills/rcc-dev-skills/SKILL.md",
+        "docs/agent-routing/40-task-memory-routing.md",
+        "docs/goals/routecodex-appsdk-migration-plan.md",
+        "docs/goals/routecodex-memory-truth-review.md",
+        "memory/**"
       ],
       "regression": {
         "allow_skipped": false,
@@ -156,7 +165,11 @@
         },
         "input_paths": [
           ".appsdk/**",
-          "contracts/**"
+          "contracts/**",
+          "AGENTS.md",
+          ".agents/skills/rcc-dev-skills/SKILL.md",
+          "docs/agent-routing/40-task-memory-routing.md",
+          "memory/**"
         ],
         "minimum_test_count": 1,
         "ordinary_mode_after_freeze": "disabled",

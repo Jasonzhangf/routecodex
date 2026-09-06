@@ -70,8 +70,13 @@ scripts/demo-*.mjs
 !.beads/issues.jsonl
 src/utils/daemon-stop-intent.ts
 
-# Local memsearch notes
-memory/
+# Project memory sources are tracked; indexes and other local projections are not.
+memory/*
+!memory/index.md
+!memory/plan.jsonl
+!memory/path.jsonl
+!memory/knowledge.jsonl
+!memory/lesson.jsonl
 !sharedmodule/llmswitch-core/src/servertool/handlers/memory/
 
 # Local development files
