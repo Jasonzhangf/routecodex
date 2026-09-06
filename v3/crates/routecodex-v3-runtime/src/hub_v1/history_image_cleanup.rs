@@ -33,9 +33,6 @@ pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
     let mut total = 0;
     if let Some(input) = body.get("input").and_then(Value::as_array) {
         for item in input {
-            if is_top_level_input_image(item) {
-                total += 1;
-            }
             if let Some(content) = item.get("content").and_then(Value::as_array) {
                 total += count_in_parts(content);
             }
@@ -724,7 +721,6 @@ mod tests {
         );
     }
 
-    #[test]
     #[test]
     fn output_images_any_base64_become_identical_placeholder_bytes() {
         // cache 影响确认：历史轮不同 base64 图片（不同请求/不同图片内容）必须归一为
