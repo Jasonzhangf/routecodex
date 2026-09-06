@@ -3697,3 +3697,44 @@ features:
     live_evidence: required
     agy_review: controller_pass_required
     commit_push: exact_reviewed_commit_required
+
+- feature_id: v3.memory_raw_capture
+  status: design_bound_implementation_pending
+  change_risk: high
+  owner_kind: rust_v3_responses_memory_raw_capture
+  owner_scope: Responses-only optional raw memory capture into new AppSDK-compatible L3 Markdown, with declared output grammar stripped before client commit.
+  contract:
+  - docs/design/v3-memory-raw-capture.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Typed config binds enabled, fixed local project root, and routecodex.memory.raw-entry.v1 output contract.
+  - Req04 injects idempotent optional schema guidance without changing client tools, tool choice, routing, or structured-output requirements.
+  - Responses JSON and SSE accept the declared output_text memory unit only at protocol-equivalent end_turn.
+  - Valid entries publish atomic non-overwriting memory/L3/<host-id>.md files with AppSDK project-memory:v1 markers.
+  - Normal text, reasoning, tools, finish state, usage, and errors preserve protocol meaning after stripping.
+  required_negative:
+  - Missing or empty memory succeeds and publishes nothing.
+  - Unknown fields, wrong types, marker injection, entry/count/byte overflow, and mixed invalid entries never leak the memory unit to the client.
+  - Tool handoff, length, incomplete, failed, cancelled, disconnected, discarded attempt, malformed envelope, ambiguous boundary, and truncated stream publish nothing.
+  - Parser never recursively scans history, tool arguments, quoted code, metadata, or unrelated JSON objects.
+  - RouteCodex never calls project-memory entry/import/index, writes JSONL/SQLite, creates Pending/Knowledge/recall, overwrites an existing L3 file, or reconstructs control state from payload/debug.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-agent-memory
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config memory_raw_capture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime memory_raw_capture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-ci
+  - git diff --check
+  live_required:
+  - Same request id correlates client request, provider-bound request, raw provider response, stripped client response, new L3 Markdown, and later AppSDK automatic scan/get receipt.
+  - JSON and SSE legal short samples prove actual Responses output_text carrier and zero memory residue.
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    live_cutover: required
+    global_install_restart: supervisor_owned
+    agy_review: supervisor_owned
+    merge: supervisor_owned

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/routecodex-v3-agent-memory",
   "crates/provider-compat-core",
   "crates/servertool-core",
   "crates/stop-message-core",

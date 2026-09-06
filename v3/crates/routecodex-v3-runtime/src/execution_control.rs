@@ -561,6 +561,41 @@ impl V3CommittedClientSseBuilder {
         Ok(())
     }
 
+    pub(crate) fn rewrite_frames_non_increasing(
+        &mut self,
+        mut rewrite: impl FnMut(Vec<u8>) -> Vec<u8>,
+    ) -> Result<(), V3AttemptStoreError> {
+        let old_bytes = self.byte_len;
+        let mut new_bytes = 0usize;
+        let mut rewritten = Vec::with_capacity(self.frames.len());
+        for frame in std::mem::take(&mut self.frames) {
+            let frame = rewrite(frame);
+            if frame.is_empty() {
+                return Err(V3AttemptStoreError::InvalidAttemptState(
+                    "committed SSE frame rewrite produced an empty frame".to_string(),
+                ));
+            }
+            new_bytes = new_bytes.checked_add(frame.len()).ok_or_else(|| {
+                V3AttemptStoreError::LocalResourceExhausted(
+                    "provider SSE attempt byte count overflowed".to_string(),
+                )
+            })?;
+            rewritten.push(frame);
+        }
+        if new_bytes > old_bytes {
+            return Err(V3AttemptStoreError::InvalidAttemptState(
+                "committed SSE frame rewrite must not increase byte count".to_string(),
+            ));
+        }
+        self.reservation
+            .budget
+            .release(old_bytes.saturating_sub(new_bytes));
+        self.reservation.bytes = new_bytes;
+        self.byte_len = new_bytes;
+        self.frames = rewritten;
+        Ok(())
+    }
+
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {

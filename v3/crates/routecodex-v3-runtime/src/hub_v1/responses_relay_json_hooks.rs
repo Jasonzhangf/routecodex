@@ -104,8 +104,13 @@ pub(crate) fn run_json_response_hooks(
     let response_web_search_state = resp04.web_search_transition().cloned();
     trace.push("V3HubRespContinuation04Committed");
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
-    let finalized_payload = resp05.client_payload().clone();
+    let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");
+    crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
+        &mut finalized_payload,
+        input.manifest,
+        input.request_id,
+    );
     trace.push("V3ServerRespOutbound06ClientFrame");
     Ok((
         action,

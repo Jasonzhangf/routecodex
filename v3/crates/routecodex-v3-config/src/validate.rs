@@ -1,3 +1,4 @@
+use crate::memory_raw_capture::compile_memory_raw_capture;
 use crate::types::*;
 use crate::{
     compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
@@ -67,6 +68,7 @@ pub(crate) fn build_resource_registry(
         debug: compile_debug(authoring.debug)?,
         error: compile_error(authoring.error, provider_error_action_policies)?,
         admin_webui,
+        memory_raw_capture: compile_memory_raw_capture(authoring.memory_raw_capture)?,
     })
 }
 pub(crate) fn publish_manifest(
@@ -82,6 +84,7 @@ pub(crate) fn publish_manifest(
         features: registry.features,
         debug: registry.debug,
         error: registry.error,
+        memory_raw_capture: registry.memory_raw_capture,
     })
 }
 const HUB_V1_ENTRY_PROTOCOLS: [&str; 4] = ["responses", "anthropic", "gemini", "openai_chat"];

@@ -232,9 +232,26 @@ impl V3DirectSseSemanticState {
 }
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal(
+    stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
+    collect_direct_sse_attempt_after_terminal_with_memory(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        None,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     mut stream: V3SseAttemptStream,
     _provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|message| {
@@ -288,6 +305,16 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
                 )
             })?;
             if disposition == V3SseFrameDisposition::LegalCloseout {
+                rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(
+                    |message| {
+                        build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3ExecutionAttemptPayloadStore",
+                            "direct_sse_memory_strip_failed",
+                            message.to_string(),
+                        )
+                    },
+                )?;
                 let sealed = committed.seal_after_validated_terminal();
                 let sealed = sealed.map_err(|message| {
                     build_v3_error_01_source_raised(
@@ -302,6 +329,14 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
         }
     }
     if terminal_seen {
+        rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|message| {
+            build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "direct_sse_memory_strip_failed",
+                message.to_string(),
+            )
+        })?;
         let sealed = committed.seal_after_validated_terminal();
         let sealed = sealed.map_err(|message| {
             build_v3_error_01_source_raised(
@@ -319,6 +354,156 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+fn rewrite_direct_sse_memory(
+    committed: &mut crate::execution_control::V3CommittedClientSseBuilder,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+) -> Result<(), crate::execution_control::V3AttemptStoreError> {
+    let Some(manifest) = manifest else {
+        return Ok(());
+    };
+    let Some(request_id) = request_id else {
+        return Ok(());
+    };
+    if !manifest.memory_raw_capture.enabled {
+        return Ok(());
+    }
+    let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
+        "{}{}",
+        manifest.memory_raw_capture.host_id_prefix, request_id
+    ));
+    let mut accumulator = routecodex_v3_agent_memory::ResponsesSseAccumulator::new();
+    committed.rewrite_frames_non_increasing(|frame| {
+        for value in parse_direct_sse_json_frames(&frame) {
+            let _ = accumulator.feed_event(&value);
+        }
+        frame
+    })?;
+    let canonical_output_texts = accumulator.canonical_output_texts();
+    let report = accumulator.finalize(&host_id, request_id);
+    if !report.memory_unit_found {
+        return Ok(());
+    }
+    for captured in &report.captured {
+        if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
+            &manifest.memory_raw_capture.project_root,
+            captured,
+        ) {
+            eprintln!("memory l3 publication diagnostic request_id={request_id}: {error}");
+        }
+    }
+    let mut raw_delta_by_key = std::collections::BTreeMap::<(usize, usize), String>::new();
+    let visible_text_by_key = canonical_output_texts
+        .into_iter()
+        .map(|(output_index, content_index, text)| {
+            let visible =
+                routecodex_v3_agent_memory::strip_memory_envelope_from_text(&text, &report);
+            ((output_index, content_index), visible)
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut visible_chars_by_key = std::collections::BTreeMap::<(usize, usize), usize>::new();
+    committed.rewrite_frames_non_increasing(|frame| {
+        rewrite_direct_sse_frame(&frame, |mut value| {
+            match value.get("type").and_then(serde_json::Value::as_str) {
+                Some("response.output_text.delta") => {
+                    let key = direct_sse_output_text_key(&value);
+                    if let Some(delta) = value.get("delta").and_then(serde_json::Value::as_str) {
+                        let raw = raw_delta_by_key.entry(key).or_default();
+                        raw.push_str(delta);
+                        let visible_text = visible_text_by_key
+                            .get(&key)
+                            .map(String::as_str)
+                            .unwrap_or_default();
+                        let previous_chars = visible_chars_by_key.entry(key).or_default();
+                        let visible_limit = raw.chars().count().min(visible_text.chars().count());
+                        let replacement = visible_text
+                            .chars()
+                            .skip(*previous_chars)
+                            .take(visible_limit.saturating_sub(*previous_chars))
+                            .collect::<String>();
+                        *previous_chars = visible_limit;
+                        if let Some(object) = value.as_object_mut() {
+                            object
+                                .insert("delta".to_owned(), serde_json::Value::String(replacement));
+                        }
+                    }
+                }
+                Some("response.output_text.done") => {
+                    if let Some(serde_json::Value::String(text)) = value.get_mut("text") {
+                        *text = routecodex_v3_agent_memory::strip_memory_envelope_from_text(
+                            text, &report,
+                        );
+                    }
+                }
+                Some("response.completed" | "response.done") => {
+                    if let Some(response) = value.get_mut("response") {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(
+                            response, &report,
+                        );
+                    } else {
+                        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(
+                            &mut value, &report,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            value
+        })
+    })
+}
+
+fn direct_sse_output_text_key(event: &serde_json::Value) -> (usize, usize) {
+    (
+        event
+            .get("output_index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
+        event
+            .get("content_index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize,
+    )
+}
+
+fn parse_direct_sse_json_frames(frame: &[u8]) -> Vec<serde_json::Value> {
+    let Ok(text) = std::str::from_utf8(frame) else {
+        return Vec::new();
+    };
+    text.split_inclusive("\n\n")
+        .filter_map(|segment| parse_direct_sse_json_segment(segment).map(|(value, _)| value))
+        .collect()
+}
+
+fn rewrite_direct_sse_frame(
+    frame: &[u8],
+    mut rewrite: impl FnMut(serde_json::Value) -> serde_json::Value,
+) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(frame) else {
+        return frame.to_vec();
+    };
+    let mut output = String::with_capacity(text.len());
+    for segment in text.split_inclusive("\n\n") {
+        if let Some((value, prefix)) = parse_direct_sse_json_segment(segment) {
+            output.push_str(&format!("{prefix}data: {}\n\n", rewrite(value)));
+        } else {
+            output.push_str(segment);
+        }
+    }
+    output.into_bytes()
+}
+
+fn parse_direct_sse_json_segment(segment: &str) -> Option<(serde_json::Value, String)> {
+    let data_start = segment.find("data:")?;
+    let data_line_end = segment[data_start..]
+        .find('\n')
+        .map(|offset| data_start + offset)
+        .unwrap_or(segment.len());
+    let raw = segment[data_start + "data:".len()..data_line_end].trim();
+    let value = serde_json::from_str(raw).ok()?;
+    Some((value, segment[..data_start].to_owned()))
 }
 
 #[cfg(test)]
@@ -395,10 +580,12 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         } else {
             client_stream
         };
-    collect_direct_sse_attempt_after_terminal(
+    collect_direct_sse_attempt_after_terminal_with_memory(
         client_stream,
         compat_plan.provider_protocol,
         attempt_budget,
+        Some(manifest),
+        Some(request_id),
     )
     .await
 }

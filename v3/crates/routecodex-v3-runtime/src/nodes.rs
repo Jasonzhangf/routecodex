@@ -155,6 +155,7 @@ pub fn build_v3_server_03_http_request_raw_with_purpose_and_scope(
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedResponses {
     pub body: Value,
+    pub memory_raw_capture_guidance_injected: bool,
     pub server_id: String,
     pub port: Option<u16>,
     pub pipeline_id: Option<String>,
@@ -310,6 +311,7 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
     crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedResponses {
+        memory_raw_capture_guidance_injected: false,
         server_id: raw.server_id,
         port: raw.port,
         pipeline_id: raw.pipeline_id,

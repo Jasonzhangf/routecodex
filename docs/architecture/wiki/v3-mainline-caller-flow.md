@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 77 functional paths, 453 caller edges.
+Generated view: 78 functional paths, 457 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -19,6 +19,7 @@ flowchart TD
   module_pending["pending"]
   module_provider_compat_core["provider-compat-core"]
   module_routecodex_v3_admin["routecodex-v3-admin"]
+  module_routecodex_v3_agent_memory["routecodex-v3-agent-memory"]
   module_routecodex_v3_route_classifier["routecodex-v3-route-classifier"]
   module_routecodex_v3_sse["routecodex-v3-sse"]
   module_v3_cli["v3-cli"]
@@ -47,17 +48,19 @@ flowchart TD
   module_v3_provider_responses -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_provider_responses -->|6 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|3 edges / 3 paths| module_provider_compat_core
+  module_v3_runtime__hub_v1 -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
   module_v3_runtime__hub_v1 -->|146 edges / 27 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|14 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|67 edges / 19 paths| module_v3_runtime
+  module_v3_runtime -->|67 edges / 20 paths| module_v3_runtime
   module_v3_runtime -->|46 edges / 12 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -90,17 +93,19 @@ flowchart TD
 | v3-provider-responses | routecodex-v3-sse | 1 | `v3.sse.transport_boundary` |
 | v3-provider-responses | v3-provider-responses | 6 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime::hub_v1 | provider-compat-core | 3 | `v3.provider_compat_profile.request`<br/>`v3.provider_compat_profile.response`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime::hub_v1 | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | v3-runtime::hub_v1 | 146 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.anthropic_relay.local_continuation`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.servertool_hook_skeleton_lifecycle`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 14 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 67 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime | 67 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.direct_stopless_metadata_center`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 46 | `v3.direct_stopless_metadata_center`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -143,6 +148,10 @@ flowchart TD
 | v3.openai_chat_sse_typed_tree | v3-chat-sse-tree-02 | HubRespChatProcess03Governed | HubRespOutbound04ClientSemantic |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-01 | V3Front01StableRequestOwner | V3Front02RequestLeaseBound |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-02 | V3Front02RequestLeaseBound | V3Front08ClientTerminalOrError |
+| v3.memory_raw_capture | v3-memory-raw-capture-direct-req04 | V3ResponsesDirect11Policy | V3Provider12ResponsesWirePayload |
+| v3.memory_raw_capture | v3-memory-raw-capture-relay-req04 | V3HubReqContinuation03Classified | V3HubReqChatProcess04Governed |
+| v3.memory_raw_capture | v3-memory-raw-capture-direct-resp03 | V3ProviderResp14Raw | V3DirectResp14ProviderProjectionPrepared |
+| v3.memory_raw_capture | v3-memory-raw-capture-relay-resp03 | V3HubRespInbound02Normalized | V3HubRespChatProcess03Governed |
 
 ### Missing caller/callee fields
 
@@ -3044,7 +3053,6 @@ flowchart TD
   c_76_v3_execution_control_payload_architecture_0 -->|v3-execution-control-success-receipt<br/>V3ExecutionControl05AttemptSealed → V3ExecutionControl06SuccessCommitted| c_76_v3_execution_control_payload_architecture_7
   c_76_v3_execution_control_payload_architecture_8 -->|v3-execution-control-health-persistence<br/>V3ExecutionControl06SuccessCommitted → V3ExecutionControl07PersistenceQueued| c_76_v3_execution_control_payload_architecture_9
   c_76_v3_execution_control_payload_architecture_10 -->|v3-execution-control-observability-persistence<br/>V3ExecutionControl06SuccessCommitted → V3ExecutionControl07PersistenceQueued| c_76_v3_execution_control_payload_architecture_11
-  c_76_v3_execution_control_payload_architecture_0 -->|v3-direct-sse-full-attempt-terminal-commit<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectSseAccept03ProjectedClientFrame| c_76_v3_execution_control_payload_architecture_3
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -3056,4 +3064,40 @@ flowchart TD
 | `v3-execution-control-success-receipt` | `V3ExecutionControl05AttemptSealed` → `V3ExecutionControl06SuccessCommitted` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | V3AttemptSuccessReceipt::from_sealed_sse_attempt<br/><small>routecodex-v3-runtime/src/execution_control.rs</small> | `v3.execution_attempt_success_receipt` |
 | `v3-execution-control-health-persistence` | `V3ExecutionControl06SuccessCommitted` → `V3ExecutionControl07PersistenceQueued` | anchored | persist_cooldown_state<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | V3ProviderHealthPersistenceTicket::enqueue<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | `v3.provider_health_persistence_isolation` |
 | `v3-execution-control-observability-persistence` | `V3ExecutionControl06SuccessCommitted` → `V3ExecutionControl07PersistenceQueued` | anchored | V3WebuiObservability::record_observed<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | V3WebuiObservabilityPersistenceWriter::enqueue<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | `v3.observability_persistence_isolation` |
+
+## v3.memory_raw_capture
+
+Typed config enables optional Responses request guidance; Direct registered response hooks and Relay Resp03 strip declared memory units before client commit, then publish valid entries as new AppSDK-compatible L3 Markdown.
+
+Owner feature: `v3.memory_raw_capture`
+
+```mermaid
+flowchart TD
+  subgraph c_77_v3_memory_raw_capture_m_routecodex_v3_agent_memory["routecodex-v3-agent-memory"]
+    c_77_v3_memory_raw_capture_1["routecodex-v3-agent-memory<br/>inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small>"]
+    c_77_v3_memory_raw_capture_4["routecodex-v3-agent-memory<br/>capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small>"]
+  end
+  subgraph c_77_v3_memory_raw_capture_m_v3_runtime["v3-runtime"]
+    c_77_v3_memory_raw_capture_0["v3-runtime<br/>responses_direct_request_projection_hook_with_key_catalog<br/><small>routecodex-v3-runtime/src/hooks.rs</small>"]
+    c_77_v3_memory_raw_capture_3["v3-runtime<br/>apply_v3_direct_response_projection_hooks<br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small>"]
+    c_77_v3_memory_raw_capture_6["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
+    c_77_v3_memory_raw_capture_7["v3-runtime<br/>collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small>"]
+  end
+  subgraph c_77_v3_memory_raw_capture_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_77_v3_memory_raw_capture_2["v3-runtime::hub_v1<br/>V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small>"]
+    c_77_v3_memory_raw_capture_5["v3-runtime::hub_v1<br/>govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
+  end
+  c_77_v3_memory_raw_capture_0 -->|v3-memory-raw-capture-direct-req04<br/>V3ResponsesDirect11Policy → V3Provider12ResponsesWirePayload| c_77_v3_memory_raw_capture_1
+  c_77_v3_memory_raw_capture_2 -->|v3-memory-raw-capture-relay-req04<br/>V3HubReqContinuation03Classified → V3HubReqChatProcess04Governed| c_77_v3_memory_raw_capture_1
+  c_77_v3_memory_raw_capture_3 -->|v3-memory-raw-capture-direct-resp03<br/>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared| c_77_v3_memory_raw_capture_4
+  c_77_v3_memory_raw_capture_5 -->|v3-memory-raw-capture-relay-resp03<br/>V3HubRespInbound02Normalized → V3HubRespChatProcess03Governed| c_77_v3_memory_raw_capture_4
+  c_77_v3_memory_raw_capture_6 -->|v3-direct-sse-full-attempt-terminal-commit<br/>V3DirectResp14ProviderProjectionPrepared → V3DirectSseAccept03ProjectedClientFrame| c_77_v3_memory_raw_capture_7
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-memory-raw-capture-direct-req04` | `V3ResponsesDirect11Policy` → `V3Provider12ResponsesWirePayload` | binding_pending | responses_direct_request_projection_hook_with_key_catalog<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-relay-req04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | binding_pending | V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-direct-resp03` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | binding_pending | apply_v3_direct_response_projection_hooks<br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-relay-resp03` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | binding_pending | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
 | `v3-direct-sse-full-attempt-terminal-commit` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | `v3.responses_direct_full_attempt_commit` |

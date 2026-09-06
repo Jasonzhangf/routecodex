@@ -66,6 +66,10 @@ modules:
     owner_feature_id: v3.servertool_hook_skeleton_lifecycle
     owned_paths:
       - v3/crates/stop-message-core/**
+  - module_id: v3.agent_memory
+    owner_feature_id: v3.memory_raw_capture
+    owned_paths:
+      - v3/crates/routecodex-v3-agent-memory/**
 
 responsibility_contracts:
   - contract_id: v3.execution_control_payload.runtime

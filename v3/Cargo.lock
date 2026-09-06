@@ -1141,6 +1141,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v3-agent-memory"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "routecodex-v3-cli"
 version = "0.1.0"
 dependencies = [
@@ -1256,6 +1266,7 @@ dependencies = [
  "futures-util",
  "provider-compat-core",
  "reqwest",
+ "routecodex-v3-agent-memory",
  "routecodex-v3-config",
  "routecodex-v3-debug",
  "routecodex-v3-error",

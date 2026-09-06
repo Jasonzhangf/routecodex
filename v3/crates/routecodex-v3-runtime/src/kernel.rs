@@ -1359,6 +1359,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 ),
                 retain_response_cipher,
             );
+            crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
+                body,
+                manifest,
+                &standardized.request_id,
+            );
             if v3_responses_direct_stopless_center_enabled_for_server(
                 manifest,
                 &standardized.server_id,

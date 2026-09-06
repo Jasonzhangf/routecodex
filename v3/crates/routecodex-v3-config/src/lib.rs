@@ -1,11 +1,13 @@
 mod attempt_store;
 mod defaults;
 mod entry_protocol_validation;
+mod memory_raw_capture;
 mod provider_directory;
 mod store;
 mod types;
 mod user_config;
 mod v2_compat;
+pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 pub use v2_compat::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,

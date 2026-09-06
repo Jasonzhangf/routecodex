@@ -339,6 +339,20 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
+        let memory_enabled = manifest.memory_raw_capture.enabled;
+        if memory_enabled && !standardized.memory_raw_capture_guidance_injected {
+            routecodex_v3_agent_memory::inject_memory_raw_capture_guidance(&mut standardized.body)
+                .map_err(|error| {
+                    build_v3_error_01_source_raised_internal(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3Req04StandardizedResponses",
+                        "direct_memory_raw_capture_guidance_injection_failed",
+                        error,
+                        V3InternalErrorCode::V3Req04StandardizedResponses,
+                    )
+                })?;
+            standardized.memory_raw_capture_guidance_injected = true;
+        }
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
         }
@@ -378,7 +392,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
                     V3InternalErrorCode::V3Req04StandardizedResponses,
                 )
             })?;
-        Ok(enabled)
+        Ok(enabled || memory_enabled)
     }
 
     fn run_error(

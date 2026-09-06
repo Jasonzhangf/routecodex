@@ -62,6 +62,100 @@ async fn direct_sse_provider_error_after_partial_attempt_is_recoverable_by_resid
 }
 
 #[tokio::test]
+async fn direct_sse_committed_client_projection_removes_memory_from_delta_done_completed() {
+    use futures_util::StreamExt;
+    use routecodex_v3_agent_memory::ROUTE_CODEX_MEMORY_RAW_ENTRY_V1;
+    use serde_json::json;
+    use std::fs;
+
+    let root = std::env::temp_dir().join(format!(
+        "memory-runtime-sse-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut manifest = routecodex_v3_config::compile_v3_config_05_manifest(
+        routecodex_v3_config::parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["sse"]
+continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+[providers.openai]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.openai.models.gpt-test]
+supports_streaming = true
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    manifest.memory_raw_capture.enabled = true;
+    manifest.memory_raw_capture.project_root = root.clone();
+    manifest.memory_raw_capture.host_id_prefix = "runtime-test-".to_owned();
+
+    let envelope = serde_json::to_string(&json!({
+        "memory": {"entries": [{
+            "schema": ROUTE_CODEX_MEMORY_RAW_ENTRY_V1,
+            "category": "knowledge",
+            "title": "Runtime SSE capture",
+            "content": "The committed client projection strips this envelope.",
+            "tags": ["runtime", "sse"]
+        }]}
+    }))
+    .unwrap();
+    let full_text = format!("Answer kept for client. {envelope}");
+    let split = full_text.len() / 2;
+    let (first, second) = full_text.split_at(split);
+    let source: V3ClientSseStream = Box::pin(stream::iter([Ok(format!(
+        "event: response.output_text.delta\ndata: {}\n\nevent: response.output_text.delta\ndata: {}\n\nevent: response.output_text.done\ndata: {}\n\nevent: response.completed\ndata: {}\n\n",
+        json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": first}),
+        json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": second}),
+        json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": full_text}),
+        json!({"type": "response.completed", "response": {
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": full_text}]}]
+        }}),
+    )
+    .into_bytes())]));
+    let committed = collect_direct_sse_attempt_after_terminal_with_memory(
+        test_direct_sse_attempt_stream(source, crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        Some(&manifest),
+        Some("runtime-sse-request"),
+    )
+    .await
+    .expect("memory-enabled direct SSE attempt must commit");
+    let client_bytes = committed.collect::<Vec<_>>().await.concat();
+    let client_text = String::from_utf8(client_bytes).unwrap();
+    assert!(client_text.contains("Answer kept for client."));
+    assert!(!client_text.contains(ROUTE_CODEX_MEMORY_RAW_ENTRY_V1));
+    assert!(!client_text.contains("\"memory\""));
+    assert!(root.join("memory/L3").is_dir());
+    assert_eq!(fs::read_dir(root.join("memory/L3")).unwrap().count(), 1);
+    fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
 async fn direct_sse_event_only_frame_cannot_supply_provider_json_type() {
     let source = Box::pin(stream::iter(vec![Ok(
             b"event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"

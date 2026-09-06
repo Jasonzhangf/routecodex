@@ -939,10 +939,12 @@ where
                     Some(C::policy_target(&policy).candidate.model_id.clone()),
                     true,
                 );
-                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal(
+                let committed = match crate::kernel::direct_runtime_helpers_stream::collect_direct_sse_attempt_after_terminal_with_memory(
                     projected,
                     response_projection.compat_plan.provider_protocol,
                     attempt_budget.clone(),
+                    Some(manifest),
+                    Some(C::request_id(&standardized)),
                 )
                 .await
                 {

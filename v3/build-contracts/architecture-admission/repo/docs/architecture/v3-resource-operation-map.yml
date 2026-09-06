@@ -2560,3 +2560,67 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: active
+
+  - resource_id: v3.memory.raw_capture_config
+    resource_kind: typed_config_manifest
+    lifecycle: v3.memory_raw_capture
+    owner_feature_id: v3.memory_raw_capture
+    owner_crate: routecodex-v3-config
+    owner_node: V3MemoryRawCaptureManifest
+    identity: [enabled, projectRoot, outputContract]
+    allowed_writers: [compile_memory_raw_capture, V3Config05ManifestPublished]
+    allowed_readers: [memory_raw_capture_for_responses]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routing, retry, health, continuation, debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.memory.schema_guidance
+    resource_kind: normal_payload
+    lifecycle: v3.memory_raw_capture
+    owner_feature_id: v3.memory_raw_capture
+    owner_crate: routecodex-v3-agent-memory
+    owner_node: V3MemoryRawCaptureGuidance
+    identity: [schemaVersion, outputContract]
+    allowed_writers: [inject_memory_raw_capture_guidance]
+    allowed_readers: [ResponsesDirectRequestProjectionHook, V3HubReqChatProcess04Governed]
+    forbidden_writers: [Provider, routing, retry, health, continuation, SSE_transport, debug]
+    may_enter_provider_body: true
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.memory.response_capture
+    resource_kind: response_business_capture
+    lifecycle: v3.memory_raw_capture
+    owner_feature_id: v3.memory_raw_capture
+    owner_crate: routecodex-v3-agent-memory
+    owner_node: V3MemoryRawCaptureOutcome
+    identity: [requestId, terminalKind, entryDigest]
+    allowed_writers: [capture_responses_json, capture_responses_sse_event]
+    allowed_readers: [publish_memory_l3_entries, memory_capture_diagnostics]
+    forbidden_writers: [Provider, routing, retry, health, continuation, SSE_transport, debug, request.normal_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+
+  - resource_id: v3.memory.l3_publication
+    resource_kind: host_owned_compatibility_publication
+    lifecycle: v3.memory_raw_capture
+    owner_feature_id: v3.memory_raw_capture
+    owner_crate: routecodex-v3-agent-memory
+    owner_node: V3MemoryL3Publisher
+    identity: [projectRoot, hostId]
+    allowed_writers: [V3MemoryL3Publisher::publish]
+    allowed_readers: [project-memory automatic L3 scanner]
+    forbidden_writers: [routecodex-v3-config, routecodex-v3-server, Provider, routing, retry, health, continuation, SSE_transport, debug]
+    semantic_contract:
+      path: memory/L3/<host-id>.md
+      publication: atomic_create_without_overwrite
+      downstream: AppSDK scans on later access; RouteCodex does not call entry/import/index or write JSONL/SQLite.
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design

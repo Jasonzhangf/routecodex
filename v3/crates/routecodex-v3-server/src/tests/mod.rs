@@ -163,6 +163,7 @@ fn test_v3_listener_state_with_debug(
     let manifest = Arc::new(V3Config05ManifestPublished {
         version: 3,
         hub_v1: None,
+        memory_raw_capture: Default::default(),
         servers,
         providers: BTreeMap::new(),
         forwarders: BTreeMap::new(),
@@ -3512,6 +3513,7 @@ fn error_projection_appends_human_console_failure_line() {
     let manifest = Arc::new(V3Config05ManifestPublished {
         version: 3,
         hub_v1: None,
+        memory_raw_capture: Default::default(),
         servers,
         providers: BTreeMap::new(),
         forwarders: BTreeMap::new(),

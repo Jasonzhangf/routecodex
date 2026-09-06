@@ -834,6 +834,48 @@ fn published_manifest_is_declaration_only_and_deterministic() {
 }
 
 #[test]
+fn memory_raw_capture_is_disabled_by_default_and_validated_when_enabled() {
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+    assert!(!manifest.memory_raw_capture.enabled);
+    assert_eq!(
+        manifest.memory_raw_capture.output_contract,
+        "responses.output_text"
+    );
+
+    let enabled = format!(
+        r#"
+{FULL_CONFIG}
+[memory_raw_capture]
+enabled = true
+project_root = "/tmp/routecodex-memory"
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&enabled).unwrap()).unwrap();
+    assert!(manifest.memory_raw_capture.enabled);
+    assert_eq!(
+        manifest.memory_raw_capture.project_root,
+        std::path::PathBuf::from("/tmp/routecodex-memory")
+    );
+
+    let relative = enabled.replace(
+        "project_root = \"/tmp/routecodex-memory\"",
+        "project_root = \"./relative\"",
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&relative).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("absolute path"));
+
+    let bad_contract = enabled.replace("output_contract", "output_contract_placeholder");
+    let bad_contract = bad_contract.replace("output_contract_placeholder = \"placeholder\"\n", "");
+    let bad_contract = format!("{bad_contract}\noutput_contract = \"chat.text\"\n");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&bad_contract).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("responses.output_text"));
+}
+
+#[test]
 fn rejects_duplicate_listener_empty_default_and_no_enabled_server() {
     let duplicate = FULL_CONFIG.replace("port = 4445", "port = 4444");
     let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&duplicate).unwrap())
