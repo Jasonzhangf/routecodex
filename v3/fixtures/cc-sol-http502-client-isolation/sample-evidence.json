@@ -1,0 +1,86 @@
+{
+  "task": "v3-goaichat400-client-isolation-0906",
+  "authoritative_dispatch": "m1788713589206-23",
+  "sample_dir": "/Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444",
+  "live_config_note": "cc-sol provider.v3.health.enabled=false (failure_threshold=9999, cooldown_ms=0). health.rs short-circuits record_provider_failure to health_disabled, failure_count=0, cooldown_until_ms=null.",
+  "samples": [
+    {
+      "rid": "openai-responses-router-gpt-5.5-20260906T094706938-52699-4437",
+      "mode": "relay",
+      "client_status": 200,
+      "error_chain": null,
+      "final_provider_key": "goaichat:key1:glm-5.3",
+      "provider_chain": [
+        "cc-sol:key1:gpt-5.6-sol HTTP 502 provider_http_502 switch_provider",
+        "goaichat:key1:glm-5.3 HTTP 200 sse requires_action"
+      ],
+      "event": {
+        "status": 502,
+        "error_type": "provider_http_502",
+        "action": "switch_provider",
+        "health_state": "health_disabled",
+        "failure_count": 0,
+        "cooldown_until_ms": null,
+        "wait_ms": 3000,
+        "next_provider_key": "goaichat:key1:glm-5.3"
+      },
+      "unavailable": ["cc-sol:key1:gpt-5.6-sol:availability(request_local_provider_failure)"],
+      "node": "V3TargetLocalReselected"
+    },
+    {
+      "rid": "openai-responses-router-gpt-5.5-20260906T092622391-52647-4385",
+      "mode": "relay",
+      "client_status": 200,
+      "error_chain": null,
+      "final_provider_key": "goaichat:key1:glm-5.3",
+      "event": {
+        "status": 502,
+        "error_type": "provider_http_502",
+        "action": "switch_provider",
+        "health_state": "health_disabled",
+        "failure_count": 0,
+        "cooldown_until_ms": null,
+        "wait_ms": 1000
+      }
+    },
+    {
+      "rid": "openai-responses-router-gpt-5.5-20260906T094656077-52698-4436",
+      "mode": "relay",
+      "client_status": 200,
+      "error_chain": null,
+      "final_provider_key": "goaichat:key1:glm-5.3",
+      "event": {
+        "status": 502,
+        "error_type": "provider_http_502",
+        "action": "switch_provider",
+        "health_state": "health_disabled",
+        "failure_count": 0,
+        "cooldown_until_ms": null,
+        "wait_ms": 5000
+      }
+    },
+    {
+      "rid": "openai-responses-router-gpt-5.5-20260906T093047022-52660-4398",
+      "mode": "direct",
+      "client_status": 200,
+      "error_chain": [],
+      "final_provider_key": "cc-sol:key1:gpt-5.6-sol",
+      "provider_chain": [
+        "cc-sol:key1:gpt-5.6-sol 502 server_error policy_retry_same",
+        "cc-sol:key1:gpt-5.6-sol 201 completed"
+      ],
+      "event": {
+        "status": 502,
+        "error_type": "server_error",
+        "action": "policy_retry_same",
+        "health_state": "transient_exhausted",
+        "failure_count": 1,
+        "cooldown_until_ms": null,
+        "wait_ms": 1,
+        "message": "Our servers are currently overloaded. Please try again later."
+      },
+      "node": "V3DirectTransientRetrySame",
+      "snapshot_gap": "provider-request.json and provider-response.json have 0 attempts"
+    }
+  ]
+}
