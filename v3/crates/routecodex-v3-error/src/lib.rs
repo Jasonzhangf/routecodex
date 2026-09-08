@@ -1244,6 +1244,17 @@ pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
 }
 
+/// A provider becoming unavailable after the client SSE response has been
+/// committed is recoverable by the caller: close the stream at EOF so the
+/// caller can replay the same entry. Internal response failures remain
+/// explicit 599 terminals at the server boundary.
+pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -> bool {
+    matches!(
+        source.source_kind,
+        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ClientDisconnect
+    )
+}
+
 pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
     build_v3_error_01_source_raised_internal(
         V3ErrorSourceKind::RuntimeFailure,

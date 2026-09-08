@@ -901,6 +901,40 @@ impl V3ProviderHealthStore {
         )))
     }
 
+    /// Cancel an abandoned probe without touching a newer cooldown
+    /// generation. The owner calls this from a cancellation guard when the
+    /// request or managed probe task is dropped before completion.
+    pub fn cancel_provider_cooldown_probe_at_generation(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        expected_generation: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let current_generation = state
+            .adaptive_history
+            .get(&key)
+            .map_or(0, |history| history.score_generation);
+        if current_generation != expected_generation {
+            return Ok(());
+        }
+        if let Some(probe_state) = state
+            .provider_cooldown_probes
+            .get_mut(&key)
+            .filter(|probe_state| probe_state.probe_in_flight)
+        {
+            probe_state.probe_in_flight = false;
+            probe_state.completion.send_replace(true);
+            persist_cooldown_state(state);
+        }
+        Ok(())
+    }
+
     /// 并发耗尽请求等待同一 key 的单飞 probe 收口，不重复发送 probe。
     pub async fn wait_for_provider_cooldown_probe_completion(
         &self,

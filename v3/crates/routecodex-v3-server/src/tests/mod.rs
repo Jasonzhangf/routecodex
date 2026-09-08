@@ -475,7 +475,7 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_error_projects_responses_failed_without_provider_detail() {
+async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -502,10 +502,11 @@ async fn direct_live_sse_provider_error_projects_responses_failed_without_provid
     let response = responses_direct_output_response(frame, None);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.contains("event: response.failed"), "{text}");
-    assert!(text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.contains("event: response.output_text.delta"), "{text}");
+    assert!(!text.contains("event: response.failed"), "{text}");
+    assert!(!text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(!text.contains("data: [DONE]"), "{text}");
 }
 
 #[tokio::test]

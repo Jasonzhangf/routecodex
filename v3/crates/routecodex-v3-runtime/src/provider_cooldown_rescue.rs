@@ -56,6 +56,13 @@ impl V3ProviderFailureRuntimeHealth {
                         .await
                         .map_err(|error| error.to_string());
                 };
+                let cancellation = V3ProviderProbeCancellationGuard {
+                    store: health.store.clone(),
+                    provider_id: provider_id.clone(),
+                    auth_alias: Some(auth_alias.clone()),
+                    model_id: Some(model_id.clone()),
+                    expected_generation: permit.expected_generation(),
+                };
                 let result = match target {
                     Ok(Some(target)) => probe_v3_provider_global_target(target).await,
                     Ok(None) => Err(format!(
@@ -63,7 +70,7 @@ impl V3ProviderFailureRuntimeHealth {
                     )),
                     Err(error) => Err(error),
                 };
-                match result {
+                let completion = match result {
                     Ok(()) => health
                         .store
                         .complete_provider_cooldown_probe_success_at_generation(
@@ -84,10 +91,12 @@ impl V3ProviderFailureRuntimeHealth {
                                 v3_relay_provider_policy_now_epoch_ms()?,
                                 Some(permit.expected_generation()),
                             )
-                            .map_err(|store_error| store_error.to_string())?;
+                        .map_err(|store_error| store_error.to_string())?;
                         Ok(())
                     }
-                }
+                };
+                drop(cancellation);
+                completion
             });
         }
         for result in futures_util::future::join_all(probes).await {

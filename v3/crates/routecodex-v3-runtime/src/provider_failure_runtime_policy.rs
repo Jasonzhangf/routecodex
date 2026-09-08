@@ -37,6 +37,25 @@ use crate::provider_error_policy_matching::provider_error_policy_matches_source_
 pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
 pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_target_impl;
 
+struct V3ProviderProbeCancellationGuard {
+    store: V3ProviderHealthStore,
+    provider_id: String,
+    auth_alias: Option<String>,
+    model_id: Option<String>,
+    expected_generation: u64,
+}
+
+impl Drop for V3ProviderProbeCancellationGuard {
+    fn drop(&mut self) {
+        let _ = self.store.cancel_provider_cooldown_probe_at_generation(
+            &self.provider_id,
+            self.auth_alias.as_deref(),
+            self.model_id.as_deref(),
+            self.expected_generation,
+        );
+    }
+}
+
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
@@ -378,10 +397,18 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             let expected_generation = permit.expected_generation();
+            let cancellation = V3ProviderProbeCancellationGuard {
+                store: self.store.clone(),
+                provider_id: provider_id.clone(),
+                auth_alias: auth_alias.clone(),
+                model_id: model_id.clone(),
+                expected_generation,
+            };
             async move {
                 let result =
                     (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (
+                    cancellation,
                     provider_id,
                     auth_alias,
                     model_id,
@@ -391,7 +418,9 @@ impl V3ProviderFailureRuntimeHealth {
             }
         }))
         .await;
-        for (provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
+        for (cancellation, provider_id, auth_alias, model_id, expected_generation, result) in
+            probe_results
+        {
             match result {
                 Ok(()) => self
                     .store
@@ -418,6 +447,7 @@ impl V3ProviderFailureRuntimeHealth {
                     ));
                 }
             }
+            drop(cancellation);
         }
         if probe_errors.is_empty() {
             Ok(())

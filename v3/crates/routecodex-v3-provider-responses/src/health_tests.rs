@@ -393,6 +393,77 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
 }
 
 #[test]
+fn cancelled_probe_releases_single_flight_for_the_same_generation() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_cooldown_failure(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            "post-commit stream failure",
+            100,
+            900_000,
+        )
+        .unwrap();
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .unwrap()
+        .expect("blocked provider must acquire one probe");
+    store
+        .cancel_provider_cooldown_probe_at_generation(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            permit.expected_generation(),
+        )
+        .unwrap();
+    assert!(
+        store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+            .unwrap()
+            .is_some(),
+        "cancellation must release the single-flight permit"
+    );
+}
+
+#[test]
+fn stale_probe_cancellation_cannot_release_a_newer_generation() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_cooldown_failure(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            "post-commit stream failure",
+            100,
+            900_000,
+        )
+        .unwrap();
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .unwrap()
+        .expect("blocked provider must acquire one probe");
+    store
+        .record_provider_key_success("provider-a", "key-a", "gpt-5.5", 101)
+        .unwrap();
+    store
+        .cancel_provider_cooldown_probe_at_generation(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            permit.expected_generation(),
+        )
+        .unwrap();
+    assert!(
+        store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+            .unwrap()
+            .is_none(),
+        "stale cancellation must not release a newer generation probe"
+    );
+}
+
+#[test]
 fn cooldown_reupsert_preserves_in_flight_probe_single_flight() {
     let store = V3ProviderHealthStore::default();
     store

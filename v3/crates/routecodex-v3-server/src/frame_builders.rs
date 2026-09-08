@@ -504,12 +504,38 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // The typed stream error has already gone to the runtime Error chain and
-    // console owner. Keep provider/internal diagnostics off the client frame;
-    // the protocol-specific client terminal is emitted at this boundary.
-    let stream: V3IoSseStream = Box::pin(stream.map(|item| {
-        item.map_err(|_| io::Error::other("response stream terminated before completion"))
-    }));
+    // Provider unavailability and client disconnect already entered the typed
+    // Error chain. Close those streams as recoverable EOF so the caller can
+    // replay the same entry. Internal response failures remain explicit 599
+    // terminals at the shared SSE transport boundary.
+    let stream: V3IoSseStream = Box::pin(stream::unfold(
+        (stream, false),
+        move |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match stream.next().await {
+                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
+                Some(Err(source)) => {
+                    if routecodex_v3_error::is_v3_sse_recoverable_disconnect_source(&source) {
+                        None
+                    } else {
+                        Some((
+                            Ok(v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "internal_response_stream_error",
+                                "internal response stream failed",
+                                599,
+                                protocol,
+                            )),
+                            (stream, true),
+                        ))
+                    }
+                }
+                None => None,
+            }
+        },
+    ));
     v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
 }
 
