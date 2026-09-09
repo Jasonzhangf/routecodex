@@ -1249,10 +1249,7 @@ pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
 /// caller can replay the same entry. Internal response failures remain
 /// explicit 599 terminals at the server boundary.
 pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -> bool {
-    matches!(
-        source.source_kind,
-        V3ErrorSourceKind::ProviderFailure | V3ErrorSourceKind::ClientDisconnect
-    )
+    is_v3_client_disconnect_source(source) || is_v3_retryable_transient_source(source)
 }
 
 pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
@@ -1438,6 +1435,23 @@ mod tests {
             "V3ServerRespOutbound06ClientFrame",
             "provider_response_sse_stream"
         ));
+    }
+
+    #[test]
+    fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
+        let transient = raise_v3_sse_provider_failure(
+            "provider_response_sse_stream",
+            "provider stream ended",
+        );
+        assert!(is_v3_sse_recoverable_disconnect_source(&transient));
+
+        let http = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_http_429",
+            "rate limited",
+        );
+        assert!(!is_v3_sse_recoverable_disconnect_source(&http));
     }
 }
 mod subscription;
