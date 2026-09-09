@@ -1452,10 +1452,10 @@ mod tests {
             "provider_http_429",
             "rate limited",
         );
-        assert!(is_v3_sse_recoverable_disconnect_source(&http));
+        assert!(!is_v3_sse_recoverable_disconnect_source(&http));
         assert_eq!(
             v3_sse_post_commit_disposition(&http),
-            V3SsePostCommitDisposition::CloseEof
+            V3SsePostCommitDisposition::ProjectInternalTerminal
         );
     }
 }
