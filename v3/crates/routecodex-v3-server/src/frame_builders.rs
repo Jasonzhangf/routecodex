@@ -517,9 +517,9 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(source)) => {
-                    if routecodex_v3_error::is_v3_sse_recoverable_disconnect_source(&source) {
-                        None
-                    } else {
+                    match routecodex_v3_error::v3_sse_post_commit_disposition(&source) {
+                        routecodex_v3_error::V3SsePostCommitDisposition::CloseEof => None,
+                        routecodex_v3_error::V3SsePostCommitDisposition::ProjectInternalTerminal => {
                         Some((
                             Ok(v3_sse_runtime_error_source_chunk_for_protocol(
                                 "V3ServerRespOutbound05ClientFrame",
@@ -530,6 +530,7 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
                             )),
                             (stream, true),
                         ))
+                        }
                     }
                 }
                 None => None,

@@ -1244,12 +1244,36 @@ pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
 }
 
+/// The post-commit server boundary consumes this typed disposition as a
+/// transport decision. A provider attempt that reaches the committed SSE
+/// stream has already gone through provider reselect/exhaustion handling;
+/// closing it lets the caller replay without exposing a provider status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3SsePostCommitDisposition {
+    CloseEof,
+    ProjectInternalTerminal,
+}
+
+pub fn v3_sse_post_commit_disposition(
+    source: &V3Error01SourceRaised,
+) -> V3SsePostCommitDisposition {
+    match source.source_kind {
+        V3ErrorSourceKind::ClientDisconnect | V3ErrorSourceKind::ProviderFailure => {
+            V3SsePostCommitDisposition::CloseEof
+        }
+        _ => V3SsePostCommitDisposition::ProjectInternalTerminal,
+    }
+}
+
 /// A provider becoming unavailable after the client SSE response has been
 /// committed is recoverable by the caller: close the stream at EOF so the
 /// caller can replay the same entry. Internal response failures remain
 /// explicit 599 terminals at the server boundary.
 pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -> bool {
-    is_v3_client_disconnect_source(source) || is_v3_retryable_transient_source(source)
+    matches!(
+        v3_sse_post_commit_disposition(source),
+        V3SsePostCommitDisposition::CloseEof
+    )
 }
 
 pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
@@ -1439,10 +1463,8 @@ mod tests {
 
     #[test]
     fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
-        let transient = raise_v3_sse_provider_failure(
-            "provider_response_sse_stream",
-            "provider stream ended",
-        );
+        let transient =
+            raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended");
         assert!(is_v3_sse_recoverable_disconnect_source(&transient));
 
         let http = build_v3_error_01_source_raised(
@@ -1451,7 +1473,11 @@ mod tests {
             "provider_http_429",
             "rate limited",
         );
-        assert!(!is_v3_sse_recoverable_disconnect_source(&http));
+        assert!(is_v3_sse_recoverable_disconnect_source(&http));
+        assert_eq!(
+            v3_sse_post_commit_disposition(&http),
+            V3SsePostCommitDisposition::CloseEof
+        );
     }
 }
 mod subscription;
