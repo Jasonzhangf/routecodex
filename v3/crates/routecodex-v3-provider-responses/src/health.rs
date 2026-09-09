@@ -1146,7 +1146,9 @@ impl V3ProviderHealthStore {
             // history (attempts/failures/EWMA above) stays diagnostic and
             // never reschedules the cadence.
             let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
-            let should_block = history.score_milli == 0;
+            let should_block = action.failure_threshold > 0
+                && history.failure_streak >= action.failure_threshold
+                || history.score_milli == 0;
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
                     &mut state,

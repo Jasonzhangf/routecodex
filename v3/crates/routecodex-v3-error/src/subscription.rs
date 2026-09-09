@@ -100,7 +100,14 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         };
     }
     if response_stream_failure || http_status_is_health_counted {
-        V3ProviderFailureAction::recoverable(&classified.source.code)
+        let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
+        if let Some(status) = status {
+            if let Some(policy) = build_v3_provider_global_failure_policy(status) {
+                action.failure_threshold = policy.failure_threshold;
+                action.cooldown_ms = policy.cooldown_ms;
+            }
+        }
+        action
     } else {
         V3ProviderFailureAction::recoverable_session(&classified.source.code)
     }
@@ -248,7 +255,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 3);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -292,7 +299,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -302,7 +309,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 3);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -311,6 +318,6 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 3);
     }
 }
