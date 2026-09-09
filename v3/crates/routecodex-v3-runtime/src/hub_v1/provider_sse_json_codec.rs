@@ -284,6 +284,24 @@ pub(crate) fn classify_v3_provider_sse_json_data(
     Ok(Some(outcome))
 }
 
+pub(crate) fn is_v3_provider_sse_transport_keepalive_event_type(event_type: &str) -> bool {
+    matches!(
+        event_type.trim().to_ascii_lowercase().as_str(),
+        "ping" | "pong" | "keepalive" | "keep-alive" | "heartbeat"
+    )
+}
+
+pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_event(
+    event_name: Option<&str>,
+    event: &Value,
+) -> bool {
+    event_name.is_some_and(|name| is_v3_provider_sse_transport_keepalive_event_type(name))
+        || event
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(is_v3_provider_sse_transport_keepalive_event_type)
+}
+
 /// Classify a complete JSON body received on an SSE-intent response.  The
 /// normal JSON-for-SSE compatibility path remains opaque; only an explicit
 /// provider error envelope is classified here so every protocol runtime shares
@@ -462,6 +480,32 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
         || serde_json::from_str::<Value>(data.trim())
             .ok()
             .is_some_and(|value| value.is_null())
+}
+
+pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[SseField]) -> bool {
+    let event_name = fields.iter().find_map(|field| match field {
+        SseField::Named { name, value } if name == "event" => Some(value.as_str()),
+        _ => None,
+    });
+    if event_name.is_some_and(|name| is_v3_provider_sse_transport_keepalive_event_type(name)) {
+        return true;
+    }
+    let data = collect_v3_provider_sse_json_data(fields);
+    if is_v3_provider_sse_transport_keepalive_data(&data)
+        || is_v3_provider_responses_sse_transport_keepalive_event(
+            None,
+            &serde_json::from_str::<Value>(data.trim()).unwrap_or(Value::Null),
+        )
+    {
+        return true;
+    }
+    event_name.is_some_and(|name| {
+        serde_json::from_str::<Value>(data.trim())
+            .ok()
+            .is_some_and(|event| {
+                is_v3_provider_responses_sse_transport_keepalive_event(Some(name), &event)
+            })
+    })
 }
 
 pub(super) fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {
@@ -1411,6 +1455,44 @@ mod provider_sse_json_codec_tests {
                 .expect("transport keepalive must not enter semantic classification"),
             None,
         );
+    }
+
+    #[test]
+    fn responses_json_keepalive_objects_are_transport_only() {
+        for data in [
+            r#"{"type":"keepalive"}"#,
+            r#"{"type":"pong"}"#,
+            r#"{"type":"heartbeat"}"#,
+        ] {
+            assert!(is_v3_provider_responses_sse_transport_keepalive_frame(&[
+                SseField::Named {
+                    name: "data".to_owned(),
+                    value: data.to_owned(),
+                }
+            ]));
+            assert_eq!(
+                classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                    .expect("transport keepalive must classify as buffered"),
+                Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+            );
+        }
+    }
+
+    #[test]
+    fn responses_keepalive_event_name_is_transport_only_for_json_objects() {
+        let fields = vec![
+            SseField::Named {
+                name: "event".to_owned(),
+                value: "keepalive".to_owned(),
+            },
+            SseField::Named {
+                name: "data".to_owned(),
+                value: r#"{"heartbeat":true}"#.to_owned(),
+            },
+        ];
+        assert!(is_v3_provider_responses_sse_transport_keepalive_frame(
+            &fields
+        ));
     }
 
     #[test]

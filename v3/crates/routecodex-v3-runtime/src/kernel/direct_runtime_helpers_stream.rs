@@ -1,7 +1,8 @@
 use super::*;
 use crate::hub_v1::{
     classify_v3_provider_sse_json_data, collect_v3_provider_sse_json_data,
-    V3ProviderResponsesJsonFrameOutcome,
+    is_v3_provider_responses_sse_transport_keepalive_frame,
+    is_v3_provider_sse_transport_keepalive_data, V3ProviderResponsesJsonFrameOutcome,
 };
 use crate::kernel::direct_sse_consumers::{
     build_v3_sse_transport_error_source, V3DirectSseContentConsumer,
@@ -616,6 +617,19 @@ fn record_direct_sse_provider_event_json_chunk(
     let mut accepted = Vec::new();
     let mut disposition = V3SseFrameDisposition::Continue;
     for frame in frames {
+        let provider_protocol = content_consumer
+            .provider_protocol
+            .ok_or_else(|| provider_sse_failure_source("provider protocol is missing"))?;
+        let is_transport_keepalive =
+            if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses {
+                is_v3_provider_responses_sse_transport_keepalive_frame(frame.frame().fields())
+            } else {
+                let data = collect_v3_provider_sse_json_data(frame.frame().fields());
+                is_v3_provider_sse_transport_keepalive_data(&data)
+            };
+        if is_transport_keepalive {
+            continue;
+        }
         let data = collect_v3_provider_sse_json_data(frame.frame().fields());
         if semantic_state.terminal_seen {
             if data.trim() == "[DONE]" && !semantic_state.done_seen {
@@ -644,9 +658,6 @@ fn record_direct_sse_provider_event_json_chunk(
                 "[DONE] before terminal finish_reason",
             ));
         }
-        let provider_protocol = content_consumer
-            .provider_protocol
-            .ok_or_else(|| provider_sse_failure_source("provider protocol is missing"))?;
         let outcome = classify_v3_provider_sse_json_data(provider_protocol, &data)
             .map_err(provider_sse_failure_source)?;
         let frame_disposition = match outcome {

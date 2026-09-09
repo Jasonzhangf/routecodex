@@ -269,6 +269,75 @@ fn direct_sse_observation_retains_provider_raw_bytes_for_capture() {
     );
 }
 
+#[test]
+fn direct_sse_keepalive_objects_are_not_forwarded_to_client() {
+    let observation = V3RuntimeStreamObservation::default();
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut consumer = V3DirectSseContentConsumer {
+        provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        ..Default::default()
+    };
+    let mut semantic_state = V3DirectSseSemanticState::new();
+    for chunk in [
+        &br#"data: {"type":"keepalive"}
+
+"#[..],
+        &br#"event: keepalive
+data: {"heartbeat":true}
+
+"#[..],
+        &br#"event: keepalive
+data: not-json
+
+"#[..],
+        &br#"event: keepalive
+
+"#[..],
+    ] {
+        let frame = record_direct_sse_provider_event_json_chunk(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut consumer,
+            &mut semantic_state,
+        )
+        .expect("transport keepalive must not abort Direct projection");
+        assert!(
+            frame.is_none(),
+            "keepalive must not be forwarded to the client"
+        );
+    }
+}
+
+#[test]
+fn direct_sse_keepalive_object_before_completed_is_consumed() {
+    let observation = V3RuntimeStreamObservation::default();
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut consumer = V3DirectSseContentConsumer {
+        provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        ..Default::default()
+    };
+    let mut semantic_state = V3DirectSseSemanticState::new();
+    let chunk = b"data: {\"type\":\"keepalive\"}\n\n\
+data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_direct\",\"status\":\"completed\",\"output\":[]}}\n\n";
+    let frame = record_direct_sse_provider_event_json_chunk(
+        chunk,
+        &mut decoder,
+        &observation,
+        &mut consumer,
+        &mut semantic_state,
+    )
+    .expect("keepalive then completed must project terminal");
+    let frame = frame.expect("response.completed must be terminal");
+    assert_eq!(frame.disposition, V3SseFrameDisposition::SemanticTerminal);
+    let bytes = String::from_utf8(frame.bytes).expect("projected SSE bytes");
+    assert!(
+        !bytes.contains(r#""type":"keepalive""#),
+        "keepalive frame must be consumed"
+    );
+    assert!(bytes.contains("response.completed"));
+}
+
 #[tokio::test]
 async fn direct_sse_toolreason_records_typed_observation_at_resp03() {
     let request_id = format!("{}-request-live-observation", module_path!());
