@@ -54,7 +54,7 @@ async fn responses_provider_sse_codex_response_metadata_extension_does_not_abort
         snapshot
             .typed_object_types
             .iter()
-            .any(|event_type| event_type == "codex.response.metadata"),
+            .any(|event_type| event_type == "responses:codex.response.metadata"),
         "registered codex.response.metadata extension must be observed as a typed provider event: {:?}",
         snapshot.typed_object_types
     );
