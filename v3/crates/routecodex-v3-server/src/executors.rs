@@ -93,32 +93,18 @@ pub(crate) fn responses_relay_output_response(
     keepalive_interval: Option<Duration>,
     requested_stream: bool,
 ) -> Response<Body> {
-    // Pool exhaustion is transport unavailability for an SSE client. Keep the
-    // typed Error06 chain for server observability, but fail the response body
-    // stream instead of serializing a client-visible 502 error frame.
-    let pool_exhausted_disconnect = requested_stream
-        && output.status == 502
-        && output
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-        && matches!(
-            &output.client_body,
-            V3ResponsesRelayClientBody::Json(value)
-                if value["error"]["code"] == "network_error"
-                    && value["error"]["message"] == "network error"
-        );
-    if pool_exhausted_disconnect {
-        let body = Body::from_stream(stream::once(async {
-            Err::<Vec<u8>, std::io::Error>(std::io::Error::other(
-                "provider pool exhausted; SSE transport unavailable",
-            ))
-        }));
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/event-stream")
-            .body(body)
-            .expect("typed V3 Responses Relay disconnect response");
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3ResponsesRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
     }
     let successful_sse = output.error_chain.is_none() && output.status < 400;
     let projected_error_frame = if requested_stream && !successful_sse {
@@ -206,6 +192,19 @@ pub(crate) fn openai_chat_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3OpenAiChatRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -476,6 +475,19 @@ pub(crate) fn gemini_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3GeminiRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -517,6 +529,16 @@ pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(&output.client_response, Value::Object(_))
+        && v3_is_sse_target_pool_exhaustion_parts(
+            output.status,
+            &output.node_trace,
+            output.error_chain.as_deref().unwrap_or(&[]),
+            &output.client_response,
+        );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();

@@ -3389,6 +3389,34 @@ fn direct_stream_error_projection_response_uses_error_channel() {
 }
 
 #[tokio::test]
+async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response_with_console_for_protocol(
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
+        None,
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
+}
+
+#[tokio::test]
 async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_json() {
     let log_file = test_v3_console_log_file("direct-continuation-scope-sse-error");
     let state = test_v3_listener_state(&log_file, 5555);
