@@ -3703,7 +3703,7 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
 }
 
 #[tokio::test]
-async fn responses_relay_canonical_network_error_stays_json_for_stream_request() {
+async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 502,
         client_body: V3ResponsesRelayClientBody::Json(json!({
@@ -3722,14 +3722,10 @@ async fn responses_relay_canonical_network_error_stays_json_for_stream_request()
     };
 
     let response = responses_relay_output_response(output, None, None, true);
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(response.headers()["content-type"], "application/json");
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = to_bytes(response.into_body(), usize::MAX).await;
+    assert!(body.is_err(), "pool exhaustion must fail the SSE transport");
 }
 
 #[test]
