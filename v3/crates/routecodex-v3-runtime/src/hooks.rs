@@ -781,7 +781,9 @@ pub(crate) fn build_v3_provider_error_source(
     match error {
         V3ProviderError::InvalidWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
-        | V3ProviderError::InvalidDataImage { .. } => build_v3_error_01_source_raised(
+        | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::NamespaceToolFlattenFailed { .. }
+        | V3ProviderError::FunctionToolShapeFailed { .. } => build_v3_error_01_source_raised(
             V3ErrorSourceKind::InvalidRequest,
             stage,
             "invalid_provider_request_payload",
