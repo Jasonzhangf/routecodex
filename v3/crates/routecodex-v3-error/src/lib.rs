@@ -1458,6 +1458,33 @@ mod tests {
             V3SsePostCommitDisposition::ProjectInternalTerminal
         );
     }
+
+    #[test]
+    fn every_provider_error_reselects_while_candidates_remain() {
+        for code in [
+            "provider_http_401",
+            "provider_http_429",
+            "provider_http_502",
+            "provider_response_sse_stream",
+            V3_TRANSIENT_TRANSPORT_HANG_CODE,
+        ] {
+            let source = build_v3_error_01_source_raised(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderRespInbound01Raw",
+                code,
+                "provider failure",
+            );
+            let classified = build_v3_error_02_classified_from_v3_error_01(source);
+            let action = build_v3_error_03_target_local_action_from_v3_error_02(
+                classified,
+                V3ErrorActionScope::ProviderInstance {
+                    provider_id: "minimax".to_string(),
+                },
+                1,
+            );
+            assert!(action.action.retry_eligible, "{code} must reselect");
+        }
+    }
 }
 mod sse_disposition;
 mod subscription;
