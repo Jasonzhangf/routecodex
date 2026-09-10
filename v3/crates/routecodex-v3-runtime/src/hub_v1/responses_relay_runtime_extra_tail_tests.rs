@@ -19,6 +19,53 @@ async fn responses_provider_sse_codex_rate_limits_extension_does_not_abort_strea
 }
 
 #[tokio::test]
+async fn responses_provider_sse_codex_response_metadata_extension_does_not_abort_stream() {
+    // `codex.response.metadata` is a typed provider extension that mirrors
+    // `response.metadata` for the same provider; it must not turn a valid
+    // 200/201 stream into a provider failure and must not trigger a retry on
+    // the same provider.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(
+            b"event: codex.response.metadata\ndata: {\"type\":\"codex.response.metadata\",\"metadata\":{\"request_id\":\"req_1\"}}\n\n"
+                .to_vec(),
+        ),
+        Ok(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
+                .to_vec(),
+        ),
+        Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_extension\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+                .to_vec(),
+        ),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect("provider extension must not turn a valid stream into a provider failure");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+    let snapshot = observation
+        .snapshot()
+        .expect("runtime stream observation snapshot must remain accessible");
+    assert!(
+        snapshot
+            .typed_object_types
+            .iter()
+            .any(|event_type| event_type == "codex.response.metadata"),
+        "registered codex.response.metadata extension must be observed as a typed provider event: {:?}",
+        snapshot.typed_object_types
+    );
+    assert!(
+        snapshot.post_commit_error.is_none(),
+        "registered provider extension must not surface a post-commit provider failure: {:?}",
+        snapshot.post_commit_error
+    );
+}
+
+#[tokio::test]
 async fn responses_provider_sse_codex_extension_without_terminal_still_fails() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(

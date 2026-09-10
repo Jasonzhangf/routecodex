@@ -985,6 +985,42 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn responses_accepts_codex_response_metadata_extension_without_dropping_frame() {
+        // provider_owned `codex.response.metadata` is a typed Responses provider
+        // extension that mirrors `response.metadata`; it is not a standard
+        // Responses semantic event and must not be classified as unregistered.
+        let data = r#"{"type":"codex.response.metadata","metadata":{"request_id":"req_1"}}"#;
+        assert_eq!(
+            classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap())
+                .expect("registered codex.response.metadata extension must classify"),
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+        );
+        let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            data,
+            Some("codex.response.metadata"),
+        )
+        .expect("registered provider extension frame must normalize");
+        assert_eq!(normalized, data);
+    }
+
+    #[test]
+    fn responses_unknown_codex_extension_namespace_still_fails_closed() {
+        // Only provider extensions explicitly declared in
+        // `tables/provider_response_event_map.json` are accepted. A typo /
+        // unregistered namespace must remain fail-closed so the runtime
+        // surfaces an explicit provider error instead of silently letting a
+        // new event through as a typed extension.
+        let data = serde_json::json!({"type":"codex.response.metadat"});
+        let error = classify_v3_provider_responses_json_event(&data)
+            .expect_err("unregistered codex namespace must remain explicit");
+        assert!(
+            error.contains("is not registered"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn responses_extension_without_terminal_does_not_fake_success() {
         let data = r#"{"type":"codex.rate_limits","rate_limits":{}}"#;
         assert_eq!(
