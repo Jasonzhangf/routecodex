@@ -1106,6 +1106,9 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(key_health_projection(&state, &key, now_ms));
+        }
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,
