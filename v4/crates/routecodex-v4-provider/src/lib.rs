@@ -878,12 +878,16 @@ pub fn normalize_provider_sse_frame(
         status: None,
     })?;
     let mut output = Vec::new();
+    let mut terminal_emitted = false;
     for line in text.lines() {
         let line = line.strip_suffix('\r').unwrap_or(line);
         let Some(data) = line.strip_prefix("data:") else { continue };
         let data = data.trim();
         if data == "[DONE]" {
-            output.extend_from_slice(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+            if !terminal_emitted {
+                output.extend_from_slice(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+                terminal_emitted = true;
+            }
             continue;
         }
         let value: Value = serde_json::from_str(data).map_err(|error| ProviderTransportError {
@@ -905,6 +909,9 @@ pub fn normalize_provider_sse_frame(
         };
         if let Some(event) = event {
             let event_type = event.get("type").and_then(Value::as_str).unwrap_or("response.output_text.delta");
+            if event_type == "response.completed" {
+                terminal_emitted = true;
+            }
             output.extend_from_slice(format!("event: {event_type}\ndata: {}\n\n", serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())).as_bytes());
         }
     }
@@ -919,13 +926,51 @@ pub fn normalize_provider_sse_frame(
 }
 
 fn normalize_openai_sse_event(value: &Value) -> Option<Value> {
-    let choice = value.get("choices")?.as_array()?.first()?;
+    let choice = value.get("choices").and_then(Value::as_array).and_then(|choices| choices.first());
+    if choice.is_none() {
+        let usage = value.get("usage").and_then(Value::as_object)?;
+        let mut canonical = serde_json::Map::new();
+        for (source, target) in [
+            ("prompt_tokens", "input_tokens"),
+            ("completion_tokens", "output_tokens"),
+            ("total_tokens", "total_tokens"),
+        ] {
+            if let Some(token_count) = usage.get(source) {
+                canonical.insert(target.to_owned(), token_count.clone());
+            }
+        }
+        if canonical.is_empty() {
+            return None;
+        }
+        return Some(serde_json::json!({
+            "type": "response.completed",
+            "response": {"status": "completed", "usage": Value::Object(canonical)}
+        }));
+    }
+    let choice = choice?;
     let delta = choice.get("delta")?;
     if let Some(content) = delta.get("content").and_then(Value::as_str) {
         return Some(serde_json::json!({"type":"response.output_text.delta","delta":content}));
     }
     if choice.get("finish_reason").is_some_and(|reason| !reason.is_null()) {
-        return Some(serde_json::json!({"type":"response.completed","response":{"status":"completed"}}));
+        let mut response = serde_json::Map::new();
+        response.insert("status".to_owned(), Value::String("completed".to_owned()));
+        if let Some(usage) = value.get("usage").and_then(Value::as_object) {
+            let mut canonical = serde_json::Map::new();
+            for (source, target) in [
+                ("prompt_tokens", "input_tokens"),
+                ("completion_tokens", "output_tokens"),
+                ("total_tokens", "total_tokens"),
+            ] {
+                if let Some(token_count) = usage.get(source) {
+                    canonical.insert(target.to_owned(), token_count.clone());
+                }
+            }
+            if !canonical.is_empty() {
+                response.insert("usage".to_owned(), Value::Object(canonical));
+            }
+        }
+        return Some(serde_json::json!({"type":"response.completed","response":Value::Object(response)}));
     }
     None
 }

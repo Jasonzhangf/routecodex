@@ -304,3 +304,38 @@ fn provider_sse_normalizers_project_text_and_terminal_events() {
     .expect("anthropic sse normalized");
     assert!(String::from_utf8(anthropic).expect("utf8").contains("response.completed"));
 }
+
+#[test]
+fn openai_sse_terminal_preserves_usage_output_tokens() {
+    let normalized = normalize_provider_sse_frame(
+        "openai",
+        br#"data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":29,"completion_tokens":4,"total_tokens":33}}
+
+"#,
+    )
+    .expect("terminal frame normalized");
+    let text = String::from_utf8(normalized).expect("utf8");
+    let data = text
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("completed data");
+    let event: serde_json::Value = serde_json::from_str(data).expect("json event");
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["usage"]["output_tokens"], 4);
+}
+
+#[test]
+fn openai_sse_usage_only_chunk_becomes_single_completed_event() {
+    let normalized = normalize_provider_sse_frame(
+        "openai",
+        br#"data: {"choices":[],"usage":{"prompt_tokens":29,"completion_tokens":4,"total_tokens":33}}
+
+data: [DONE]
+
+"#,
+    )
+    .expect("usage-only terminal normalized");
+    let text = String::from_utf8(normalized).expect("utf8");
+    assert_eq!(text.matches("event: response.completed").count(), 1);
+    assert!(text.contains("\"output_tokens\":4"));
+}
