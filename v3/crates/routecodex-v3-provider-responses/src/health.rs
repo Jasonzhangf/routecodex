@@ -423,16 +423,6 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        if state.health_disabled.contains(provider_id) {
-            return Ok(V3ProviderFailureRecord {
-                scope_label,
-                provider_key,
-                state: "health_disabled".to_string(),
-                failure_count: 0,
-                cooldown_until_ms: None,
-                reason: reason.map(str::to_string),
-            });
-        }
         let uses_configured_policy = policy_override.is_none();
         let policy = policy_override.unwrap_or_else(|| {
             state

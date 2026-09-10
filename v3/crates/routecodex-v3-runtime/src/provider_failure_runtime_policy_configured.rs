@@ -4,24 +4,11 @@ fn configured_retry_budget_for_failure(
     matched_policy: Option<&V3ProviderErrorActionPolicyManifest>,
     default_budget: usize,
 ) -> usize {
-    let Some(policy) = matched_policy else {
-        return default_budget;
-    };
-    policy
-        .path
-        .iter()
-        .find_map(|step| match step {
-            V3ProviderDispositionStepManifest::WaitRetry {
-                retry_mode:
-                    V3ProviderErrorRetryMode::RetrySame
-                    | V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
-                max_attempts,
-                ..
-            } => Some(max_attempts.saturating_sub(1) as usize),
-            V3ProviderDispositionStepManifest::WaitRetry { .. } => Some(0),
-            _ => None,
-        })
-        .unwrap_or(default_budget)
+    // A provider failure must always advance to another candidate.  Retry
+    // budgets remain in the manifest for observability/backoff metadata, but
+    // are never used to send the same request to the same provider again.
+    let _ = (matched_policy, default_budget);
+    0
 }
 
 fn configured_retry_backoff_ms(
