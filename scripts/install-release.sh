@@ -45,7 +45,7 @@ resolve_v3_verify_ports() {
   fi
 
   local configured_ports
-  configured_ports="$(node - "$VERIFY_CONFIG" <<'NODE'
+  configured_ports="$(node - "${VERIFY_CONFIG}" <<'NODE'
 const fs = require('fs');
 const configPath = process.argv[2];
 const lines = fs.readFileSync(configPath, 'utf8').split(/\r?\n/);
@@ -69,13 +69,13 @@ const uniquePorts = [...new Set(ports)];
 if (uniquePorts.length === 0) process.exit(1);
 process.stdout.write(`${uniquePorts.join('\n')}\n`);
 NODE
-)" || fail "无法从配置文件解析 V3 server listener：$VERIFY_CONFIG；请显式设置 ROUTECODEX_INSTALL_VERIFY_PORT"
+)" || fail "无法从配置文件解析 V3 server listener：${VERIFY_CONFIG}；请显式设置 ROUTECODEX_INSTALL_VERIFY_PORT"
 
   while IFS= read -r configured_port; do
     [ -n "$configured_port" ] && VERIFY_PORTS+=("$configured_port")
   done <<< "$configured_ports"
   if [ "${#VERIFY_PORTS[@]}" -eq 0 ]; then
-    fail "无法从配置文件解析 V3 server listener：$VERIFY_CONFIG"
+    fail "无法从配置文件解析 V3 server listener：${VERIFY_CONFIG}"
   fi
 }
 
@@ -293,7 +293,7 @@ verify_runtime_health() {
     fail "无法读取 v3/package.json version，不能验证 release runtime 版本"
   fi
   if [ ! -f "$VERIFY_CONFIG" ]; then
-    fail "V3 release 验证缺少配置文件：$VERIFY_CONFIG；可用 ROUTECODEX_INSTALL_VERIFY_CONFIG 指定"
+    fail "V3 release 验证缺少配置文件：${VERIFY_CONFIG}；可用 ROUTECODEX_INSTALL_VERIFY_CONFIG 指定"
   fi
   resolve_v3_verify_ports
   local VERIFY_PORT="${VERIFY_PORTS[0]}"
@@ -324,7 +324,7 @@ verify_runtime_health() {
   }
 
   start_release_runtime_when_stopped() {
-    fail "${VERIFY_HEALTH_URL} 当前不可用；V3 release 默认验证不做旧 port fallback start，请先用 rcc start -c \"$VERIFY_CONFIG\" 启动后重试"
+    fail "${VERIFY_HEALTH_URL} 当前不可用；V3 release 默认验证不做旧 port fallback start，请先用 rcc start -c \"${VERIFY_CONFIG}\" 启动后重试"
   }
 
   if probe_release_runtime_available; then
