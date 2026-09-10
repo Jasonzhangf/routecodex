@@ -261,6 +261,9 @@ fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
 
 /// 单一对象的密文键剥离（请求侧 reasoning 条目与响应侧递归共用同一语义）。
 fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
+    if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
+        return;
+    }
     if let Some(Value::String(cipher)) = map.get("encrypted_content") {
         if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
             map.remove("encrypted_content");

@@ -178,6 +178,7 @@ pub fn compile_direct_response_compat_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn compat_plan_uses_configured_profile_and_canonical_model() {
@@ -214,5 +215,30 @@ mod tests {
         })
         .expect_err("responses profile must not attach to Chat direct");
         assert!(error.contains("unsupported direct response compatibility profile"));
+    }
+
+    #[test]
+    fn direct_response_projection_preserves_function_output_cipher_only() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "rsn_reasoning_cipher"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "rsn_opaque_function_output"
+                }
+            ]
+        });
+
+        apply_v3_direct_response_projection_hooks(&mut payload, false, false);
+
+        assert!(payload["output"][0].get("encrypted_content").is_none());
+        assert_eq!(
+            payload["output"][1]["encrypted_content"],
+            "rsn_opaque_function_output"
+        );
     }
 }
