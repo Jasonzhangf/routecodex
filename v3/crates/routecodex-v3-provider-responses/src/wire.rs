@@ -183,7 +183,6 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         &target.provider_type,
         current_request_body,
     )?;
-    validate_responses_input_tool_names(&request_id, &body)?;
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
@@ -218,6 +217,10 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
+    // Validate the final provider-bound wire shape after all protocol
+    // conversion and compatibility hooks. Inbound remains lossless; names
+    // synthesized under `messages[].content[]` are checked here only.
+    validate_responses_input_tool_names(&request_id, &body)?;
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
