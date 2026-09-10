@@ -986,9 +986,8 @@ mod provider_sse_json_codec_tests {
 
     #[test]
     fn responses_accepts_codex_response_metadata_extension_without_dropping_frame() {
-        // provider_owned `codex.response.metadata` is a typed Responses provider
-        // extension that mirrors `response.metadata`; it is not a standard
-        // Responses semantic event and must not be classified as unregistered.
+        // `codex.response.metadata` is a registered provider extension, not a
+        // standard Responses event, and must not be classified as unregistered.
         let data = r#"{"type":"codex.response.metadata","metadata":{"request_id":"req_1"}}"#;
         assert_eq!(
             classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap())
@@ -1006,11 +1005,8 @@ mod provider_sse_json_codec_tests {
 
     #[test]
     fn responses_unknown_codex_extension_namespace_still_fails_closed() {
-        // Only provider extensions explicitly declared in
-        // `tables/provider_response_event_map.json` are accepted. A typo /
-        // unregistered namespace must remain fail-closed so the runtime
-        // surfaces an explicit provider error instead of silently letting a
-        // new event through as a typed extension.
+        // Only explicitly declared provider extensions are accepted; unknown
+        // namespaces remain fail-closed.
         let data = serde_json::json!({"type":"codex.response.metadat"});
         let error = classify_v3_provider_responses_json_event(&data)
             .expect_err("unregistered codex namespace must remain explicit");

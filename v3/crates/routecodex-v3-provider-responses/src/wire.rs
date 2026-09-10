@@ -227,17 +227,23 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     })
 }
 
-fn validate_responses_input_tool_names(request_id: &str, body: &Value) -> Result<(), V3ProviderError> {
+fn validate_responses_input_tool_names(
+    request_id: &str,
+    body: &Value,
+) -> Result<(), V3ProviderError> {
     fn walk(request_id: &str, value: &Value, path: &str) -> Result<(), V3ProviderError> {
         match value {
             Value::Object(object) => {
                 let kind = object.get("type").and_then(Value::as_str);
-                if matches!(kind, Some("function_call" | "custom_tool_call" | "tool_use")) {
+                if matches!(
+                    kind,
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                ) {
                     if let Some(name) = object.get("name").and_then(Value::as_str) {
                         if name.is_empty()
-                            || !name.bytes().all(|b| {
-                                b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
-                            })
+                            || !name
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
                         {
                             return Err(V3ProviderError::FunctionToolShapeFailed {
                                 request_id: request_id.to_owned(),
