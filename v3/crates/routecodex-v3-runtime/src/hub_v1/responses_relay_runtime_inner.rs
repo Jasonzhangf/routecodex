@@ -1421,8 +1421,10 @@ pub(crate) fn find_responses_tool_output_ids(
             .or_else(|| item.get("tool_call_id"))
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| V3LocalContinuationError::Codec {
-                message: "Responses tool output requires call_id".to_string(),
+            .ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+                    "Responses tool output requires call_id".to_string(),
+                )
             })?;
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
