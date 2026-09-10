@@ -1459,30 +1459,81 @@ mod tests {
         );
     }
 
+    fn provider_error_05(
+        code: &str,
+        stage: &'static str,
+        same_retry: bool,
+    ) -> V3Error05ExecutionDecision {
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            stage,
+            code,
+            "provider failure",
+        );
+        let classified = build_v3_error_02_classified_from_v3_error_01(source);
+        let action = build_v3_error_03_target_local_action_from_v3_error_02(
+            classified,
+            V3ErrorActionScope::ProviderInstance {
+                provider_id: "minimax".to_string(),
+            },
+            1,
+        );
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            action, 1, false, same_retry,
+        );
+        let witness = V3Error05RecoveryAdmissionWitness::new(
+            V3ProviderFailureSessionScope::new("server", "group", "session").expect("scope"),
+            "minimax:key1:model",
+            code,
+            1,
+        )
+        .expect("witness");
+        build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, Some(witness))
+    }
+
     #[test]
-    fn every_provider_error_reselects_while_candidates_remain() {
+    fn provider_http_errors_reselect_when_route_pool_remains() {
         for code in [
             "provider_http_401",
             "provider_http_429",
             "provider_http_502",
-            "provider_response_sse_stream",
-            V3_TRANSIENT_TRANSPORT_HANG_CODE,
         ] {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderRespInbound01Raw",
-                code,
-                "provider failure",
+            let decision = provider_error_05(code, "V3ProviderRespInbound01Raw", false);
+            assert!(
+                matches!(
+                    decision.action,
+                    V3Error05ExecutionAction::WaitThenReselect { .. }
+                ),
+                "{code} must reselect"
             );
-            let classified = build_v3_error_02_classified_from_v3_error_01(source);
-            let action = build_v3_error_03_target_local_action_from_v3_error_02(
-                classified,
-                V3ErrorActionScope::ProviderInstance {
-                    provider_id: "minimax".to_string(),
-                },
-                1,
+        }
+    }
+
+    #[test]
+    fn transient_stream_failures_retry_same_before_reselect() {
+        for (code, stage) in [
+            ("provider_response_sse_stream", "V3ProviderRespInbound01Raw"),
+            (
+                V3_TRANSIENT_TRANSPORT_HANG_CODE,
+                "V3ProviderReqOutbound09TransportRequest",
+            ),
+        ] {
+            let retry_same = provider_error_05(code, stage, true);
+            assert!(
+                matches!(
+                    retry_same.action,
+                    V3Error05ExecutionAction::WaitThenRetrySame { .. }
+                ),
+                "{code} must retry same first"
             );
-            assert!(action.action.retry_eligible, "{code} must reselect");
+            let reselect = provider_error_05(code, stage, false);
+            assert!(
+                matches!(
+                    reselect.action,
+                    V3Error05ExecutionAction::WaitThenReselect { .. }
+                ),
+                "{code} must reselect when same retry is unavailable"
+            );
         }
     }
 }
