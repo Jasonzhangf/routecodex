@@ -4,11 +4,29 @@ fn configured_retry_budget_for_failure(
     matched_policy: Option<&V3ProviderErrorActionPolicyManifest>,
     default_budget: usize,
 ) -> usize {
-    // A provider failure must always advance to another candidate.  Retry
-    // budgets remain in the manifest for observability/backoff metadata, but
-    // are never used to send the same request to the same provider again.
-    let _ = (matched_policy, default_budget);
-    0
+    let Some(policy) = matched_policy else {
+        return 0;
+    };
+    policy
+        .path
+        .iter()
+        .find_map(|step| match step {
+            V3ProviderDispositionStepManifest::WaitRetry {
+                retry_mode: V3ProviderErrorRetryMode::RetrySame,
+                max_attempts,
+                ..
+            } => Some(max_attempts.saturating_sub(1) as usize),
+            // ReselectBeforeClientProjection means the failed candidate may be
+            // visited again only through explicit target reselection, never as
+            // a local same-candidate retry once that reselection is exhausted.
+            V3ProviderDispositionStepManifest::WaitRetry {
+                retry_mode: V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
+                ..
+            } => Some(0),
+            V3ProviderDispositionStepManifest::WaitRetry { .. } => Some(0),
+            _ => None,
+        })
+        .unwrap_or(default_budget)
 }
 
 fn configured_retry_backoff_ms(
@@ -40,12 +58,13 @@ fn configured_retry_mode(
     matched_policy
         .and_then(|policy| {
             policy.path.iter().find_map(|step| match step {
-                V3ProviderDispositionStepManifest::WaitRetry { retry_mode, .. } => Some(*retry_mode),
+                V3ProviderDispositionStepManifest::WaitRetry { retry_mode, .. } => {
+                    Some(*retry_mode)
+                }
                 _ => None,
             })
         })
         .or_else(|| {
-            (default_same_candidate_retries > 0)
-                .then_some(V3ProviderErrorRetryMode::RetrySame)
+            (default_same_candidate_retries > 0).then_some(V3ProviderErrorRetryMode::RetrySame)
         })
 }

@@ -7,6 +7,9 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
+#[path = "tests/terminal_projection.rs"]
+mod terminal_projection;
+
 fn test_provider_failure_scope(
     server_id: &str,
     routing_group: &str,
@@ -1388,14 +1391,20 @@ targets = [
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
+    let matched_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "exact_response_policy")
+        .expect("compiled response policy");
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
         "V3ProviderRespInbound01Raw",
         200,
-        Some("wrapped_provider_error".to_string()),
+        Some("provider_embedded_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
-        None,
+        Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
