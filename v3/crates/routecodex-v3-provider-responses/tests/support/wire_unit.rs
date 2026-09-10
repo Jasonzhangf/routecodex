@@ -211,6 +211,17 @@ mod tests {
     }
 
     #[test]
+    fn wire_rejects_invalid_input_tool_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "function_call", "name": "servertool.exec"}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
+            .expect_err("invalid tool name must be rejected locally");
+        assert!(error.to_string().contains("input[0].name"));
+    }
+
+    #[test]
     fn wire_flattens_namespace_tool_children_into_function_tools() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
