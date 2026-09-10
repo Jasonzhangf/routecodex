@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn malformed_tool_output_missing_call_id_projects_client_400_not_598() {
+    let payload = serde_json::json!({
+        "input": [{"type": "function_call_output", "output": "tool result"}]
+    });
+
+    let collected = find_responses_tool_output_ids(&payload)
+        .expect_err("missing call_id must reject before canonicalization");
+    let output = project_v3_responses_relay_runtime_failure(collected, None);
+
+    assert_eq!(output.status, 400);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("must project JSON"),
+    };
+    assert_eq!(body["error"]["code"], "invalid_responses_request");
+}
+
+#[test]
 fn provider_pool_exhaustion_projection_is_compact() {
     let output = project_v3_responses_relay_runtime_failure(
         V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
