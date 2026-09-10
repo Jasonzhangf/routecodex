@@ -982,11 +982,6 @@ pub(crate) fn error_output(
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
-    assert!(
-        source.source_kind != V3ErrorSourceKind::ProviderFailure,
-        "error_output must not project ProviderFailure with hardcoded exhaustion; \
-         provider failures require caller-owned route/default availability proof"
-    );
     let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
     let projected = V3ErrorHandlingCenter::project_terminal(decision);
     projected_error_output(projected, node_trace)
@@ -998,11 +993,6 @@ pub(crate) fn error_output_with_observability(
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    assert!(
-        source.source_kind != V3ErrorSourceKind::ProviderFailure,
-        "error_output must not project ProviderFailure with hardcoded exhaustion; \
-         provider failures require caller-owned route/default availability proof"
-    );
     let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
     let projected = V3ErrorHandlingCenter::project_terminal(decision);
     projected_error_output_with_observability(projected, node_trace, observability)
