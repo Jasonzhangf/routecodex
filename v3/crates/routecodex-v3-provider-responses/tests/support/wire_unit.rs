@@ -285,6 +285,32 @@ mod tests {
     }
 
     #[test]
+    fn wire_maps_namespace_qualified_tool_names_consistently_for_calls() {
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "function_call", "call_id": "call-review", "name": "mcp__codex_review.review_start", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call-review", "output": "ok"}
+            ], "tools": [
+                {"type": "namespace", "name": "mcp__codex_review", "tools": [
+                    {"type": "function", "name": "review_start", "parameters": {"type": "object"}}
+                ]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body)
+            .expect("namespace-qualified names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["tools"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
+        assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
+    }
+
+    #[test]
     fn wire_flattens_namespace_children_into_dual_field_functions_for_openai_chat_provider() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
