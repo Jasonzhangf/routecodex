@@ -222,6 +222,19 @@ mod tests {
     }
 
     #[test]
+    fn wire_rejects_invalid_nested_tool_use_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": [
+                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+            ]}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
+            .expect_err("invalid nested tool name must be rejected locally");
+        assert!(error.to_string().contains("body.messages[0].content[0].name"));
+    }
+
+    #[test]
     fn wire_flattens_namespace_tool_children_into_function_tools() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [

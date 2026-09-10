@@ -228,19 +228,41 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
 }
 
 fn validate_responses_input_tool_names(request_id: &str, body: &Value) -> Result<(), V3ProviderError> {
-    let Some(input) = body.get("input").and_then(Value::as_array) else { return Ok(()); };
-    for (index, item) in input.iter().enumerate() {
-        let kind = item.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("function_call" | "custom_tool_call")) { continue; }
-        let Some(name) = item.get("name").and_then(Value::as_str) else { continue; };
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-            return Err(V3ProviderError::FunctionToolShapeFailed {
-                request_id: request_id.to_owned(),
-                detail: format!("input[{index}].name must match ^[a-zA-Z0-9_-]+$: {name:?}"),
-            });
+    fn walk(request_id: &str, value: &Value, path: &str) -> Result<(), V3ProviderError> {
+        match value {
+            Value::Object(object) => {
+                let kind = object.get("type").and_then(Value::as_str);
+                if matches!(kind, Some("function_call" | "custom_tool_call" | "tool_use")) {
+                    if let Some(name) = object.get("name").and_then(Value::as_str) {
+                        if name.is_empty()
+                            || !name.bytes().all(|b| {
+                                b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
+                            })
+                        {
+                            return Err(V3ProviderError::FunctionToolShapeFailed {
+                                request_id: request_id.to_owned(),
+                                detail: format!(
+                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                ),
+                            });
+                        }
+                    }
+                }
+                for (key, child) in object {
+                    walk(request_id, child, &format!("{path}.{key}"))?;
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(request_id, child, &format!("{path}[{index}]"))?;
+                }
+            }
+            _ => {}
         }
+        Ok(())
     }
-    Ok(())
+
+    walk(request_id, body, "body")
 }
 
 /// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
