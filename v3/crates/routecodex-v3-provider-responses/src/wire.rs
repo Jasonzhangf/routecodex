@@ -183,6 +183,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         &target.provider_type,
         current_request_body,
     )?;
+    validate_responses_input_tool_names(&request_id, &body)?;
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
@@ -224,6 +225,22 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         endpoint,
         body,
     })
+}
+
+fn validate_responses_input_tool_names(request_id: &str, body: &Value) -> Result<(), V3ProviderError> {
+    let Some(input) = body.get("input").and_then(Value::as_array) else { return Ok(()); };
+    for (index, item) in input.iter().enumerate() {
+        let kind = item.get("type").and_then(Value::as_str);
+        if !matches!(kind, Some("function_call" | "custom_tool_call")) { continue; }
+        let Some(name) = item.get("name").and_then(Value::as_str) else { continue; };
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+            return Err(V3ProviderError::FunctionToolShapeFailed {
+                request_id: request_id.to_owned(),
+                detail: format!("input[{index}].name must match ^[a-zA-Z0-9_-]+$: {name:?}"),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
