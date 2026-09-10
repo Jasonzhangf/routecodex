@@ -762,21 +762,46 @@ fn map_namespace_tool_name(namespace_name: &str, child_name: &str) -> String {
 }
 
 fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in input {
-        let kind = item.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("function_call" | "custom_tool_call")) {
-            continue;
-        }
-        let Some(name) = item.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(mapped) = names.get(name) {
-            item["name"] = Value::String(mapped.clone());
+    fn walk(value: &mut Value, names: &HashMap<String, String>) {
+        match value {
+            Value::Object(object) => {
+                let kind_is_tool_call = matches!(
+                    object.get("type").and_then(Value::as_str),
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                );
+                let kind_is_function =
+                    object.get("type").and_then(Value::as_str) == Some("function");
+                if kind_is_tool_call {
+                    if let Some(Value::String(name)) = object.get_mut("name") {
+                        if let Some(mapped) = names.get(name.as_str()) {
+                            *name = mapped.clone();
+                        }
+                    }
+                }
+                if kind_is_function {
+                    if let Some(function) =
+                        object.get_mut("function").and_then(Value::as_object_mut)
+                    {
+                        if let Some(Value::String(name)) = function.get_mut("name") {
+                            if let Some(mapped) = names.get(name.as_str()) {
+                                *name = mapped.clone();
+                            }
+                        }
+                    }
+                }
+                for child in object.values_mut() {
+                    walk(child, names);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, names);
+                }
+            }
+            _ => {}
         }
     }
+    walk(body, names);
 }
 
 fn validate_provider_wire_tool_names(
@@ -787,13 +812,32 @@ fn validate_provider_wire_tool_names(
         match value {
             Value::Object(object) => {
                 let kind = object.get("type").and_then(Value::as_str);
-                if matches!(kind, Some("function_call" | "custom_tool_call" | "tool_use")) {
+                if matches!(
+                    kind,
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                ) {
                     if let Some(name) = object.get("name").and_then(Value::as_str) {
                         if !is_provider_wire_tool_name(name) {
                             return Err(V3ProviderError::FunctionToolShapeFailed {
                                 request_id: request_id.to_owned(),
-                                detail: format!("{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"),
+                                detail: format!(
+                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                ),
                             });
+                        }
+                    }
+                }
+                if kind == Some("function") {
+                    if let Some(function) = object.get("function").and_then(Value::as_object) {
+                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                            if !is_provider_wire_tool_name(name) {
+                                return Err(V3ProviderError::FunctionToolShapeFailed {
+                                    request_id: request_id.to_owned(),
+                                    detail: format!(
+                                        "{path}.function.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
