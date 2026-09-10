@@ -246,10 +246,8 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
             frame.body = V3Server16Body::Json(json!({
                 "error": {"code": "network_error", "message": "network error"}
             }));
-        } else {
-            frame.body = V3Server16Body::Json(body);
+            return frame;
         }
-        return frame;
     }
     let (code, message) = if code.starts_with("provider_response_") {
         (

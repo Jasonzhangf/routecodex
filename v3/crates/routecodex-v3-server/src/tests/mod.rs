@@ -3757,6 +3757,39 @@ async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
 }
 
 #[test]
+fn responses_stream_network_error_without_error04_projects_sse_body() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.content_type, "text/event-stream");
+    match projected.body {
+        V3Server16Body::Bytes(bytes) => {
+            assert!(!bytes.is_empty());
+            let text = std::str::from_utf8(&bytes).expect("SSE error body must be UTF-8");
+            assert!(text.contains("event: response.failed"), "{text}");
+            assert!(text.contains("network_error"), "{text}");
+            assert!(text.contains("network error"), "{text}");
+            assert!(text.contains("data: [DONE]"), "{text}");
+        }
+        other => panic!("network error must project SSE bytes, got {other:?}"),
+    }
+}
+
+#[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
     let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({
         "id": "chatcmpl_test",
