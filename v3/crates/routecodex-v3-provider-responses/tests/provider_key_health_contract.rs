@@ -72,18 +72,14 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
     }
 
     assert!(store
-        .provider_cooldown_probe_keys_due(30_101)
+        .provider_cooldown_probe_keys_due(60_101)
         .expect("probe due query")
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(30_102)
+            .provider_cooldown_probe_keys_due(60_102)
             .expect("probe due query"),
-        vec![(
-            "provider-a".into(),
-            Some("key-a".into()),
-            Some("model-a".into())
-        )]
+        vec![("provider-a".into(), Some("key-a".into()), None,)]
     );
 }
 

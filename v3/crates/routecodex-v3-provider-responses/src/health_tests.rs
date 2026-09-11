@@ -107,7 +107,7 @@ fn operator_can_remove_auth_key_cooldown_and_probe_state() {
         .iter()
         .any(|entry| entry.kind == "auth_key"));
     assert!(store
-        .remove_cooldown_entry("provider-a", Some("key-a"), Some("gpt-5.5"), "auth_key")
+        .remove_cooldown_entry("provider-a", Some("key-a"), None, "auth_key")
         .unwrap());
     assert!(!store
         .cooldown_entries(103)
@@ -196,18 +196,14 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         )
         .unwrap();
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(30_101));
+    assert_eq!(second.cooldown_until_ms, Some(3_600_101));
     assert!(store
-        .provider_cooldown_probe_keys_due(30_100)
+        .provider_cooldown_probe_keys_due(3_600_100)
         .unwrap()
         .is_empty());
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(30_101).unwrap(),
-        vec![(
-            "provider-a".to_string(),
-            Some("key-a".to_string()),
-            Some("gpt-5.5".to_string()),
-        )]
+        store.provider_cooldown_probe_keys_due(3_600_101).unwrap(),
+        vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
     );
     assert!(
         !store
@@ -221,7 +217,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     assert!(
-        store
+        !store
             .availability_for_session(
                 &session("session-c"),
                 "provider-a",
@@ -229,7 +225,8 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
                 Some("other-model"),
                 102,
             )
-            .available
+            .available,
+        "auth-key cooldown must block another model under the same provider/auth alias"
     );
     assert!(
         store
@@ -243,7 +240,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), None)
         .unwrap();
     assert!(
         store

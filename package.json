@@ -128,7 +128,7 @@
     "verify:v3-provider-action-gate": "node v3/scripts/architecture/verify-v3-provider-action-gate.mjs",
     "test:v3-provider-session-cooldown": "node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses --lib health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test multi_listener_server responses_direct_without_failure_session_header_reaches_provider -- --nocapture",
     "verify:v3-provider-session-cooldown": "node scripts/architecture/verify-v3-provider-session-cooldown.mjs",
-    "test:v3-provider-session-cooldown-red-fixtures": "node scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs",
+    "test:v3-provider-session-cooldown-red-fixtures": "npm --prefix v3 run test:v3-provider-session-cooldown-red-fixtures",
     "verify:v3-runtime-timing-observability": "ROUTECODEX_V3_ADMISSION_WORKSPACE=1 npm --prefix v3 run verify:v3-runtime-timing-observability",
     "verify:v3-responses-session-admission": "npm --prefix v3 run verify:v3-responses-session-admission",
     "test:v3-responses-session-admission-red-fixtures": "npm --prefix v3 run test:v3-responses-session-admission-red-fixtures",

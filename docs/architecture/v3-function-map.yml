@@ -456,6 +456,7 @@ features:
   - v3.provider_error.policy_manifest
   - v3.provider.failure_session_scope
   - v3.provider.health_state
+  - v3.provider.auth_key_cooldown_state
   - v3.provider.availability_projection
   mainline_bindings:
   - v3-de-01
@@ -4995,6 +4996,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.provider.global_subscription_health
+  - v3.provider.auth_key_cooldown_state
   - v3.config.published_manifest
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
@@ -5004,6 +5006,8 @@ features:
   - build_v3_provider_global_failure_policy
   - V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+  - V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+  - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
@@ -5069,6 +5073,7 @@ features:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
   - v3.provider.health_state
+  - v3.provider.auth_key_cooldown_state
   - v3.continuation.local_context_truth
   mainline_bindings:
   - v3-hub-relay-response-failure-01

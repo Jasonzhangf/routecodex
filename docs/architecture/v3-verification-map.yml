@@ -3208,10 +3208,14 @@ features:
   - one typed permit generation owns each scheduled or rescue probe and successful completion atomically resets score, streak, delta window, cooldown, and probe backoff state
   - Responses, OpenAI Chat, Anthropic, and Gemini probes require their protocol-specific terminal success shape before recovery
   - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
+  - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after two failures
+  - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
+  - 401 auth-key probe is not due before the typed 5-hour cooldown deadline and is due at the deadline
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
   - an early due probe does not make the provider available before semantic probe success
+  - model-less auth-key cooldown state never enters provider or client payload, MetadataCenter, or continuation state
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
@@ -3220,6 +3224,9 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
+  - npm run test:v3-provider-health-contract
+  - npm run test:v3-provider-session-cooldown-red-fixtures
+  - npm run verify:v3-provider-action-gate
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

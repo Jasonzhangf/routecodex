@@ -1,8 +1,10 @@
 use futures_util::future::join_all;
-use routecodex_v3_config::internal::classify_v3_internal_provider_error;
+use routecodex_v3_config::internal::{
+    classify_v3_internal_provider_error, v3_internal_error_handling,
+};
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
-    V3ProviderErrorActionPolicyManifest, V3ProviderErrorRetryMode,
+    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
@@ -524,7 +526,7 @@ impl V3ProviderFailureRuntimeHealth {
 
     pub(crate) fn record_provider_failure_record_with_policy(
         &self,
-        _matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
+        matched_policy_directive: Option<&V3ProviderErrorActionPolicyManifest>,
         _manifest: &V3Config05ManifestPublished,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
@@ -555,9 +557,13 @@ impl V3ProviderFailureRuntimeHealth {
         );
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        let policy_override = match matched_policy_directive {
+            Some(directive) => provider_failure_policy_from_error_policy_directive(directive)?,
+            None => None,
+        };
         let request_local_provider_error =
             status == 400 || error_type == Some("invalid_request_error");
-        if !request_local_provider_error {
+        if !request_local_provider_error && policy_override.is_none() {
             self.record_provider_key_failure_action(
                 provider_id,
                 auth_alias,
@@ -566,14 +572,28 @@ impl V3ProviderFailureRuntimeHealth {
                 now_ms,
             )?;
         }
-        self.record_provider_failure_in_session_without_health_cooldown(
-            failure_session_scope,
-            provider_id,
-            auth_alias,
-            model_id,
-            reason,
-            now_ms,
-        )
+        if let Some(policy) = policy_override {
+            self.store
+                .record_provider_failure_in_session_with_policy(
+                    failure_session_scope,
+                    provider_id,
+                    auth_alias,
+                    model_id,
+                    reason,
+                    now_ms,
+                    Some(policy),
+                )
+                .map_err(|error| error.to_string())
+        } else {
+            self.record_provider_failure_in_session_without_health_cooldown(
+                failure_session_scope,
+                provider_id,
+                auth_alias,
+                model_id,
+                reason,
+                now_ms,
+            )
+        }
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(
@@ -1464,6 +1484,47 @@ fn find_matching_provider_error_policy<'manifest>(
                     .any(|value| message.contains(value))
                 || error_type == Some(policy.action.reason_code.as_str()))
         })
+}
+
+fn provider_failure_policy_from_error_policy_directive(
+    policy: &V3ProviderErrorActionPolicyManifest,
+) -> Result<Option<V3ProviderFailurePolicy>, String> {
+    let failure_threshold = policy
+        .path
+        .iter()
+        .find_map(|step| match step {
+            V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
+                Some((*max_attempts).max(1))
+            }
+            _ => None,
+        })
+        .unwrap_or(1);
+    let Some(cooldown) = policy.path.iter().find_map(|step| match step {
+        V3ProviderDispositionStepManifest::Cooldown {
+            scope,
+            duration_ms,
+            until_restart,
+            ..
+        } => Some((*scope, *duration_ms, *until_restart)),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    let (scope, duration_ms, until_restart) = cooldown;
+    if scope != V3ProviderErrorActionScope::AuthKey {
+        // V3 provider health only implements auth_key policy cooldowns today.
+        // Other scopes keep the existing generic key-health path rather than
+        // being silently remapped to auth_key.
+        return Ok(None);
+    }
+    Ok(Some(V3ProviderFailurePolicy {
+        failure_threshold,
+        cooldown_ms: duration_ms.unwrap_or(1),
+        probe_interval_ms: duration_ms
+            .unwrap_or(v3_internal_error_handling().unrecoverable_probe_interval_ms),
+        until_restart: until_restart.unwrap_or(false),
+        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+    }))
 }
 
 fn build_v3_relay_provider_error_05_decision(
