@@ -360,6 +360,40 @@ mod tests {
     }
 
     #[test]
+    fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "description": "an independently declared tool",
+                    "parameters": {"type": "object"}
+                }}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-declaration-name",
+            chat_target,
+            body,
+        )
+        .expect_err("ordinary tool declaration must not be rewritten before validation");
+        assert!(
+            error.to_string().contains("body.tools[1].function.name"),
+            "declaration path must be rejected without mapping: {error}"
+        );
+        assert!(
+            !error.to_string().contains("mcp__node_repl__js"),
+            "declaration names must not be rewritten from call-history aliases: {error}"
+        );
+    }
+
+    #[test]
     fn wire_flattens_namespace_children_into_dual_field_functions_for_openai_chat_provider() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
