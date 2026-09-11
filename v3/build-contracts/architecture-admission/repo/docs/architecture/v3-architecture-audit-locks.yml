@@ -137,8 +137,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:b887fb4f320897dd8999417abeffb3575dd16cb0d4fcdcadf68f4035e85af1fd
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
+    last_manual_authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
   - item_id: chain:v3.models.capability_catalog
     chain_id: v3.models.capability_catalog
     status: audited_locked
@@ -476,6 +476,13 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
+    item_id: chain:v3.server.managed_lifecycle
+    approved_by: Jason
+    approved_at: '2026-09-11T11:54:00-07:00'
+    reason: "Jason authorized integrating the local hooks framework as a RouteCodex-managed sidecar. The lifecycle chain now starts the configured hooks supervisor after its CodexApp/hooksd readiness contract and drains it before RouteCodex exits; hooks operator state and business request/response semantics remain outside the V3 runtime."
+    fingerprint_before: sha256:b887fb4f320897dd8999417abeffb3575dd16cb0d4fcdcadf68f4035e85af1fd
+    fingerprint_after: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
   - authorization_id: auth-20260905-v3-debug-error-split-anchor
     item_id: chain:v3.debug_error_foundation.mainline
     approved_by: Jason

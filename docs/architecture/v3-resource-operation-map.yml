@@ -1225,6 +1225,30 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored_config_path_transfer_verified_pre_live
+  - resource_id: v3.lifecycle.hooks_sidecar_declaration
+    resource_kind: external_process_declaration
+    lifecycle: v3.server.managed_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3Lifecycle04ChildSpawned
+    identity: [installRecordPath, supervisorWrapper, daemonConfig, enabled]
+    allowed_writers: [routecodex_hooks_init]
+    allowed_readers: [start_configured_hooks_sidecar]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.lifecycle.hooks_sidecar_process
+    resource_kind: managed_runtime_process
+    lifecycle: v3.server.managed_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3Lifecycle06LiveControlled
+    identity: [supervisorWrapper, pid, readinessProtocol, state]
+    allowed_writers: [start_configured_hooks_sidecar, V3HooksSidecarProcess::stop]
+    allowed_readers: [shutdown_managed_runtime]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: source_controlled
 
   - resource_id: v3.openai_chat.client_sse_stream
     resource_kind: client_transport_projection

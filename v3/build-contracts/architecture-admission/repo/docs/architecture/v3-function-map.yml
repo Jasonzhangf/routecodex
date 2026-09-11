@@ -85,6 +85,8 @@ features:
   - v3.lifecycle.control_channel
   - v3.lifecycle.operation_lock
   - v3.lifecycle.restart_plan
+  - v3.lifecycle.hooks_sidecar_declaration
+  - v3.lifecycle.hooks_sidecar_process
   entry_symbols:
   - V3ManagedLifecycle::declaration
   - V3ManagedLifecycle::start
@@ -108,6 +110,8 @@ features:
   - explicit_listener_pids_for_ports
   - occupied_listener_ports
   - send_release_ports_control
+  - start_configured_hooks_sidecar
+  - V3HooksSidecarProcess::stop
   allowed_paths:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-cli

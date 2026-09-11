@@ -190,6 +190,7 @@ features:
   required_unit:
   - Config-owned source identity is stable, source-sensitive, deterministic, and secret-free
   - deterministic identity and strict state schema
+  - configured hooks sidecar starts only after CodexApp readiness, fails closed on missing readiness, and drains before CodexApp
   - exclusive operation lock and auth-handle preflight
   - no resolved secret in lifecycle projection
   - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
@@ -208,6 +209,7 @@ features:
     release when a configured listener is already owned by another managed instance
   - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path; release-a running restart from release-b execs in place into the new executable
   - all listeners close on one stop
+  - RouteCodex managed start/stop owns the installed hooks supervisor process without broad kill
   - lifecycle state, argv, log, and evidence contain no resolved secret
   - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
   required_gates:
