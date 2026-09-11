@@ -316,7 +316,7 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        ["primary", "primary", "primary", "secondary"]
+        ["primary", "secondary"]
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
