@@ -1,5 +1,5 @@
 use crate::adaptive_concurrency::{
-    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyPermit, V3AdaptiveConcurrencyPermitGuard,
+    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyPermitGuard,
     V3AdaptiveConcurrencyProbeResult,
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
@@ -784,6 +784,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
         };
         let was_probe = lease.is_probe();
         let permit = lease.into_permit();
+        let permit_guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), permit);
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -843,12 +844,12 @@ impl ResponsesTransport for ProviderResponsesTransport {
         let now_ms = current_epoch_ms();
         match result {
             Ok(raw) => {
-                if was_probe {
+                if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
                             .transition(
                                 attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
+                                crate::transport_handoff::V3ProviderTransportAttemptState::Streaming,
                             )
                             .map_err(|reason| V3ProviderError::Transport {
                                 request_id: raw.request_id().to_string(),
@@ -856,30 +857,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 reason,
                             })?;
                     }
-                    controller
-                        .complete_probe(permit, V3AdaptiveConcurrencyProbeResult::Accepted, now_ms)
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: raw.request_id().to_string(),
-                            provider_id: raw.provider_id().to_string(),
-                            reason,
-                        })?;
-                } else if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
-                    if let Some(attempt_key) = &attempt_key {
-                        self.handoff
-                        .transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Streaming,
-                        )
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: raw.request_id().to_string(),
-                            provider_id: raw.provider_id().to_string(),
-                            reason,
-                        })?;
-                    }
+                    let guard = if was_probe {
+                        permit_guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted)
+                    } else {
+                        permit_guard
+                    };
                     return Ok(hold_sse_lease(
                         raw,
-                        controller.clone(),
-                        permit,
+                        guard,
                         self.handoff.clone(),
                         attempt_key,
                     ));
@@ -896,13 +881,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 reason,
                             })?;
                     }
-                    controller
-                        .release(permit)
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: raw.request_id().to_string(),
-                            provider_id: raw.provider_id().to_string(),
-                            reason,
-                        })?;
+                    if was_probe {
+                        drop(
+                            permit_guard
+                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted),
+                        );
+                    } else {
+                        drop(permit_guard);
+                    }
                 }
                 Ok(raw)
             }
@@ -921,17 +907,10 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 }
                 if is_rate_limited(&error) {
                     if was_probe {
-                        controller
-                            .complete_probe(
-                                permit,
-                                V3AdaptiveConcurrencyProbeResult::RateLimited,
-                                now_ms,
-                            )
-                            .map_err(|reason| V3ProviderError::Transport {
-                                request_id: request_id.clone(),
-                                provider_id: provider_id.clone(),
-                                reason,
-                            })?;
+                        drop(
+                            permit_guard
+                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
+                        );
                     } else {
                         controller
                             .observe_rate_limit(&provider_key, now_ms)
@@ -940,22 +919,10 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 provider_id: provider_id.clone(),
                                 reason,
                             })?;
-                        controller.release(permit).map_err(|reason| {
-                            V3ProviderError::Transport {
-                                request_id: request_id.clone(),
-                                provider_id: provider_id.clone(),
-                                reason,
-                            }
-                        })?;
+                        drop(permit_guard);
                     }
                 } else {
-                    controller
-                        .release(permit)
-                        .map_err(|reason| V3ProviderError::Transport {
-                            request_id: request_id.clone(),
-                            provider_id: provider_id.clone(),
-                            reason,
-                        })?;
+                    drop(permit_guard);
                 }
                 Err(error)
             }
@@ -965,8 +932,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
 
 fn hold_sse_lease(
     raw: V3ProviderResp14Raw,
-    controller: V3AdaptiveConcurrencyController,
-    permit: V3AdaptiveConcurrencyPermit,
+    guard: V3AdaptiveConcurrencyPermitGuard,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
     attempt_key: Option<crate::transport_handoff::V3ProviderTransportAttemptKey>,
 ) -> V3ProviderResp14Raw {
@@ -976,7 +942,6 @@ fn hold_sse_lease(
     let V3ProviderResponseBody::Sse(stream) = body else {
         unreachable!("SSE lease must only wrap an SSE response");
     };
-    let guard = V3AdaptiveConcurrencyPermitGuard::new(controller, permit);
     let stream = Box::pin(stream::unfold(
         (stream, guard, 0_u64),
         move |(mut stream, guard, provider_sequence)| {
