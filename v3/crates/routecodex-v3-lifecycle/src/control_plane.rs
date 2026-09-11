@@ -53,9 +53,13 @@ pub(crate) async fn shutdown_managed_runtime(
     instance_id: &str,
     socket_path: &Path,
     handle: V3ServerAggregateHandle,
+    hooks_sidecar: Option<V3HooksSidecarProcess>,
 ) -> Result<(), V3LifecycleError> {
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopping, None)?;
     handle.shutdown().await;
+    if let Some(sidecar) = hooks_sidecar {
+        sidecar.stop().await?;
+    }
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopped, None)?;
     let _ = fs::remove_file(instance_dir.join("pid.cache"));
     let _ = fs::remove_file(instance_dir.join("control.json"));
@@ -67,6 +71,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
     instance_dir: &Path,
     socket_path: &Path,
     handle: V3ServerAggregateHandle,
+    hooks_sidecar: Option<V3HooksSidecarProcess>,
     restart_plan: ControlRestartPlan,
     console: bool,
 ) -> Result<(), V3LifecycleError> {
@@ -86,6 +91,9 @@ pub(crate) async fn restart_managed_runtime_in_place(
         &instance_dir.join(PROVIDER_HANDOFF_FILE),
         &provider_checkpoints,
     )?;
+    if let Some(sidecar) = hooks_sidecar {
+        sidecar.stop().await?;
+    }
     if restart_plan.control_instance_id == declaration.instance_id {
         write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
     }

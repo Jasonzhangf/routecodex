@@ -33,7 +33,8 @@ chains:
       consumes: [v3.provider.global_cooldown_persistence]
       produces: [v3.provider.global_cooldown_persistence]
       side_channel_reads: []
-      side_channel_writes: []
+      side_channel_writes:
+      - v3.lifecycle.hooks_sidecar_process
   - step_id: v3-provider-global-cooldown-03
     from_node: V3ServerStartup01ListenerSetPreflight
     to_node: V3ProviderHealthStore
@@ -461,10 +462,12 @@ chains:
       produces:
       - v3.lifecycle.pid_cache
       - v3.lifecycle.control_channel
-      side_channel_reads: []
+      side_channel_reads:
+      - v3.lifecycle.hooks_sidecar_declaration
       side_channel_writes:
       - v3.lifecycle.pid_cache
       - v3.lifecycle.control_channel
+      - v3.lifecycle.hooks_sidecar_process
   - step_id: v3-life-05
     from_node: V3Lifecycle05IdentityPublished
     to_node: V3Lifecycle06LiveControlled
@@ -540,6 +543,7 @@ chains:
       produces: []
       side_channel_reads:
       - v3.lifecycle.control_channel
+      - v3.lifecycle.hooks_sidecar_process
       side_channel_writes: []
 - chain_id: v3.user_config.compile
   owner_feature_id: v3.simplified_user_config

@@ -1,8 +1,11 @@
 use super::*;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
 static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
 #[test]
 fn control_client_disconnect_is_not_a_managed_runtime_failure() {
@@ -38,6 +41,42 @@ async fn control_response_broken_pipe_is_nonfatal() {
     assert!(!write_control_response(&mut server, &response)
         .await
         .unwrap());
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn configured_hooks_sidecar_requires_ready_protocol_and_stops_by_explicit_pid() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let record_path = root.path().join("install.json");
+    let daemon_config = root.path().join("hooksd.json");
+    let supervisor_wrapper = root.path().join("supervisor-wrapper");
+    fs::write(&daemon_config, "{}").unwrap();
+    fs::write(
+        &supervisor_wrapper,
+        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "supervisor_wrapper": supervisor_wrapper,
+            "daemon_config": daemon_config,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+    let sidecar = start_configured_hooks_sidecar()
+        .await
+        .unwrap()
+        .expect("enabled test sidecar must start");
+    sidecar.stop().await.unwrap();
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
 }
 
 fn fixture(root: &TempDir) -> (PathBuf, PathBuf, PathBuf) {
