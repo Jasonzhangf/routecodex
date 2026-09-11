@@ -18,6 +18,9 @@ requireText('all configured listener verification', 'for verify_port in "${VERIF
 if (script.includes('ROUTECODEX_INSTALL_VERIFY_PORT:-5520')) {
   failures.push('V3 release verification must not default to V4 port 5520');
 }
+if (/\$[A-Z_][A-Z0-9_]*[^\x00-\x7F]/.test(script)) {
+  failures.push('shell variables followed by non-ASCII text must use ${VAR} braces');
+}
 if (script.includes("require('./package.json').version")) {
   failures.push('release runtime version must not use the root package version');
 }

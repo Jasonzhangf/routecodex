@@ -167,7 +167,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
                     &state.responses_direct_continuation,
-                    &state.responses_direct_stopless_control,
+                    &state.responses_direct_server_tool_state,
                     state.provider_health.runtime_health(),
                 )
                 .with_provider_failure_event_sink(
@@ -196,7 +196,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(
                     &state.responses_direct_continuation,
-                    &state.responses_direct_stopless_control,
+                    &state.responses_direct_server_tool_state,
                     state.provider_health.runtime_health(),
                 )
                 .with_provider_failure_event_sink(
@@ -226,17 +226,18 @@ pub(super) async fn execute_responses_direct_server_outcome(
             request_id: request_id.clone(),
             payload: payload.clone(),
         };
-        let mut local_stopless = V3ResponsesRelayLocalStoplessControlInput::new(
+        let mut local_server_tool = V3ResponsesRelayLocalServerToolInput::new(
             &state.responses_relay_local_continuation,
-            &state.responses_relay_stopless_control,
+            &state.responses_relay_server_tool_state,
             relay_continuation_scope,
             now_epoch_ms,
         );
         if let Some(sink) = provider_failure_event_sink.as_ref() {
-            local_stopless = local_stopless.with_provider_failure_event_sink(Arc::clone(sink));
+            local_server_tool =
+                local_server_tool.with_provider_failure_event_sink(Arc::clone(sink));
         }
         if let Some(sink) = route_selection_event_sink.as_ref() {
-            local_stopless = local_stopless.with_route_selection_event_sink(Arc::clone(sink));
+            local_server_tool = local_server_tool.with_route_selection_event_sink(Arc::clone(sink));
         }
         let capture_provider_request = state
             .debug
@@ -245,11 +246,11 @@ pub(super) async fn execute_responses_direct_server_outcome(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let relay_result = if capture_provider_request || capture_provider_response {
-            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
+            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                local_stopless,
+                local_server_tool,
                 V3ResponsesRelayProviderSnapshotCapture::new(
                     capture_provider_request,
                     capture_provider_response,
@@ -262,11 +263,11 @@ pub(super) async fn execute_responses_direct_server_outcome(
             )
             .await
         } else {
-            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target(
+            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                local_stopless,
+                local_server_tool,
                 handoff.target,
                 handoff.expanded,
                 handoff.request_local_excluded_candidates,

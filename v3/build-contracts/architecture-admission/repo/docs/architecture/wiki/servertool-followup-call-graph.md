@@ -5,7 +5,7 @@
 这页只回答两件事：
 
 1. servertool followup 主链到底怎么从 `HubRespChatProcess03Governed` 回到正常请求/响应主线。
-2. followup、CLI projection、stopless 三条分支分别由谁 owning，哪里绝对不能长出第二份语义。
+2. followup 和 CLI projection 两条分支分别由谁 owning，哪里绝对不能长出第二份语义。
 
 它是 review surface，不是第二份 SSOT。
 
@@ -24,7 +24,6 @@ Key owners:
 
 - `hub.servertool_followup`
 - `hub.servertool_cli_projection`
-- `hub.servertool_stopless_cli_continuation`
 - `hub.servertool_orchestration_policy`
 
 ## Main Rule
@@ -32,7 +31,7 @@ Key owners:
 - servertool 是 `HubRespChatProcess03Governed` 内部子链，不是独立 pipeline。
 - followup 只能从 origin snapshot 构造，不能从当前污染 payload 猜。
 - TS 只能做 runtime IO / bridge / reenter shell，不得重写工具语义。
-- stopless CLI 不走 server-side followup/reenter；它走 client-visible `exec_command`。
+- client-side hook 唤醒不属于 V3 servertool followup；它由外部 hooks daemon/codexapp 通过输入接口完成。
 
 ## Mainline
 
@@ -79,9 +78,6 @@ flowchart LR
   F --> G["HubRespOutbound04ClientSemantic"]
   G --> H["client-visible exec_command"]
 
-  B -->|stopless CLI continuation| I["StoplessOrchestrationPlan"]
-  I --> J["ServertoolCliProjection01Planned"]
-  J --> G
 ```
 
 ## Owner Matrix
@@ -90,7 +86,6 @@ flowchart LR
 | --- | --- | --- | --- |
 | `hub.servertool_followup` | followup orchestration + post-followup governed truth | `run_servertool_response_stage_json`, `plan_servertool_outcome_json`, `project_hub_resp_outbound_04_from_hub_resp_chatprocess_03` | `src/providers`, `src/server` |
 | `hub.servertool_cli_projection` | generic servertool -> client `exec_command` projection | `build_servertool_cli_projection_01_from_hub_resp_chatprocess_03` | provider runtime / executor local projection |
-| `hub.servertool_stopless_cli_continuation` | stopless runtime-metadata control continuation planning | `plan_stopless_orchestration_action`, `resolve_runtime_stop_message_state_from_metadata_center`, `plan_client_exec_cli_projection_output` | handler-local stopless logic / TS reenter / adapterContext state |
 | `hub.servertool_orchestration_policy` | timeout, disconnect, provider pin, followup error policy | `resolve_adapter_context_provider_key`, `compact_followup_error_reason` | scattered handler/executor policy |
 
 ## Followup vs CLI
@@ -99,21 +94,13 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | followup runtime | internal servertool needs local execution + reenter | server-side runtime shell under Rust plan | rebuild standard request and reenter Hub request chain | 只能 relay 复入完整 Hub Pipeline |
 | generic CLI projection | tool should run through normal client tool loop | client executes `exec_command` | client returns ordinary tool result next turn | 不得 server-side reenter |
-| stopless CLI continuation | `stop_message_auto` / `reasoningStop` loop | client executes `exec_command` | next turn model consumes current request `tool_outputs` / runtime metadata truth | 不得再触发 server-side followup，也不得依赖 file writeback |
 
-## Stopless Branch
+## External Hooks Boundary
 
-```mermaid
-flowchart TD
-  A["finish_reason=stop or stop hook condition"] --> B["hub.servertool_stopless_cli_continuation"]
-  B --> C["ServertoolCliProjection01Planned<br/>tool=exec_command"]
-  C --> D["Client executes routecodex hook run reasoningStop ..."]
-  D --> E["stdout JSON tool result"]
-  E --> F["HubReqInbound02Standardized"]
-  F --> G["next normal model turn"]
-
-  H["server-side followup/reenter"] --> I["forbidden for stopless CLI"]
-```
+- V3 不再声明、注入或拦截 `reasoningStop`，也不再维护 Stopless continuation/state machine。
+- 官方 Stop Hook、定时唤醒、update-goal 和后续 long-horizon hook 属于独立 hooks daemon/codexapp；它们通过 Codex 输入接口发送普通 message。
+- daemon 先感知 Codex 是否 working；working 时默认不发送打扰型唤醒，非 working 时才执行发送策略。
+- 外部 hooks 的消息发送不经过 servertool followup、V3 response projection 或 SSE 修复路径。
 
 ## Illegal Growth
 
@@ -122,7 +109,6 @@ flowchart TD
 | handler/executor 直接决定 servertool tool 语义 | 破坏 Rust-only orchestration owner |
 | followup 从当前响应 payload 猜上下文 | 会把污染 payload 当真相 |
 | pre-followup `clientPayload` / `streamPipe.payload` 覆盖 post-followup truth | 会丢失真实 followup 结果 |
-| stopless CLI 再走 server-side followup/reenter | 与 CLI 生命周期冲突 |
 | direct/provider passthrough 进入 followup orchestration | 违反“followup 只能 relay 复入完整 Hub Pipeline” |
 | provider/client payload 暴露内部 followup metadata | 违反 metadata 闭环边界 |
 
@@ -130,26 +116,22 @@ flowchart TD
 
 | Gap ID | Area | Current signal | Why it matters |
 | --- | --- | --- | --- |
-| `followup-gap-01` | Dedicated wiki | 此前没有 followup/CLI/stopless 合并 review 图面 | servertool 分支很多，易改错层 |
+| `followup-gap-01` | Dedicated wiki | 此前没有 followup/CLI 合并 review 图面 | servertool 分支很多，易改错层 |
 | `followup-gap-02` | Split visibility | function-map 有 owner，但 followup 与 CLI 的分流边界未在单页显式对比 | 容易把 CLI 路径误补成 followup |
-| `followup-gap-03` | Stopless isolation | 文档已写 stopless 不可 server-side reenter，但 wiki 之前没有单独标红 | 旧 stopless/followup 语义容易复活 |
 | `followup-gap-04` | Post-followup truth | 之前缺一张图强调 `ServertoolResp03FollowupResult -> HubRespOutbound04ClientSemantic` 的唯一出口 | 容易重新用 pre-followup payload 投影 SSE/JSON |
 
 ## Verification Anchors
 
-- `tests/sharedmodule/servertool-active-js-shadow-audit.spec.ts`
-- `tests/servertool/execution-stage-shell.spec.ts`
-- `tests/servertool/stopless-cli-continuation.spec.ts`
-- `tests/servertool/engine-preflight-shell.spec.ts`
-- `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
-- `tests/sharedmodule/apply-patch-chat-process-contract.spec.ts`
-- `npm run verify:servertool-rust-only`
+- `v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs`
+- `v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs`
+- `v3/scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs`
+- `npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout`
 
 ## Review Checklist
 
 - 当前改动是在 `hub.servertool_*` owner 或允许路径里，而不是 handler/provider/executor 本地补语义。
 - followup 请求是否只从 origin snapshot 构造。
 - followup 是否仍然走正常 Hub request/reenter chain，而不是私有旁路。
-- stopless CLI 是否仍是 client-visible `exec_command`，且不走 server-side followup。
+- 外部 hooks 是否保持在 daemon/codexapp 输入边界，不进入 V3 servertool followup。
 - post-followup governed truth 是否仍是 `HubRespOutbound04ClientSemantic` 的唯一输入。
 - provider pin / timeout / disconnect / error policy 是否仍只由 `hub.servertool_orchestration_policy` 收口。

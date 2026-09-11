@@ -90,7 +90,7 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
 }
 
 #[tokio::test]
-async fn direct_response_hook_uses_server_toolreason_override_when_global_is_disabled() {
+async fn direct_response_hook_keeps_toolreason_disabled_when_config_requests_override() {
     let mut manifest = test_manifest();
     manifest
         .servers
@@ -123,11 +123,8 @@ async fn direct_response_hook_uses_server_toolreason_override_when_global_is_dis
     let V3ClientBody::Json(body) = output.client_payload.body else {
         panic!("direct JSON response must remain JSON: {output:?}");
     };
-    assert_eq!(body["output"][0]["type"], "reasoning");
-    assert_eq!(
-        body["output"][0]["summary"][0],
-        json!({"type":"summary_text","text":"调用工具 pwd：确认当前工作目录"})
-    );
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert!(!body.to_string().contains("调用工具"));
 }
 
 #[tokio::test]
@@ -2004,7 +2001,7 @@ targets = [
 async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     let manifest = direct_web_search_mode_b_manifest();
     let continuation_state = V3ResponsesDirectContinuationState::default();
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
     let continuation_scope = V3ResponsesDirectContinuationScope::responses(
         "/v1/responses",
         "session-ws-direct",
@@ -2022,9 +2019,9 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
             "tools": [{"type": "web_search"}]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
         &continuation_state,
-        &stopless_control,
+        &server_tool_state,
         &manifest,
         raw,
         continuation_scope.clone(),
@@ -2063,8 +2060,8 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(paired["call_id"], "call_ws_1");
     assert_eq!(paired["output"], "search result for routecodex");
     // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    let state = stopless_control
+    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
+    let state = server_tool_state
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");

@@ -19,7 +19,6 @@ policy:
     - v3.responses_direct.required_mainline
     - v3.hub_pipeline.v1.request
     - v3.hub_pipeline.v1.response
-    - v3.servertool_hook_skeleton_lifecycle
     - v3.debug_error_foundation.mainline
     - v3.sse.transport_boundary
 manual_review_instruction:
@@ -90,15 +89,6 @@ locked_items:
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
     fingerprint: sha256:6c9652ec050d62e5c23e4f5b776ea2d531a720e2725064c1cad8daaf148857cb
-  - item_id: chain:v3.servertool_hook_skeleton_lifecycle
-    chain_id: v3.servertool_hook_skeleton_lifecycle
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-07-23T20:05:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:e96820574fa6d0c2a9f5a635397c754566241991108e54b6018dc16e8e031089
-    last_manual_authorization_id: auth-20260811-v3-god-file-decomposition
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -147,8 +137,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:b887fb4f320897dd8999417abeffb3575dd16cb0d4fcdcadf68f4035e85af1fd
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
+    last_manual_authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
   - item_id: chain:v3.models.capability_catalog
     chain_id: v3.models.capability_catalog
     status: audited_locked
@@ -331,8 +321,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:9ba25aeebed701e6506727eab6a2cf015acf79e2b4e4ee88f4bd62f2f7dc83da
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:ad3bc81d04b0ffe597a206604587b72572b9611fe81c25a1ac07efd888a3223a
+    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-responses-relay
   - item_id: chain:v3.error.raw_wire_evidence
     chain_id: v3.error.raw_wire_evidence
     status: audited_locked
@@ -347,16 +337,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:90ad91a819018db9e6374da1791b2beeaf4c7471526c421e6ac4718b0789eacf
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
-  - item_id: chain:v3.direct_stopless_metadata_center
-    chain_id: v3.direct_stopless_metadata_center
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:cede693589218325fd9aaaba9668b85ac57e6ffe5fa6d1892079df4ced2ca7f2
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:d9b7b760ba2a816c2228607da0d8a53e4a7b4d5aefaf07894ec0a53fd065cec0
+    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-servertool
   - item_id: chain:v3.hub_relay.tool_servertool_multiturn_parity
     chain_id: v3.hub_relay.tool_servertool_multiturn_parity
     status: audited_locked
@@ -371,8 +353,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:757a47abbe39513dc4acdaaee2648769bafb708e29ac36e0b52488bb3f23b170
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:7950b8876b8d3cad534e7b2ca50f75fd05e93e5328aab90ab184e5abc99f12f9
+    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-resp03
   - item_id: chain:v3.live_provider_compat.parity
     chain_id: v3.live_provider_compat.parity
     status: audited_locked
@@ -427,8 +409,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba
-    last_manual_authorization_id: auth-20260827-v3-sse-client-provider-decoupling-timing-owner-map-refresh
+    fingerprint: sha256:f028534b46300c81ae3d629b50191b18f6c0ee2f758f13b6289b733810662c5f
+    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-timing
   - item_id: chain:v3.responses_session_admission
     chain_id: v3.responses_session_admission
     status: audited_locked
@@ -494,6 +476,13 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
+    item_id: chain:v3.server.managed_lifecycle
+    approved_by: Jason
+    approved_at: '2026-09-11T11:54:00-07:00'
+    reason: "Jason authorized integrating the local hooks framework as a RouteCodex-managed sidecar. The lifecycle chain now starts the configured hooks supervisor after its CodexApp/hooksd readiness contract and drains it before RouteCodex exits; hooks operator state and business request/response semantics remain outside the V3 runtime."
+    fingerprint_before: sha256:b887fb4f320897dd8999417abeffb3575dd16cb0d4fcdcadf68f4035e85af1fd
+    fingerprint_after: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
   - authorization_id: auth-20260905-v3-debug-error-split-anchor
     item_id: chain:v3.debug_error_foundation.mainline
     approved_by: Jason
@@ -1061,3 +1050,31 @@ manual_authorizations:
     reason: "Jason authorized the SSE/client/provider decoupling audit and repair. The global and V3 timing maps now bind the same current Direct SSE timing owner and file after the retired implementation was removed; the audited fingerprint is refreshed after source and map synchronization."
     fingerprint_before: sha256:968849c3f1b4306c9c70f93f5547411ca8a28bd80f75895dc479c87d0673ddb1
     fingerprint_after: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba
+  - authorization_id: auth-20260910-v3-stopless-retirement-responses-relay
+    item_id: chain:v3.responses_relay.source_server_entry
+    approved_by: Jason
+    approved_at: '2026-09-10T08:16:49-07:00'
+    reason: "Jason authorized retiring the V3 Stopless runtime resource. The Responses Relay entry now binds the server-tool state API and preserves the existing runtime topology without the removed Stopless control edge."
+    fingerprint_before: sha256:9ba25aeebed701e6506727eab6a2cf015acf79e2b4e4ee88f4bd62f2f7dc83da
+    fingerprint_after: sha256:ad3bc81d04b0ffe597a206604587b72572b9611fe81c25a1ac07efd888a3223a
+  - authorization_id: auth-20260910-v3-stopless-retirement-servertool
+    item_id: chain:v3.servertool_center.skeleton
+    approved_by: Jason
+    approved_at: '2026-09-10T08:16:49-07:00'
+    reason: "Jason authorized retiring the V3 Stopless runtime resource. The ServertoolCenter skeleton now describes only web_search and servertool CLI state, with the tool-call hook as the sole response hook."
+    fingerprint_before: sha256:90ad91a819018db9e6374da1791b2beeaf4c7471526c421e6ac4718b0789eacf
+    fingerprint_after: sha256:d9b7b760ba2a816c2228607da0d8a53e4a7b4d5aefaf07894ec0a53fd065cec0
+  - authorization_id: auth-20260910-v3-stopless-retirement-resp03
+    item_id: chain:v3.resp03_tool_governance_gap_closeout
+    approved_by: Jason
+    approved_at: '2026-09-10T08:16:49-07:00'
+    reason: "Jason authorized retiring the V3 Stopless response hook. Resp03 retains ordinary tool-call governance and terminal response semantics; the removed stop hook is no longer an active edge."
+    fingerprint_before: sha256:757a47abbe39513dc4acdaaee2648769bafb708e29ac36e0b52488bb3f23b170
+    fingerprint_after: sha256:7950b8876b8d3cad534e7b2ca50f75fd05e93e5328aab90ab184e5abc99f12f9
+  - authorization_id: auth-20260910-v3-stopless-retirement-timing
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    approved_at: '2026-09-10T08:16:49-07:00'
+    reason: "Jason authorized retiring the V3 Stopless runtime resource. The timing chain's entry symbol now names the server-tool API while timing remains an independent side-channel."
+    fingerprint_before: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba
+    fingerprint_after: sha256:f028534b46300c81ae3d629b50191b18f6c0ee2f758f13b6289b733810662c5f

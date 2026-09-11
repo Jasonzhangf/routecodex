@@ -37,6 +37,25 @@ use crate::provider_error_policy_matching::provider_error_policy_matches_source_
 pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
 pub(crate) use crate::provider_failure_global_probe::probe_v3_provider_global_target_impl;
 
+struct V3ProviderProbeCancellationGuard {
+    store: V3ProviderHealthStore,
+    provider_id: String,
+    auth_alias: Option<String>,
+    model_id: Option<String>,
+    expected_generation: u64,
+}
+
+impl Drop for V3ProviderProbeCancellationGuard {
+    fn drop(&mut self) {
+        let _ = self.store.cancel_provider_cooldown_probe_at_generation(
+            &self.provider_id,
+            self.auth_alias.as_deref(),
+            self.model_id.as_deref(),
+            self.expected_generation,
+        );
+    }
+}
+
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
@@ -378,10 +397,18 @@ impl V3ProviderFailureRuntimeHealth {
             let auth_alias = permit.auth_alias().map(str::to_string);
             let model_id = permit.model_id().map(str::to_string);
             let expected_generation = permit.expected_generation();
+            let cancellation = V3ProviderProbeCancellationGuard {
+                store: self.store.clone(),
+                provider_id: provider_id.clone(),
+                auth_alias: auth_alias.clone(),
+                model_id: model_id.clone(),
+                expected_generation,
+            };
             async move {
                 let result =
                     (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
                 (
+                    cancellation,
                     provider_id,
                     auth_alias,
                     model_id,
@@ -391,7 +418,9 @@ impl V3ProviderFailureRuntimeHealth {
             }
         }))
         .await;
-        for (provider_id, auth_alias, model_id, expected_generation, result) in probe_results {
+        for (cancellation, provider_id, auth_alias, model_id, expected_generation, result) in
+            probe_results
+        {
             match result {
                 Ok(()) => self
                     .store
@@ -418,6 +447,7 @@ impl V3ProviderFailureRuntimeHealth {
                     ));
                 }
             }
+            drop(cancellation);
         }
         if probe_errors.is_empty() {
             Ok(())
@@ -914,20 +944,22 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         ),
         routecodex_v3_config::internal::V3InternalErrorCategory::Transient
     );
-    let matched_policy = find_matching_provider_error_policy(
-        context.manifest,
-        &selected.candidate.provider_id,
-        Some(&selected.candidate.provider_type),
-        Some(&selected.candidate.model_id),
-        status,
-        error_type.as_deref(),
-        &message,
-    );
+    let matched_policy = matched_policy_directive.or_else(|| {
+        find_matching_provider_error_policy(
+            context.manifest,
+            &selected.candidate.provider_id,
+            Some(&selected.candidate.provider_type),
+            Some(&selected.candidate.model_id),
+            status,
+            error_type.as_deref(),
+            &message,
+        )
+    });
     let configured_same_candidate_retries = configured_retry_budget_for_failure(
         matched_policy,
         context.retry_policy.same_candidate_retries,
     );
-    let transient_admission = if transient {
+    let mut transient_admission = if transient {
         Some(
             context
                 .provider_health
@@ -996,6 +1028,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     if configured_retry_mode(matched_policy, context.retry_policy.same_candidate_retries)
         == Some(V3ProviderErrorRetryMode::RetrySame)
         && health_record.state != "cooldown"
+        // Request-local projection/compat failures describe this request, not
+        // provider health. They must project terminally without spending a
+        // same-candidate retry budget or entering a provider action wait.
+        && !is_request_local_compat_failure
         && retries_done < configured_same_candidate_retries
         && status != 400
         // HTTP 503 is an upstream availability signal.  Do not spend a
@@ -1229,6 +1265,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 false,
                 None,
             );
+            drop(transient_admission.take());
             let admission = context
                 .provider_health
                 .wait_for_terminal_provider_projection_in_scope(
@@ -1369,6 +1406,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         false,
         None,
     );
+    drop(transient_admission.take());
     let admission = context
         .provider_health
         .wait_for_terminal_provider_projection_in_scope(

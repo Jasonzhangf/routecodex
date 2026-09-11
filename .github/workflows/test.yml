@@ -71,7 +71,7 @@ jobs:
       - name: V2 and V3 route-classifier semantic gate
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
-        run: npm run verify:servertool-rust-only
+        run: node scripts/verify-servertool-rust-only.mjs
       - name: Fetch Rust dependencies for offline builds
         run: cargo fetch --manifest-path v3/Cargo.toml
       - name: Build (release)

@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+if (process.cwd().endsWith('/v3') && existsSync(resolve(process.cwd(), 'crates'))) {
+  process.chdir(resolve(process.cwd(), '..'));
+}
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-relay-response-semantics.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-relay-response-semantics.mjs');
 const fixtures = [
   ['Resp05 continuation save', 'V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n    }', 'V3HubRespOutbound05ClientSemantic {\n        previous: input,\n        client_payload,\n        canonical_context: Some(Value::Null),\n    }', /Resp05\/Server immutable interval/],
   ['SSE semantic repair', 'V3ServerRespOutbound06ClientFrame { previous: input }', 'V3ServerRespOutbound06ClientFrame { previous: input }; serde_json::to_string(&"repair").unwrap()', /Resp05\/Server immutable interval/],
@@ -32,6 +35,8 @@ const failures = [];
 for (const [name, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-relay-response-red-'));
   try {
+    const verifierCopy = join(root, 'verify-v3-relay-response-semantics.mjs');
+    cpSync(verifier, verifierCopy);
     cpSync(resolve(repoRoot, 'v3/crates/routecodex-v3-runtime/src'), join(root, 'v3/crates/routecodex-v3-runtime/src'), { recursive: true });
     cpSync(resolve(repoRoot, 'v3/crates/routecodex-v3-server/src'), join(root, 'v3/crates/routecodex-v3-server/src'), { recursive: true });
     cpSync(resolve(repoRoot, 'v3/crates/routecodex-v3-provider-responses/src'), join(root, 'v3/crates/routecodex-v3-provider-responses/src'), { recursive: true });
@@ -51,7 +56,7 @@ for (const [name, from, to, diagnostic] of fixtures) {
     const source = readFileSync(target, 'utf8');
     if (!source.includes(from)) throw new Error(`${name}: fixture source missing`);
     writeFileSync(target, source.replace(from, to));
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifierCopy], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${name}: gate unexpectedly passed`);
     else if (!diagnostic.test(output)) failures.push(`${name}: wrong diagnostic: ${output.slice(-600)}`);

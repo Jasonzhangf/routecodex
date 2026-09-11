@@ -17,8 +17,8 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> crate::V3FoundationRuntimeOutput {
-    let stopless_control = V3ResponsesRelayStoplessControlState::default();
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    let server_tool_state = V3ResponsesRelayServerToolState::default();
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
@@ -28,9 +28,9 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
             now_epoch_ms,
             commit_resp04_effects: false,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: &stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: &server_tool_state,
+            scope: server_tool_scope,
             commit_effects: false,
         }),
         None,
@@ -40,15 +40,15 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
     .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control(
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
+    server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> crate::V3FoundationRuntimeOutput {
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
@@ -58,9 +58,9 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
             now_epoch_ms,
             commit_resp04_effects: false,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: server_tool_state,
+            scope: server_tool_scope,
             commit_effects: false,
         }),
         None,
@@ -70,17 +70,17 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
     .into_foundation()
 }
 
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_stopless_control_and_initial_target(
+pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_server_tool_state_and_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
+    server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> crate::V3FoundationRuntimeOutput {
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
@@ -90,9 +90,9 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_contin
             now_epoch_ms,
             commit_resp04_effects: false,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: server_tool_state,
+            scope: server_tool_scope,
             commit_effects: false,
         }),
         Some(initial_selected_target),
@@ -102,15 +102,15 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_contin
     .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control(
+pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
+    server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> V3ResponsesRelayDryRunOutcome {
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
@@ -120,9 +120,9 @@ pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local
             now_epoch_ms,
             commit_resp04_effects: false,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: server_tool_state,
+            scope: server_tool_scope,
             commit_effects: false,
         }),
         None,
@@ -135,7 +135,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
-    stopless_control: Option<V3ResponsesRelayStoplessControlExecution<'_>>,
+    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
 ) -> V3ResponsesRelayDryRunOutcome {
@@ -160,7 +160,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         input,
         &transport,
         local,
-        stopless_control,
+        server_tool_state,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         false,

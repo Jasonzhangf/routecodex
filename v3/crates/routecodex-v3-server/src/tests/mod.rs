@@ -163,6 +163,7 @@ fn test_v3_listener_state_with_debug(
     let manifest = Arc::new(V3Config05ManifestPublished {
         version: 3,
         hub_v1: None,
+        memory_raw_capture: Default::default(),
         servers,
         providers: BTreeMap::new(),
         forwarders: BTreeMap::new(),
@@ -207,13 +208,11 @@ fn test_v3_listener_state_with_debug(
                 && !manifest.debug.codex_samples,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
-        responses_direct_stopless_control: Arc::new(
-            V3ResponsesDirectStoplessControlState::default(),
-        ),
+        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
         responses_relay_local_continuation: Arc::new(
             V3ResponsesRelayLocalContinuationState::default(),
         ),
-        responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
+        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -474,7 +473,7 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_error_projects_responses_failed_without_provider_detail() {
+async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -501,10 +500,11 @@ async fn direct_live_sse_provider_error_projects_responses_failed_without_provid
     let response = responses_direct_output_response(frame, None);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.contains("event: response.failed"), "{text}");
-    assert!(text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.contains("event: response.output_text.delta"), "{text}");
+    assert!(!text.contains("event: response.failed"), "{text}");
+    assert!(!text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(!text.contains("data: [DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -1072,7 +1072,6 @@ fn test_direct_observability(
         provider_status: Some(200),
         response_status: Some("completed".to_string()),
         finish_reason: Some("stop".to_string()),
-        stopless_activation: false,
         attempts: Some(2),
         unavailable_candidates: Vec::new(),
         provider_failure_events,
@@ -1396,15 +1395,13 @@ fn console_timed_content_aligns_tags_by_terminal_display_width() {
     assert_eq!(v3_console_char_display_width('▶'), 1);
     assert_eq!(v3_console_char_display_width('✅'), 2);
     assert_eq!(v3_console_char_display_width('❌'), 2);
-    assert_eq!(v3_console_char_display_width('🧭'), 2);
 
     let started = format_v3_console_timed_content("▶ [/v1/responses]", "req=a");
     let completed = format_v3_console_timed_content("✅ [/v1/responses]", "req=b");
     let failed = format_v3_console_timed_content("❌ [provider-error]", "req=e");
-    let stopless = format_v3_console_timed_content("🧭 [stopless]", "req=c");
     let usage = format_v3_console_timed_content("[usage]", "req=d");
 
-    let data_columns = [&started, &completed, &failed, &stopless, &usage].map(|line| {
+    let data_columns = [&started, &completed, &failed, &usage].map(|line| {
         let boundary = line.find(" req=").expect("timed content must contain req");
         v3_console_display_width(&line[..boundary])
     });
@@ -3387,6 +3384,34 @@ fn direct_stream_error_projection_response_uses_error_channel() {
 }
 
 #[tokio::test]
+async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let response = responses_direct_output_response_with_console_for_protocol(
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
+        None,
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
+}
+
+#[tokio::test]
 async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_json() {
     let log_file = test_v3_console_log_file("direct-continuation-scope-sse-error");
     let state = test_v3_listener_state(&log_file, 5555);
@@ -3512,6 +3537,7 @@ fn error_projection_appends_human_console_failure_line() {
     let manifest = Arc::new(V3Config05ManifestPublished {
         version: 3,
         hub_v1: None,
+        memory_raw_capture: Default::default(),
         servers,
         providers: BTreeMap::new(),
         forwarders: BTreeMap::new(),
@@ -3551,13 +3577,11 @@ fn error_projection_appends_human_console_failure_line() {
                 && !manifest.debug.full_codex_sampling,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
-        responses_direct_stopless_control: Arc::new(
-            V3ResponsesDirectStoplessControlState::default(),
-        ),
+        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
         responses_relay_local_continuation: Arc::new(
             V3ResponsesRelayLocalContinuationState::default(),
         ),
-        responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
+        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -3607,44 +3631,6 @@ fn error_projection_appends_human_console_failure_line() {
         "human console log must include the visible failed line, not only JSON debug events: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
-}
-
-#[test]
-fn stopless_console_activation_requires_action_stop_and_uses_fixed_orange() {
-    let active = V3RuntimeObservability {
-        response_status: Some("requires_action".to_string()),
-        finish_reason: Some("tool_calls".to_string()),
-        stopless_activation: true,
-        ..Default::default()
-    };
-    assert!(is_v3_stopless_console_activation(&active));
-
-    let completed = V3RuntimeObservability {
-        response_status: Some("completed".to_string()),
-        finish_reason: Some("stop".to_string()),
-        stopless_activation: false,
-        ..Default::default()
-    };
-    assert!(!is_v3_stopless_console_activation(&completed));
-
-    let stopless_content = "[5555:responses:sessionID:xxxx][rules][glmrelay_openai.glm-5.2][tools] 🧭 [stopless] 00:00:00 req=req event=activated hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason=stop transport=sse";
-    let colored = colorize_v3_layered_console_line(
-        V3ConsoleLayeredBlock::new("", stopless_content, stopless_content, ""),
-        ANSI_STOPLESS_ORANGE,
-        ANSI_DEBUG_DIM,
-    );
-    assert!(
-        colored.starts_with(ANSI_STOPLESS_ORANGE),
-        "stopless console line must use fixed orange color: {colored:?}"
-    );
-    assert!(
-        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
-        "stopless diagnostic layer must be dim gray: {colored:?}"
-    );
-    assert!(colored.contains("hook="));
-    assert!(colored.contains("reasoningStop"));
-    assert!(colored.contains("callId="));
-    assert!(colored.contains("call_stopless_reasoning"));
 }
 
 #[tokio::test]
@@ -3700,7 +3686,7 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
 }
 
 #[tokio::test]
-async fn responses_relay_canonical_network_error_stays_json_for_stream_request() {
+async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 502,
         client_body: V3ResponsesRelayClientBody::Json(json!({
@@ -3719,14 +3705,43 @@ async fn responses_relay_canonical_network_error_stays_json_for_stream_request()
     };
 
     let response = responses_relay_output_response(output, None, None, true);
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(response.headers()["content-type"], "application/json");
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = to_bytes(response.into_body(), usize::MAX).await;
+    assert!(body.is_err(), "pool exhaustion must fail the SSE transport");
+}
+
+#[test]
+fn responses_stream_network_error_without_error04_projects_sse_body() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        observability: None,
+        stream_observation: None,
+    };
+
+    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+    assert_eq!(projected.status, 502);
+    assert_eq!(projected.content_type, "text/event-stream");
+    match projected.body {
+        V3Server16Body::Bytes(bytes) => {
+            assert!(!bytes.is_empty());
+            let text = std::str::from_utf8(&bytes).expect("SSE error body must be UTF-8");
+            assert!(text.contains("event: response.failed"), "{text}");
+            assert!(text.contains("network_error"), "{text}");
+            assert!(text.contains("network error"), "{text}");
+            assert!(text.contains("data: [DONE]"), "{text}");
+        }
+        other => panic!("network error must project SSE bytes, got {other:?}"),
+    }
 }
 
 #[test]

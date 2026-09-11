@@ -118,7 +118,7 @@ const cases = [
     path: "docs/architecture/v3-resource-operation-map.yml",
     mutate: (source) =>
       source.replace(
-        "allowed_writers: [V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_rescue_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]",
+        /allowed_writers: \[V3ProviderHealthStore::record_provider_failure_in_session[^\n]*\]/u,
         "allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record, V3ProviderHealthStore::record_provider_failure_in_session, V3ProviderHealthStore::record_provider_success_in_session]",
       ),
     diagnostic: /Resource map provider health writers must name only session-scoped|Resource map must not register Runtime wrappers/u,

@@ -17,6 +17,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
     V3Config05ManifestPublished {
         version: 3,
         hub_v1: None,
+        memory_raw_capture: Default::default(),
         servers: BTreeMap::from([(
             "s".into(),
             V3ServerManifest {

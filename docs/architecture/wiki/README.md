@@ -73,12 +73,9 @@
    - 看 same-protocol direct 的 provider/model policy 如何从 config 编译，经 VR real-target 分类，再驱动成对 request/response projector。
 
 18. `docs/architecture/wiki/servertool-followup-call-graph.md`
-   - 看 `followup / CLI projection / stopless` 三条 servertool 分支如何回到主链，以及谁是 owner。
+   - 看 servertool followup 与 CLI projection 如何回到主链，以及谁是 owner。
 
-19. `docs/architecture/wiki/stopless-session-mainline-source.md`
-   - 看 stopless 的 runtime metadata 主线、当前请求 `tool_outputs` 恢复、以及 file/tmux/sessionDir 已移除到什么程度。
-
-20. `docs/architecture/wiki/coverage-matrix.md`
+19. `docs/architecture/wiki/coverage-matrix.md`
    - 看哪些逻辑已经有 wiki review 面，哪些还缺。
    - 先确定下一批应该补哪一页，不要零散补图。
 
@@ -117,7 +114,6 @@
 - `docs/architecture/wiki/virtual-router-ownership-map.md`
 - `docs/architecture/wiki/metadata-boundary-map.md`
 - `docs/architecture/wiki/metadata-center-mainline-source.md`
-- `docs/architecture/wiki/stopless-session-mainline-source.md`
 - `docs/architecture/wiki/chat-process-protocol-mapping.md`
 - `docs/architecture/wiki/server-responses-sse-bridge-map.md`
 - `docs/architecture/wiki/responses-direct-relay-map.md`
@@ -142,7 +138,7 @@
   - 再查 `mainline-call-map.yml`
 - 需要图面 review 时看 `wiki/mainline-call-graph.md`
 - 需要直接浏览正式渲染页时看 `wiki/html/mainline-call-graph.html`
-- stopless/runtime-metadata 问题先看 `wiki/stopless-session-mainline-source.md`，再看 `wiki/metadata-boundary-map.md`
+- Stopless 已从 V3 runtime、CLI、MetadataCenter 和当前架构主线退休；官方 Stop Hook 后续由独立 hooks daemon / codexapp 输入接口承载，不在此处恢复旧入口。
 - metadata center / provenance / repeated merge/backfill 问题先看 `wiki/metadata-center-mainline-source.md`，再看 `wiki/metadata-boundary-map.md`
 - `ROUTECODEX_SESSION_DIR` / tmux / session / conversation namespace 问题先看 `wiki/runtime-lifecycle-call-graph.md`，再看 `wiki/metadata-boundary-map.md`
 

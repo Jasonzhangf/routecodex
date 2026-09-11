@@ -4,6 +4,7 @@ use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 
 /// Protocol name recognized by the shared namespace-tool flattener for Responses wire
 /// function shape (`{type:"function", name, description?, parameters?, strict?}`).
@@ -184,7 +185,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         current_request_body,
     )?;
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
-    normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
+    normalize_deepseek_thinking_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
     // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
     //    接受密文，保留透传；响应侧主防线（`apply_v3_response_cipher_policy`，
@@ -217,6 +218,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
+    validate_provider_wire_tool_names(&request_id, &body)?;
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
@@ -261,6 +263,9 @@ fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
 
 /// 单一对象的密文键剥离（请求侧 reasoning 条目与响应侧递归共用同一语义）。
 fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
+    if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
+        return;
+    }
     if let Some(Value::String(cipher)) = map.get("encrypted_content") {
         if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
             map.remove("encrypted_content");
@@ -538,10 +543,7 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
     }
 }
 
-fn normalize_deepseek_thinking_stopless_tool_choice(
-    body: &mut Value,
-    target: &V3ResponsesProviderTarget,
-) {
+fn normalize_deepseek_thinking_tool_choice(body: &mut Value, target: &V3ResponsesProviderTarget) {
     if matches!(target.provider_type.as_str(), "openai_chat" | "responses")
         && (target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash")
@@ -647,9 +649,47 @@ fn expand_namespace_tools_in_responses_wire_body(
     };
     let tools = tools.clone();
     let mut expanded = Vec::with_capacity(tools.len());
+    let mut namespace_name_map = HashMap::new();
     for tool in tools {
+        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            let namespace_name = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let (Some(namespace_name), Some(children)) =
+                (namespace_name, tool.get("tools").and_then(Value::as_array))
+            {
+                for child in children {
+                    let child_name = child
+                        .get("function")
+                        .and_then(Value::as_object)
+                        .and_then(|function| function.get("name"))
+                        .or_else(|| child.get("name"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty());
+                    if let Some(child_name) = child_name {
+                        let qualified_name = format!("{namespace_name}.{child_name}");
+                        namespace_name_map.insert(
+                            qualified_name,
+                            map_namespace_tool_name(namespace_name, child_name),
+                        );
+                    }
+                }
+            }
+        }
         match flatten_namespace_tool_for_provider(protocol, &tool) {
-            Ok(Some(children)) => expanded.extend(children),
+            Ok(Some(mut children)) => {
+                if let Some(namespace_name) = tool.get("name").and_then(Value::as_str) {
+                    rename_flattened_namespace_children(
+                        namespace_name,
+                        tool.get("tools").and_then(Value::as_array),
+                        &mut children,
+                    );
+                }
+                expanded.extend(children)
+            }
             Ok(None) => expanded.push(tool),
             Err(detail) => {
                 return Err(V3ProviderError::NamespaceToolFlattenFailed {
@@ -663,7 +703,163 @@ fn expand_namespace_tools_in_responses_wire_body(
         expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
     }
     body["tools"] = Value::Array(expanded);
+    rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
     Ok(body)
+}
+
+fn rename_flattened_namespace_children(
+    namespace_name: &str,
+    source_children: Option<&Vec<Value>>,
+    flattened_children: &mut [Value],
+) {
+    let Some(source_children) = source_children else {
+        return;
+    };
+    for (source, flattened) in source_children.iter().zip(flattened_children.iter_mut()) {
+        let child_name = source
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .or_else(|| source.get("name"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(child_name) = child_name else {
+            continue;
+        };
+        let mapped = Value::String(map_namespace_tool_name(namespace_name, child_name));
+        if let Some(object) = flattened.as_object_mut() {
+            object.insert("name".to_string(), mapped.clone());
+            if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+                function.insert("name".to_string(), mapped.clone());
+            }
+        }
+    }
+}
+
+fn map_namespace_tool_name(namespace_name: &str, child_name: &str) -> String {
+    if child_name
+        .strip_prefix(namespace_name)
+        .is_some_and(|suffix| suffix.starts_with("__"))
+    {
+        return child_name.to_string();
+    }
+    let qualified_name = format!("{namespace_name}.{child_name}");
+    let mut mapped = String::with_capacity(qualified_name.len());
+    for character in qualified_name.chars() {
+        match character {
+            '.' => mapped.push_str("__"),
+            character if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') => {
+                mapped.push(character)
+            }
+            _ => mapped.push('_'),
+        }
+    }
+    mapped
+}
+
+fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
+    fn rewrite_call_object(value: &mut Value, names: &HashMap<String, String>) {
+        let Some(object) = value.as_object_mut() else {
+            return;
+        };
+        if let Some(Value::String(name)) = object.get_mut("name") {
+            if let Some(mapped) = names.get(name.as_str()) {
+                *name = mapped.clone();
+            }
+        }
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(Value::String(name)) = function.get_mut("name") {
+                if let Some(mapped) = names.get(name.as_str()) {
+                    *name = mapped.clone();
+                }
+            }
+        }
+    }
+
+    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            if matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "custom_tool_call" | "tool_use")
+            ) {
+                rewrite_call_object(item, names);
+            }
+        }
+    }
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for tool_call in tool_calls {
+                if tool_call.get("type").and_then(Value::as_str) == Some("function") {
+                    rewrite_call_object(tool_call, names);
+                }
+            }
+        }
+    }
+}
+
+fn validate_provider_wire_tool_names(
+    request_id: &str,
+    body: &Value,
+) -> Result<(), V3ProviderError> {
+    fn walk(request_id: &str, value: &Value, path: &str) -> Result<(), V3ProviderError> {
+        match value {
+            Value::Object(object) => {
+                let kind = object.get("type").and_then(Value::as_str);
+                if matches!(
+                    kind,
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                ) {
+                    if let Some(name) = object.get("name").and_then(Value::as_str) {
+                        if !is_provider_wire_tool_name(name) {
+                            return Err(V3ProviderError::FunctionToolShapeFailed {
+                                request_id: request_id.to_owned(),
+                                detail: format!(
+                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                ),
+                            });
+                        }
+                    }
+                }
+                if kind == Some("function") {
+                    if let Some(function) = object.get("function").and_then(Value::as_object) {
+                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                            if !is_provider_wire_tool_name(name) {
+                                return Err(V3ProviderError::FunctionToolShapeFailed {
+                                    request_id: request_id.to_owned(),
+                                    detail: format!(
+                                        "{path}.function.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                for (key, child) in object {
+                    walk(request_id, child, &format!("{path}.{key}"))?;
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(request_id, child, &format!("{path}[{index}]"))?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    walk(request_id, body, "body")
+}
+
+fn is_provider_wire_tool_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 /// Console Go (`openai_chat`) 的 `/v1/responses` 端点使用 Chat 风格工具 serde 的变体：
@@ -881,11 +1077,6 @@ pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
     "resumeMeta",
     "servertool_state",
     "servertoolState",
-    "stopless_state",
-    "stoplessState",
-    "stopless_center",
-    "stoplessCenter",
-    "__routecodex_stopless_center",
     "error_chain",
     "errorChain",
     "node_trace",

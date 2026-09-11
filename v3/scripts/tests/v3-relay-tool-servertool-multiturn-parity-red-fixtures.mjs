@@ -1,12 +1,25 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+if (process.cwd().endsWith('/v3') && existsSync(resolve(process.cwd(), 'crates'))) {
+  process.chdir(resolve(process.cwd(), '..'));
+}
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs');
+const verifierRelative = 'v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs';
 const copyPaths = [
+  verifierRelative,
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
@@ -18,7 +31,7 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-  'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
   'docs/architecture/v3-resource-operation-map.yml',
   'docs/architecture/v3-function-map.yml',
@@ -103,14 +116,6 @@ const cases = [
     diagnostic: /apply_v3_tool_call_servertool_hook_at_resp03/,
   },
   {
-    name: 'stop servertool hook removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: 'apply_v3_stop_servertool_hook_at_resp03',
-    mutation: 'apply_v3_stop_servertool_hook_removed_at_resp03',
-    all: true,
-    diagnostic: /apply_v3_stop_servertool_hook_at_resp03/,
-  },
-  {
     name: 'Responses client SSE completed terminal relabeled as requires_action',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     marker:
@@ -165,48 +170,6 @@ const cases = [
     diagnostic: /request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id/,
   },
   {
-    name: 'Responses Relay provider tools preservation removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
-    mutation: 'json_two_turn_additional_tools_surface_test_removed',
-    diagnostic: /json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs/,
-  },
-  {
-    name: 'Codex additional_tools shape blackbox removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
-    mutation: 'json_two_turn_additional_tools_shape_test_removed',
-    diagnostic: /json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs/,
-  },
-  {
-    name: 'stopless natural-stop guard client semantic blackbox removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
-    mutation: 'json_stopless_budget_tool_call_semantic_test_removed',
-    diagnostic: /json_stopless_center_natural_stop_guard_passes_cleaned_original_response/,
-  },
-  {
-    name: 'apply_patch SSE rejects requires_action terminal assertion removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
-    mutation: 'apply_patch SSE terminal assertion removed',
-    diagnostic: /response\.requires_action as the terminal stream event/,
-  },
-  {
-    name: 'Codex additional_tools original JSON path assertion removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'no-original-tools request must not synthesize Responses input.additional_tools',
-    mutation: 'request path check removed',
-    diagnostic: /no-original-tools request must not synthesize Responses input\.additional_tools/,
-  },
-  {
-    name: 'stopless additional_tools lift helper revived',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
-    marker: 'use super::{',
-    mutation: 'fn lift_additional_tools_into_provider_tool_surface() {}\nuse super::{',
-    diagnostic: /tool declaration shape rebuild helper|lift_additional_tools_into_provider_tool_surface/,
-  },
-  {
     name: 'Responses HTTP additional_tools transport lift revived',
     file: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
     marker: 'pub struct V3Transport13ResponsesRequest',
@@ -231,8 +194,8 @@ const cases = [
   {
     name: 'package script removed',
     file: 'package.json',
-    marker: '    "verify:v3-relay-tool-servertool-multiturn-parity-closeout": "node scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs",\n',
-    mutation: '',
+    marker: '"verify:v3-relay-tool-servertool-multiturn-parity-closeout": "',
+    mutation: '"verify:v3-relay-tool-servertool-multiturn-parity-closeout_removed": "',
     diagnostic: /missing script verify:v3-relay-tool-servertool-multiturn-parity-closeout/,
   },
   {
@@ -264,6 +227,7 @@ const failures = [];
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-relay-tool-parity-red-'));
   try {
+    symlinkSync(resolve(repo, '../../node_modules'), resolve(root, 'node_modules'), 'dir');
     for (const relative of copyPaths) {
       const destination = resolve(root, relative);
       mkdirSync(dirname(destination), { recursive: true });
@@ -281,7 +245,15 @@ for (const testCase of cases) {
         ? source.split(testCase.marker).join(testCase.mutation)
         : source.replace(testCase.marker, testCase.mutation),
     );
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [resolve(root, verifierRelative)], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ROUTECODEX_V3_SOURCE_ROOT: '',
+        ROUTECODEX_V3_ADMISSION_WORKSPACE: '1',
+      },
+    });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) {

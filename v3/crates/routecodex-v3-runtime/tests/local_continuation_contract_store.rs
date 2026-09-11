@@ -212,7 +212,7 @@ fn same_context_id_in_distinct_scope_does_not_collide() {
     let mut store = V3LocalContinuationStore::default();
     store
         .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
-            "call_stopless_reasoning",
+            "call_exec_tool",
             scope(),
             context(),
             V3LocalContinuationTerminalOutcome::NonTerminal,
@@ -229,7 +229,7 @@ fn same_context_id_in_distinct_scope_does_not_collide() {
     );
     store
         .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
-            "call_stopless_reasoning",
+            "call_exec_tool",
             second_scope.clone(),
             json!({"response":{"id":"rcc_local_2","output":[]}}),
             V3LocalContinuationTerminalOutcome::NonTerminal,
@@ -242,7 +242,7 @@ fn same_context_id_in_distinct_scope_does_not_collide() {
     assert_eq!(
         store
             .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-                "call_stopless_reasoning",
+                "call_exec_tool",
                 scope(),
                 3_000
             ))
@@ -253,7 +253,7 @@ fn same_context_id_in_distinct_scope_does_not_collide() {
     assert_eq!(
         store
             .restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-                "call_stopless_reasoning",
+                "call_exec_tool",
                 second_scope,
                 3_000
             ))
@@ -261,11 +261,11 @@ fn same_context_id_in_distinct_scope_does_not_collide() {
             .canonical_context(),
         &json!({"response":{"id":"rcc_local_2","output":[]}})
     );
-    assert!(store.release_in_scope(&scope(), "call_stopless_reasoning"));
+    assert!(store.release_in_scope(&scope(), "call_exec_tool"));
     assert_eq!(store.len(), 1);
     assert!(matches!(
         store.restore_at_req04(&V3LocalContinuationReq04RestoreRequest::local(
-            "call_stopless_reasoning",
+            "call_exec_tool",
             scope(),
             3_000
         )),

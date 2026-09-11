@@ -73,7 +73,7 @@ flowchart TD
   S0[&quot;&lt;b&gt;V3ProviderRespInbound01Raw&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider raw response/event bytes already received&lt;/small&gt;&quot;]
   S1[&quot;&lt;b&gt;ProviderRespCompat02ProviderCompat&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider-specific compat before Hub parse&lt;/small&gt;&quot;]
   S2[&quot;&lt;b&gt;V3HubRespInbound02Normalized&lt;/b&gt;&lt;br/&gt;&lt;small&gt;Hub response semantic input&lt;/small&gt;&quot;]
-  S3[&quot;&lt;b&gt;V3HubRespChatProcess03Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;response tool/servertool/stopless governance owner&lt;/small&gt;&quot;]
+  S3[&quot;&lt;b&gt;V3HubRespChatProcess03Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;response tool/servertool governance owner&lt;/small&gt;&quot;]
   S4[&quot;&lt;b&gt;V3HubRespContinuation04Committed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;continuation save endpoint only&lt;/small&gt;&quot;]
   S5[&quot;&lt;b&gt;V3HubRespOutbound05ClientSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;client protocol projection only&lt;/small&gt;&quot;]
   S6[&quot;&lt;b&gt;V3ServerRespOutbound06ClientFrame&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP/SSE frame handoff only&lt;/small&gt;&quot;]
@@ -96,7 +96,7 @@ flowchart TD
         <article class="logic-card">
     <div class="node-card-top"><span>Req04</span></div>
     <h3>Request Chat Process owner</h3>
-    <p>Continuation restore, current-turn tool governance, stopless request control, and tool declaration merge live here.</p>
+    <p>Continuation restore, current-turn tool governance, and tool declaration merge live here.</p>
   </article>
         <article class="logic-card">
     <div class="node-card-top"><span>ReqOutbound / Compat / Wire</span></div>
@@ -117,7 +117,7 @@ flowchart TD
         <article class="logic-card">
     <div class="node-card-top"><span>Resp03</span></div>
     <h3>Response Chat Process owner</h3>
-    <p>Text harvest, tool frame repair, finish_reason branch, servertool, stopless, and ordinary tool governance live here.</p>
+    <p>Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.</p>
   </article>
         <article class="logic-card">
     <div class="node-card-top"><span>Resp04 / RespOutbound / Server frame</span></div>
@@ -131,7 +131,7 @@ flowchart TD
       <h2>Error resources</h2>
       <div class="note-grid">
         <article class="note-card"><h3>Error01-06 is a resource graph</h3><p>Error handling is not a side-channel label. Provider/runtime errors must enter the typed error chain and provider health resources without entering normal payload.</p></article>
-        <article class="note-card"><h3>Side-channel is carrier only</h3><p>Metadata, debug, error, snapshot, health, and stopless control facts are resources with owners. Side-channel only moves those facts; it is not business payload.</p></article>
+        <article class="note-card"><h3>Side-channel is carrier only</h3><p>Metadata, debug, error, snapshot, and health facts are resources with owners. Side-channel only moves those facts; it is not business payload.</p></article>
       </div>
     </section>
 
@@ -160,12 +160,12 @@ flowchart TD
 
     <section class="panel">
       <h2>SSE Edge SOP</h2>
-      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, stopless/servertool, routing, retry, or error-policy semantics.</div>
+      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.</div>
     </section>
 
     <section class="panel">
       <h2>Locked chain fingerprints</h2>
-      <table><thead><tr><th>Chain</th><th>Lock status</th><th>Edges</th><th>Owner</th><th>Fingerprint</th></tr></thead><tbody><tr><td><code>v3.config.compile</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:1390aa1d0f1b67e239443…</code></td></tr><tr><td><code>v3.config.compact_hub_v1_defaults</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a3acf3ebdf…</code></td></tr><tr><td><code>v3.entry_protocol_endpoint_binding.mainline</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.entry_protocol_endpoint_binding</code></td><td><code>sha256:9ebd6fe03f79c332e1876…</code></td></tr><tr><td><code>v3.server.startup</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:f266fbe1eab21df845296…</code></td></tr><tr><td><code>v3.responses_direct.required_mainline</code></td><td><span class="status">audited_locked</span></td><td>17</td><td><code>v3.responses_direct_mvp_architecture</code></td><td><code>sha256:2a5ca1c00c3fc8b329623…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.request</code></td><td><span class="status">audited_locked</span></td><td>9</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:66d3f5549e48833950458…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.response</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:6c9652ec050d62e5c23e4…</code></td></tr><tr><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><span class="status">audited_locked</span></td><td>8</td><td><code>v3.servertool_hook_skeleton_lifecycle</code></td><td><code>sha256:99d045db07dc7885fbfdf…</code></td></tr><tr><td><code>v3.debug_error_foundation.mainline</code></td><td><span class="status">audited_locked</span></td><td>18</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:3a62cd4e24df96130d7a9…</code></td></tr><tr><td><code>v3.sse.transport_boundary</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:ee58da7eca3b82d7e16b0…</code></td></tr></tbody></table>
+      <table><thead><tr><th>Chain</th><th>Lock status</th><th>Edges</th><th>Owner</th><th>Fingerprint</th></tr></thead><tbody><tr><td><code>v3.config.compile</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48ff5c7cdb3e…</code></td></tr><tr><td><code>v3.config.compact_hub_v1_defaults</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a3acf3ebdf…</code></td></tr><tr><td><code>v3.entry_protocol_endpoint_binding.mainline</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.entry_protocol_endpoint_binding</code></td><td><code>sha256:15ecb6de58935a4c1d3bf…</code></td></tr><tr><td><code>v3.server.startup</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:edd1d4d6c653ef4db4002…</code></td></tr><tr><td><code>v3.responses_direct.required_mainline</code></td><td><span class="status">audited_locked</span></td><td>17</td><td><code>v3.responses_direct_mvp_architecture</code></td><td><code>sha256:6d464f4c7a5db684d4798…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.request</code></td><td><span class="status">audited_locked</span></td><td>9</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:8aef490e60aec1ba0e582…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.response</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:6c9652ec050d62e5c23e4…</code></td></tr><tr><td><code>v3.debug_error_foundation.mainline</code></td><td><span class="status">audited_locked</span></td><td>22</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:c520e6d65c78c6dea0d8f…</code></td></tr><tr><td><code>v3.sse.transport_boundary</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:c93ca1386d58b91b17f73…</code></td></tr></tbody></table>
     </section>
 
     <section class="panel">

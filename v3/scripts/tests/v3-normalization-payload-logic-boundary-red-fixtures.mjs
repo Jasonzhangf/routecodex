@@ -117,10 +117,10 @@ const fixtures = [
     diagnostic: /RespOutbound05 client semantic projection/,
   },
   {
-    name: 'Server frame stopless logic',
+    name: 'Server frame payload serialization logic',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
     from: 'V3ServerRespOutbound06ClientFrame { previous: input }',
-    to: 'let _stopless = "stopless";\n    V3ServerRespOutbound06ClientFrame { previous: input }',
+    to: 'let _payload = serde_json::to_value(&input).unwrap();\n    V3ServerRespOutbound06ClientFrame { previous: input }',
     diagnostic: /ServerRespOutbound06 frame projection/,
   },
   {

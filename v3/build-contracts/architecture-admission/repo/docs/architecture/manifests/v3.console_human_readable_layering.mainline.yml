@@ -17,7 +17,6 @@ node_ids:
   - V3ConsoleReq02HumanBlock
   - V3ConsoleResp03HumanBlock
   - V3ConsoleStartup07HumanBlock
-  - V3ConsoleStopless05ExceptionalBlock
   - V3DebugSink01WriteFailed
   - V3Error01SourceRaised
   - V3Error06ClientProjected
@@ -81,24 +80,6 @@ edges:
       side_channel_writes:
         - v3.debug.artifact
         - v3.console.terminal_output
-  - step_id: v3-console-04
-    from_node: V3ConsoleObs01RuntimeObservability
-    to_node: V3ConsoleStopless05ExceptionalBlock
-    status: anchored
-    owner_feature_id: v3.console_human_readable_layering
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes:
-        - v3.runtime.responses_observability
-      produces:
-        - v3.debug.artifact
-        - v3.console.terminal_output
-      side_channel_reads:
-        - v3.runtime.responses_observability
-      side_channel_writes:
-        - v3.debug.artifact
-        - v3.console.terminal_output
   - step_id: v3-console-05
     from_node: V3ConsoleObs01RuntimeObservability
     to_node: V3ConsoleResp03HumanBlock
@@ -117,45 +98,9 @@ edges:
       side_channel_writes:
         - v3.debug.artifact
         - v3.console.terminal_output
-  - step_id: v3-console-06
-    from_node: V3ConsoleObs01RuntimeObservability
-    to_node: V3ConsoleStopless05ExceptionalBlock
-    status: anchored
-    owner_feature_id: v3.console_human_readable_layering
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes:
-        - v3.runtime.responses_observability
-      produces:
-        - v3.debug.artifact
-        - v3.console.terminal_output
-      side_channel_reads:
-        - v3.runtime.responses_observability
-      side_channel_writes:
-        - v3.debug.artifact
-        - v3.console.terminal_output
   - step_id: v3-console-07
     from_node: V3ConsoleObs01RuntimeObservability
     to_node: V3ConsoleResp03HumanBlock
-    status: anchored
-    owner_feature_id: v3.console_human_readable_layering
-    binding_pending: null
-    split_binding_id: null
-    resource_flow:
-      consumes:
-        - v3.runtime.responses_observability
-      produces:
-        - v3.debug.artifact
-        - v3.console.terminal_output
-      side_channel_reads:
-        - v3.runtime.responses_observability
-      side_channel_writes:
-        - v3.debug.artifact
-        - v3.console.terminal_output
-  - step_id: v3-console-08
-    from_node: V3ConsoleObs01RuntimeObservability
-    to_node: V3ConsoleStopless05ExceptionalBlock
     status: anchored
     owner_feature_id: v3.console_human_readable_layering
     binding_pending: null
@@ -431,4 +376,3 @@ verification:
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync
-    - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_lines --lib -- --nocapture

@@ -45,7 +45,7 @@ export const GENERATED_WIKI_PAGES = [
     path: `${WIKI_ROOT}/servertool-ownership-map.md`,
     heading: 'hub.servertool_*',
     purpose:
-      '把 servertool 的 owner、验证栈、允许修改路径、禁止修改路径集中成一页，避免在 followup/CLI/stopless/backend-route 多文件里改错层。',
+      '把 servertool 的 owner、验证栈、允许修改路径、禁止修改路径集中成一页，避免在 followup/CLI/backend-route 多文件里改错层。',
     filters: ['hub.servertool_'],
     relatedDocs: [
       'docs/architecture/function-map.yml',
@@ -101,23 +101,6 @@ export const MANUAL_WIKI_PAGES = [
       'V3HubV1CompactAuthoringAccepted',
       'default_hub_v1_authoring()',
       'default_server_execution()',
-    ],
-  },
-  {
-    path: `${WIKI_ROOT}/stopless-session-mainline-source.md`,
-    title: '# Stopless Session Mainline Source',
-    minMermaidBlocks: 2,
-    requiredTokens: [
-      '## Purpose',
-      '## Stopless Session Mainline',
-      '## Stopless State Machine',
-      '## State Transition Matrix',
-      'GuardTerminal',
-      '## Edge Owners and Current Status',
-      '## Active Gaps',
-      'stopless-gap-03',
-      'stopless-gap-04',
-      'stopless-gap-05',
     ],
   },
   {
@@ -242,7 +225,7 @@ export const MANUAL_WIKI_PAGES = [
       '## Branch Split',
       '## Owner Matrix',
       '## Followup vs CLI',
-      '## Stopless Branch',
+      '## External Hooks Boundary',
       '## Review Findings',
       'followup-gap-01',
       'HubRespChatProcess03Governed',

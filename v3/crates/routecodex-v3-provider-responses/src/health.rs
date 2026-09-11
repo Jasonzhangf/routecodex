@@ -423,16 +423,6 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        if state.health_disabled.contains(provider_id) {
-            return Ok(V3ProviderFailureRecord {
-                scope_label,
-                provider_key,
-                state: "health_disabled".to_string(),
-                failure_count: 0,
-                cooldown_until_ms: None,
-                reason: reason.map(str::to_string),
-            });
-        }
         let uses_configured_policy = policy_override.is_none();
         let policy = policy_override.unwrap_or_else(|| {
             state
@@ -901,6 +891,40 @@ impl V3ProviderHealthStore {
         )))
     }
 
+    /// Cancel an abandoned probe without touching a newer cooldown
+    /// generation. The owner calls this from a cancellation guard when the
+    /// request or managed probe task is dropped before completion.
+    pub fn cancel_provider_cooldown_probe_at_generation(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        expected_generation: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let current_generation = state
+            .adaptive_history
+            .get(&key)
+            .map_or(0, |history| history.score_generation);
+        if current_generation != expected_generation {
+            return Ok(());
+        }
+        if let Some(probe_state) = state
+            .provider_cooldown_probes
+            .get_mut(&key)
+            .filter(|probe_state| probe_state.probe_in_flight)
+        {
+            probe_state.probe_in_flight = false;
+            probe_state.completion.send_replace(true);
+            persist_cooldown_state(state);
+        }
+        Ok(())
+    }
+
     /// 并发耗尽请求等待同一 key 的单飞 probe 收口，不重复发送 probe。
     pub async fn wait_for_provider_cooldown_probe_completion(
         &self,
@@ -1082,6 +1106,9 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(key_health_projection(&state, &key, now_ms));
+        }
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,

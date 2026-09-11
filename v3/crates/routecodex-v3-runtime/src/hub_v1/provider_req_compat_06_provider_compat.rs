@@ -131,7 +131,7 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     .map_err(|reason| classify_v3_provider_compat_error("request", profile, reason))?;
     let mut result = result;
     project_reasoning_effort_for_selected_target(&mut result, selected, provider_protocol)?;
-    normalize_deepseek_thinking_stopless_tool_choice(&mut result, selected, provider_protocol);
+    normalize_deepseek_thinking_tool_choice(&mut result, selected, provider_protocol);
     Ok(result)
 }
 
@@ -311,7 +311,7 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
         .map(V3SelectedProviderModelBinding::into_payload)
 }
 
-fn normalize_deepseek_thinking_stopless_tool_choice(
+fn normalize_deepseek_thinking_tool_choice(
     payload: &mut Value,
     selected: &routecodex_v3_target::V3TargetCandidate,
     provider_protocol: V3HubProviderWireProtocol,
@@ -536,14 +536,14 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_openai_chat_stopless_tool_choice_is_omitted_on_provider_wire() {
+    fn deepseek_openai_chat_thinking_tool_choice_is_omitted_on_provider_wire() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
                 "messages": [{"role":"user","content":"continue"}],
                 "reasoning_effort": "high",
-                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tools": [{"type":"function","name":"exec_command"}],
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
@@ -586,14 +586,14 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_openai_chat_stopless_tool_choice_object_is_omitted_on_provider_wire() {
+    fn deepseek_openai_chat_thinking_tool_choice_object_is_omitted_on_provider_wire() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
                 "messages": [{"role":"user","content":"continue"}],
                 "reasoning_effort": "high",
-                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tools": [{"type":"function","name":"exec_command"}],
                 "tool_choice": {"type":"required"}
             }),
             V3HubProviderWireProtocol::OpenAiChat,
@@ -611,14 +611,14 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_openai_chat_type_alias_omits_stopless_tool_choice_provider_field() {
+    fn deepseek_openai_chat_type_alias_omits_thinking_tool_choice_provider_field() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
                 "messages": [{"role":"user","content":"continue"}],
                 "reasoning_effort": "high",
-                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tools": [{"type":"function","name":"exec_command"}],
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
@@ -636,14 +636,14 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_openai_chat_non_thinking_stopless_keeps_required_tool_choice() {
+    fn deepseek_openai_chat_non_thinking_keeps_required_tool_choice() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,
             json!({
                 "model": "client-route-alias",
                 "messages": [{"role":"user","content":"continue"}],
                 "reasoning_effort": "none",
-                "tools": [{"type":"function","name":"reasoningStop"}],
+                "tools": [{"type":"function","name":"exec_command"}],
                 "tool_choice": "required"
             }),
             V3HubProviderWireProtocol::OpenAiChat,
@@ -653,7 +653,7 @@ mod tests {
         req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("non-thinking DeepSeek stopless request must preserve required choice");
+            .expect("non-thinking DeepSeek request must preserve required choice");
         assert_eq!(
             req_compat.provider_semantic_payload()["tool_choice"],
             "required"

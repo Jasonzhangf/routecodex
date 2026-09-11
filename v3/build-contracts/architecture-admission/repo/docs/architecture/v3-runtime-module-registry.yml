@@ -59,13 +59,13 @@ modules:
     owned_paths:
       - v3/crates/routecodex-v3-virtual-router/**
   - module_id: v3.servertool_core
-    owner_feature_id: v3.servertool_hook_skeleton_lifecycle
+    owner_feature_id: v3.servertool_center_skeleton
     owned_paths:
       - v3/crates/servertool-core/**
-  - module_id: v3.stop_message_core
-    owner_feature_id: v3.servertool_hook_skeleton_lifecycle
+  - module_id: v3.agent_memory
+    owner_feature_id: v3.memory_raw_capture
     owned_paths:
-      - v3/crates/stop-message-core/**
+      - v3/crates/routecodex-v3-agent-memory/**
 
 responsibility_contracts:
   - contract_id: v3.execution_control_payload.runtime

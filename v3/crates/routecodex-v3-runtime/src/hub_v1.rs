@@ -4,8 +4,7 @@ pub(crate) use crate::{
 
 mod common;
 pub(crate) use common::{
-    v3_feature_enabled_for_server, v3_responses_direct_stopless_center_enabled_for_server,
-    v3_stopless_center_enabled_for_server, v3_tool_thinking_enabled_for_server,
+    v3_feature_enabled_for_server, v3_tool_thinking_enabled_for_server,
     v3_toolreason_client_projection_enabled_for_server, V3HubOpaquePayload,
     V3HubRelayCanonicalResponseContext, V3HubResponsePayload, V3HubResponseToolCall,
 };
@@ -16,10 +15,9 @@ pub use common::{
     V3HubTransportIntent, V3ProviderCompatProfileId, V3ServerToolCenter, V3ServerToolCenterKey,
     V3ServerToolCenterPoisoned, V3ServerToolCenterWriteAction, V3ServerToolCenterWriteAuditEntry,
     V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState, V3ServerToolName,
-    V3StoplessCenterNextRequestPolicy, V3StoplessCenterState, V3StoplessCenterSteering,
-    V3StoplessCenterStopKind, V3WebSearchCenterPhase, V3WebSearchCenterState,
+    V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
-pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol, V3StoplessCenterPhase};
+pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol};
 mod provider_compat_error;
 pub(crate) use provider_compat_error::classify_v3_provider_compat_error;
 pub(crate) use provider_compat_error::provider_request_payload_source;
@@ -135,7 +133,6 @@ pub use relay_request::*;
 mod servertool_hooks;
 pub use servertool_hooks::*;
 mod anthropic_codec;
-mod stopless_injection;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;

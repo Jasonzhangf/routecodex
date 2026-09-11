@@ -1,3 +1,4 @@
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
@@ -103,6 +104,59 @@ fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
     assert_eq!(projection.score_milli, 1);
     assert!(projection.available);
     assert_eq!(projection.blocked_scopes, Vec::<String>::new());
+}
+
+#[test]
+fn disabled_health_does_not_record_global_failure_actions() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = false, failure_threshold = 1, cooldown_ms = 1 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .expect("parse manifest authoring"),
+    )
+    .expect("compile manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+
+    for (reason, now_ms) in [("provider_429", 100), ("provider_502", 101)] {
+        let projection = store
+            .record_provider_failure_action(
+                "p",
+                "k",
+                "m",
+                &V3ProviderFailureAction::recoverable(reason),
+                now_ms,
+            )
+            .expect("disabled health failure action");
+        assert_eq!(projection.score_milli, 1);
+        assert_eq!(projection.failure_streak, 0);
+        assert!(!projection.cooldown);
+        assert!(projection.available);
+    }
+
+    let projection = store
+        .scheduling_projection("p", "k", "m", 1, 1, 102)
+        .expect("disabled health projection");
+    assert_eq!(projection.score_milli, 1);
+    assert!(projection.available);
+    assert!(store
+        .provider_cooldown_probe_keys(102, false)
+        .expect("disabled health probe keys")
+        .is_empty());
 }
 
 #[test]

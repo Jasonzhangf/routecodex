@@ -30,6 +30,8 @@ mod pid_scan;
 use pid_scan::*;
 mod reap;
 use reap::*;
+mod hooks_sidecar;
+use hooks_sidecar::*;
 
 const SCHEMA_VERSION: u16 = 1;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -905,12 +907,18 @@ impl V3ManagedLifecycle {
         let admin_config_path = admin_webui
             .as_ref()
             .map(|_| PathBuf::from(&declaration.config_path));
+        let mut hooks_sidecar =
+            start_managed_hooks_sidecar(&instance_dir, &declaration.instance_id, &socket_path)
+                .await?;
         let handle =
             match spawn_v3_server_aggregate_with_admin(manifest, admin_webui, admin_config_path)
                 .await
             {
                 Ok(handle) => handle,
                 Err(error) => {
+                    if let Some(sidecar) = hooks_sidecar.take() {
+                        let _ = sidecar.stop().await;
+                    }
                     write_status(
                         &instance_dir,
                         &declaration.instance_id,
@@ -966,13 +974,13 @@ impl V3ManagedLifecycle {
                     let handle = handle.take().ok_or_else(|| {
                         V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
                     })?;
-                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle, hooks_sidecar.take()).await;
                 }
                 _ = terminate_signal.recv() => {
                     let handle = handle.take().ok_or_else(|| {
                         V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
                     })?;
-                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle, hooks_sidecar.take()).await;
                 }
                 accepted = listener.accept() => accepted?,
             };
@@ -991,7 +999,7 @@ impl V3ManagedLifecycle {
                     let handle = handle.take().ok_or_else(|| {
                         V3LifecycleError::Validation("managed runtime handle was already consumed".to_string())
                     })?;
-                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle).await;
+                    return shutdown_managed_runtime(&instance_dir, &declaration.instance_id, &socket_path, handle, hooks_sidecar.take()).await;
                 }
                 accepted = listener.accept() => accepted?,
             };
@@ -1083,6 +1091,7 @@ impl V3ManagedLifecycle {
                     &declaration.instance_id,
                     &socket_path,
                     handle,
+                    hooks_sidecar.take(),
                 )
                 .await;
             }
@@ -1121,6 +1130,7 @@ impl V3ManagedLifecycle {
                         &declaration.instance_id,
                         &socket_path,
                         handle,
+                        hooks_sidecar.take(),
                     )
                     .await;
                 }
@@ -1150,6 +1160,7 @@ impl V3ManagedLifecycle {
                     &instance_dir,
                     &socket_path,
                     handle,
+                    hooks_sidecar.take(),
                     restart_plan,
                     self.force_console,
                 )
@@ -1157,7 +1168,6 @@ impl V3ManagedLifecycle {
             }
         }
     }
-
     fn instance_dir(&self, instance_id: &str) -> PathBuf {
         self.state_root.join("instances").join(instance_id)
     }

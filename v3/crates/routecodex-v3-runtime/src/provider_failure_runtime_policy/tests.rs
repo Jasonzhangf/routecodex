@@ -4,6 +4,11 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderHealthScope,
 };
 use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::Notify;
+
+#[path = "tests/terminal_projection.rs"]
+mod terminal_projection;
 
 fn test_provider_failure_scope(
     server_id: &str,
@@ -48,6 +53,51 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("target-resolution authoring"),
     )
     .expect("target-resolution manifest")
+}
+
+#[tokio::test]
+async fn cancelled_scheduled_probe_releases_single_flight_permit() {
+    let manifest = global_pool_alive_manifest("cancelled_scheduled_probe");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            "pending provider probe",
+            0,
+            1,
+        )
+        .expect("provider cooldown setup");
+    let started = Arc::new(Notify::new());
+    let running = {
+        let health = health.clone();
+        let started = started.clone();
+        tokio::spawn(async move {
+            health
+                .run_due_provider_health_probes(u64::MAX, false, move |_, _, _| {
+                    let started = started.clone();
+                    async move {
+                        started.notify_one();
+                        futures_util::future::pending::<Result<(), String>>().await
+                    }
+                })
+                .await
+        })
+    };
+    started.notified().await;
+    running.abort();
+    let _ = running.await;
+
+    assert!(
+        health
+            .store
+            .acquire_provider_cooldown_probe("first", Some("key1"), Some("gpt-test"))
+            .expect("probe permit acquisition after cancellation")
+            .is_some(),
+        "dropping the scheduled probe must release its single-flight permit"
+    );
 }
 
 fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
@@ -1341,14 +1391,20 @@ targets = [
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
+    let matched_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "exact_response_policy")
+        .expect("compiled response policy");
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
         "V3ProviderRespInbound01Raw",
         200,
-        Some("wrapped_provider_error".to_string()),
+        Some("provider_embedded_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
-        None,
+        Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,

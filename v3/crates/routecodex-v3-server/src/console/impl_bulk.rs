@@ -721,48 +721,6 @@ fn emit_v3_runtime_observability_contract_or_warning(
     }
 }
 
-pub(crate) fn emit_v3_stopless_console_line(
-    context: &V3ConsoleEmissionContext,
-    observability: &V3RuntimeObservability,
-) {
-    if !context.state.console_enabled || !is_v3_stopless_console_activation(observability) {
-        return;
-    }
-    let finish_reason = observability
-        .finish_reason
-        .as_deref()
-        .expect("Stopless console activation requires a typed finish reason");
-    let identity = context.identity.clone();
-    let route = resolve_v3_console_route_projection(observability);
-    let content = format_v3_console_timed_content(
-        "🧭 [stopless]",
-        &format!(
-            "req={} event=activated hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason={} transport={}",
-            context.request_identity.request_id, finish_reason, observability.transport
-        ),
-    );
-    let content_str = content.as_str();
-    let stopless_human_prefix = format_v3_console_human_prefix_for_observability(
-        &context.state.server.port.to_string(),
-        &context.entry_protocol,
-        identity.project_path.as_deref(),
-        observability,
-        &route.label,
-    );
-    let colorized = colorize_v3_stopless_console_line(
-        &stopless_human_prefix,
-        content_str,
-        content_str,
-        &identity.session_id,
-    );
-    append_v3_human_console_line(&context.state, &colorized);
-    println!("{colorized}");
-}
-
-pub(crate) fn is_v3_stopless_console_activation(observability: &V3RuntimeObservability) -> bool {
-    observability.stopless_activation
-}
-
 pub(crate) fn append_v3_human_console_line(state: &V3ListenerState, line: &str) {
     if let Err(error) = state.debug.append_human_console_line(line) {
         emit_v3_debug_sink_console_failure(state, &error);
@@ -832,7 +790,6 @@ pub(crate) fn emit_v3_observability_console_lines(
     emit_v3_provider_observability_console_lines(context, observability);
     if include_usage {
         let elapsed = started_at.elapsed();
-        emit_v3_stopless_console_line(context, observability);
         let terminal_event = v3_webui_terminal_event_for_response(status, observability);
         if terminal_event == V3ObsEventType::Completed {
             if let Err(error) =
@@ -1007,7 +964,6 @@ impl V3SseConsoleFinalizer {
 
     pub(crate) fn emit_relay_sse_complete_console_lines(self) {
         let elapsed = self.started_at.elapsed();
-        emit_v3_stopless_console_line(&self.context, &self.observability);
         // Typed WebUI projection: SSE stream completed.
         if let Err(error) = record_v3_webui_event_for_context(
             &self.context,
@@ -1091,7 +1047,6 @@ impl V3DirectSseConsoleFinalizer {
 
     pub(crate) fn emit_direct_sse_complete_console_lines(self) {
         let elapsed = self.started_at.elapsed();
-        emit_v3_stopless_console_line(&self.context, &self.observability);
         // Typed WebUI projection: SSE stream completed.
         if let Err(error) = record_v3_webui_event_for_context(
             &self.context,

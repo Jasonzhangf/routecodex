@@ -343,7 +343,7 @@ owners:
   notes:
   - This is a V3 workspace copy of the protocol-neutral SSE transport core so V3 can
     build and run independently from the V2 llmswitch-core crate tree.
-  - Protocol semantics, tool governance, continuation, stopless, and provider-specific
+  - Protocol semantics, tool governance, continuation, and provider-specific
     event projection remain outside this transport module.
   - V3 server closeout may observe EOF/error/drop transport lifecycle only; it must
     not parse SSE event names or data JSON for terminal/required_action/failure semantics.
@@ -434,7 +434,7 @@ owners:
     missing, duplicate, or orphan identities fail before provider send.
   - apply_request_compat is registered as provider-compat internal block edge v3-provider-compat-minimax-anthropic-01
     under run_req_outbound_stage3_compat, not as a new Hub/VR transition.
-  - Tool governance, stopless, continuation, routing, retry/failure policy, and protocol
+  - Tool governance, continuation, routing, retry/failure policy, and protocol
     lifecycle conversion remain owned by their existing Hub/VR/Error nodes.
   - Top-level semantics, processed, and processingMetadata are unregistered control-like
     fields and must fail at both provider compat entrypoints; they are never silently
@@ -525,7 +525,7 @@ owners:
     Error01, pre-commit Error06, startup, and debug-sink failures into bright human
     headlines plus complete dim diagnostic detail.
   owner_kind: rust_v3_server_console_projection
-  owner_scope: routecodex-v3-server owns console-only request/response/provider/Stopless/post-commit
+  owner_scope: routecodex-v3-server owns console-only request/response/provider/post-commit
     Error01/pre-commit Error06/startup/debug-sink presentation; it never creates runtime
     observability or mutates request, response, routing, provider health, or error
     truth.
@@ -556,7 +556,6 @@ owners:
   canonical_builders:
   - emit_v3_observability_console_lines
   - emit_v3_provider_observability_console_lines
-  - emit_v3_stopless_console_line
   - emit_relay_sse_complete_console_lines
   - emit_direct_sse_complete_console_lines
   - emit_relay_sse_failure_console_line

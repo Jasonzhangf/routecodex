@@ -399,7 +399,6 @@ pub(crate) fn build_v3_relay_observability(
         provider_status: None,
         response_status: None,
         finish_reason: None,
-        stopless_activation: false,
         attempts: Some(selected.attempts),
         unavailable_candidates: selected.unavailable_candidates.clone(),
         provider_failure_events: Vec::new(),

@@ -1,0 +1,14 @@
+{
+  "sample_rid": "openai-responses-router-gpt-5.5-20260906T075643453-51980-3718",
+  "source_note": "Captured goaichat:key1:glm-5.3 HTTP 400 invalid_request/content-required. Live sample later rotated off ports/4444. Client response.json was status 200 with error_chain=null after switch to goaichat:key1:qwen3.8-max.",
+  "provider_key": "goaichat:key1:glm-5.3",
+  "provider_status": 400,
+  "error_type": "invalid_request_error",
+  "exact_provider_400_body": {
+    "error": {
+      "message": "data: {\"error\":{\"code\":\"invalid_parameter_error\",\"param\":null,\"message\":\"The content field is a required field.\",\"type\":\"invalid_request_error\"},\"id\":\"chatcmpl-e0bd7244-a6c5-9dab-a95a-2aea69bd0b21\"}",
+      "type": "invalid_request_error"
+    },
+    "type": "error"
+  }
+}

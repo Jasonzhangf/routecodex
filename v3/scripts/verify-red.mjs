@@ -49,8 +49,6 @@ for (const fixture of [
   'scripts/tests/v3-servertool-center-skeleton-red-fixtures.mjs',
   'scripts/tests/v3-source-gate-red-fixtures.mjs',
   'scripts/tests/v3-stage-protocol-shapes-red-fixtures.mjs',
-  'scripts/tests/v3-stopless-resource-control-red-fixtures.mjs',
-  'scripts/tests/v3-stopless-state-machine-docs-red-fixtures.mjs',
 ]) {
   run('node', ['scripts/run-admission-gate.mjs', fixture]);
 }

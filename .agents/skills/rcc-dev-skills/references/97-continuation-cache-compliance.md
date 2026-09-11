@@ -22,7 +22,7 @@ Provider-bound request N+1 must preserve request N rendered prefix byte-for-byte
 - Do not change usage display, cache policy, provider transport, or logger to hide a transcript mismatch.
 - Do not rewrite prior user/assistant/tool items to improve cache rate.
 - Do not infer compliance from cache-hit percentage alone; provider may not expose cache telemetry.
-- Control state, route/model override, Stopless state, and debug data never enter persisted provider transcript.
+- Control state, route/model override, and debug data never enter persisted provider transcript.
 
 ## Evidence
 

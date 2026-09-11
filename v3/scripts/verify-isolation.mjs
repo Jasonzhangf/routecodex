@@ -55,7 +55,7 @@ function cargoMetadataFailures(env = process.env) {
       }
     }
   }
-  for (const crate of ['provider-compat-core', 'servertool-core', 'stop-message-core']) {
+  for (const crate of ['provider-compat-core', 'servertool-core']) {
     const owners = metadata.packages.filter((pkg) => pkg.name === crate);
     if (owners.length !== 1 || !isInside(v3Root, resolve(owners[0]?.manifest_path ?? '/'))) {
       failures.push(`${crate} must have one V3-local Cargo owner`);

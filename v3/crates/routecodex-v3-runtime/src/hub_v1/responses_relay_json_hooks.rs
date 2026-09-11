@@ -15,10 +15,6 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) compatibility_profile: Option<&'a str>,
     pub(crate) web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     pub(crate) web_search_center_state: Option<V3WebSearchCenterState>,
-    pub(crate) stopless_state: Option<&'a V3StoplessCenterState>,
-    pub(crate) stopless_control_has_client_session_scope: bool,
-    pub(crate) transition_request_id: &'a str,
-    pub(crate) transition_updated_at: u64,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt 模型 + 单一 provider
     /// 候选时为 true），响应侧 Resp03 只消费此结果，不重复判定。
     pub(crate) retain_response_cipher: bool,
@@ -33,7 +29,6 @@ pub(crate) fn run_json_response_hooks(
     (
         V3HubContinuationCommit,
         Value,
-        Option<V3StoplessCenterState>,
         Option<V3WebSearchCenterState>,
     ),
     V3ResponsesRelayRuntimeError,
@@ -82,10 +77,6 @@ pub(crate) fn run_json_response_hooks(
         input.server_id,
         input.session_id,
         input.request_id,
-        input.stopless_state,
-        input.stopless_control_has_client_session_scope,
-        input.transition_request_id,
-        input.transition_updated_at,
         input.web_search_execution_mode,
         input.retain_response_cipher,
         input.tool_thinking_enabled,
@@ -100,19 +91,18 @@ pub(crate) fn run_json_response_hooks(
     trace.push("V3HubRespChatProcess03Governed");
     let resp04 = hooks.commit(resp03)?;
     let action = resp04.action();
-    let response_stopless_state = resp04.control_transition().cloned();
     let response_web_search_state = resp04.web_search_transition().cloned();
     trace.push("V3HubRespContinuation04Committed");
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
-    let finalized_payload = resp05.client_payload().clone();
+    let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");
+    crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
+        &mut finalized_payload,
+        input.manifest,
+        input.request_id,
+    );
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((
-        action,
-        finalized_payload,
-        response_stopless_state,
-        response_web_search_state,
-    ))
+    Ok((action, finalized_payload, response_web_search_state))
 }
 
 fn normalize_v3_responses_json_document(
@@ -177,10 +167,6 @@ pub(crate) fn resolve_request_web_search_execution_mode(
 pub(crate) fn responses_relay_request_hook_profile(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
-    stopless_state: Option<&V3StoplessCenterState>,
-    stopless_control_has_client_session_scope: bool,
-    transition_request_id: &str,
-    transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
 ) -> V3HubServertoolRequestProfile {
     let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
@@ -198,21 +184,7 @@ pub(crate) fn responses_relay_request_hook_profile(
     } else {
         V3HubServertoolRequestProfile::disabled()
     };
-    if !v3_stopless_center_enabled_for_server(manifest, server_id)
-        || !stopless_control_has_client_session_scope
-    {
-        return base;
-    }
-    let mut profile = V3HubServertoolRequestProfile::stopless_reasoning_stop()
-        .with_stopless_transition_context(transition_request_id, transition_updated_at)
-        .with_tool_thinking_enabled(tool_thinking_enabled);
-    if web_search_execution_mode.is_metadata_center_local_search() {
-        profile = profile.with_web_search_execution_mode(web_search_execution_mode);
-    }
-    match stopless_state {
-        Some(state) => profile.with_stopless_center_state(state.clone()),
-        None => profile,
-    }
+    base
 }
 
 pub(crate) fn responses_relay_response_hook_profile(
@@ -220,10 +192,6 @@ pub(crate) fn responses_relay_response_hook_profile(
     server_id: &str,
     session_id: &str,
     request_id: &str,
-    stopless_state: Option<&V3StoplessCenterState>,
-    stopless_control_has_client_session_scope: bool,
-    transition_request_id: &str,
-    transition_updated_at: u64,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
@@ -257,16 +225,5 @@ pub(crate) fn responses_relay_response_hook_profile(
     };
     let profile = profile.with_toolreason_observation_request_id(request_id);
     let profile = profile.with_toolreason_observation_session_id(session_id);
-    if !v3_stopless_center_enabled_for_server(manifest, server_id)
-        || !stopless_control_has_client_session_scope
-    {
-        return profile;
-    }
-    let profile = profile
-        .with_stopless_reasoning_stop()
-        .with_stopless_transition_context(transition_request_id, transition_updated_at);
-    match stopless_state {
-        Some(state) => profile.with_stopless_center_state(state.clone()),
-        None => profile,
-    }
+    profile
 }
