@@ -53,6 +53,7 @@ use axum::http::{
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{stream, StreamExt};
+use libc::EINTR;
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
@@ -144,6 +145,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
+use std::future::Future;
 use std::io;
 use std::io::Read as _;
 use std::io::Write as _;
@@ -161,6 +163,26 @@ struct V3ResponsesPreviousResponseOwnerResolutionContext {
     direct_scope: V3ResponsesDirectContinuationScope,
     relay_scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
+}
+
+fn v3_io_error_is_eintr(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Interrupted || error.raw_os_error() == Some(EINTR)
+}
+
+async fn bind_v3_tcp_listener_retry_eintr<F, Fut>(mut bind: F) -> io::Result<TcpListener>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = io::Result<TcpListener>>,
+{
+    loop {
+        match bind().await {
+            Ok(listener) => return Ok(listener),
+            // Restart inherits the foreground process signal environment, so bind
+            // may be interrupted while the replacement process is starting.
+            Err(error) if v3_io_error_is_eintr(&error) => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -384,7 +406,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
             .parse()
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let listener = TcpListener::bind(addr).await?;
+        let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
         let bound_addr = listener.local_addr()?;
         bound.push((server, listener, bound_addr));
     }
@@ -392,7 +414,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         let addr: SocketAddr = format!("{}:{}", admin.bind, admin.port)
             .parse()
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let listener = TcpListener::bind(addr).await?;
+        let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
         let bound_addr = listener.local_addr()?;
         bound.push((
             V3ServerManifest {
