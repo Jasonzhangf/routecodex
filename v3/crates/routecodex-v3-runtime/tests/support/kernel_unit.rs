@@ -90,7 +90,7 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
 }
 
 #[tokio::test]
-async fn direct_response_hook_uses_server_toolreason_override_when_global_is_disabled() {
+async fn direct_response_hook_keeps_toolreason_disabled_when_config_requests_override() {
     let mut manifest = test_manifest();
     manifest
         .servers
@@ -123,11 +123,8 @@ async fn direct_response_hook_uses_server_toolreason_override_when_global_is_dis
     let V3ClientBody::Json(body) = output.client_payload.body else {
         panic!("direct JSON response must remain JSON: {output:?}");
     };
-    assert_eq!(body["output"][0]["type"], "reasoning");
-    assert_eq!(
-        body["output"][0]["summary"][0],
-        json!({"type":"summary_text","text":"调用工具 pwd：确认当前工作目录"})
-    );
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert!(!body.to_string().contains("调用工具"));
 }
 
 #[tokio::test]
