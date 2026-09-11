@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <div class="brand">Route<span class="accent">Codex</span></div>
+    <div class="brand">RouteCodex</div>
     <nav>
       <a href="/">Dashboard</a>
       <a href="/routes.html">Routes</a>
@@ -21,7 +21,7 @@
 
   <main>
     <h1>Requests</h1>
-    <div class="sub">Persistent request records with usage, routing, errors and lifecycle</div>
+    <div class="sub">Persistent request records — grouped by port, then by status code</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
 
     <div class="section">
@@ -40,38 +40,85 @@
       </div>
     </div>
 
-    <div class="toolbar">
-      <label>Status<select id="status-filter"><option value="all">all</option><option value="active">active</option><option value="retrying">retrying</option><option value="success">success</option><option value="error">error</option><option value="cancelled">cancelled</option></select></label>
-      <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
-      <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
-      <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
-      <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
-      <label>Route<input id="route-filter" type="search" placeholder="route"></label>
-      <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
-      <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
-      <label>Search<input id="search-filter" type="search" placeholder="request, model, provider, route, error"></label>
-      <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
-      <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+    <!-- 层1：端口页签（隐藏的 port-filter select 保留用于兼容/测试，由页签同步） -->
+    <div class="visually-hidden-select" aria-hidden="true">
+      <select id="port-filter"><option value="all">all ports</option></select>
+    </div>
+    <nav class="port-tab-bar" id="port-tabs" role="tablist" aria-label="Port"></nav>
+
+    <div class="controls-row">
+      <div class="segmented" role="group" aria-label="Sort mode" id="sort-mode">
+        <button type="button" data-mode="time" aria-pressed="true">按时间</button>
+        <button type="button" data-mode="code" aria-pressed="false">按返回码</button>
+      </div>
+      <span class="page-info muted" id="page-info">—</span>
+      <span class="spacer"></span>
+      <button class="btn" id="export-csv-top" type="button" disabled>导出 CSV</button>
+      <button class="btn" id="copy-tsv-top" type="button" disabled>复制到剪贴板</button>
     </div>
 
-    <div class="pagination">
-      <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
-      <span id="page-info" class="muted">page — of — · — records</span>
-      <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
-      <button class="btn" id="page-next" type="button">Next &#8594;</button>
+    <div class="requests-grid">
+      <aside class="filter-rail" aria-label="Filters">
+        <div class="filter-search">
+          <input id="search-filter" type="search" placeholder="搜索 request / model / error…" aria-label="Search" autocomplete="off">
+        </div>
+        <div class="filter-group">
+          <h3><span class="layer">层2</span> 状态</h3>
+          <div class="filter-list" id="filter-status"></div>
+        </div>
+        <div class="filter-group">
+          <h3><span class="layer">层3</span> Provider <button class="filter-clear" type="button" data-clear="providerSel">清空</button></h3>
+          <div class="filter-list" id="filter-provider"></div>
+        </div>
+        <div class="filter-group">
+          <h3><span class="layer">层4</span> Model <button class="filter-clear" type="button" data-clear="modelSel">清空</button></h3>
+          <div class="filter-list" id="filter-model"></div>
+        </div>
+        <details class="adv-filters">
+          <summary>更多过滤 / 排序</summary>
+          <div class="adv-grid">
+            <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
+            <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
+            <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
+            <label>Route<input id="route-filter" type="search" placeholder="route"></label>
+            <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
+            <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
+            <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
+            <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+          </div>
+        </details>
+      </aside>
+
+      <div>
+        <div class="pagination">
+          <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
+          <span id="page-info" class="page-info">page — of — · — records</span>
+          <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
+          <button class="btn" id="page-next" type="button">Next &#8594;</button>
+        </div>
+
+        <div class="section">
+          <nav class="requests-tab-bar" id="requests-tab-bar">
+            <button class="tab-btn active" data-tab="entries" type="button">Entries <span class="tab-count" id="tab-count-entries">—</span></button>
+            <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
+            <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
+          </nav>
+          <nav class="entries-sub-tab-bar" id="entries-sub-tab-bar" data-visible="all" hidden>
+            <button class="sub-tab-btn active" data-sub-tab="pool" type="button">Pool</button>
+            <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
+          </nav>
+          <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
+          <p class="help">按返回码模式：分组与排除的范围是当前已加载的页；组内按时间倒序。导出列含 request_id 与 error_detail。</p>
+        </div>
+      </div>
     </div>
 
-    <div class="section">
-      <nav class="requests-tab-bar" id="requests-tab-bar">
-        <button class="tab-btn active" data-tab="entries" type="button">Entries <span class="tab-count" id="tab-count-entries">—</span></button>
-        <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
-        <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
-      </nav>
-      <nav class="entries-sub-tab-bar" id="entries-sub-tab-bar" data-visible="all" hidden>
-        <button class="sub-tab-btn active" data-sub-tab="pool" type="button">Pool</button>
-        <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
-      </nav>
-      <div class="panel table-panel" id="requests-panel"><div class="loading">loading…</div></div>
+    <div class="selection-bar" id="selection-bar" role="status">
+      <span>已选 <span class="n" id="sel-count">0</span> 行</span>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn" id="copy-tsv-bar" type="button">复制到剪贴板</button>
+      <button class="btn primary" id="export-csv-bar" type="button">导出 CSV</button>
+      <button class="icon-btn" id="sel-clear" type="button" aria-label="Clear selection">✕</button>
     </div>
   </main>
 
@@ -79,7 +126,7 @@
 <div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
   <div class="drawer-head">
     <button class="btn" id="drawer-back" type="button" aria-label="Back to list">&#859; Back</button>
-    <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+    <button class="btn close icon-btn" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
   </div>
   <h2 id="drawer-title">Details</h2>
   <div id="drawer-body"></div>
@@ -89,12 +136,10 @@
   </div>
 </div>
 
-<div class="row-popover" id="row-popover" role="tooltip" aria-hidden="true"></div>
-
+  <script src="/app.embedded.txt"></script>
   <script>
-    // Endpoint label: shorten canonical V3 entry paths so the Endpoint column
-    // stays compact without losing the protocol identity; non-canonical paths
-    // pass through.
+    // Endpoint label: shorten canonical V3 entry paths so exports stay compact
+    // without losing the protocol identity; non-canonical paths pass through.
     function endpointLabel(endpoint) {
       if (endpoint == null || endpoint === "—") return "—";
       if (endpoint === "/v1/responses") return "responses";
@@ -103,9 +148,7 @@
       if (endpoint === "/v1beta/models") return "gemini";
       return endpoint;
     }
-  </script>
-  <script src="/app.embedded.txt"></script>
-  <script>
+
     // Compact numeric formatting for token counts and request totals.
     function fmtCompact(n) {
       const value = Number(n || 0);
@@ -193,65 +236,6 @@
       return map[reason] || reason;
     }
 
-    function buildRowPopover(row) {
-      const usage = row.usage || {};
-      const fields = [
-        ["request id", row.meta?.request_id || row.request_key],
-        ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol],
-        ["endpoint", row.meta?.endpoint], ["model", row.meta?.model],
-        ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
-        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
-        ["finish reason", compactFinishReason(row)],
-        ["error", compactErrorReason(row)],
-        ["attempts", `${row.attempts}/${row.failed_attempts}/${row.switches}`],
-        ["tokens in/out/read/created", `${fmtCompact(usage.input_tokens)}/${fmtCompact(usage.output_tokens)}/${fmtCompact(usage.cache_read_input_tokens ?? usage.cached_tokens)}/${fmtCompact(usage.cache_creation_input_tokens)}`],
-        ["internal / external", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`],
-        ["duration", fmtMs(row.duration_ms)],
-      ];
-      const box = el("div", "row-popover-body");
-      for (const [label, value] of fields) {
-        const line = el("div", "row-popover-row");
-        line.append(el("span", "label", label), el("span", "value", String(value ?? "—")));
-        box.appendChild(line);
-      }
-      if (row.meta?.error_detail) {
-        const detail = el("div", "row-popover-detail muted", row.meta.error_detail);
-        box.appendChild(detail);
-      }
-      return box;
-    }
-
-    function showRowPopover(row, event) {
-      const popover = document.getElementById("row-popover");
-      if (!popover) return;
-      popover.replaceChildren(buildRowPopover(row));
-      popover.setAttribute("aria-hidden", "false");
-      popover.classList.add("show");
-      positionRowPopover(event);
-    }
-
-    function positionRowPopover(event) {
-      const popover = document.getElementById("row-popover");
-      if (!popover || !popover.classList.contains("show")) return;
-      const margin = 12;
-      const rect = popover.getBoundingClientRect();
-      let x = event.clientX + margin;
-      let y = event.clientY + margin;
-      const overflowX = x + rect.width - window.innerWidth;
-      if (overflowX > 0) x = Math.max(margin, event.clientX - rect.width - margin);
-      const overflowY = y + rect.height - window.innerHeight;
-      if (overflowY > 0) y = Math.max(margin, event.clientY - rect.height - margin);
-      popover.style.left = `${x}px`;
-      popover.style.top = `${y}px`;
-    }
-
-    function hideRowPopover() {
-      const popover = document.getElementById("row-popover");
-      if (!popover) return;
-      popover.classList.remove("show");
-      popover.setAttribute("aria-hidden", "true");
-    }
-
     const state = {
       records: [],
       attemptRecords: [],
@@ -262,6 +246,7 @@
       attemptsTotal: 0,
       attemptsPage: 1,
       errorStatuses: 0,
+      errorExamples: {},
       tab: "entries",
       entriesGroup: "pool",
       stats: {},
@@ -271,6 +256,22 @@
       selected: null,
       tableWidths: { entries: null, attempts: null, errors: null },
       loading: false,
+      // layered filter model: port tabs (层1) → status kinds (层2) →
+      // provider (层3) → model (层4); within a layer selections are OR,
+      // across layers they AND.
+      port: "all",
+      sortMode: "time",
+      statusKinds: new Set(),
+      providerSel: new Set(),
+      modelSel: new Set(),
+      excluded: {},
+      collapsed: new Set(),
+      openExclude: null,
+      selection: new Set(),
+      kindCounts: {},
+      providerCounts: {},
+      modelCounts: {},
+      exports: [],
     };
 
     function statusOf(row) {
@@ -310,68 +311,45 @@
       return row.meta?.[key] ?? "—";
     }
 
-    function endpointLabel(endpoint) {
-      // Shorten canonical V3 entry paths so the Endpoint column stays compact
-      // without losing the protocol identity; non-canonical paths pass through.
-      if (endpoint == null || endpoint === "—") return "—";
-      if (endpoint === "/v1/responses") return "responses";
-      if (endpoint === "/v1/chat/completions") return "chat";
-      if (endpoint === "/v1/messages") return "messages";
-      if (endpoint === "/v1beta/models") return "gemini";
-      return endpoint;
-    }
-
-    function providerModelCell(row) {
+    function comboOf(row) {
       const provider = metaValue(row, "provider");
       const model = metaValue(row, "model");
-      if (provider === "—" && model === "—") return "—";
-      if (provider === "—") return model;
-      if (model === "—") return provider;
-      return `${provider} · ${model}`;
+      const key = metaValue(row, "auth_alias");
+      return `${provider}/${model} · ${key}`;
     }
 
-    // Compact provider cell: show the alias model by default; reveal
-    // provider/auth_alias/provider_id/wire_model on hover or focus.
-    function compactProviderCell(row) {
-      const meta = (row && row.meta) || {};
-      const model = meta.model ?? "—";
-      const wire = meta.wire_model ?? "—";
-      const provider = meta.provider ?? "—";
-      const providerId = meta.provider_id ?? "—";
-      const authAlias = meta.auth_alias ?? "—";
-      const allEmpty = [model, wire, provider, providerId, authAlias].every((v) => v === "—");
-      const cell = el("td", "providercompact compact");
-      if (allEmpty) {
-        cell.textContent = "—";
-        return cell;
-      }
-      const primary = el("div", "providercompact-primary mono");
-      primary.append(
-        el("span", "providercompact-model", model),
-        el("span", "providercompact-sep muted", " · "),
-        el("span", "providercompact-key muted", authAlias)
-      );
-      cell.appendChild(primary);
-      const details = el("dl", "providercompact-detail");
-      for (const [label, value] of [
-        ["provider", provider],
-        ["key", authAlias],
-        ["provider id", providerId],
-        ["wire model", wire],
-      ]) {
-        details.append(el("dt", null, label), el("dd", null, value));
-      }
-      cell.appendChild(details);
-      cell.tabIndex = 0;
-      cell.setAttribute(
-        "aria-label",
-        `provider ${provider}, key ${authAlias}, model ${model}, wire ${wire}`
-      );
-      cell.addEventListener("focus", () => cell.classList.add("is-detail"));
-      cell.addEventListener("blur", () => cell.classList.remove("is-detail"));
-      cell.addEventListener("mouseenter", () => cell.classList.add("is-detail"));
-      cell.addEventListener("mouseleave", () => cell.classList.remove("is-detail"));
-      return cell;
+    // Group rank: error codes first (numeric desc), then success, then
+    // in-flight, cancelled last.
+    function groupRank(code) {
+      const n = Number(code);
+      if (!Number.isFinite(n)) return 2;
+      if (n === 499) return 3;
+      if (n >= 400) return 0;
+      return 1;
+    }
+    function compareCodes(a, b) {
+      const ra = groupRank(a), rb = groupRank(b);
+      if (ra !== rb) return ra - rb;
+      const na = Number(a), nb = Number(b);
+      if (ra === 0) return nb - na;
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      return a.localeCompare(b);
+    }
+
+    function buildRowPopoverFields(row) {
+      const usage = row.usage || {};
+      return [
+        ["request id", row.meta?.request_id || row.request_key],
+        ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol],
+        ["endpoint", row.meta?.endpoint], ["model", row.meta?.model],
+        ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
+        ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
+        ["finish reason", compactFinishReason(row)],
+        ["error", compactErrorReason(row)],
+        ["attempts", `${row.attempts}/${row.failed_attempts}/${row.switches}`],
+        ["internal / external", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`],
+        ["duration", fmtMs(row.duration_ms)],
+      ];
     }
 
     // Per-tab Excel-style column resizing with localStorage persistence so
@@ -422,9 +400,7 @@
         handle.setAttribute("aria-hidden", "true");
         th.appendChild(handle);
         // Stop propagation so dragging the handle never triggers the header
-        // sort click handler that lives on the parent <th>. preventDefault
-        // also kills text selection and the native drag-image that some
-        // browsers attach to the span.
+        // click handler; preventDefault kills text selection and native DnD.
         handle.addEventListener("pointerdown", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -452,27 +428,122 @@
           window.addEventListener("pointerup", onUp);
         });
         handle.addEventListener("click", (event) => {
-          // A bare click on the handle is never a sort intent.
           event.stopPropagation();
         });
       });
     }
 
+    function activePlans() {
+      const kinds = state.statusKinds.size ? [...state.statusKinds] : [null];
+      const providers = state.providerSel.size ? [...state.providerSel] : [null];
+      const models = state.modelSel.size ? [...state.modelSel] : [null];
+      const plans = [];
+      for (const status of kinds) {
+        for (const provider of providers) {
+          for (const model of models) {
+            plans.push({ status, provider, model });
+          }
+        }
+      }
+      return plans;
+    }
+
+    async function fetchPlan(base, plan) {
+      const params = new URLSearchParams(base);
+      if (plan.status) params.set("status", plan.status);
+      if (plan.provider) params.set("provider", plan.provider);
+      if (plan.model) params.set("model", plan.model);
+      return api(`/api/observability/records?${params}`);
+    }
+
+    function mergeFacets(target, source) {
+      for (const [key, values] of Object.entries(source || {})) {
+        const bucket = target[key] || (target[key] = {});
+        for (const [value, count] of Object.entries(values || {})) {
+          bucket[value] = (bucket[value] || 0) + Number(count || 0);
+        }
+      }
+      return target;
+    }
+
+    function mergeStats(statsList, rowsTotal) {
+      if (statsList.length === 1) return statsList[0] || {};
+      const keys = ["count", "success_count", "error_count", "cancelled_count", "active_count",
+        "switch_count", "input_tokens", "output_tokens", "cached_tokens",
+        "cache_read_input_tokens", "cache_creation_input_tokens", "total_tokens",
+        "provider_failure_count"];
+      const merged = {};
+      for (const key of keys) {
+        merged[key] = statsList.reduce((sum, item) => sum + Number(item?.[key] || 0), 0);
+      }
+      // Cache hit rate recomputed from summed read/input; the server uses the
+      // effective input denominator, so multi-plan mode is a close estimate.
+      merged.cache_hit_rate_percent = merged.input_tokens > 0
+        ? (merged.cache_read_input_tokens / merged.input_tokens) * 100
+        : 0;
+      const durationWeighted = statsList.reduce((sum, item) => {
+        const avg = Number(item?.avg_duration_ms || 0);
+        const withDuration = Number(item?.count || 0);
+        return sum + avg * withDuration;
+      }, 0);
+      merged.avg_duration_ms = merged.count > 0 ? durationWeighted / merged.count : 0;
+      const byPort = {};
+      const byProvider = {};
+      for (const item of statsList) {
+        for (const [port, entry] of Object.entries(item?.by_port || {})) {
+          const bucket = byPort[port] || (byPort[port] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0 });
+          for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
+        }
+        for (const [provider, entry] of Object.entries(item?.by_provider || {})) {
+          const bucket = byProvider[provider] || (byProvider[provider] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+          for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
+        }
+      }
+      merged.by_port = byPort;
+      merged.by_provider = byProvider;
+      return merged;
+    }
+
+    // Latest-wins loading: a filter change that lands while a query is in
+    // flight queues exactly one trailing reload instead of being dropped.
+    let loadInFlight = false;
+    let loadQueued = false;
     async function loadRecords() {
-      if (state.loading) return;
+      if (loadInFlight) {
+        loadQueued = true;
+        return;
+      }
+      loadInFlight = true;
       state.loading = true;
-      // placeholder
+      try {
+        await loadRecordsInner();
+      } finally {
+        loadInFlight = false;
+        state.loading = false;
+        if (loadQueued) {
+          loadQueued = false;
+          loadRecords();
+        }
+      }
+    }
+
+    async function loadRecordsInner() {
       try {
         const params = new URLSearchParams();
         params.set("page", String(state.page));
         params.set("page_size", String(state.pageSize));
         params.set("range", document.getElementById("chart-range").value);
         params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
-        params.set("sort_by", document.getElementById("sort-field").value);
-        params.set("sort_order", document.getElementById("sort-order").value);
-        const status = document.getElementById("status-filter").value;
-        if (status !== "all") {
-          params.set("status", status);
+        const sortMode = state.sortMode;
+        if (sortMode === "time") {
+          params.set("sort_by", "started_epoch_ms");
+          params.set("sort_order", "desc");
+        } else if (sortMode === "code") {
+          params.set("sort_by", "result");
+          params.set("sort_order", "desc");
+        } else {
+          params.set("sort_by", document.getElementById("sort-field").value);
+          params.set("sort_order", document.getElementById("sort-order").value);
         }
         const port = document.getElementById("port-filter").value;
         if (port !== "all") params.set("port", port);
@@ -491,18 +562,25 @@
         const search = document.getElementById("search-filter").value.trim();
         if (search) params.set("search", search);
         if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
-        const response = await api(`/api/observability/records?${params}`);
-        state.records = response.records || [];
-        state.total = response.total || 0;
-        state.stats = response.stats || {};
-        state.timeseries = response.timeseries || [];
-        state.facets = response.facets || state.facets;
+        // Rail multi-selects win over the single-value facet selects when set.
+        const plans = activePlans();
+        if (plans.length > 12) {
+          showStatus("err", "勾选组合过多（>12 次查询），请减少层2-4的勾选数量。");
+          return;
+        }
+        const responses = await Promise.all(plans.map((plan) => fetchPlan(params, plan)));
+        state.records = responses.flatMap((response) => response.records || []);
+        state.total = responses.reduce((sum, response) => sum + Number(response.total || 0), 0);
+        state.stats = mergeStats(responses.map((response) => response.stats || {}), state.total);
+        state.timeseries = responses[0]?.timeseries || [];
+        const mergedFacets = {};
+        for (const response of responses) mergeFacets(mergedFacets, response.facets || {});
+        state.facets = mergedFacets;
+        if (state.port === "all") state.portCountsCache = { ...(mergedFacets.ports || {}) };
         await Promise.all([loadAttempts(), loadErrors()]);
         renderAll();
       } catch (error) {
         showStatus("err", `records query failed: ${error.message}`);
-      } finally {
-        state.loading = false;
       }
     }
 
@@ -559,10 +637,6 @@
       await loadRecords();
     }
 
-    function showConnection() {
-      hideStatus();
-    }
-
     function renderStats(stats) {
       stats = stats || {};
       const portBody = document.querySelector("#ports-table tbody");
@@ -593,12 +667,7 @@
         const row = el("tr", "status-error");
         row.style.cursor = "pointer";
         row.title = `Filter requests by status code "${statusCode}"`;
-        row.addEventListener("click", () => {
-          state.page = 1;
-          document.getElementById("status-filter").value = "error";
-          state.errorStatusCode = statusCode;
-          loadRecords();
-        });
+        row.addEventListener("click", () => drilldownErrorStatus(statusCode));
         row.append(el("td", null, statusCode), numberCell(entry.terminal));
         return row;
       }));
@@ -610,13 +679,13 @@
         errorBody.replaceChildren(emptyRow);
       }
       const portSelect = document.getElementById("port-filter");
-      const selected = portSelect.value;
+      const selectedPort = portSelect.value;
       const allPorts = el("option", null, "all ports");
       allPorts.value = "all";
       portSelect.replaceChildren(allPorts, ...Object.entries(state.facets.ports || {}).sort(([a],[b])=>Number(a)-Number(b)).map(([port]) => {
         const option = el("option", null, String(port)); option.value = String(port); return option;
       }));
-      portSelect.value = [...portSelect.options].some((option) => option.value === selected) ? selected : "all";
+      portSelect.value = [...portSelect.options].some((option) => option.value === selectedPort) ? selectedPort : "all";
       populateFacetSelect("protocol-filter", state.facets.response_types || {});
       populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
       populateFacetSelect("model-filter", state.facets.models || {}, "all models");
@@ -672,49 +741,122 @@
       return grid;
     }
 
+    function checkCell(row) {
+      const td = el("td", "col-check");
+      const input = el("input");
+      input.type = "checkbox";
+      input.checked = state.selection.has(row.request_key);
+      input.setAttribute("aria-label", `Select row ${timeText(row.started_epoch_ms)} ${statusText(row)} ${metaValue(row, "model")}`);
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("change", () => {
+        input.checked ? state.selection.add(row.request_key) : state.selection.delete(row.request_key);
+        renderSelection();
+      });
+      td.appendChild(input);
+      return td;
+    }
+
     function requestRow(row) {
-      const status = statusOf(row);
-      const tr = el("tr", `request-row status-${status}`);
+      const tr = el("tr");
       tr.dataset.requestKey = row.request_key;
       tr.style.cursor = "pointer";
       tr.addEventListener("click", () => openRequestDetail(row));
-      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
-      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
-      tr.addEventListener("mouseleave", hideRowPopover);
-      const usage = row.usage || {};
-      // Compact port: strip the leading zero-width space so a 4-digit port stays narrow.
-      const portValue = row.scope?.port;
-      const portText = portValue == null ? "—" : String(portValue);
-      const statusCell = el("td", `status-cell ${status}`, statusText(row));
-      statusCell.title = row.meta?.error_category
-        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
-        : `${status}`;
-      tr.appendChild(statusCell);
-      tr.appendChild(el("td", "col-port", portText));
-      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
+      tr.appendChild(checkCell(row));
+      tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
+      tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
+      const code = statusText(row);
+      const kind = statusOf(row);
+      const codeCell = el("td", "col-code");
+      codeCell.appendChild(el("span", kind === "error" ? "status-text error" : "mono", code));
+      codeCell.title = row.meta?.error_category ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim() : kind;
+      tr.appendChild(codeCell);
+      const modelCell = el("td", "col-model");
+      modelCell.innerHTML = `<span>${escapeHtml(metaValue(row, "provider"))}/${escapeHtml(metaValue(row, "model"))}</span> <span class="key">· ${escapeHtml(metaValue(row, "auth_alias"))}</span>`;
+      tr.appendChild(modelCell);
       if ((state.entriesGroup || "pool") === "reason") {
-        tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
+        tr.appendChild(el("td", "col-route", metaValue(row, "route_reason")));
       } else {
-        tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
+        tr.appendChild(el("td", "col-pool", metaValue(row, "pool")));
       }
-      tr.appendChild(compactProviderCell(row));
-      tr.appendChild(el("td", "num", `${row.timing_internal_ms != null ? fmtMs(row.timing_internal_ms) : "—"} / ${row.timing_external_ms != null ? fmtMs(row.timing_external_ms) : "—"}`));
+      const usage = row.usage || {};
       const usageCell = el("td", "mono col-usage");
       usageCell.appendChild(el("div", "usage-value", usageText(usage)));
       usageCell.appendChild(el("div", "hit-rate", hitRateText(usage)));
       tr.appendChild(usageCell);
-      tr.appendChild(el("td", "col-finish", compactFinishReason(row)));
-      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.started_epoch_ms)));
-      tr.appendChild(el("td", "mono col-time col-time-last", timeText(status === "active" || status === "retrying" ? row.updated_epoch_ms : row.finished_epoch_ms)));
+      tr.appendChild(el("td", "num mono", fmtMs(row.duration_ms)));
+      return tr;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "—").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[ch]));
+    }
+
+    function groupHeadRow(code, groupRows) {
+      const tr = el("tr", "group-head" + (state.collapsed.has(code) ? " collapsed" : ""));
+      const td = el("td");
+      td.colSpan = 8;
+      const btn = el("button", "group-head-btn");
+      btn.type = "button";
+      btn.setAttribute("aria-expanded", String(!state.collapsed.has(code)));
+      btn.appendChild(el("span", "caret", "▾"));
+      btn.appendChild(el("span", "code" + (groupRank(code) === 0 ? " error" : ""), code));
+      const latest = groupRows[0] ? ` · 最新 ${timeText(Math.max(...groupRows.map((row) => row.started_epoch_ms || 0)))}` : "";
+      btn.appendChild(el("span", "n", `${groupRows.length} 条${latest}`));
+      const excludedCount = state.excluded[code]?.size || 0;
+      if (excludedCount) btn.appendChild(el("span", "exclude-chip", `已排除 ${excludedCount}`));
+      btn.addEventListener("click", () => {
+        state.collapsed.has(code) ? state.collapsed.delete(code) : state.collapsed.add(code);
+        renderRequests();
+      });
+      td.appendChild(btn);
+      const actions = el("span", "group-actions");
+      const excludeBtn = el("button", "btn", "排除…");
+      excludeBtn.type = "button";
+      excludeBtn.setAttribute("aria-expanded", String(state.openExclude === code));
+      excludeBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        state.openExclude = state.openExclude === code ? null : code;
+        renderRequests();
+      });
+      actions.appendChild(excludeBtn);
+      td.appendChild(actions);
+      tr.appendChild(td);
+      return tr;
+    }
+
+    function excludeRowEl(code, groupRows) {
+      const tr = el("tr", "exclude-row");
+      const td = el("td");
+      td.colSpan = 8;
+      const list = el("div", "exclude-list");
+      const combos = new Map();
+      for (const row of groupRows) combos.set(comboOf(row), (combos.get(comboOf(row)) || 0) + 1);
+      for (const [combo, count] of [...combos.entries()].sort((a, b) => b[1] - a[1])) {
+        const label = el("label", "filter-item");
+        const input = el("input");
+        input.type = "checkbox";
+        input.checked = state.excluded[code]?.has(combo) || false;
+        input.addEventListener("change", () => {
+          const bucket = state.excluded[code] || (state.excluded[code] = new Set());
+          input.checked ? bucket.add(combo) : bucket.delete(combo);
+          renderRequests();
+        });
+        label.append(input, el("span", null, combo), el("span", "n", String(count)));
+        list.appendChild(label);
+      }
+      list.appendChild(el("span", "mono muted", "勾选 = 在本组隐藏该 provider/model/key"));
+      td.appendChild(list);
+      tr.appendChild(td);
       return tr;
     }
 
     function drilldownErrorStatus(code) {
-      // Preserve current toolbar filters, then drill into Entries tab with
-      // status=error and the clicked status code. After viewing, the user
-      // can return to the Errors tab via the tabs themselves.
+      // Drill into Entries with the clicked status code, layer-2 narrowed to
+      // errors, keeping the rest of the filter rail.
       state.page = 1;
-      document.getElementById("status-filter").value = "error";
+      state.statusKinds = new Set(["error"]);
       state.errorStatusCode = code;
       state.tab = "entries";
       loadRecords();
@@ -756,12 +898,12 @@
       renderEntriesPanel(panel);
       wireTableResizers(panel, "entries");
       syncEntriesSubTabs();
+      renderPortTabs();
+      renderRail();
+      renderSelection();
     }
 
-    // Persist per-tab column widths once each table is rendered. The resize
-    // handle in attachColumnResizers records widths; this helper only
-    // applies whatever is stored on disk so the layout matches the user
-    // choice across reloads.
+    // Persist per-tab column widths once each table is rendered.
     function wireTableResizers(panel, tab) {
       const table = panel ? panel.querySelector("table.request-table") : null;
       if (!table) return;
@@ -780,10 +922,19 @@
       });
     }
 
+    const ENTRY_COLUMNS = [
+      { key: "__check", label: "", colClass: "col-check", width: 36 },
+      { key: "started_epoch_ms", label: "时间", colClass: "col-time", width: 78 },
+      { key: "scope.port", label: "端口", colClass: "col-port", width: 64 },
+      { key: "result", label: "状态", colClass: "col-code", width: 78 },
+      { key: "meta.provider", label: "Provider · Key", colClass: "col-model", width: 220 },
+      { key: "meta.pool", label: "Pool", colClass: "col-pool", width: 110 },
+      { key: "usage_total_tokens", label: "Usage", colClass: "col-usage", width: 160 },
+      { key: "duration_ms", label: "耗时", colClass: "col-dur", width: 84 },
+    ];
+
     function renderEntriesPanel(panel) {
       const rows = state.records;
-      // Single-action return-to-errors banner: keeps the prior status_code
-      // context visible and offers one click to clear it.
       const fragments = [];
       if (state.errorStatusCode) {
         const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
@@ -797,69 +948,78 @@
         fragments.push(banner);
       }
       if (!rows.length) {
-        fragments.push(el("div", "loading", "no matching requests"));
+        fragments.push(el("div", "empty-state", "<h2>No matching requests</h2><p>调整搜索词或清除勾选过滤。</p>"));
         panel.replaceChildren(...fragments);
         return;
       }
       const table = el("table", "request-table");
-      const head = el("tr");
-      const group = state.entriesGroup === "reason" ? "reason" : "pool";
-      const columns = [
-        { key: "result", label: "Status", colClass: "col-status" },
-        { key: "scope.port", label: "Port", colClass: "col-port" },
-        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
-        group === "reason"
-          ? { key: "meta.route_reason", label: "Reason", colClass: "col-route" }
-          : { key: "meta.pool", label: "Pool", colClass: "col-pool" },
-        { key: "meta.provider", label: "Model", colClass: "col-provider" },
-        { key: "timing_internal_ms", label: "Internal / External", colClass: "col-intext" },
-        { key: "usage_total_tokens", label: "Usage", colClass: "col-usage" },
-        { key: "meta.finish_reason", label: "Finish", colClass: "col-finish" },
-        { key: "started_epoch_ms", label: "Sent", colClass: "col-time col-time-last" },
-        { key: "finished_epoch_ms", label: "Responded", colClass: "col-time col-time-last" },
-      ];
       const colgroup = el("colgroup");
-      columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+      ENTRY_COLUMNS.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
       table.appendChild(colgroup);
-      columns.forEach((col, index) => {
-        const th = el("th", `sortable ${col.colClass}`, col.label);
-        th.dataset.sortKey = col.key;
-        const active = document.getElementById("sort-field").value === col.key;
-        if (active) {
-          const dir = document.getElementById("sort-order").value === "desc" ? "▼" : "▲";
-          th.classList.add("sorted");
-          th.appendChild(el("span", "sort-indicator", dir));
+      const tableHead = document.createElement("thead");
+      const head = el("tr");
+      ENTRY_COLUMNS.forEach((col) => {
+        const th = el("th", col.colClass, col.label);
+        if (col.key === "__check") {
+          const checkAll = el("input");
+          checkAll.type = "checkbox";
+          checkAll.id = "check-all";
+          checkAll.setAttribute("aria-label", "Select all visible rows");
+          checkAll.addEventListener("change", () => {
+            const inputs = [...panel.querySelectorAll("#table-body td.col-check input")];
+            inputs.forEach((input) => {
+              input.checked = checkAll.checked;
+              const key = input.closest("tr").dataset.requestKey;
+              checkAll.checked ? state.selection.add(key) : state.selection.delete(key);
+            });
+            renderSelection();
+          });
+          th.textContent = "";
+          th.appendChild(checkAll);
         }
-        th.addEventListener("click", (event) => {
-          // The resizer handle sits inside <th>; clicks on it are already
-          // stopped from bubbling, but guard again in case any other
-          // child element (sort indicator, future icon) is added later.
-          if (event.target instanceof Element && event.target.closest(".col-resizer")) return;
-          const fieldEl = document.getElementById("sort-field");
-          const orderEl = document.getElementById("sort-order");
-          if (fieldEl.value === col.key) {
-            orderEl.value = orderEl.value === "desc" ? "asc" : "desc";
-          } else {
-            fieldEl.value = col.key;
-            orderEl.value = "desc";
-          }
-          state.page = 1;
-          loadRecords();
-        });
         head.appendChild(th);
       });
-      const tableHead = document.createElement("thead");
       tableHead.appendChild(head);
       table.appendChild(tableHead);
       const body = document.createElement("tbody");
-      body.className = "request-body is-updating";
-      rows.forEach((row) => body.appendChild(requestRow(row)));
+      body.id = "table-body";
+      if (state.sortMode === "code") {
+        const sorted = [...rows].sort((a, b) => {
+          const codeA = statusText(a), codeB = statusText(b);
+          const rank = compareCodes(codeA, codeB);
+          if (rank !== 0) return rank;
+          return (b.started_epoch_ms || 0) - (a.started_epoch_ms || 0);
+        });
+        const groups = new Map();
+        for (const row of sorted) {
+          const code = statusText(row);
+          if (!groups.has(code)) groups.set(code, []);
+          groups.get(code).push(row);
+        }
+        for (const code of [...groups.keys()].sort(compareCodes)) {
+          const groupRows = groups.get(code);
+          body.appendChild(groupHeadRow(code, groupRows));
+          if (state.openExclude === code) body.appendChild(excludeRowEl(code, groupRows));
+          if (state.collapsed.has(code)) continue;
+          const excluded = state.excluded[code];
+          const shown = excluded ? groupRows.filter((row) => !excluded.has(comboOf(row))) : groupRows;
+          for (const row of shown) body.appendChild(requestRow(row));
+        }
+      } else {
+        for (const row of rows) body.appendChild(requestRow(row));
+      }
       table.appendChild(body);
-      panel.replaceChildren(...fragments, table);
+      fragments.push(table);
+      panel.replaceChildren(...fragments);
       state.tableWidths.entries = loadTableWidths("entries");
       applyTableWidths(table, state.tableWidths.entries);
       attachColumnResizers(table, "entries");
-      requestAnimationFrame(() => body.classList.remove("is-updating"));
+      const checkAll = panel.querySelector("#check-all");
+      if (checkAll) {
+        const inputs = [...body.querySelectorAll("td.col-check input")];
+        checkAll.checked = inputs.length > 0 && inputs.every((input) => input.checked);
+        checkAll.indeterminate = inputs.some((input) => input.checked) && !inputs.every((input) => input.checked);
+      }
     }
 
     function renderAttemptsPanel(panel) {
@@ -871,13 +1031,12 @@
       const table = el("table", "request-table");
       const head = el("tr");
       const columns = [
-        { key: "status", label: "Status", colClass: "col-status" },
+        { key: "status", label: "Status", colClass: "col-code" },
         { key: "scope.port", label: "Port", colClass: "col-port" },
-        { key: "meta.endpoint", label: "Endpoint", colClass: "col-endpoint" },
         { key: "meta.pool", label: "Pool", colClass: "col-pool" },
         { key: "meta.route_reason", label: "Reason", colClass: "col-route" },
-        { key: "meta.provider", label: "Model", colClass: "col-provider" },
-        { key: "duration_ms", label: "Duration", colClass: "col-intext" },
+        { key: "meta.provider", label: "Model", colClass: "col-model" },
+        { key: "duration_ms", label: "Duration", colClass: "col-dur" },
         { key: "error", label: "Error", colClass: "col-usage" },
         { key: "switches", label: "Next", colClass: "col-finish" },
         { key: "updated_epoch_ms", label: "When", colClass: "col-time col-time-last" },
@@ -891,42 +1050,33 @@
       tableHead.appendChild(trh);
       table.appendChild(tableHead);
       const body = document.createElement("tbody");
-      body.className = "request-body is-updating";
-      rows.forEach((row) => body.appendChild(attemptRow(row)));
+      rows.forEach((row) => {
+        const tr = el("tr");
+        tr.dataset.requestKey = row.request_key;
+        tr.style.cursor = "pointer";
+        tr.addEventListener("click", () => openRequestDetail(row));
+        const detail = row.meta?.error_category
+          ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+          : "—";
+        const codeCell = el("td", "col-code");
+        codeCell.appendChild(el("span", "status-text error", statusText(row)));
+        codeCell.title = detail;
+        tr.appendChild(codeCell);
+        tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
+        tr.appendChild(el("td", "col-pool", metaValue(row, "pool")));
+        tr.appendChild(el("td", "col-route", metaValue(row, "route_reason")));
+        tr.appendChild(el("td", "col-model", `${metaValue(row, "provider")}/${metaValue(row, "model")} · ${metaValue(row, "auth_alias")}`));
+        tr.appendChild(el("td", "num mono", fmtMs(row.duration_ms)));
+        tr.appendChild(el("td", "mono col-usage", detail));
+        tr.appendChild(el("td", "col-finish", row.switches > 0 ? "switched" : "terminal"));
+        tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
+        body.appendChild(tr);
+      });
       table.appendChild(body);
       panel.replaceChildren(table);
       state.tableWidths.attempts = loadTableWidths("attempts");
       applyTableWidths(table, state.tableWidths.attempts);
       attachColumnResizers(table, "attempts");
-      requestAnimationFrame(() => body.classList.remove("is-updating"));
-    }
-
-    function attemptRow(row) {
-      const tr = el("tr", "request-row status-error");
-      tr.dataset.requestKey = row.request_key;
-      tr.style.cursor = "pointer";
-      tr.addEventListener("click", () => openRequestDetail(row));
-      tr.addEventListener("mouseenter", (event) => showRowPopover(row, event));
-      tr.addEventListener("mousemove", (event) => positionRowPopover(event));
-      tr.addEventListener("mouseleave", hideRowPopover);
-      const portValue = row.scope?.port;
-      const portText = portValue == null ? "—" : String(portValue);
-      const statusCell = el("td", `status-cell error`, statusText(row));
-      const detail = row.meta?.error_category
-        ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
-        : "—";
-      statusCell.title = detail;
-      tr.appendChild(statusCell);
-      tr.appendChild(el("td", "col-port", portText));
-      tr.appendChild(el("td", null, endpointLabel(metaValue(row, "endpoint"))));
-      tr.appendChild(el("td", "muted col-pool", metaValue(row, "pool")));
-      tr.appendChild(el("td", "muted col-route", metaValue(row, "route_reason")));
-      tr.appendChild(compactProviderCell(row));
-      tr.appendChild(el("td", "num", row.duration_ms != null ? fmtMs(row.duration_ms) : "—"));
-      tr.appendChild(el("td", "mono", detail));
-      tr.appendChild(el("td", "col-finish", row.switches > 0 ? `switched` : "terminal"));
-      tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
-      return tr;
     }
 
     function renderErrorsPanel(panel) {
@@ -935,10 +1085,10 @@
         panel.replaceChildren(el("div", "loading", "no errors"));
         return;
       }
-      const wrapper = el("div", "errors-grid");
+      const wrapper = el("div");
       const table = el("table", "request-table");
       const columns = [
-        { key: "code", label: "Status", colClass: "col-status" },
+        { key: "code", label: "Status", colClass: "col-code" },
         { key: "count", label: "Count", colClass: "col-port" },
         { key: "example", label: "Example detail", colClass: "col-usage" },
       ];
@@ -951,16 +1101,16 @@
       head.appendChild(trh);
       table.appendChild(head);
       const body = document.createElement("tbody");
-      body.className = "request-body is-updating";
       codes.forEach((item) => {
-        const tr = el("tr", "status-error");
+        const tr = el("tr");
         tr.style.cursor = "pointer";
         tr.title = `View Requests filtered by status ${item.code}`;
-        // Drilldown: jump to Entries tab with status=error + error_status_code
-        // set, keeping all other toolbar filters. Single action; no separate
-        // modal or extra navigation step.
+        // Drilldown: jump to Entries tab with layer-2 narrowed to errors and
+        // the clicked status code, keeping other filters.
         tr.addEventListener("click", () => drilldownErrorStatus(item.code));
-        tr.appendChild(el("td", "col-status", item.code));
+        const codeCell = el("td", "col-code");
+        codeCell.appendChild(el("span", "status-text error", item.code));
+        tr.appendChild(codeCell);
         tr.appendChild(el("td", "col-port", String(item.count)));
         tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
         body.appendChild(tr);
@@ -972,7 +1122,163 @@
       state.tableWidths.errors = loadTableWidths("errors");
       applyTableWidths(table, state.tableWidths.errors);
       attachColumnResizers(table, "errors");
-      requestAnimationFrame(() => body.classList.remove("is-updating"));
+    }
+
+    function renderPortTabs() {
+      const bar = document.getElementById("port-tabs");
+      if (!bar) return;
+      // Counts come from the unfiltered-by-port response; keep the last known
+      // per-port counts while a specific port tab is active.
+      const source = state.port === "all" ? (state.facets.ports || {}) : (state.portCountsCache || {});
+      const ports = Object.entries(source).sort(([a], [b]) => Number(a) - Number(b));
+      const tabs = [{ value: "all", label: "All ports", count: state.port === "all" ? state.total : null }];
+      for (const [port, count] of ports) {
+        tabs.push({ value: port, label: port, count: Number(count) });
+      }
+      bar.replaceChildren(...tabs.map((tab) => {
+        const btn = el("button", "port-tab");
+        btn.type = "button";
+        btn.role = "tab";
+        btn.dataset.port = tab.value;
+        btn.setAttribute("aria-selected", String(state.port === tab.value));
+        btn.append(el("span", null, tab.label));
+        if (tab.count != null) btn.appendChild(el("span", "count", String(tab.count)));
+        btn.addEventListener("click", () => {
+          if (state.port === tab.value) return;
+          state.port = tab.value;
+          document.getElementById("port-filter").value = tab.value;
+          state.page = 1;
+          renderPortTabs();
+          loadRecords();
+        });
+        return btn;
+      }));
+    }
+
+    const STATUS_KIND_LABELS = { success: "成功 (2xx)", error: "错误 (4xx/5xx)", cancelled: "已取消 (499)", active: "进行中" };
+
+    function renderRail() {
+      const stats = state.stats || {};
+      if (!state.statusKinds.size) {
+        state.kindCounts = {
+          success: Number(stats.success_count || 0),
+          error: Number(stats.error_count || 0),
+          cancelled: Number(stats.cancelled_count || 0),
+          active: Number(stats.active_count || 0),
+        };
+      }
+      if (!state.providerSel.size) state.providerCounts = { ...(state.facets.providers || {}) };
+      if (!state.modelSel.size) state.modelCounts = { ...(state.facets.models || {}) };
+      checkboxList(document.getElementById("filter-status"),
+        Object.keys(STATUS_KIND_LABELS).map((kind) => [STATUS_KIND_LABELS[kind], state.kindCounts[kind] || 0]),
+        new Set([...state.statusKinds].map((kind) => STATUS_KIND_LABELS[kind])),
+        (label, on) => {
+          const kind = Object.keys(STATUS_KIND_LABELS).find((key) => STATUS_KIND_LABELS[key] === label);
+          on ? state.statusKinds.add(kind) : state.statusKinds.delete(kind);
+          state.page = 1;
+          loadRecords();
+        });
+      checkboxList(document.getElementById("filter-provider"),
+        Object.entries(state.providerCounts).sort((a, b) => b[1] - a[1]),
+        state.providerSel,
+        (value, on) => {
+          on ? state.providerSel.add(value) : state.providerSel.delete(value);
+          state.page = 1;
+          loadRecords();
+        });
+      checkboxList(document.getElementById("filter-model"),
+        Object.entries(state.modelCounts).sort((a, b) => b[1] - a[1]),
+        state.modelSel,
+        (value, on) => {
+          on ? state.modelSel.add(value) : state.modelSel.delete(value);
+          state.page = 1;
+          loadRecords();
+        });
+      document.querySelectorAll(".filter-clear").forEach((btn) => {
+        btn.onclick = () => {
+          state[btn.dataset.clear].clear();
+          state.page = 1;
+          loadRecords();
+        };
+      });
+    }
+
+    function checkboxList(container, entries, selectedSet, onToggle) {
+      if (!container) return;
+      container.replaceChildren(...entries.map(([value, count]) => {
+        const label = el("label", "filter-item");
+        const input = el("input");
+        input.type = "checkbox";
+        input.checked = selectedSet.has(value);
+        input.addEventListener("change", () => onToggle(value, input.checked));
+        label.append(input, el("span", null, value), el("span", "n", String(count)));
+        return label;
+      }));
+      if (!entries.length) {
+        container.appendChild(el("span", "mono muted tiny", "当前层无可选值"));
+      }
+    }
+
+    // ---------- selection & export ----------
+    const CSV_HEAD = ["time", "port", "status", "endpoint", "provider", "model", "key", "pool", "input", "output", "duration", "request_id", "error_detail"];
+    function selectedRows() {
+      return state.exports;
+    }
+    function exportFields(row) {
+      const usage = row.usage || {};
+      return [
+        timeText(row.started_epoch_ms),
+        String(row.scope?.port ?? "—"),
+        statusText(row),
+        endpointLabel(row.meta?.endpoint),
+        String(row.meta?.provider ?? "—"),
+        String(row.meta?.model ?? "—"),
+        String(row.meta?.auth_alias ?? "—"),
+        String(row.meta?.pool ?? "—"),
+        fmtCompact(usage.input_tokens ?? 0),
+        fmtCompact(usage.output_tokens ?? 0),
+        fmtMs(row.duration_ms),
+        String(row.meta?.request_id || row.request_key || "—"),
+        String(row.meta?.error_detail || row.meta?.error_category || "—"),
+      ];
+    }
+    function toTSV(rows) {
+      return [CSV_HEAD.join("\t"), ...rows.map((row) => exportFields(row).join("\t"))].join("\n");
+    }
+    function toCSV(rows) {
+      const esc = (value) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+      return [CSV_HEAD.join(","), ...rows.map((row) => exportFields(row).map(esc).join(","))].join("\n");
+    }
+    function renderSelection() {
+      const bar = document.getElementById("selection-bar");
+      state.exports = state.records.filter((row) => state.selection.has(row.request_key));
+      // The bar reflects what an export would actually contain: the selected
+      // rows among the currently loaded records.
+      bar.classList.toggle("show", state.exports.length > 0);
+      document.getElementById("sel-count").textContent = String(state.exports.length);
+      const has = state.exports.length > 0;
+      for (const id of ["export-csv-top", "copy-tsv-top"]) document.getElementById(id).disabled = !has;
+    }
+    async function copyTSV() {
+      const rows = selectedRows();
+      if (!rows.length) return;
+      try {
+        await navigator.clipboard.writeText(toTSV(rows));
+        showStatus("ok", `已复制 ${rows.length} 行到剪贴板（TSV，含 request_id / error_detail）。`);
+      } catch (error) {
+        showStatus("err", "剪贴板不可用（浏览器权限）。");
+      }
+    }
+    function exportCSV() {
+      const rows = selectedRows();
+      if (!rows.length) return;
+      const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `rcc-requests-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showStatus("ok", `已导出 ${rows.length} 行 CSV。`);
     }
 
     function renderStatsCards() {
@@ -1017,9 +1323,8 @@
         chart.replaceChildren(el("div", "empty-chart muted", "no data in selected range"));
         return;
       }
-      // Per Jason spec: x-axis is date (one column per bucket), y-axis is the
-      // selected metric normalized to the bucket maximum, with the tallest bar
-      // at 80% of the chart area height.
+      // X-axis is date (one column per bucket), y-axis is the selected metric
+      // normalized to the bucket maximum, tallest bar at 80% of the area.
       const chartHeight = Math.max(200, chart.clientHeight || 0);
       const axisHeight = 22;
       const gap = 8;
@@ -1034,6 +1339,12 @@
         const label = el("span", "chart-y-label", metric === "cache_hit_rate_percent" ? `${axisValue.toFixed(0)}%` : fmtCompact(axisValue));
         label.style.bottom = `${Math.round(usableHeight * ratio)}px`;
         yAxis.appendChild(label);
+      }
+      const grid = el("div", "chart-gridlines");
+      for (const ratio of [1, 0.8, 0.6, 0.4, 0.2]) {
+        const line = el("i");
+        line.style.bottom = `${Math.round(usableHeight * ratio)}px`;
+        grid.appendChild(line);
       }
 
       const bars = el("div", "chart-bars");
@@ -1053,6 +1364,7 @@
         column.append(spacer, bar, label);
         bars.appendChild(column);
       }
+      bars.appendChild(grid);
       chart.replaceChildren(yAxis, bars);
     }
 
@@ -1086,8 +1398,6 @@
       });
     }
 
-    function render() { renderAll(); }
-
     document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
     document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1107,23 +1417,24 @@
     ["chart-range","chart-metric"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
     });
-    ["status-filter","port-filter","provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+    ["provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
       const input = document.getElementById(id);
       let timer = null;
       input.addEventListener("input", () => {
         clearTimeout(timer);
-        if (id === "status-filter") state.errorStatusCode = null;
         timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
       });
       if (input.tagName === "SELECT") input.addEventListener("change", () => {
-        if (id === "status-filter") state.errorStatusCode = null;
         state.page = 1;
         loadRecords();
       });
     });
-    ["sort-field","sort-order"].forEach((id) => {
-      document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
+    document.getElementById("sort-field").addEventListener("change", () => {
+      setSortMode(null);
+      state.page = 1;
+      loadRecords();
     });
+    document.getElementById("sort-order").addEventListener("change", () => { state.page = 1; loadRecords(); });
     document.getElementById("page-prev").addEventListener("click", () => {
       if (state.page > 1) { state.page -= 1; loadRecords(); }
     });
@@ -1135,6 +1446,26 @@
     document.getElementById("page-next").addEventListener("click", () => {
       const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
       if (state.page < pages) { state.page += 1; loadRecords(); }
+    });
+    document.getElementById("sort-mode").addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-mode]");
+      if (!btn) return;
+      setSortMode(btn.dataset.mode);
+      state.page = 1;
+      loadRecords();
+    });
+    function setSortMode(mode) {
+      state.sortMode = mode || "custom";
+      document.querySelectorAll("#sort-mode button").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === state.sortMode));
+      });
+    }
+    for (const id of ["copy-tsv-bar", "copy-tsv-top"]) document.getElementById(id).addEventListener("click", copyTSV);
+    for (const id of ["export-csv-bar", "export-csv-top"]) document.getElementById(id).addEventListener("click", exportCSV);
+    document.getElementById("sel-clear").addEventListener("click", () => {
+      state.selection.clear();
+      renderSelection();
+      renderRequests();
     });
     startAutoRefresh(() => loadRecords(), 5000);
     document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
