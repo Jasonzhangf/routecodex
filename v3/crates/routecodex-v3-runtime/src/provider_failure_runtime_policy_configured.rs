@@ -5,7 +5,7 @@ fn configured_retry_budget_for_failure(
     default_budget: usize,
 ) -> usize {
     let Some(policy) = matched_policy else {
-        return 0;
+        return default_budget;
     };
     policy
         .path
