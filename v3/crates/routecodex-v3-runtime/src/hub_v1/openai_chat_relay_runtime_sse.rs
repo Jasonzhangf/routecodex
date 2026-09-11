@@ -277,24 +277,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
                                 for mut payload in transducer.push_event(event)? {
-                                    if tool_thinking_enabled {
-                                        crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
-                                            &payload,
-                                            &mut toolreason.tool_names,
-                                        );
-                                        crate::hooks::apply_relay_toolreason_sse_hook(
-                                            &mut payload,
-                                            &toolreason.tool_names,
-                                            &mut toolreason.pending_reasons,
-                                            &mut toolreason.reason_emitted,
-                                            true,
-                                            Some(session_id.as_str()),
-                                            Some(request_id.as_str()),
-                                            Some(provider_outcome.model_id.as_str()),
-                                            &mut toolreason.argument_buffers,
-                                            None,
-                                        );
-                                    }
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),
                                         Some(session_id.as_str()),

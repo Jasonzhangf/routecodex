@@ -355,7 +355,7 @@ targets = [
 bind = "127.0.0.1"
 port = 10000
 routing_group = "anthropic_v3_10000"
-features = { stopless_center = false, responses_direct_stopless_center = false, tool_thinking = true, toolreason_client_projection = true }
+features = { stopless_center = false, responses_direct_stopless_center = false, tool_thinking = false, toolreason_client_projection = false }
 expose_models = ["deepseek-v4-flash"]
 
 [servers.toolreason_test_10000.execution]
