@@ -762,19 +762,45 @@ fn map_namespace_tool_name(namespace_name: &str, child_name: &str) -> String {
 }
 
 fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in input {
-        let kind = item.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("function_call" | "custom_tool_call")) {
-            continue;
-        }
-        let Some(name) = item.get("name").and_then(Value::as_str) else {
-            continue;
+    fn rewrite_call_object(value: &mut Value, names: &HashMap<String, String>) {
+        let Some(object) = value.as_object_mut() else {
+            return;
         };
-        if let Some(mapped) = names.get(name) {
-            item["name"] = Value::String(mapped.clone());
+        if let Some(Value::String(name)) = object.get_mut("name") {
+            if let Some(mapped) = names.get(name.as_str()) {
+                *name = mapped.clone();
+            }
+        }
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(Value::String(name)) = function.get_mut("name") {
+                if let Some(mapped) = names.get(name.as_str()) {
+                    *name = mapped.clone();
+                }
+            }
+        }
+    }
+
+    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            if matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "custom_tool_call" | "tool_use")
+            ) {
+                rewrite_call_object(item, names);
+            }
+        }
+    }
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for tool_call in tool_calls {
+                if tool_call.get("type").and_then(Value::as_str) == Some("function") {
+                    rewrite_call_object(tool_call, names);
+                }
+            }
         }
     }
 }
@@ -799,6 +825,20 @@ fn validate_provider_wire_tool_names(
                                     "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
                                 ),
                             });
+                        }
+                    }
+                }
+                if kind == Some("function") {
+                    if let Some(function) = object.get("function").and_then(Value::as_object) {
+                        if let Some(name) = function.get("name").and_then(Value::as_str) {
+                            if !is_provider_wire_tool_name(name) {
+                                return Err(V3ProviderError::FunctionToolShapeFailed {
+                                    request_id: request_id.to_owned(),
+                                    detail: format!(
+                                        "{path}.function.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                    ),
+                                });
+                            }
                         }
                     }
                 }

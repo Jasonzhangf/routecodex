@@ -235,6 +235,28 @@ mod tests {
     }
 
     #[test]
+    fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-review", "type": "function", "function": {
+                    "name": "mcp__codex_review.review_start",
+                    "arguments": "{}"
+                }}
+            ]}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-chat-tool-call-name",
+            target(),
+            body,
+        )
+        .expect_err("invalid openai_chat tool call name must be rejected locally");
+        assert!(error
+            .to_string()
+            .contains("body.messages[0].tool_calls[0].function.name"));
+    }
+
+    #[test]
     fn wire_flattens_namespace_tool_children_into_function_tools() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
@@ -308,6 +330,67 @@ mod tests {
         );
         assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
         assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
+    }
+
+    #[test]
+    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_when_declared() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-js", "type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "arguments": "{}"
+                }}
+            ]}],
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
+                ]}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-qualified-chat", chat_target, body)
+                .expect("declared namespace call names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__node_repl__js"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "description": "an independently declared tool",
+                    "parameters": {"type": "object"}
+                }}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-declaration-name",
+            chat_target,
+            body,
+        )
+        .expect_err("ordinary tool declaration must not be rewritten before validation");
+        assert!(
+            error.to_string().contains("body.tools[1].function.name"),
+            "declaration path must be rejected without mapping: {error}"
+        );
+        assert!(
+            !error.to_string().contains("mcp__node_repl__js"),
+            "declaration names must not be rewritten from call-history aliases: {error}"
+        );
     }
 
     #[test]
