@@ -1,11 +1,15 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderHealthScope,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorSourceKind,
+    V3ProviderHealthScope,
 };
 use serde_json::json;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Notify;
+
+include!("provider_action_gate_tests.rs");
 
 fn test_provider_failure_scope(
     server_id: &str,
@@ -1311,7 +1315,7 @@ message_mode = "code_only"
 }
 
 #[tokio::test]
-async fn matched_response_policy_identity_drives_retry_without_message_rematch() {
+async fn matched_response_policy_identity_drives_terminal_projection_without_message_rematch() {
     let scope = "response_policy_identity";
     let source = r#"
 version = 3
@@ -1388,6 +1392,12 @@ targets = [
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
+    let matched_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "exact_response_policy")
+        .expect("response-policy fixture must expose its captured policy");
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
@@ -1395,7 +1405,7 @@ targets = [
         200,
         Some("wrapped_provider_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
-        None,
+        Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
@@ -1405,8 +1415,12 @@ targets = [
     .await
     .expect("exact matched policy must drive Error05");
 
-    assert_eq!(result.event.action, "policy_retry_same");
-    assert_eq!(result.event.wait_ms, Some(7000));
-    assert!(result.retry_selected.is_some());
-    assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
+    assert_eq!(result.event.action, "terminal_default_floor_exhausted");
+    assert!(result.retry_selected.is_none());
+    assert_eq!(same_candidate_retries.values().copied().next(), Some(0));
+    let projection = result
+        .terminal_projection
+        .expect("captured response policy must drive terminal projection");
+    assert_eq!(projection.status, 502);
+    assert_eq!(projection.body["error"]["code"], "network_error");
 }
