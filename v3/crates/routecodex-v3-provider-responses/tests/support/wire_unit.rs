@@ -311,6 +311,96 @@ mod tests {
     }
 
     #[test]
+    fn wire_maps_historical_namespace_call_without_current_tools() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-no-tools",
+            target(),
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_with_empty_current_tools() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [],
+            "input": [{"type": "custom_tool_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-empty-tools",
+            target(),
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_tool_use_name_in_input() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "tool_use", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-use-input",
+            target(),
+            body,
+        )
+        .expect("historical MCP tool_use names must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [],
+            "input": [{
+                "type": "custom_tool_call",
+                "name": "mcp__codex_review.review_start"
+            }]
+        });
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-empty-tools-openai-chat",
+            chat_target,
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "namespace", "name": "mcp__codex_review", "tools": [
+                {"type": "function", "name": "other"}
+            ]}],
+            "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-incomplete-namespace",
+            target(),
+            body,
+        )
+        .expect("incomplete namespace declarations still require convention mapping");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
     fn wire_flattens_namespace_children_into_dual_field_functions_for_openai_chat_provider() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();

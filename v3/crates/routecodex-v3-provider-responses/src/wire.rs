@@ -637,12 +637,16 @@ fn expand_namespace_tools_in_responses_wire_body(
     provider_type: &str,
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
-    let Some(tools) = body.get("tools").and_then(Value::as_array) else {
+    let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
+        rewrite_namespace_qualified_call_names_from_convention(&mut body);
         return Ok(body);
     };
     let has_namespace = tools
         .iter()
         .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
+    if !has_namespace {
+        rewrite_namespace_qualified_call_names_from_convention(&mut body);
+    }
     if !has_namespace && provider_type != "openai_chat" {
         return Ok(body);
     }
@@ -650,7 +654,6 @@ fn expand_namespace_tools_in_responses_wire_body(
         "openai_chat" => "openai-chat",
         _ => RESPONSES_WIRE_PROTOCOL_NAME,
     };
-    let tools = tools.clone();
     let mut expanded = Vec::with_capacity(tools.len());
     let mut namespace_name_map = HashMap::new();
     for tool in tools {
@@ -707,6 +710,11 @@ fn expand_namespace_tools_in_responses_wire_body(
     }
     body["tools"] = Value::Array(expanded);
     rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
+    // Historical inputs may carry an MCP-qualified call even when the current
+    // tool declaration is incomplete or omitted its child. Apply the same
+    // validated convention mapping as the no-tools path so strict providers
+    // never receive a dotted function name.
+    rewrite_namespace_qualified_call_names_from_convention(&mut body);
     Ok(body)
 }
 
@@ -767,7 +775,10 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
     };
     for item in input {
         let kind = item.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("function_call" | "custom_tool_call")) {
+        if !matches!(
+            kind,
+            Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
+        ) {
             continue;
         }
         let Some(name) = item.get("name").and_then(Value::as_str) else {
@@ -779,6 +790,48 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
     }
 }
 
+fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input {
+        let kind = item.get("type").and_then(Value::as_str);
+        if !matches!(
+            kind,
+            Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
+        ) {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(mapped) = map_known_namespace_qualified_call_name(name) else {
+            continue;
+        };
+        item["name"] = Value::String(mapped);
+    }
+}
+
+fn map_known_namespace_qualified_call_name(name: &str) -> Option<String> {
+    let remainder = name.strip_prefix("mcp__")?;
+    let (namespace, child) = remainder.split_once('.')?;
+    if namespace.is_empty()
+        || child.is_empty()
+        || child.contains('.')
+        || !is_namespace_component(namespace)
+        || !is_namespace_component(child)
+    {
+        return None;
+    }
+    Some(map_namespace_tool_name(&format!("mcp__{namespace}"), child))
+}
+
+fn is_namespace_component(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 fn validate_provider_wire_tool_names(
     request_id: &str,
     body: &Value,
@@ -787,12 +840,17 @@ fn validate_provider_wire_tool_names(
         match value {
             Value::Object(object) => {
                 let kind = object.get("type").and_then(Value::as_str);
-                if matches!(kind, Some("function_call" | "custom_tool_call" | "tool_use")) {
+                if matches!(
+                    kind,
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                ) {
                     if let Some(name) = object.get("name").and_then(Value::as_str) {
                         if !is_provider_wire_tool_name(name) {
                             return Err(V3ProviderError::FunctionToolShapeFailed {
                                 request_id: request_id.to_owned(),
-                                detail: format!("{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"),
+                                detail: format!(
+                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                ),
                             });
                         }
                     }
