@@ -1,29 +1,33 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const rootPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
-const hookPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoPath = (path) => resolve(repoRoot, path);
+const rootPath = repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1.rs');
+const hookPath = repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs');
 const skeletonPaths = [
   rootPath,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs'),
+  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs'),
   hookPath,
 ];
 const hookText = readFileSync(hookPath, 'utf8');
@@ -42,26 +46,26 @@ function rustFiles(dir, output = []) {
 }
 
 const nodeOwners = {
-  V3HubReqInbound01ClientRaw: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs',
-  V3HubReqInbound02Normalized: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
-  V3HubReqContinuation03Classified: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs',
-  V3HubReqChatProcess04Governed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
-  V3HubReqExecution05Planned: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs',
-  V3HubReqTarget06Resolved: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs',
-  V3HubReqOutbound07ProviderSemantic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
-  ProviderReqCompat06ProviderCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
-  V3ProviderReqOutbound08WirePayload: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs',
-  V3ProviderReqOutbound09TransportRequest: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs',
-  V3ProviderRespInbound01Raw: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs',
-  ProviderRespCompat02ProviderCompat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs',
-  V3HubRespInbound02Normalized: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
-  V3HubRespChatProcess03Governed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  V3HubRespContinuation04Committed: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
-  V3HubRespOutbound05ClientSemantic: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
-  V3ServerRespOutbound06ClientFrame: 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs',
+  V3HubReqInbound01ClientRaw: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs'),
+  V3HubReqInbound02Normalized: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs'),
+  V3HubReqContinuation03Classified: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs'),
+  V3HubReqChatProcess04Governed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs'),
+  V3HubReqExecution05Planned: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs'),
+  V3HubReqTarget06Resolved: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs'),
+  V3HubReqOutbound07ProviderSemantic: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs'),
+  ProviderReqCompat06ProviderCompat: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs'),
+  V3ProviderReqOutbound08WirePayload: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_08_wire_payload.rs'),
+  V3ProviderReqOutbound09TransportRequest: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs'),
+  V3ProviderRespInbound01Raw: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs'),
+  ProviderRespCompat02ProviderCompat: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs'),
+  V3HubRespInbound02Normalized: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs'),
+  V3HubRespChatProcess03Governed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs'),
+  V3HubRespContinuation04Committed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs'),
+  V3HubRespOutbound05ClientSemantic: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs'),
+  V3ServerRespOutbound06ClientFrame: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs'),
 };
 const nodes = Object.keys(nodeOwners);
-const allRust = rustFiles('v3/crates');
+const allRust = rustFiles(repoPath('v3/crates'));
 for (const node of nodes) {
   if (!production.includes(`pub struct ${node}`)) failures.push(`missing opaque node ${node}`);
   const owners = allRust.filter((file) => new RegExp(`pub\\s+struct\\s+${node}\\b`).test(readFileSync(file, 'utf8')));

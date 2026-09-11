@@ -816,29 +816,6 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
-  - resource_id: v3.metadata.runtime_control_stopless
-    resource_kind: metadata_center_control_signal
-    lifecycle: v3.metadata.center.mainline
-    owner_feature_id: v3.servertool_hook_skeleton_lifecycle
-    owner_crate: routecodex-v3-runtime
-    owner_node: StoplessCenterMetadataControl
-    signal_kind: control_signal
-    state_machine_required: true
-    state_fields: [phase, consecutive_stop_count, max_stop_budget, last_stop_kind, need_continue, blocked, terminal, guard_exhausted, next_request_policy, next_step_prompt, last_request_id, last_response_id, last_transition_reason, updated_at]
-    data_control_separation: required
-    normal_payload_state: forbidden
-    current_turn_protocol_projection: { req04_injection: allowed_registered_only, resp03_stripping: allowed_matching_provenance_only, history_mutation: forbidden, continuation_immutable_interval_semantics: forbidden }
-    identity: [entryEndpoint, sessionId, conversationId, port, routingGroup]
-    implementation_handles: [V3ResponsesRelayStoplessControlState(adapter_runtime_handle), V3ResponsesRelayStoplessControlScope(identity_projection), V3ResponsesDirectStoplessControlState(adapter_runtime_handle), V3ResponsesDirectStoplessControlScope(identity_projection)]
-    allowed_writers: [StoplessCenterMetadataControl::store_for_scope, StoplessCenterMetadataControl::clear_for_scope, V3ResponsesRelayStoplessControlState::store_for_scope, V3ResponsesRelayStoplessControlState::clear_for_scope, apply_v3_responses_relay_stopless_control_transition, apply_v3_responses_relay_stopless_control_request_transition, clear_v3_responses_relay_stopless_control_on_pre_resp03_terminal, V3StoplessResp02RuntimeControlUpdated, V3ResponsesDirectStoplessControlState::store_for_scope, V3ResponsesDirectStoplessControlState::clear_for_scope, prepare_v3_responses_direct_stopless_control_request, apply_v3_responses_direct_stopless_control_request_transition, apply_v3_responses_direct_stopless_json_response_control, apply_v3_responses_direct_stopless_control_response_transition, V3DirectStoplessResp02RuntimeControlUpdated]
-    allowed_readers: [StoplessCenterMetadataControl::load_for_scope, V3ResponsesRelayStoplessControlState::load_for_scope, load_v3_responses_relay_stopless_control_state, V3StoplessReq01RuntimeControlLoaded, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed, V3ResponsesDirectStoplessControlState::load_for_scope, prepare_v3_responses_direct_stopless_control_request, V3DirectStoplessReq01RuntimeControlLoaded, apply_v3_responses_direct_stopless_json_response_control]
-    forbidden_writers: [V3HubRespContinuation04Committed, V3LocalContinuationStore, V3RemoteContinuationStore, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, response_projector, sse_framer, reasoningStop_cli_args, reasoningStop_cli_stdout, reasoningStop_empty_input_json_envelope, client_payload, provider_payload, debug_snapshot, __runtime_json]
-    forbidden_readers: [reasoningStop_cli_stdout_parser, reasoningStop_cli_args_parser, V3HubRespContinuation04Committed, V3LocalContinuationStore, routecodex-v3-provider-responses, routecodex-v3-server, routecodex-v3-debug_snapshot_restore]
-    cli_contract: { carries_scope: false, carries_state: false, parameters: none, transport_envelope: no_input, role: protocol_tool_call_completion_only }
-    process_contract: { central_aggregation_allowed: true, allowed_callers: current_business_sop_declared_nodes_only, relay_required: false, cross_process_shortcut: forbidden }
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
   - resource_id: v3.hub.tool_governance_truth
     resource_kind: side_channel
     lifecycle: v3.hub_relay.tool_servertool_multiturn_parity
@@ -1275,7 +1252,7 @@ resources:
     allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, v3/scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
     data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
-    control_plane_fields: [metadata_center, routeHint, stoplessCenter, requestCapabilities]
+    control_plane_fields: [metadata_center, routeHint, requestCapabilities]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -1462,7 +1439,7 @@ resources:
     owner_crate: routecodex-v3-runtime
     owner_node: V3ServerToolState01ControlScope
     identity: [entryProtocol, endpoint, serverId, port, routingGroup, sessionId, conversationId, toolName, toolRunId]
-    implementation_handles: [V3ServerToolCenter(generic_registry), V3ServerToolCenterKey(toolName+scope_key), V3ServerToolInstanceState(typed_per_tool), V3ServerToolName(stopless|websearch), V3ResponsesRelayStoplessControlState(stopless_bucket_relay), V3ResponsesDirectStoplessControlState(stopless_bucket_direct)]
+    implementation_handles: [V3ServerToolCenter(generic_registry), V3ServerToolCenterKey(toolName+scope_key), V3ServerToolInstanceState(typed_per_tool), V3ServerToolName(websearch)]
     allowed_writers:
       - V3ServerToolStateManager
       - V3ServerToolCenter::register

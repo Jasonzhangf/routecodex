@@ -2,7 +2,7 @@
 
 ## Contract
 
-Normalization maps adjacent protocols and validates shape only. Tool identity pairing, uniqueness checks, orphan tool output detection, servertool, stopless, apply_patch, hook governance, and continuation save/restore semantics belong to Chat Process govern nodes.
+Normalization maps adjacent protocols and validates shape only. Tool identity pairing, uniqueness checks, orphan tool output detection, servertool, apply_patch, hook governance, and continuation save/restore semantics belong to Chat Process govern nodes.
 
 ## Request chain
 
@@ -37,7 +37,7 @@ flowchart LR
 ## Compat skeleton
 
 - `ProviderReqCompat06ProviderCompat`: standard provider protocol to provider implementation micro-adjustment. No protocol remap, tool governance, fallback, silent repair, route, or model selection.
-- `ProviderRespCompat02ProviderCompat`: provider-specific response to standard provider protocol compatibility. No harvest, apply_patch, servertool, stopless, side-channel injection, or fallback-to-success.
+- `ProviderRespCompat02ProviderCompat`: provider-specific response to standard provider protocol compatibility. No harvest, apply_patch, servertool, side-channel injection, or fallback-to-success.
 
 ## Gates
 

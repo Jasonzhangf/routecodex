@@ -6,7 +6,6 @@ pub struct V3CurrentTurnRouteFacts {
     pub is_compaction: bool,
     pub has_image_attachment: bool,
     pub latest_message_from_user: bool,
-    pub stopless_followup: bool,
     pub has_current_turn_tool_output: bool,
     pub has_current_turn_tool_execution_error: bool,
     pub has_current_turn_web_search: bool,
@@ -59,7 +58,7 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
             .as_deref()
             .unwrap_or_default()
     };
-    let thinking_from_user = input.latest_message_from_user || input.stopless_followup;
+    let thinking_from_user = input.latest_message_from_user;
     let continuation = !input.latest_message_from_user && input.has_current_turn_tool_output;
     let thinking_continuation = continuation && last_tool_category == "thinking";
     let coding_continuation = continuation && last_tool_category == "coding";

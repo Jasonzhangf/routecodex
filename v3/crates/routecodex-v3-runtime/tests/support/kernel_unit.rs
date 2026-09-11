@@ -2001,7 +2001,7 @@ targets = [
 async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     let manifest = direct_web_search_mode_b_manifest();
     let continuation_state = V3ResponsesDirectContinuationState::default();
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
     let continuation_scope = V3ResponsesDirectContinuationScope::responses(
         "/v1/responses",
         "session-ws-direct",
@@ -2019,9 +2019,9 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
             "tools": [{"type": "web_search"}]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
         &continuation_state,
-        &stopless_control,
+        &server_tool_state,
         &manifest,
         raw,
         continuation_scope.clone(),
@@ -2060,8 +2060,8 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(paired["call_id"], "call_ws_1");
     assert_eq!(paired["output"], "search result for routecodex");
     // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    let state = stopless_control
+    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
+    let state = server_tool_state
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");

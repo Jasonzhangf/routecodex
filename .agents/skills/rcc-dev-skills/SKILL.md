@@ -56,7 +56,7 @@ After verification and before commit/merge, use the reviewer selected by global 
 | first-divergence pipe debug | `references/10-pipedebug-flow.md` |
 | protocol/SSE/continuation | `references/25-protocol-sse-continuation-boundary.md` |
 | config/install/runtime replay | `references/50-rcc-config-ssot.md` |
-| servertool/Stopless | `references/95-v3-stopless-sop.md` |
+| servertool | V3 maps + `docs/agent-routing/30-servertool-lifecycle-routing.md` |
 | error chain | `references/96-unified-error-path-audit.md` |
 | selected provider model | `references/96-v3-selected-provider-model-binding-sop.md` |
 | continuation cache | `references/97-continuation-cache-compliance.md` |

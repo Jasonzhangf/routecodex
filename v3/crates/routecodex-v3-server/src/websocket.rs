@@ -324,13 +324,13 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         payload: payload.clone(),
     };
     let output = match protocol_plan {
-        Some(plan) => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target(
+        Some(plan) => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
             &state.manifest,
             input,
             &state.provider_health,
-            V3ResponsesRelayLocalStoplessControlInput::new(
+            V3ResponsesRelayLocalServerToolInput::new(
                 &state.responses_relay_local_continuation,
-                &state.responses_relay_stopless_control,
+                &state.responses_relay_server_tool_state,
                 continuation_scope,
                 now_epoch_ms,
             ),
@@ -341,12 +341,12 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             None,
         )
         .await,
-        None => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+        None => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state(
             &state.manifest,
             input,
             &state.provider_health,
             &state.responses_relay_local_continuation,
-            &state.responses_relay_stopless_control,
+            &state.responses_relay_server_tool_state,
             continuation_scope,
             now_epoch_ms,
         )

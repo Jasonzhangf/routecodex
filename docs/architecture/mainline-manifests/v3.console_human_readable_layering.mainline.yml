@@ -15,7 +15,6 @@ node_ids:
   - V3ConsoleReq02HumanBlock
   - V3ConsoleResp03HumanBlock
   - V3ConsoleStartup07HumanBlock
-  - V3ConsoleStopless05ExceptionalBlock
   - V3DebugSink01WriteFailed
   - V3Error01SourceRaised
   - V3Error06ClientProjected
@@ -27,11 +26,8 @@ step_ids:
   - v3-console-01
   - v3-console-02
   - v3-console-03
-  - v3-console-04
   - v3-console-05
-  - v3-console-06
   - v3-console-07
-  - v3-console-08
   - v3-console-09
   - v3-console-10
   - v3-console-11
@@ -48,10 +44,10 @@ step_ids:
   - v3-console-22
   - v3-console-23
 edge_status_counts:
-  anchored: 23
+  anchored: 20
   partial: 0
   binding_pending: 0
-  total: 23
+  total: 20
 sources:
   mainline_call_map: docs/architecture/mainline-call-map.yml
   function_map: docs/architecture/function-map.yml

@@ -59,8 +59,6 @@ mod responses_relay_failures;
 mod responses_relay_json_hooks;
 #[path = "responses_relay_runtime_inner.rs"]
 mod responses_relay_runtime_inner;
-#[path = "responses_relay_stopless.rs"]
-mod responses_relay_stopless;
 #[path = "responses_relay_types.rs"]
 mod responses_relay_types;
 use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
@@ -107,9 +105,9 @@ impl V3ResponsesRelayProviderHealthHandle {
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state,
     execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_server_tool_state,
     project_v3_responses_relay_runtime_failure,
 };
 use responses_relay_failures::{
@@ -120,7 +118,6 @@ use responses_relay_failures::{
     provider_runtime_failure, provider_semantic_failure, server_routing_group,
 };
 use responses_relay_json_hooks::*;
-use responses_relay_stopless::*;
 
 const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
@@ -138,23 +135,23 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     execute_v3_responses_relay_runtime(manifest, input, crate::default_responses_transport()).await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control<
+pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state<
     T: ResponsesTransport,
 >(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
-    scope: V3ResponsesRelayStoplessControlScope,
+    server_tool_state: &V3ResponsesRelayServerToolState,
+    scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
         None,
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: stopless_control,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: server_tool_state,
             scope,
             commit_effects: true,
         }),
@@ -172,37 +169,37 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_stople
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control<
+pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state<
     T: ResponsesTransport,
 >(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
-    let provider_failure_event_sink = local_stopless.provider_failure_event_sink.clone();
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&local_server_tool.scope);
+    let provider_failure_event_sink = local_server_tool.provider_failure_event_sink.clone();
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
         Some(V3ResponsesRelayLocalContinuationExecution {
-            state: local_stopless.state,
-            scope: local_stopless.scope,
-            now_epoch_ms: local_stopless.now_epoch_ms,
+            state: local_server_tool.state,
+            scope: local_server_tool.scope,
+            now_epoch_ms: local_server_tool.now_epoch_ms,
             commit_resp04_effects: true,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: local_stopless.stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: local_server_tool.server_tool_state,
+            scope: server_tool_scope,
             commit_effects: true,
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
         provider_failure_event_sink,
-        local_stopless.route_selection_event_sink.clone(),
+        local_server_tool.route_selection_event_sink.clone(),
         None,
         None,
         BTreeSet::new(),
@@ -212,42 +209,42 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target<
+pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target<
     T: ResponsesTransport,
 >(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&local_stopless.scope);
-    let provider_failure_event_sink = local_stopless.provider_failure_event_sink.clone();
+    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&local_server_tool.scope);
+    let provider_failure_event_sink = local_server_tool.provider_failure_event_sink.clone();
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
         Some(V3ResponsesRelayLocalContinuationExecution {
-            state: local_stopless.state,
-            scope: local_stopless.scope,
-            now_epoch_ms: local_stopless.now_epoch_ms,
+            state: local_server_tool.state,
+            scope: local_server_tool.scope,
+            now_epoch_ms: local_server_tool.now_epoch_ms,
             commit_resp04_effects: true,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: local_stopless.stopless_control,
-            scope: stopless_scope,
+        Some(V3ResponsesRelayServerToolExecution {
+            control: local_server_tool.server_tool_state,
+            scope: server_tool_scope,
             commit_effects: true,
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
         provider_failure_event_sink,
-        local_stopless.route_selection_event_sink.clone(),
+        local_server_tool.route_selection_event_sink.clone(),
         Some(initial_selected_target),
         Some(initial_expanded),
         request_local_excluded_candidates,
@@ -257,23 +254,23 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_cont
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
+    server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
         manifest,
         input,
         crate::default_responses_transport(),
         provider_health,
-        V3ResponsesRelayLocalStoplessControlInput::new(
+        V3ResponsesRelayLocalServerToolInput::new(
             state,
-            stopless_control,
+            server_tool_state,
             scope,
             now_epoch_ms,
         ),
@@ -281,25 +278,25 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_initial_target(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_state_and_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     state: &V3ResponsesRelayLocalContinuationState,
-    stopless_control: &V3ResponsesRelayStoplessControlState,
+    server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayLocalContinuationScope,
     now_epoch_ms: u64,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
         manifest,
         input,
         crate::default_responses_transport(),
         provider_health,
-        V3ResponsesRelayLocalStoplessControlInput::new(
+        V3ResponsesRelayLocalServerToolInput::new(
             state,
-            stopless_control,
+            server_tool_state,
             scope,
             now_epoch_ms,
         ),
@@ -312,39 +309,39 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
         manifest,
         input,
         crate::default_responses_transport(),
         provider_health,
-        local_stopless,
+        local_server_tool,
     )
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
+    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
         manifest,
         input,
         crate::default_responses_transport(),
         provider_health,
-        local_stopless,
+        local_server_tool,
         initial_selected_target,
         initial_expanded,
         request_local_excluded_candidates,
@@ -354,22 +351,22 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_provider_snapshots(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
     capture: V3ResponsesRelayProviderSnapshotCapture,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
     let mut output =
-        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_stopless_control(
+        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
             manifest,
             input,
             &transport,
             provider_health,
-            local_stopless,
+            local_server_tool,
         )
         .await?;
     output.provider_snapshots =
@@ -377,11 +374,11 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     Ok(output)
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_stopless: V3ResponsesRelayLocalStoplessControlInput<'_>,
+    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
     capture: V3ResponsesRelayProviderSnapshotCapture,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
@@ -392,12 +389,12 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_lo
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
     let mut output =
-        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_stopless_control_and_initial_target(
+        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
             manifest,
             input,
             &transport,
             provider_health,
-            local_stopless,
+            local_server_tool,
             initial_selected_target,
             initial_expanded,
             request_local_excluded_candidates,
@@ -490,8 +487,6 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
     now_epoch_ms: u64,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
-    let stopless_control = V3ResponsesRelayStoplessControlState::default();
-    let stopless_scope = V3ResponsesRelayStoplessControlScope::from(&scope);
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
@@ -502,11 +497,7 @@ pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: Respo
             now_epoch_ms,
             commit_resp04_effects: true,
         }),
-        Some(V3ResponsesRelayStoplessControlExecution {
-            control: &stopless_control,
-            scope: stopless_scope,
-            commit_effects: true,
-        }),
+        None,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
@@ -528,9 +519,9 @@ struct V3ResponsesRelayLocalContinuationExecution<'state> {
     commit_resp04_effects: bool,
 }
 
-pub(crate) struct V3ResponsesRelayStoplessControlExecution<'state> {
-    pub(crate) control: &'state V3ResponsesRelayStoplessControlState,
-    pub(crate) scope: V3ResponsesRelayStoplessControlScope,
+pub(crate) struct V3ResponsesRelayServerToolExecution<'state> {
+    pub(crate) control: &'state V3ResponsesRelayServerToolState,
+    pub(crate) scope: V3ResponsesRelayServerToolScope,
     pub(crate) commit_effects: bool,
 }
 

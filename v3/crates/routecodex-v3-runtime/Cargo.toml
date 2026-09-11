@@ -18,7 +18,6 @@ routecodex-v3-target = { path = "../routecodex-v3-target" }
 routecodex-v3-virtual-router = { path = "../routecodex-v3-virtual-router" }
 provider-compat-core.workspace = true
 servertool-core.workspace = true
-stop-message-core.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

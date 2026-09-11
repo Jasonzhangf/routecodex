@@ -362,7 +362,6 @@ pub fn build_v3_router_request_facts_from_v3_req_04_chat(
         &standardized.body,
         "openai_chat",
         configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
-        false,
         standardized.request_purpose.is_compaction()
             || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
@@ -382,7 +381,6 @@ pub fn build_v3_router_request_facts_from_v3_req_04(
         &standardized.body,
         entry_protocol,
         configured_v3_longcontext_threshold_tokens(manifest, &standardized.server_id),
-        false,
         standardized.request_purpose.is_compaction()
             || is_v3_compaction_endpoint(&standardized.endpoint),
         Some(manifest),
@@ -409,7 +407,6 @@ pub fn build_v3_router_request_facts_for_entry(
         entry_protocol,
         longcontext_threshold_tokens,
         false,
-        false,
         None,
     )
 }
@@ -427,7 +424,6 @@ pub(crate) fn build_v3_router_request_facts_for_entry_and_endpoint(
         &normalized,
         entry_protocol,
         longcontext_threshold_tokens,
-        false,
         is_v3_compaction_endpoint(endpoint),
         manifest,
     );
@@ -455,7 +451,6 @@ pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
         entry_protocol,
         longcontext_threshold_tokens,
         false,
-        false,
         Some(manifest),
     )
 }
@@ -464,7 +459,6 @@ fn build_v3_router_request_facts_for_entry_with_control(
     body: &Value,
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
-    stopless_followup: bool,
     is_compaction: bool,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
@@ -479,7 +473,6 @@ fn build_v3_router_request_facts_for_entry_with_control(
         is_compaction: is_compaction || active_turn.is_compaction,
         has_image_attachment,
         latest_message_from_user: active_turn.latest_message_from_user,
-        stopless_followup,
         has_current_turn_tool_output: active_turn.has_current_turn_tool_output,
         has_current_turn_tool_execution_error: active_turn.has_current_turn_tool_execution_error,
         has_current_turn_web_search: active_turn.has_current_turn_web_search,
@@ -1383,7 +1376,6 @@ mod tests {
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
             false,
-            false,
             Some(&manifest),
         );
         assert!(
@@ -1411,7 +1403,6 @@ mod tests {
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
             false,
-            false,
             Some(&manifest),
         );
         assert!(
@@ -1435,7 +1426,6 @@ mod tests {
             &request,
             "responses",
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
-            false,
             false,
             Some(&manifest),
         );

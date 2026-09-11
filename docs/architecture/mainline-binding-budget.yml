@@ -28,15 +28,6 @@ chains:
       V3 V2-config compatibility for 5555 is fully anchored in routecodex-v3-config:
       store detection enters the V2 TOML compiler, then normal V3 schema validation
       publishes the manifest consumed by CLI/server/runtime.
-  - chain_id: servertool.hook_skeleton.mainline
-    expected_total_edges: 11
-    min_anchored_edges: 11
-    max_partial_edges: 0
-    max_binding_pending_edges: 0
-    note: >
-      Servertool hook skeleton is anchored after retiring the server-side
-      followup/reenter runtime-action edges; CLI projection and next-turn restore
-      remain the only business execution path.
   - chain_id: request.mainline
     expected_total_edges: 6
     min_anchored_edges: 6
@@ -131,12 +122,6 @@ chains:
       restart-process HTTP, SIGUSR2 in-session restart, the start takeover
       guard, port-scoped listener release for start/stop, and the final
       PortRegistry removal edge.
-  - chain_id: stopless.session.mainline
-    expected_total_edges: 7
-    min_anchored_edges: 7
-    max_partial_edges: 0
-    max_binding_pending_edges: 0
-    note: Stopless session chain is fully anchored after retiring the deleted TS CLI/servertool binary execution edge.
   - chain_id: error.provider_action_gate.mainline
     expected_total_edges: 8
     min_anchored_edges: 8

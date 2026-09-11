@@ -529,23 +529,23 @@ mod tests {
     }
 
     #[test]
-    fn opencode_go_deepseek_responses_wire_omits_thinking_stopless_tool_choice() {
+    fn opencode_go_deepseek_responses_wire_omits_thinking_tool_choice() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
         selected.provider_type = "responses".into();
         selected.canonical_model_id = "deepseek-v4-flash".into();
         selected.wire_model = "deepseek-v4-flash".into();
         selected.compatibility_profile = Some("responses:deepseek-console-go".into());
-        let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-stopless", selected, json!({
+        let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-tool", selected, json!({
             "model": "deepseek-v4-flash", "input": "continue",
             "reasoning": {"effort": "high"}, "tool_choice": "required",
-            "tools": [{"type": "function", "name": "reasoningStop", "description": "stopless control"}]
+            "tools": [{"type": "function", "name": "exec_command", "description": "run a command"}]
         }))
-        .expect("DeepSeek Responses wire must not reject Stopless thinking mode");
+        .expect("DeepSeek Responses wire must not reject thinking mode with a tool");
         assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+                tool.get("name").and_then(Value::as_str) == Some("exec_command")
             })
         }));
     }
@@ -567,7 +567,7 @@ mod tests {
                     "input": "continue",
                     "reasoning": {"effort": "high"},
                     "tool_choice": "required",
-                    "tools": [{"type": "function", "name": "reasoningStop"}]
+                    "tools": [{"type": "function", "name": "exec_command"}]
                 }),
             )
             .expect("DeepSeek thinking compat must cover every supported wire protocol");
@@ -592,7 +592,7 @@ mod tests {
                 "model": "deepseek-v4-flash",
                 "input": "continue",
                 "tool_choice": "required",
-                "tools": [{"type": "function", "name": "reasoningStop"}]
+                    "tools": [{"type": "function", "name": "exec_command"}]
             }),
         )
         .expect("non-thinking DeepSeek request must remain valid");

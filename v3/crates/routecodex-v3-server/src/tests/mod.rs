@@ -208,13 +208,11 @@ fn test_v3_listener_state_with_debug(
                 && !manifest.debug.codex_samples,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
-        responses_direct_stopless_control: Arc::new(
-            V3ResponsesDirectStoplessControlState::default(),
-        ),
+        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
         responses_relay_local_continuation: Arc::new(
             V3ResponsesRelayLocalContinuationState::default(),
         ),
-        responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
+        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -1074,7 +1072,6 @@ fn test_direct_observability(
         provider_status: Some(200),
         response_status: Some("completed".to_string()),
         finish_reason: Some("stop".to_string()),
-        stopless_activation: false,
         attempts: Some(2),
         unavailable_candidates: Vec::new(),
         provider_failure_events,
@@ -1398,15 +1395,13 @@ fn console_timed_content_aligns_tags_by_terminal_display_width() {
     assert_eq!(v3_console_char_display_width('▶'), 1);
     assert_eq!(v3_console_char_display_width('✅'), 2);
     assert_eq!(v3_console_char_display_width('❌'), 2);
-    assert_eq!(v3_console_char_display_width('🧭'), 2);
 
     let started = format_v3_console_timed_content("▶ [/v1/responses]", "req=a");
     let completed = format_v3_console_timed_content("✅ [/v1/responses]", "req=b");
     let failed = format_v3_console_timed_content("❌ [provider-error]", "req=e");
-    let stopless = format_v3_console_timed_content("🧭 [stopless]", "req=c");
     let usage = format_v3_console_timed_content("[usage]", "req=d");
 
-    let data_columns = [&started, &completed, &failed, &stopless, &usage].map(|line| {
+    let data_columns = [&started, &completed, &failed, &usage].map(|line| {
         let boundary = line.find(" req=").expect("timed content must contain req");
         v3_console_display_width(&line[..boundary])
     });
@@ -3582,13 +3577,11 @@ fn error_projection_appends_human_console_failure_line() {
                 && !manifest.debug.full_codex_sampling,
         )),
         responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
-        responses_direct_stopless_control: Arc::new(
-            V3ResponsesDirectStoplessControlState::default(),
-        ),
+        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
         responses_relay_local_continuation: Arc::new(
             V3ResponsesRelayLocalContinuationState::default(),
         ),
-        responses_relay_stopless_control: Arc::new(V3ResponsesRelayStoplessControlState::default()),
+        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
         responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
@@ -3638,44 +3631,6 @@ fn error_projection_appends_human_console_failure_line() {
         "human console log must include the visible failed line, not only JSON debug events: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
-}
-
-#[test]
-fn stopless_console_activation_requires_action_stop_and_uses_fixed_orange() {
-    let active = V3RuntimeObservability {
-        response_status: Some("requires_action".to_string()),
-        finish_reason: Some("tool_calls".to_string()),
-        stopless_activation: true,
-        ..Default::default()
-    };
-    assert!(is_v3_stopless_console_activation(&active));
-
-    let completed = V3RuntimeObservability {
-        response_status: Some("completed".to_string()),
-        finish_reason: Some("stop".to_string()),
-        stopless_activation: false,
-        ..Default::default()
-    };
-    assert!(!is_v3_stopless_console_activation(&completed));
-
-    let stopless_content = "[5555:responses:sessionID:xxxx][rules][glmrelay_openai.glm-5.2][tools] 🧭 [stopless] 00:00:00 req=req event=activated hook=reasoningStop callId=call_stopless_reasoning action=exec_command finish_reason=stop transport=sse";
-    let colored = colorize_v3_layered_console_line(
-        V3ConsoleLayeredBlock::new("", stopless_content, stopless_content, ""),
-        ANSI_STOPLESS_ORANGE,
-        ANSI_DEBUG_DIM,
-    );
-    assert!(
-        colored.starts_with(ANSI_STOPLESS_ORANGE),
-        "stopless console line must use fixed orange color: {colored:?}"
-    );
-    assert!(
-        colored.contains(&format!("{ANSI_RESET}{ANSI_DEBUG_DIM}")),
-        "stopless diagnostic layer must be dim gray: {colored:?}"
-    );
-    assert!(colored.contains("hook="));
-    assert!(colored.contains("reasoningStop"));
-    assert!(colored.contains("callId="));
-    assert!(colored.contains("call_stopless_reasoning"));
 }
 
 #[tokio::test]

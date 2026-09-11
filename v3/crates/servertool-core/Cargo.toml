@@ -11,6 +11,3 @@ workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-regex.workspace = true
-stop-message-core.workspace = true
-toml.workspace = true

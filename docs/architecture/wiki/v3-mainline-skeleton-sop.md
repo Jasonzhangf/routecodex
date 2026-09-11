@@ -14,12 +14,12 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 - `v3.responses_direct.required_mainline`
 - `v3.hub_pipeline.v1.request`
 - `v3.hub_pipeline.v1.response`
-- `v3.servertool_hook_skeleton_lifecycle`
+- `v3.servertool_center_skeleton`
 - `v3.debug_error_foundation.mainline`
 
 ## Debug Entry SOP
 
-1. Open this SOP first for any V3 Hub Pipeline / Direct / Relay / Stopless / servertool / error handling debug.
+1. Open this SOP first for any V3 Hub Pipeline / Direct / Relay / servertool / error handling debug.
 2. Open the HTML review surface and find the relevant locked chain before reading implementation code.
 3. Check the locked chain's contract nodes and resource-flow table.
 4. If the issue is outside the locked chain, continue to the relevant branch diagram; if a new pattern is proven, add or update the owning SOP.
@@ -31,7 +31,7 @@ The following big-skeleton chains are SOP and cannot change without a Jason manu
 - Response skeleton is `ProviderRespInbound -> ProviderRespCompat -> RespInbound -> RespChatProcess -> RespContinuation save -> RespOutbound -> Server frame`.
 - Responses Direct is `V3Target10ConcreteProviderSelected -> V3Execution11ProtocolDecision -> V3ResponsesDirect11Policy`; Direct is allowed only for same entry/provider protocol, and mismatch must enter Relay or explicit Error06 before provider send.
 - Direct response projection must pass through Direct-only projection nodes; no provider raw / Resp03 / Resp04 direct-to-client shortcut.
-- Stopless/servertool request-side governance is Req04-owned; response-side governance is Resp03-owned; continuation save is Resp04-owned.
+- Servertool request-side governance is Req04-owned; response-side governance is Resp03-owned; continuation save is Resp04-owned.
 - Error handling is a resource graph with Error01-06 plus provider health/availability; side-channel is carrier mechanism, not the resource owner.
 - Metadata/debug/snapshot/error carriers must not enter provider body or client normal payload.
 
@@ -97,7 +97,7 @@ Use this SOP for V3 native live surfaces served by `config.v3.toml`, including 4
 ## SSE Edge SOP
 
 - SSE is an independent transport edge. It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only.
-- SSE transport and server frame code must not inspect `data` JSON, event names, `required_action`, terminal status, tool calls, continuation, stopless/servertool, routing, retry, or error-policy semantics.
+- SSE transport and server frame code must not inspect `data` JSON, event names, `required_action`, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.
 - Provider inbound streaming semantics belong to provider/protocol response codec owners after `SseTransportIn03ValidatedFrameStream` has produced opaque frames.
 - Client outbound streaming semantics belong to `V3HubRespOutbound05ClientSemantic`; `V3ServerRespOutbound06ClientFrame` only hands finalized JSON/client bytes to `Body::from_stream`.
 - EOF without a provider/client semantic terminal is a protocol/runtime owner error before client projection, not a server/SSE parser responsibility.

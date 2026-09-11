@@ -389,7 +389,6 @@ export function renderMainlineChainMarkdown(root, chainId, options = {}) {
     ['response.mainline', 'response-mainline-call-graph'],
     ['error.mainline', 'error-mainline-call-graph'],
     ['runtime.lifecycle.mainline', 'runtime-lifecycle-call-graph'],
-    ['stopless.session.mainline', 'runtime-lifecycle-call-graph'],
     ['metadata.center.mainline', 'metadata-center-mainline-source'],
   ]);
   const chainLinks = (parsed.chains ?? [])
@@ -503,7 +502,6 @@ export const GENERATED_WIKI_CHAIN_PAGES = [
   { chainId: 'response.mainline', path: 'docs/architecture/wiki/response-mainline-call-graph.md' },
   { chainId: 'error.mainline', path: 'docs/architecture/wiki/error-mainline-call-graph.md' },
   { chainId: 'runtime.lifecycle.mainline', path: 'docs/architecture/wiki/runtime-lifecycle-call-graph.md' },
-  { chainId: 'stopless.session.mainline', path: 'docs/architecture/wiki/stopless-session-mainline-source.md' },
   { chainId: 'metadata.center.mainline', path: 'docs/architecture/wiki/metadata-center-mainline-source.md' },
 ];
 

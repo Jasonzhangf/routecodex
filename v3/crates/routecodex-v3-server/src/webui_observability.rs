@@ -206,7 +206,6 @@ pub(crate) struct V3ObsRequestRow {
     pub timing_internal_ms: Option<u64>,
     pub timing_external_ms: Option<u64>,
     pub servertool: bool,
-    pub stopless: bool,
     // rawArtifactRef is a controlled reference only; never the full body.
     pub raw_artifact_ref: Option<String>,
 }
@@ -545,7 +544,6 @@ impl V3WebuiObservability {
                     .as_ref()
                     .map(|t| t.external.as_millis() as u64);
                 row.servertool = false;
-                row.stopless = observability.stopless_activation;
                 // Preserve the most recent provider-failure category for completed-but-recovered rows
                 // so the UI/facets keep the last attempt's error category even when the meta
                 // projection is otherwise rebuilt from a fresh payload here.

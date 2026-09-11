@@ -7,7 +7,7 @@
 //! - 路由事实（`router_facts`）
 //! - direct 策略（`Policy` / `run_route`）
 //! - 出站 wire 与 transport（`run_request_projection` / `run_provider_transport`）
-//! - 协议控制面（续接/stopless 等，responses 实现，chat 等默认无）
+//! - 协议控制面（续接与 web search 等，responses 实现，chat 等默认无）
 //! 骨架执行流程（路由 -> 选择 -> 决策 -> 策略 -> wire -> transport -> 发送 ->
 //! 响应投影 -> 客户端帧 + 失败策略循环）在 `crate::kernel::execute_v3_direct_runtime_kernel_core`
 //! 中只实现一份。
@@ -148,7 +148,7 @@ pub trait V3DirectProtocolCodec {
         Ok(None)
     }
 
-    /// 协议控制面：发送前的控制准备（responses 的 stopless/websearch；
+    /// 协议控制面：发送前的控制准备（responses 的 web search；
     /// chat 等默认无）。返回 false 表示骨架应跳过控制准备。
     fn prepare_before_send(
         control: &mut Self::Control,

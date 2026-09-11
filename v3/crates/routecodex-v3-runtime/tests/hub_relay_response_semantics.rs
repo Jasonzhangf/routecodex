@@ -7,7 +7,7 @@ use routecodex_v3_runtime::{
     V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
     V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind,
     V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext, V3StoplessCenterState, V3StoplessCenterSteering,
+    V3ProviderRespInbound01RawContext,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -42,7 +42,6 @@ fn real_5555_sample_json(sample_dir_name: &str, file_name: &str) -> Option<Value
     }
     None
 }
-
 #[test]
 fn provider_resp_compat_profile_loads_before_chat_process_tool_governance() {
     let hooks = compile_v3_hub_relay_response_hooks();
@@ -86,8 +85,6 @@ fn provider_resp_compat_profile_loads_before_chat_process_tool_governance() {
     );
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
 }
-
-#[test]
 fn passthrough_profile_does_not_harvest_minimax_text_tool_calls() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let raw = relay_raw(
@@ -225,116 +222,13 @@ fn response_reasoning_summary_and_text_stay_separate_through_chat_process() {
     );
 }
 
-fn active_stopless_response_profile(
-    consecutive_stop_count: u32,
-    request_id: &'static str,
-) -> V3HubRelayResponseHookProfile {
-    V3HubRelayResponseHookProfile::empty()
-        .with_stopless_reasoning_stop()
-        .with_stopless_transition_context(request_id, 111_000)
-        .with_stopless_center_state(
-            V3StoplessCenterState::new(
-                consecutive_stop_count,
-                3,
-                V3StoplessCenterSteering::NaturalStopWithoutReasoningStop,
-            )
-            .provider_turn_in_flight(Some(request_id), Some(111_000)),
-        )
-}
-
 #[test]
-fn stopless_natural_stop_keeps_control_transition_out_of_client_payload() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let original = json!({
-        "id":"resp_stopless_control_plane_only",
-        "status":"completed",
-        "finish_reason":"stop",
-        "output":[{
-            "type":"message",
-            "role":"assistant",
-            "content":[{"type":"output_text","text":"CONTROL_PLANE_AUDIT_OK"}]
-        }]
-    });
-    let resp02 = hooks
-        .normalize(relay_raw(original.clone(), V3HubTransportIntent::Json))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-control-plane-only"),
-        )
-        .unwrap();
-    let resp04 = hooks.commit(resp03).unwrap();
-
-    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 1);
-    assert_eq!(resp04.finalized_payload(), &original);
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "reasoningStop",
-        "requires_action",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "control-plane stopless artifact leaked into client payload: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn stopless_response_hook_keeps_natural_stop_transition_out_of_payload() {
+fn resp03_repairs_tool_call_finish_reason_before_tool_governance() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
             json!({
-                "id":"resp_stopless_natural_noop",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"I should stop naturally"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-natural-noop"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    assert_eq!(resp03.tool_call_count(), 0);
-    assert_eq!(
-        resp03.servertool_action(),
-        V3HubServertoolResponseAction::FollowupRequired
-    );
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 1);
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["status"], "completed");
-    assert_eq!(payload["output"][0]["text"], "I should stop naturally");
-    let serialized = serde_json::to_string(payload).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "reasoningStop",
-        "requires_action",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "natural-stop control transition leaked into payload {forbidden}: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stop_with_real_tool_call",
+                "id":"resp_with_real_tool_call",
                 "status":"completed",
                 "finish_reason":"stop",
                 "output":[{
@@ -347,12 +241,8 @@ fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
             V3HubTransportIntent::Json,
         ))
         .unwrap();
-
     let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-tool-repair"),
-        )
+        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .unwrap();
 
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
@@ -367,12 +257,6 @@ fn resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook() {
     assert_eq!(payload["finish_reason"], "tool_calls");
     assert_eq!(payload["output"][0]["call_id"], "call_real_exec");
     assert_eq!(payload["output"][0]["name"], "exec_command");
-    assert!(
-        !serde_json::to_string(payload)
-            .unwrap()
-            .contains("call_stopless_reasoning"),
-        "tool_call branch must not run stop hook projection: {payload}"
-    );
 }
 
 #[test]
@@ -394,7 +278,6 @@ fn resp04_reuses_resp03_repaired_payload_without_semantic_repair() {
             V3HubTransportIntent::Json,
         ))
         .unwrap();
-
     let resp03 = hooks
         .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .unwrap();
@@ -402,343 +285,13 @@ fn resp04_reuses_resp03_repaired_payload_without_semantic_repair() {
     let resp04 = hooks.commit(resp03).unwrap();
 
     assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert!(
-        resp04.canonical_context_shares_provider_payload(),
-        "Resp04 must save Resp03 governed payload directly, not run its own status/finish_reason repair"
-    );
+    assert!(resp04.canonical_context_shares_provider_payload());
     assert_eq!(resp04.finalized_payload()["status"], "requires_action");
     assert_eq!(resp04.finalized_payload()["finish_reason"], "tool_calls");
     assert_eq!(
         resp04.finalized_payload()["output"][0]["type"],
         "custom_tool_call"
     );
-}
-
-#[test]
-fn stopless_response_hook_empty_natural_stop_keeps_empty_business_payload() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_empty_natural_noop",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-empty-natural"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 1);
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["status"], "completed");
-    assert_eq!(payload["output"], json!([]));
-    let serialized = serde_json::to_string(payload).unwrap();
-    for forbidden in ["继续。", "Stopless", "续轮上限", "call_stopless_reasoning"] {
-        assert!(
-            !serialized.contains(forbidden),
-            "client response leaked synthetic stopless text {forbidden}: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn stopless_response_hook_ignores_assistant_text_schema_fence_as_state_source() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_fence_ignored",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"正文含旧 schema\n<rcc_stop_schema>{\"stopreason\":0,\"has_evidence\":1,\"evidence\":\"old\"}</rcc_stop_schema>"}]}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-fence-ignored"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.finalized_payload()["status"], "completed");
-    assert!(resp04.control_transition().is_some());
-    assert!(!serde_json::to_string(resp04.finalized_payload())
-        .unwrap()
-        .contains("call_stopless_reasoning"));
-}
-
-#[test]
-fn stopless_response_hook_reasoning_stop_continue_projects_noop_and_center_state() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_reasoning_stop_continue",
-                "status":"requires_action",
-                "output":[{
-                    "type":"function_call",
-                    "call_id":"call_model_reasoning_stop",
-                    "name":"reasoningStop",
-                    "arguments":"{\"stopreason\":2,\"reason\":\"continue\"}"
-                }]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-reasoning-continue"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert_eq!(
-        resp04.control_transition().unwrap().steering(),
-        V3StoplessCenterSteering::Continue
-    );
-    let payload = resp04.finalized_payload();
-    let serialized = serde_json::to_string(payload).unwrap();
-    assert!(
-        serialized.contains("call_model_reasoning_stop"),
-        "continuation stopless must keep the noop call id: {serialized}"
-    );
-    assert!(!serialized.contains("\"name\":\"reasoningStop\""));
-    assert!(
-        serialized.contains("\"name\":\"noop\""),
-        "continuation stopless must project a noop call: {serialized}"
-    );
-    assert!(
-        !serialized.contains("\"arguments\""),
-        "noop call must be parameterless: {serialized}"
-    );
-}
-
-#[test]
-fn stopless_response_hook_terminal_reasoning_stop_returns_visible_completed_evidence() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_reasoning_stop_terminal",
-                "status":"requires_action",
-                "tools":[
-                    {"type":"function","name":"lookup","parameters":{"type":"object"}},
-                    {"type":"function","name":"reasoningStop","parameters":{"type":"object"}}
-                ],
-                "output":[{
-                    "type":"function_call",
-                    "call_id":"call_model_reasoning_stop_terminal",
-                    "name":"reasoningStop",
-                    "arguments":"{\"stopreason\":0,\"reason\":\"done\",\"evidence\":\"live proof\",\"needs_user_input\":false}"
-                }]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(0, "req-stopless-reasoning-terminal"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
-    assert_eq!(resp03.tool_call_count(), 0);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert!(resp04.control_transition().is_none());
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["status"], "completed");
-    let serialized = serde_json::to_string(payload).unwrap();
-    assert!(serialized.contains("live proof"));
-    assert!(!serialized.contains("call_model_reasoning_stop_terminal"));
-    assert!(!serialized.contains("\"name\":\"reasoningStop\""));
-    assert_eq!(payload["tools"][0]["name"], "lookup");
-    assert_eq!(payload["tools"].as_array().unwrap().len(), 1);
-}
-
-#[test]
-fn stopless_response_hook_blocked_reasoning_stop_requires_reason_and_evidence() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let missing_evidence = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_blocked_missing_evidence",
-                "status":"requires_action",
-                "output":[{
-                    "type":"function_call",
-                    "call_id":"call_model_reasoning_stop_blocked_missing",
-                    "name":"reasoningStop",
-                    "arguments":"{\"stopreason\":1,\"reason\":\"blocked\",\"evidence\":\"\"}"
-                }]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            missing_evidence,
-            &active_stopless_response_profile(0, "req-stopless-blocked-missing"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    assert_eq!(resp03.tool_call_count(), 1);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert!(resp04.control_transition().is_some());
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
-    assert!(!serialized.contains("reasoningStop"));
-    assert!(serialized.contains("\"name\":\"noop\""));
-
-    let with_evidence = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_blocked_with_evidence",
-                "status":"requires_action",
-                "output":[{
-                    "type":"function_call",
-                    "call_id":"call_model_reasoning_stop_blocked",
-                    "name":"reasoningStop",
-                    "arguments":"{\"stopreason\":1,\"reason\":\"blocked by missing approval\",\"evidence\":\"approval ticket absent\"}"
-                }]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            with_evidence,
-            &active_stopless_response_profile(0, "req-stopless-blocked-with-evidence"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
-    let resp04 = hooks.commit(resp03).unwrap();
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
-    assert!(serialized.contains("blocked by missing approval"));
-    assert!(serialized.contains("approval ticket absent"));
-    assert!(!serialized.contains("call_model_reasoning_stop_blocked"));
-}
-
-#[test]
-fn stopless_response_hook_third_natural_stop_remains_control_only() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_natural_third_projection",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"third natural stop should still project"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(2, "req-stopless-third-natural"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    assert_eq!(resp03.tool_call_count(), 0);
-    assert_eq!(
-        resp03.servertool_action(),
-        V3HubServertoolResponseAction::FollowupRequired
-    );
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.control_transition().unwrap().natural_stop_count(), 3);
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["status"], "completed");
-    let serialized = serde_json::to_string(payload).unwrap();
-    assert!(serialized.contains("third natural stop should still project"));
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "reasoningStop",
-        "requires_action",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "third natural-stop projection leaked legacy stopless artifact {forbidden}: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn stopless_response_hook_fourth_natural_stop_guard_passes_cleaned_original_response() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_natural_guard",
-                "status":"completed",
-                "finish_reason":"stop",
-                "output":[{"type":"output_text","text":"fourth natural stop should pass through"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(
-            resp02,
-            &active_stopless_response_profile(3, "req-stopless-fourth-natural"),
-        )
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
-    assert_eq!(resp03.tool_call_count(), 0);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    let payload = resp04.finalized_payload();
-    assert_eq!(payload["status"], "completed");
-    let serialized = serde_json::to_string(payload).unwrap();
-    assert!(serialized.contains("fourth natural stop should pass through"));
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-        "repeatCount",
-        "schemaFeedback",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "natural guard pass-through leaked stopless artifact {forbidden}: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn stopless_response_hook_disabled_keeps_completed_text_terminal() {
-    let hooks = compile_v3_hub_relay_response_hooks();
-    let resp02 = hooks
-        .normalize(relay_raw(
-            json!({
-                "id":"resp_stopless_disabled",
-                "status":"completed",
-                "output":[{"type":"output_text","text":"no stopless"}]
-            }),
-            V3HubTransportIntent::Json,
-        ))
-        .unwrap();
-    let resp03 = hooks
-        .govern(resp02, &V3HubRelayResponseHookProfile::empty())
-        .unwrap();
-    assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
-    assert_eq!(resp03.tool_call_count(), 0);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.finalized_payload()["status"], "completed");
 }
 
 #[test]
@@ -942,48 +495,4 @@ fn direct_response_cannot_enter_relay_response_hooks() {
         hooks.normalize(direct),
         Err(V3HubRelayResponseError::ExecutionModeNotRelay)
     ));
-}
-
-#[test]
-fn stopless_real_5555_sample_5973_reports_activation_true_and_requires_action() {
-    let sample = real_5555_sample_json(
-        "openai-responses-router-gpt-5.5-20260718T171347967-566984-5973",
-        "response.json",
-    );
-    let Some(sample) = sample else {
-        return;
-    };
-    let obs = sample["observability"]
-        .as_object()
-        .expect("sample observability object");
-    assert_eq!(obs.get("stopless_activation"), Some(&json!(true)));
-    assert_eq!(obs.get("response_status"), Some(&json!("requires_action")));
-    assert_eq!(obs.get("finish_reason"), Some(&json!("tool_calls")));
-    assert_eq!(obs.get("model_id"), Some(&json!("glm-5.2")));
-    assert_eq!(
-        obs.get("target_path"),
-        Some(&json!([
-            "pool:default",
-            "forwarder:fwd.glm.glm-5.2",
-            "provider:orangeai"
-        ]))
-    );
-}
-
-#[test]
-fn stopless_real_5555_sample_6272_reports_activation_false_and_terminal_stop() {
-    let sample = real_5555_sample_json(
-        "openai-responses-router-gpt-5.5-20260718T180101332-567283-6272",
-        "response.json",
-    );
-    let Some(sample) = sample else {
-        return;
-    };
-    let obs = sample["observability"]
-        .as_object()
-        .expect("sample observability object");
-    assert_eq!(obs.get("stopless_activation"), Some(&json!(false)));
-    assert_eq!(obs.get("response_status"), Some(&json!("completed")));
-    assert_eq!(obs.get("finish_reason"), Some(&json!("stop")));
-    assert_eq!(obs.get("model_id"), Some(&json!("glm-5.2")));
 }

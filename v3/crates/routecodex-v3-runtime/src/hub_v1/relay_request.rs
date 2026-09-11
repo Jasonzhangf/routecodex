@@ -1,12 +1,12 @@
 use super::{
-    apply_v3_stopless_request_hook_at_req04, apply_v3_web_search_request_hook_at_req04,
+    apply_v3_web_search_request_hook_at_req04,
     build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
     build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01, find_v3_hub_side_channel_key,
     govern_v3_servertool_request_at_req04, merge_v3_relay_restored_local_context_at_req04,
     V3HubContinuationOwnership, V3HubEntryProtocol, V3HubReqChatProcess04Governed,
     V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRequestSemanticProtocol,
-    V3StoplessCenterState, V3ToolThinkingTurnContext, V3WebSearchCenterState,
+    V3ToolThinkingTurnContext, V3WebSearchCenterState,
 };
 use crate::{
     V3LocalContinuationError, V3LocalContinuationReq04RestoreRequest, V3LocalContinuationScopeKey,
@@ -154,10 +154,6 @@ pub enum V3HubServertoolRequestProfile {
     Disabled,
     Enabled {
         hook_ids: Vec<&'static str>,
-        stopless_reasoning_stop: bool,
-        stopless_center_state: Option<V3StoplessCenterState>,
-        stopless_transition_request_id: Option<String>,
-        stopless_transition_updated_at: Option<u64>,
         web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
         tool_thinking: bool,
     },
@@ -170,21 +166,6 @@ impl V3HubServertoolRequestProfile {
     pub fn enabled<const N: usize>(hook_ids: [&'static str; N]) -> Self {
         Self::Enabled {
             hook_ids: hook_ids.into(),
-            stopless_reasoning_stop: false,
-            stopless_center_state: None,
-            stopless_transition_request_id: None,
-            stopless_transition_updated_at: None,
-            web_search_execution_mode: None,
-            tool_thinking: false,
-        }
-    }
-    pub fn stopless_reasoning_stop() -> Self {
-        Self::Enabled {
-            hook_ids: vec!["stop_message_auto"],
-            stopless_reasoning_stop: true,
-            stopless_center_state: None,
-            stopless_transition_request_id: None,
-            stopless_transition_updated_at: None,
             web_search_execution_mode: None,
             tool_thinking: false,
         }
@@ -228,70 +209,8 @@ impl V3HubServertoolRequestProfile {
             Self::Disabled | Self::RequiredFailure(_) => None,
         }
     }
-    pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
-        if let Self::Enabled {
-            stopless_center_state,
-            ..
-        } = &mut self
-        {
-            *stopless_center_state = Some(state);
-        }
-        self
-    }
-    pub fn with_stopless_transition_context(
-        mut self,
-        request_id: impl Into<String>,
-        updated_at: u64,
-    ) -> Self {
-        if let Self::Enabled {
-            stopless_transition_request_id,
-            stopless_transition_updated_at,
-            ..
-        } = &mut self
-        {
-            *stopless_transition_request_id = Some(request_id.into());
-            *stopless_transition_updated_at = Some(updated_at);
-        }
-        self
-    }
     pub fn required_failure(hook_id: &'static str) -> Self {
         Self::RequiredFailure(hook_id)
-    }
-    pub fn stopless_reasoning_stop_enabled(&self) -> bool {
-        matches!(
-            self,
-            Self::Enabled {
-                stopless_reasoning_stop: true,
-                ..
-            }
-        )
-    }
-    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
-        match self {
-            Self::Enabled {
-                stopless_center_state,
-                ..
-            } => stopless_center_state.as_ref(),
-            _ => None,
-        }
-    }
-    pub fn stopless_transition_request_id(&self) -> Option<&str> {
-        match self {
-            Self::Enabled {
-                stopless_transition_request_id,
-                ..
-            } => stopless_transition_request_id.as_deref(),
-            _ => None,
-        }
-    }
-    pub fn stopless_transition_updated_at(&self) -> Option<u64> {
-        match self {
-            Self::Enabled {
-                stopless_transition_updated_at,
-                ..
-            } => *stopless_transition_updated_at,
-            _ => None,
-        }
     }
 }
 
@@ -308,12 +227,6 @@ pub enum V3HubRelayRequestHookEvent {
     Req04ToolGoverned,
     Req04ProtocolToolIdentityGoverned,
     Req04ServertoolGoverned,
-    Req04StoplessControlLoaded,
-    Req04StoplessCliNoopObserved,
-    Req04StoplessGuidancePrepared,
-    Req04StoplessResultParsed,
-    Req04StoplessTextRewritten,
-    Req04StoplessToolInjected,
     ServertoolOptionalNoop,
     Req04Exit,
 }
@@ -350,13 +263,6 @@ pub enum V3HubRelayRequestError {
     UnknownStaticHook { hook_id: &'static str },
     #[error("web_search ServerTool surface activation failed at Req04: {reason}")]
     WebSearchToolSurfaceActivationFailed { reason: String },
-    #[error("malformed stopless CLI output at input index {index}: {reason}")]
-    MalformedStoplessCliOutput { index: usize, reason: &'static str },
-    #[error("malformed stopless tool surface at request field {field}: {reason}")]
-    MalformedStoplessToolSurface {
-        field: &'static str,
-        reason: &'static str,
-    },
     #[error("tool-thinking schema is invalid: {reason}")]
     ToolThinkingSchemaInvalid { reason: String },
     #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
@@ -373,7 +279,6 @@ pub struct V3HubRelayRequestOutcome {
     local_context: Option<Arc<Value>>,
     tool_output_count: usize,
     events: Vec<V3HubRelayRequestHookEvent>,
-    stopless_state: Option<V3StoplessCenterState>,
     web_search_state: Option<V3WebSearchCenterState>,
     tool_thinking_enabled: bool,
     tool_thinking_turn_context: V3ToolThinkingTurnContext,
@@ -403,9 +308,6 @@ impl V3HubRelayRequestOutcome {
     }
     pub fn tool_output_count(&self) -> usize {
         self.tool_output_count
-    }
-    pub fn stopless_state(&self) -> Option<&V3StoplessCenterState> {
-        self.stopless_state.as_ref()
     }
     pub fn web_search_state(&self) -> Option<&V3WebSearchCenterState> {
         self.web_search_state.as_ref()
@@ -509,20 +411,15 @@ impl V3HubRelayRequestHooks {
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
         }
-        let (stopless_state, web_search_state, tool_thinking_turn_context) =
-            govern_v3_servertool_request_at_req04(
-                Arc::make_mut(&mut classified.previous.previous.payload.0),
-                current_payload_start,
-                &mut events,
-                profile.stopless_reasoning_stop_enabled(),
-                profile.web_search_execution_mode().is_some_and(
-                    routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-                ),
-                false,
-                profile.stopless_center_state(),
-                profile.stopless_transition_request_id(),
-                profile.stopless_transition_updated_at(),
-            )?;
+        let (web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
+            Arc::make_mut(&mut classified.previous.previous.payload.0),
+            current_payload_start,
+            &mut events,
+            profile.web_search_execution_mode().is_some_and(
+                routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
+            ),
+            profile.tool_thinking_enabled(),
+        )?;
         if govern_protocol_tool_identity_at_req04(
             classified.previous.previous.entry_protocol,
             &classified.previous.previous.payload.0,
@@ -549,9 +446,8 @@ impl V3HubRelayRequestHooks {
             local_context,
             tool_output_count,
             events,
-            stopless_state,
             web_search_state,
-            tool_thinking_enabled: false,
+            tool_thinking_enabled: profile.tool_thinking_enabled(),
             tool_thinking_turn_context,
         })
     }
@@ -1125,16 +1021,8 @@ fn run_servertool_profile(
             events.push(V3HubRelayRequestHookEvent::ServertoolOptionalNoop);
             Ok(())
         }
-        V3HubServertoolRequestProfile::Enabled {
-            hook_ids,
-            stopless_reasoning_stop,
-            ..
-        } => {
+        V3HubServertoolRequestProfile::Enabled { hook_ids, .. } => {
             for hook_id in hook_ids {
-                if *stopless_reasoning_stop && *hook_id == "stop_message_auto" {
-                    events.push(V3HubRelayRequestHookEvent::Req04ServertoolGoverned);
-                    continue;
-                }
                 if *hook_id != "servertool.request" {
                     return Err(V3HubRelayRequestError::UnknownStaticHook { hook_id });
                 }
