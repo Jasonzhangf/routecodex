@@ -93,13 +93,13 @@ use routecodex_v3_runtime::{
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control,
+    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target,
-    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_provider_snapshots,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input,
+    execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health, probe_v3_provider_global_target,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
     project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
@@ -116,16 +116,16 @@ use routecodex_v3_runtime::{
     V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeInput,
     V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots, V3RequestExecutionControl,
     V3Resp15ClientPayload, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectStoplessControlState,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
     V3ResponsesRelayDryRunOutcome, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalStoplessControlInput,
+    V3ResponsesRelayLocalContinuationState, V3ResponsesRelayLocalServerToolInput,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
     V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayStoplessControlState, V3RuntimeObservability,
-    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3ResponsesRelayServerToolState, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
+    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -174,9 +174,9 @@ struct V3ListenerState {
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     responses_direct_continuation: Arc<V3ResponsesDirectContinuationState>,
-    responses_direct_stopless_control: Arc<V3ResponsesDirectStoplessControlState>,
+    responses_direct_server_tool_state: Arc<V3ResponsesDirectServerToolState>,
     responses_relay_local_continuation: Arc<V3ResponsesRelayLocalContinuationState>,
-    responses_relay_stopless_control: Arc<V3ResponsesRelayStoplessControlState>,
+    responses_relay_server_tool_state: Arc<V3ResponsesRelayServerToolState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
     responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
@@ -360,12 +360,10 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     let debug =
         build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
     let responses_direct_continuation = Arc::new(V3ResponsesDirectContinuationState::default());
-    let responses_direct_stopless_control =
-        Arc::new(V3ResponsesDirectStoplessControlState::default());
+    let responses_direct_server_tool_state = Arc::new(V3ResponsesDirectServerToolState::default());
     let responses_relay_local_continuation =
         Arc::new(V3ResponsesRelayLocalContinuationState::default());
-    let responses_relay_stopless_control =
-        Arc::new(V3ResponsesRelayStoplessControlState::default());
+    let responses_relay_server_tool_state = Arc::new(V3ResponsesRelayServerToolState::default());
     let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
         &manifest,
     ));
@@ -464,9 +462,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
                 responses_direct_continuation: responses_direct_continuation.clone(),
-                responses_direct_stopless_control: responses_direct_stopless_control.clone(),
+                responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
                 responses_relay_local_continuation: responses_relay_local_continuation.clone(),
-                responses_relay_stopless_control: responses_relay_stopless_control.clone(),
+                responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
                 provider_health: provider_health.clone(),
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
                 responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),

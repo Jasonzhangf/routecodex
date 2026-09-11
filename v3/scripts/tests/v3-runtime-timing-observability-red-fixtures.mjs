@@ -56,7 +56,6 @@ const copied = [
   "docs/architecture/wiki/error-mainline-call-graph.md",
   "docs/architecture/wiki/internal-error-numbering-mainline-source.md",
   "docs/architecture/wiki/runtime-lifecycle-call-graph.md",
-  "docs/architecture/wiki/stopless-session-mainline-source.md",
   "docs/architecture/wiki/metadata-center-mainline-source.md",
 ];
 

@@ -1,6 +1,27 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const admissionRoot = path.resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const sourceRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT;
+const admissionWorkspace = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1';
+const root = sourceRoot
+  ? path.resolve(sourceRoot)
+  : admissionWorkspace
+    ? path.dirname(v3Root)
+    : admissionRoot;
+const packagePath = sourceRoot || admissionWorkspace
+  ? path.join(root, 'package.json')
+  : path.join(v3Root, 'package.json');
+const rewriteRel = (rel) => {
+  if (rel === 'package.json') return packagePath;
+  if (rel.startsWith('v3/')) return path.join(v3Root, rel.slice('v3/'.length));
+  return path.join(root, rel);
+};
+const read = (rel) => fs.readFileSync(rewriteRel(rel), 'utf8');
 
 const files = {
   responseCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
@@ -16,7 +37,7 @@ const files = {
   responseSemanticsTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
   requestSemanticsTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs',
   tests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-  responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  responsesLocalTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   manifest: 'docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml',
   functionMap: 'docs/architecture/v3-function-map.yml',
   mainlineMap: 'docs/architecture/v3-mainline-call-map.yml',
@@ -26,9 +47,7 @@ const files = {
   packageJson: 'package.json',
 };
 
-const text = Object.fromEntries(
-  Object.entries(files).map(([key, path]) => [key, readFileSync(path, 'utf8')]),
-);
+const text = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, read(file)]));
 const responseOwnerSource = [
   text.responseCommon,
   text.responseChatProcess,
@@ -105,13 +124,10 @@ forbid(
   'full payload materialization shortcut',
 );
 requireAll(text.servertoolHooks, files.servertoolHooks, [
-  'apply_v3_stopless_request_hook_at_req04',
   'current_payload_start',
-  'let current_input = input.get(current_payload_start..)',
-  'let current_messages = messages.get(current_payload_start..)',
-  'active_stopless_cli_output',
-  'active_stopless_chat_cli_output',
-  'STOPLESS_CLI_COMMAND',
+  'current_v3_tool_thinking_payload_start',
+  'compile_v3_tool_thinking_turn_context_at_req04',
+  'apply_v3_web_search_request_hook_at_req04',
 ]);
 forbid(
   text.servertoolHooks,
@@ -149,7 +165,6 @@ requireAll(text.responseChatProcess, files.responseChatProcess, [
 ]);
 requireAll(text.servertoolHooks, files.servertoolHooks, [
   'apply_v3_tool_call_servertool_hook_at_resp03',
-  'apply_v3_stop_servertool_hook_at_resp03',
 ]);
 const resp03GovernStart = text.responseChatProcess.indexOf('fn govern_v3_hub_relay_response(');
 const resp03GovernEnd = text.responseChatProcess.indexOf('\nstruct V3Resp03ProtocolGovernance', resp03GovernStart);
@@ -163,13 +178,12 @@ if (resp03GovernStart < 0 || resp03GovernEnd < 0) {
     'inspect_v3_resp03_finish_reason',
     'apply_v3_tool_call_servertool_hook_at_resp03',
     'project_v3_apply_patch_freeform_calls_at_resp03',
-    'apply_v3_stop_servertool_hook_at_resp03',
   ], 'Resp03 response governance');
   forbid(
     resp03Govern,
     files.responseChatProcess,
     /apply_v3_stopless_response_hook_at_resp03/,
-    'merged stopless response hook in Resp03 orchestrator',
+    'retired stopless response hook in Resp03 orchestrator',
   );
 }
 requireAll(text.responseContinuation, files.responseContinuation, [
@@ -264,21 +278,17 @@ requireAll(text.tests, files.tests, [
   'data:image/png;base64,CURRENT',
   'attachment_history_is_preserved_without_placeholder_cleanup',
   'attachment_history_missing_resource_is_preserved_as_client_data',
-  'stopless_shaped_business_text_is_preserved_without_current_turn_activation',
-  'malformed_current_turn_reasoning_stop_arguments_fail_without_guessing_control_state',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
-  'resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook',
+  'resp03_repairs_tool_call_finish_reason_before_tool_governance',
   'resp04_reuses_resp03_repaired_payload_without_semantic_repair',
 ]);
 requireAll(text.requestSemanticsTests, files.requestSemanticsTests, [
-  'stopless_req04_ignores_restored_history_and_only_observes_current_suffix',
 ]);
 requireAll(text.functionMap, files.functionMap, [
   'feature_id: v3.resp03_tool_governance_gap_closeout',
   'complete_or_repair_v3_resp03_tool_frames',
   'apply_v3_tool_call_servertool_hook_at_resp03',
-  'apply_v3_stop_servertool_hook_at_resp03',
 ]);
 requireAll(text.mainlineMap, files.mainlineMap, [
   'chain_id: v3.resp03_tool_governance_gap_closeout',
@@ -290,14 +300,11 @@ requireAll(text.verificationMap, files.verificationMap, [
   'Resp04 reuses Resp03 governed provider payload',
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
-  'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
-  'json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback',
-  'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
-  'json_two_turn_preserves_responses_additional_tools_surface_and_tool_result_pairs',
-  'json_stopless_center_natural_stop_guard_passes_cleaned_original_response',
-  'Responses Relay client SSE must not use response.requires_action as the terminal stream event',
-  'no-original-tools request must not synthesize Responses input.additional_tools',
+  'local_continuation_servertool_roundtrip_is_runtime_e2e',
+  'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
+  'assert_eq!(captures.len(), 2);',
+  'Responses Relay client SSE transport must not raw-pass provider argument event payloads around Hub',
+  'responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion',
 ]);
 
 requireAll(text.functionMap, files.functionMap, [featureId, lifecycleId]);

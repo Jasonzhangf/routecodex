@@ -212,13 +212,7 @@ fn parses_full_config_v3_without_interpreting_targets() {
     let manifest = compile_v3_config_05_manifest(authoring).unwrap();
 
     assert_eq!(manifest.version, 3);
-    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
     assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
-    assert_eq!(
-        manifest.features.get("responses_direct_stopless_center"),
-        None,
-        "Relay StoplessCenter default must not enable Direct stopless"
-    );
     assert_eq!(manifest.servers.len(), 2);
     assert_eq!(manifest.servers["primary"].port, 4444);
     assert_eq!(manifest.servers["secondary"].port, 4445);
@@ -629,44 +623,6 @@ fn omitted_snapshot_direct_preserves_config_compatibility() {
     assert!(
         !manifest.debug.codex_samples,
         "per-start CLI/lifecycle authorization must remain absent after Config compilation"
-    );
-}
-
-#[test]
-fn stopless_center_compiled_default_preserves_global_and_server_overrides() {
-    let explicit_global_false =
-        FULL_CONFIG.replace("[features]\n", "[features]\nstopless_center = false\n");
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&explicit_global_false).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
-
-    let server_false = FULL_CONFIG.replace(
-        "[servers.primary]\n",
-        "[servers.primary]\nfeatures = { stopless_center = false }\n",
-    );
-    let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&server_false).unwrap())
-            .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
-    assert_eq!(
-        manifest.servers["primary"].features.get("stopless_center"),
-        Some(&false)
-    );
-
-    let server_true_over_global_false = explicit_global_false.replace(
-        "[servers.primary]\n",
-        "[servers.primary]\nfeatures = { stopless_center = true }\n",
-    );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&server_true_over_global_false).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
-    assert_eq!(
-        manifest.servers["primary"].features.get("stopless_center"),
-        Some(&true)
     );
 }
 

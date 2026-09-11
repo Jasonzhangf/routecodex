@@ -1261,7 +1261,6 @@ pub(crate) fn project_v3_runtime_observability_debug(
         "provider_status": observability.provider_status,
         "response_status": observability.response_status,
         "finish_reason": observability.finish_reason,
-        "stopless_activation": observability.stopless_activation,
         "target_path": observability.target_path,
         "unavailable_candidates": observability.unavailable_candidates,
         "provider_failure_events": observability.provider_failure_events.iter().map(project_v3_runtime_provider_failure_event_debug).collect::<Vec<Value>>(),

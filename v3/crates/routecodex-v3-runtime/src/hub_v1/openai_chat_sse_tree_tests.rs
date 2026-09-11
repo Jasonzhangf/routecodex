@@ -363,7 +363,7 @@ fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
         .apply_chunk(&json!({
             "id":"chatcmpl_empty_content_tool_call",
             "object":"chat.completion.chunk",
-            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_reasoning_stop","type":"function","function":{"name":"reasoningStop","arguments":"{\"stopreason\":2}"}}],"content":""},"finish_reason":"tool_calls"}]
+            "choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_exec_command","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}],"content":""},"finish_reason":"tool_calls"}]
         }))
         .unwrap();
 

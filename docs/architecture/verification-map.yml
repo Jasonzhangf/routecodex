@@ -169,7 +169,7 @@ verification:
   - Validation must prove cross-boundary control state is carried by MetadataCenter
     families, not by request/response payload or history fields.
   - Tests must lock current-request explicit evidence, owner resolution, canonical
-    restore, stopless CLI result restore, response schema judgment/projection, post-projection
+    restore, response governance, post-projection
     canonical save, stale transient request-id clearing, and released retained state.
   - 'Tests must lock response save request-id priority: the current active provider
     request label passed to the Rust record planner wins over stale `requestTruth.requestId`
@@ -182,7 +182,7 @@ verification:
     coercion or any malformed-to-null compatibility path.
   - SSE tests are not continuation gates. `handler-response-sse.ts` must not contain
     continuation probe, required_action detection, terminal repair, save/restore,
-    tool injection, or stopless schema logic.
+    tool injection, or response schema logic.
   - Handler response-store integration tests are stale continuation-owner evidence
     if they expect `sendPipelineResponse` or SSE transport to save continuation; migrate
     those assertions to bridge/Rust owner tests instead of reintroducing handler-side
@@ -217,7 +217,7 @@ verification:
     failure mapping, and no synthetic terminal success.
   - V3 crates must import the V3-local `routecodex-v3-sse`; no external workspace SSE crate is permitted.
   - Server closeout wrappers must not parse SSE event names or data JSON to decide
-    terminal, required_action, continuation, tool, stopless, servertool, or provider
+    terminal, required_action, continuation, tool, servertool, or provider
     failure semantics.
 - feature_id: v3.provider_compat_profile_loading
   change_risk: high
@@ -251,7 +251,7 @@ verification:
     and ProviderRespCompat02ProviderCompat, including chat:minimax Anthropic hosted
     web-search projection to matching ordinary tool_use/tool_result blocks.
   - Negative coverage must reject missing, duplicate, orphan, and malformed hosted
-    web-search identities/fields and prove provider compat does not own routing, stopless/tool
+    web-search identities/fields and prove provider compat does not own routing or tool
     governance, fallback, continuation, or SSE semantics.
   - Paired request/response negative coverage rejects top-level semantics, processed,
     and processingMetadata before provider/client payload projection; positive coverage

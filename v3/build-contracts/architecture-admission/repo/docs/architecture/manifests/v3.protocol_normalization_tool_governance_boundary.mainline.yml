@@ -35,7 +35,6 @@ nodes:
     responsibility: provider-specific response to standard provider protocol compatibility; family-specific error normalization to the error chain; special field stripping or normalization.
     forbidden:
       tool_governance: forbidden
-      harvest_apply_patch_servertool_stopless: forbidden
       side_channel_injection: forbidden
       fallback_or_silent_repair: forbidden
 edges:
@@ -61,7 +60,6 @@ normalization_contract:
     - tool_identity_pairing
     - tool_identity_uniqueness
     - orphan_tool_output_detection
-    - servertool_stopless_apply_patch_hook_governance
     - continuation_save_restore_semantics
     - fallback_or_silent_repair
 verification_gates:

@@ -466,7 +466,6 @@ pub(crate) const ANSI_REQUEST_CYAN: &str = "\x1b[36m";
 pub(crate) const ANSI_DEBUG_DIM: &str = "\x1b[2;90m";
 pub(crate) const ANSI_ERROR_RED: &str = "\x1b[31m";
 pub(crate) const ANSI_ERROR_TEXT_WHITE: &str = "\x1b[97m";
-pub(crate) const ANSI_STOPLESS_ORANGE: &str = "\x1b[38;5;208m";
 
 #[derive(Clone, Copy)]
 pub(crate) struct V3ConsoleLayeredBlock<'a> {
@@ -594,19 +593,6 @@ pub(crate) fn colorize_v3_console_error_segment(segment: &str) -> String {
     } else {
         segment.to_string()
     }
-}
-
-pub(crate) fn colorize_v3_stopless_console_line(
-    human_prefix: &str,
-    headline: &str,
-    debug: &str,
-    session_id: &str,
-) -> String {
-    let block = V3ConsoleLayeredBlock::new(human_prefix, headline, debug, session_id);
-    if !is_v3_console_color_enabled() {
-        return format_v3_console_layered_block_plain(block);
-    }
-    colorize_v3_layered_console_line(block, ANSI_STOPLESS_ORANGE, ANSI_DEBUG_DIM)
 }
 
 pub(crate) fn colorize_v3_layered_console_line(

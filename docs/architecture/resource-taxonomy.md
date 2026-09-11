@@ -86,7 +86,7 @@ Client-visible semantic response before HTTP/SSE framing.
 
 ### `metadata.runtime_control`
 
-RouteCodex-owned internal control side-channel for route/runtime/stopless/servertool/error/scope decisions.
+RouteCodex-owned internal control side-channel for route/runtime/servertool/error/scope decisions.
 
 - Identity: request-scoped `MetadataCenter`.
 - Canonical writer: metadata center family owners.
@@ -166,10 +166,10 @@ Client-visible stream frames after semantic response projection.
 
 ### `servertool.followup_state`
 
-Servertool/stopless hook state and client-visible CLI projection state.
+Servertool hook state and client-visible CLI projection state.
 
 - Identity: Chat Process lifecycle, request scope, flow ID.
-- Canonical writer: servertool/stopless Chat Process owners.
+- Canonical writer: servertool Chat Process owners.
 - Forbidden: provider runtime, SSE transport, handler post-projection repair.
 
 ## Resource Operation Rules

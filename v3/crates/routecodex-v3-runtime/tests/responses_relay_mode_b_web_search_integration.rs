@@ -2,9 +2,9 @@
 //!
 //! 背景（20260808）：用户真实请求（4444 `/v1/responses` + input web_search part）
 //! 返回裸 `requires_action`（websearch function_call 直接给客户端）——Mode B
-//! 的 Resp03 同轮本地搜索拦截未触发。web_search 与 stopless 解耦后，当前轮
+//! 的 Resp03 同轮本地搜索拦截未触发。web_search 与其他 tool state 解耦后，当前轮
 //! 拦截必须直接使用 Req04 激活的 LocalToolSurfaceActive state，不依赖
-//! stopless feature / client session scope。
+//! 其他 client session control scope。
 //!
 //! 红测契约：responses 入口 + web_search item + Mode B 模型（metadata_center_local_search）
 //! → provider 返回 websearch tool call → 响应**不得**以裸 function_call(websearch)
@@ -21,9 +21,9 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control,
+    execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state,
     V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
-    V3ResponsesRelayStoplessControlScope, V3ResponsesRelayStoplessControlState,
+    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
 };
 use serde_json::{json, Value};
 
@@ -130,9 +130,9 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
             }),
         ])),
     };
-    let stopless_control = V3ResponsesRelayStoplessControlState::default();
+    let server_tool_state = V3ResponsesRelayServerToolState::default();
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
-    let scope = V3ResponsesRelayStoplessControlScope::new(
+    let scope = V3ResponsesRelayServerToolScope::new(
         "/v1/responses",
         "session-mode-b-web-search",
         "conversation-mode-b-web-search",
@@ -140,7 +140,7 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
         "controlled",
     );
 
-    let result = execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control(
+    let result = execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -162,7 +162,7 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
         },
         &transport,
         &provider_health,
-        &stopless_control,
+        &server_tool_state,
         scope.clone(),
     )
     .await;

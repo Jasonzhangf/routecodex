@@ -26,7 +26,6 @@ rules:
       - routeHint
       - providerKey
       - continuationOwner
-      - stoplessCenter
       - requestCapabilities
       - __rt
       - _debug

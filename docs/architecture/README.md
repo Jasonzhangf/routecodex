@@ -87,10 +87,6 @@
   - 记录 topology 文档当前允许保留但尚未被 call-map/manifest/wiki 消费的节点 debt
   - 用于把 topology review debt 从“信息输出”升级成显式预算锁
 
-- `wiki/stopless-session-mainline-source.md`
-  - stopless 的 runtime metadata / current-turn `tool_outputs` 主线 review 面
-  - 用于审计 stopless 真源是否仍只来自当前请求闭环，而不是 file persistence / tmux / `ROUTECODEX_SESSION_DIR`
-
 - `wiki/chat-process-protocol-mapping.md`
   - 三协议 `openai-chat / openai-responses / anthropic-messages` 进入统一 chat process 的字段映射 review 面
   - 用于审计哪些语义已 lift 到 `chat/semantics`，哪些还残留在 legacy metadata / transitional surfaces
@@ -104,8 +100,8 @@
   - 用于审计 continuation 是否仍按 `entryKind + continuationOwner + scope` 三重隔离
 
 - `wiki/servertool-followup-call-graph.md`
-  - `followup / CLI projection / stopless` 三条 servertool 主链分支的 review 面
-  - 用于审计 followup 是否仍只走 relay reenter，CLI/stopless 是否仍与 followup 隔离
+  - `followup / CLI projection` 两条 servertool 主链分支的 review 面
+  - 用于审计 followup 是否仍只走 relay reenter，以及 CLI projection 是否与 followup 隔离
 
 - `verification-map.yml`
   - 记录关键功能的最小验证栈：`unit / contract / integration / smoke / build`

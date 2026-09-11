@@ -244,8 +244,6 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                     tool_name,
                     input,
                     flow_id: flow,
-                    repeat_count: None,
-                    max_repeats: None,
                     session_id,
                     request_id,
                 },
