@@ -100,7 +100,11 @@ async fn cancelled_scheduled_probe_releases_single_flight_permit() {
     );
 }
 
-fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
+fn global_pool_alive_manifest_with_priorities(
+    scope: &str,
+    first_priority: u32,
+    second_priority: u32,
+) -> V3Config05ManifestPublished {
     let source = r#"
 version = 3
 [servers.__SCOPE__]
@@ -128,21 +132,27 @@ capabilities = ["text", "tools", "reasoning"]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = __FIRST_PRIORITY__ },
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = __SECOND_PRIORITY__ }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = __FIRST_PRIORITY__ },
+  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = __SECOND_PRIORITY__ }
 ]
 "#
-    .replace("__SCOPE__", scope);
+    .replace("__SCOPE__", scope)
+    .replace("__FIRST_PRIORITY__", &first_priority.to_string())
+    .replace("__SECOND_PRIORITY__", &second_priority.to_string());
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(&source).expect("global-pool-alive authoring"),
     )
     .expect("global-pool-alive manifest")
+}
+
+fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
+    global_pool_alive_manifest_with_priorities(scope, 1, 2)
 }
 
 fn account_threshold_manifest() -> V3Config05ManifestPublished {
@@ -392,14 +402,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let manifest = global_pool_alive_manifest("global_status_policy");
-    let cases = [
-        (401, 5),
-        (403, 5),
-        (429, 20),
-        (500, 20),
-        (502, 20),
-        (599, 20),
-    ];
+    let cases = [(401, 5), (403, 5), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -1418,4 +1421,44 @@ targets = [
     assert_eq!(result.event.wait_ms, Some(7000));
     assert!(result.retry_selected.is_some());
     assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
+}
+
+#[test]
+fn configured_semantic_global_failure_keeps_manifest_cooldown_policy() {
+    let manifest = global_pool_alive_manifest_with_priorities("global_429_threshold", 100, 200);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(
+        "global_429_threshold",
+        "global_429_threshold",
+        "session-429-threshold",
+    )
+    .expect("429 threshold session scope");
+
+    for attempt in 0..3u64 {
+        health
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("provider 429"),
+                "V3ProviderRespInbound01Raw",
+                429,
+                Some("rate_limit_error"),
+                "upstream rate limit",
+                10_000 + attempt,
+            )
+            .expect("429 policy failure should record");
+    }
+
+    assert!(
+        !health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_003)
+            .available,
+        "three 429 failures must block even while score is not yet zero"
+    );
 }
