@@ -440,7 +440,7 @@ fn project_json_response(
         // materialized for a non-streaming client response.  Observation must
         // remain enabled there; the live SSE path does not invoke this
         // Resp03 profile, so disabling it here silently loses MISSING logs.
-        .with_toolreason_observation_enabled(true);
+        .with_toolreason_observation_enabled(false);
     if let Some(request_id) = request_id {
         response_profile = response_profile.with_toolreason_observation_request_id(request_id);
     }
@@ -794,24 +794,6 @@ fn enqueue_sse_client_chunks(
         if !payload.is_object() {
             continue;
         }
-        if state.tool_thinking_enabled {
-            crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
-                &payload,
-                &mut state.tool_names,
-            );
-            crate::hooks::apply_relay_toolreason_sse_hook(
-                &mut payload,
-                &state.tool_names,
-                &mut state.pending_toolreasons,
-                &mut state.toolreason_emitted,
-                true,
-                Some(&state.session_id),
-                Some(state.request_id.as_str()),
-                Some(state.provider_outcome.model_id.as_str()),
-                &mut state.toolreason_argument_buffers,
-                None,
-            );
-        }
         let transport_object = V3OpenAiChatSseTransportObject::new(
             object.event_name().map(ToOwned::to_owned),
             payload.clone(),
@@ -1119,24 +1101,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                 .record_provider_event_json(&event)
                                 .map_err(|error| error.to_string())?;
                             for mut payload in transducer.push_event(event)? {
-                                if tool_thinking_enabled {
-                                    crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
-                                        &payload,
-                                        &mut toolreason.tool_names,
-                                    );
-                                    crate::hooks::apply_relay_toolreason_sse_hook(
-                                        &mut payload,
-                                        &toolreason.tool_names,
-                                        &mut toolreason.pending_reasons,
-                                        &mut toolreason.reason_emitted,
-                                        true,
-                                        Some(session_id.as_str()),
-                                        Some(request_id.as_str()),
-                                        Some(provider_outcome.model_id.as_str()),
-                                        &mut toolreason.argument_buffers,
-                                        None,
-                                    );
-                                }
                                 let governed = project_sse_event_payload(
                                     request_id.as_str(),
                                     Some(session_id.as_str()),

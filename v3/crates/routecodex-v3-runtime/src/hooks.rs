@@ -236,8 +236,9 @@ pub(crate) fn register_responses_direct_hooks_with_key_catalog(
             output_node: "V3Error05ExecutionDecision",
         },
     ];
-    let direct_sse_typed_hooks =
-        V3DirectSseTypedHookCatalog::new().with_toolreason(apply_responses_toolreason_sse_hook);
+    // Toolreason is retired from the production client SSE path. Tests may
+    // still register the helper explicitly, but runtime never intercepts it.
+    let direct_sse_typed_hooks = V3DirectSseTypedHookCatalog::new();
     V3HookRegistry {
         hooks: HOOKS,
         route: responses_direct_route_hook,

@@ -518,7 +518,7 @@ impl V3HubRelayRequestHooks {
                 profile.web_search_execution_mode().is_some_and(
                     routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
                 ),
-                profile.tool_thinking_enabled(),
+                false,
                 profile.stopless_center_state(),
                 profile.stopless_transition_request_id(),
                 profile.stopless_transition_updated_at(),
@@ -551,7 +551,7 @@ impl V3HubRelayRequestHooks {
             events,
             stopless_state,
             web_search_state,
-            tool_thinking_enabled: profile.tool_thinking_enabled(),
+            tool_thinking_enabled: false,
             tool_thinking_turn_context,
         })
     }

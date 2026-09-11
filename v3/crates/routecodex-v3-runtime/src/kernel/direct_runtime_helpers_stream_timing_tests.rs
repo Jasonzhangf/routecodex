@@ -371,8 +371,8 @@ data: {"type":"response.completed","response":{"id":"resp_live_observation","sta
         false,
         false,
         crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        true,
-        true,
+        false,
+        false,
         Some("session-live-observation".to_string()),
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
@@ -384,14 +384,7 @@ data: {"type":"response.completed","response":{"id":"resp_live_observation","sta
     }
 
     let snapshot = observation.snapshot().expect("observation snapshot");
-    let toolreason = snapshot
-        .toolreason
-        .expect("Direct Resp03 must publish the typed Toolreason observation");
-    assert_eq!(toolreason.status, "OK");
-    assert_eq!(toolreason.stage, "resp03_direct_sse");
-    assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
-    assert_eq!(toolreason.tool, "pwd");
-    assert_eq!(toolreason.reason.as_deref(), Some("确认当前工作目录"));
+    assert!(snapshot.toolreason.is_none());
 }
 
 #[tokio::test]
@@ -424,8 +417,8 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
         false,
         false,
         crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        true,
-        true,
+        false,
+        false,
         Some("session-live-missing".to_string()),
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
@@ -445,16 +438,11 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
     assert!(!client_sse.contains("response.output_text.delta"));
     assert!(client_sse.contains("call_live_missing"));
     assert!(client_sse.contains(r#"{\"cmd\":\"pwd\"}"#));
-    let toolreason = observation
+    assert!(observation
         .snapshot()
         .expect("observation snapshot")
         .toolreason
-        .expect("Direct Resp03 must publish a MISSING observation");
-    assert_eq!(toolreason.status, "MISSING");
-    assert_eq!(toolreason.stage, "resp03_direct_sse");
-    assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
-    assert_eq!(toolreason.tool, "pwd");
-    assert_eq!(toolreason.reason, None);
+        .is_none());
 }
 
 #[tokio::test]
