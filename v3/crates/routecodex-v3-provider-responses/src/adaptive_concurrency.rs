@@ -90,19 +90,32 @@ impl V3AdaptiveConcurrencyPermit {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct V3AdaptiveConcurrencyState {
     budget: u32,
     in_flight: u32,
     saturated: bool,
     probe_in_flight: bool,
     next_probe_at_ms: Option<u64>,
+    notify: Arc<Notify>,
+}
+
+impl Default for V3AdaptiveConcurrencyState {
+    fn default() -> Self {
+        Self {
+            budget: 0,
+            in_flight: 0,
+            saturated: false,
+            probe_in_flight: false,
+            next_probe_at_ms: None,
+            notify: Arc::new(Notify::new()),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct V3AdaptiveConcurrencyInner {
     states: Mutex<BTreeMap<String, V3AdaptiveConcurrencyState>>,
-    changed: Notify,
     initial_budget: u32,
 }
 
@@ -126,7 +139,6 @@ impl V3AdaptiveConcurrencyController {
         Ok(Self {
             inner: Arc::new(V3AdaptiveConcurrencyInner {
                 states: Mutex::new(BTreeMap::new()),
-                changed: Notify::new(),
                 initial_budget,
             }),
         })
@@ -172,7 +184,21 @@ impl V3AdaptiveConcurrencyController {
     {
         let provider_key = provider_key.into();
         loop {
-            let notified = self.inner.changed.notified();
+            let notify = {
+                let mut states = self
+                    .inner
+                    .states
+                    .lock()
+                    .expect("adaptive concurrency state lock should not be poisoned");
+                let state = states.entry(provider_key.clone()).or_insert_with(|| {
+                    V3AdaptiveConcurrencyState {
+                        budget: self.inner.initial_budget,
+                        ..V3AdaptiveConcurrencyState::default()
+                    }
+                });
+                state.notify.clone()
+            };
+            let notified = notify.notified();
             if let Some(lease) = self.try_acquire(&provider_key, now_ms()) {
                 return lease;
             }
@@ -270,8 +296,9 @@ impl V3AdaptiveConcurrencyController {
                     Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
             }
         }
+        let notify = state.notify.clone();
         drop(states);
-        self.inner.changed.notify_waiters();
+        notify.notify_waiters();
         Ok(())
     }
 
@@ -288,8 +315,9 @@ impl V3AdaptiveConcurrencyController {
         state.saturated = true;
         state.next_probe_at_ms =
             Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
+        let notify = state.notify.clone();
         drop(states);
-        self.inner.changed.notify_waiters();
+        notify.notify_waiters();
         Ok(())
     }
 
@@ -306,8 +334,9 @@ impl V3AdaptiveConcurrencyController {
             return Err("adaptive concurrency lease underflow".to_string());
         }
         state.in_flight -= 1;
+        let notify = state.notify.clone();
         drop(states);
-        self.inner.changed.notify_one();
+        notify.notify_waiters();
         Ok(())
     }
 
@@ -333,6 +362,7 @@ impl V3AdaptiveConcurrencyController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn rejects_zero_initial_budget() {
@@ -436,6 +466,114 @@ mod tests {
             controller.snapshot("opencode-go:key2").unwrap().in_flight,
             0
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_scoped_notify_wakes_only_target_provider() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let held_a = controller.acquire("opencode-go:key-a", 0).await;
+        let probe_a = controller.acquire("opencode-go:key-a", 0).await;
+        assert!(probe_a.is_probe());
+        let held_b = controller.acquire("opencode-go:key-b", 0).await;
+        let probe_b = controller.acquire("opencode-go:key-b", 0).await;
+        assert!(probe_b.is_probe());
+
+        let controller_a = controller.clone();
+        let waiter_a =
+            tokio::spawn(async move { controller_a.acquire("opencode-go:key-a", 0).await });
+        let controller_b = controller.clone();
+        let waiter_b =
+            tokio::spawn(async move { controller_b.acquire("opencode-go:key-b", 0).await });
+        tokio::task::yield_now().await;
+        assert!(!waiter_a.is_finished());
+        assert!(!waiter_b.is_finished());
+
+        controller
+            .complete_probe(
+                probe_a.into_permit(),
+                V3AdaptiveConcurrencyProbeResult::Accepted,
+                0,
+            )
+            .unwrap();
+        let lease_a = tokio::time::timeout(Duration::from_millis(100), waiter_a)
+            .await
+            .expect("provider A release must wake provider A waiter")
+            .unwrap();
+        assert_eq!(lease_a.provider_key(), "opencode-go:key-a");
+        assert!(
+            !waiter_b.is_finished(),
+            "provider A release must not wake provider B waiter"
+        );
+
+        controller
+            .complete_probe(
+                probe_b.into_permit(),
+                V3AdaptiveConcurrencyProbeResult::Accepted,
+                0,
+            )
+            .unwrap();
+        controller.release(held_b.into_permit()).unwrap();
+        let lease_b = tokio::time::timeout(Duration::from_millis(100), waiter_b)
+            .await
+            .expect("provider B release must wake provider B waiter")
+            .unwrap();
+        assert_eq!(lease_b.provider_key(), "opencode-go:key-b");
+        controller.release(lease_a.into_permit()).unwrap();
+        controller.release(lease_b.into_permit()).unwrap();
+        controller.release(held_a.into_permit()).unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn same_provider_probe_completion_and_release_wake_registered_waiters() {
+        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let held_first = controller.acquire("opencode-go:key1", 0).await;
+        let held_second = controller.acquire("opencode-go:key1", 0).await;
+        let probe = controller.acquire("opencode-go:key1", 0).await;
+        assert!(probe.is_probe());
+
+        let controller_first = controller.clone();
+        let mut waiter_first =
+            tokio::spawn(async move { controller_first.acquire("opencode-go:key1", 0).await });
+        let controller_second = controller.clone();
+        let mut waiter_second =
+            tokio::spawn(async move { controller_second.acquire("opencode-go:key1", 0).await });
+        tokio::task::yield_now().await;
+        assert!(!waiter_first.is_finished());
+        assert!(!waiter_second.is_finished());
+
+        controller
+            .complete_probe(
+                probe.into_permit(),
+                V3AdaptiveConcurrencyProbeResult::Accepted,
+                0,
+            )
+            .unwrap();
+        let (first_was_first_waiter, first) =
+            tokio::time::timeout(Duration::from_millis(100), async {
+                tokio::select! {
+                    biased;
+                    lease = &mut waiter_first => (true, lease.unwrap()),
+                    lease = &mut waiter_second => (false, lease.unwrap()),
+                }
+            })
+            .await
+            .expect("first release must satisfy one registered waiter");
+
+        controller.release(held_second.into_permit()).unwrap();
+        let second = if first_was_first_waiter {
+            tokio::time::timeout(Duration::from_millis(100), waiter_second)
+                .await
+                .expect("second release must satisfy the remaining registered waiter")
+                .unwrap()
+        } else {
+            tokio::time::timeout(Duration::from_millis(100), waiter_first)
+                .await
+                .expect("second release must satisfy the remaining registered waiter")
+                .unwrap()
+        };
+        controller.release(held_first.into_permit()).unwrap();
+        controller.release(first.into_permit()).unwrap();
+        controller.release(second.into_permit()).unwrap();
     }
 
     #[tokio::test]
