@@ -352,7 +352,7 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
     let resp02 = build_resp02(payload_with("rsn_CODEX_CIPHER", "signed thought"));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let (governed, _) = outcome.into_parts();
     let payload = payload_str(&governed);
     assert!(
         !payload.contains("rsn_CODEX_CIPHER"),
@@ -364,7 +364,7 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
     let resp02 = build_resp02(payload_with("rsn_GPT_CIPHER", "gpt thought"));
     let profile = V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(true);
     let outcome = govern_v3_hub_relay_response(resp02, &profile).expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let (governed, _) = outcome.into_parts();
     assert!(
         payload_str(&governed).contains("rsn_GPT_CIPHER"),
         "gpt 单 provider 必须保留 encrypted_content 透传"
@@ -375,7 +375,7 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
     let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
-    let (governed, _, _) = outcome.into_parts();
+    let (governed, _) = outcome.into_parts();
     let payload = payload_str(&governed);
     assert!(
         payload.contains("resp04-signature"),

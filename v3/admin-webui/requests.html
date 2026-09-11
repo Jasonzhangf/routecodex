@@ -651,7 +651,7 @@
         ["attempts", row.attempts], ["failed attempts", row.failed_attempts], ["switches", row.switches],
         ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
         ["finish reason", row.meta?.finish_reason],
-        ["servertool", row.servertool ? "yes" : "no"], ["stopless", row.stopless ? "yes" : "no"],
+        ["servertool", row.servertool ? "yes" : "no"],
         ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail],
         ["usage in", usage.input_tokens != null ? Number(usage.input_tokens).toLocaleString() : "—"],
         ["usage out", usage.output_tokens != null ? Number(usage.output_tokens).toLocaleString() : "—"],

@@ -609,7 +609,6 @@ pub(crate) fn publish_v3_direct_provider_failure_event(
             status,
             "failed",
             provider_failure_events.to_vec(),
-            false,
         );
         observability.attempts = Some(attempts);
         sink(&observability, event);
@@ -632,7 +631,6 @@ pub(crate) fn build_v3_direct_runtime_observability(
     provider_status: Option<u16>,
     response_status: &str,
     provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
-    stopless_activation: bool,
 ) -> V3RuntimeObservability {
     V3RuntimeObservability {
         entry_protocol: entry_protocol.to_string(),
@@ -650,7 +648,6 @@ pub(crate) fn build_v3_direct_runtime_observability(
         provider_status,
         response_status: Some(response_status.to_string()),
         finish_reason: None,
-        stopless_activation,
         attempts: Some(selected.attempts),
         unavailable_candidates: selected.unavailable_candidates.clone(),
         provider_failure_events,

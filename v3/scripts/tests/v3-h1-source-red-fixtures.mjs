@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+if (process.cwd().endsWith('/v3') && existsSync(resolve(process.cwd(), 'crates'))) {
+  process.chdir(resolve(process.cwd(), '..'));
+}
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-static-hook-registry.mjs');
+const verifierRelative = 'v3/scripts/architecture/verify-v3-static-hook-registry.mjs';
 const targetFile = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const hookFile = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
 const fixtures = [
@@ -34,7 +37,7 @@ for (const fixture of fixtures) {
       const insertion = testModule < 0 ? source.length : testModule;
       writeFileSync(target, source.slice(0, insertion) + mutation + source.slice(insertion));
     }
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [join(root, verifierRelative)], { cwd: root, encoding: 'utf8' });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${name}: gate unexpectedly passed`);
     else if (!diagnostic.test(output)) failures.push(`${name}: wrong diagnostic: ${output.slice(-500)}`);

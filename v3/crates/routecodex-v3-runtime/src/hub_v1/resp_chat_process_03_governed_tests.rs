@@ -100,7 +100,7 @@ fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruct
         &V3HubRelayResponseHookProfile::empty(),
     )
     .expect("Resp03 must govern provider response");
-    let (governed, _, _) = outcome.into_parts();
+    let (governed, _) = outcome.into_parts();
     let identity_payload = governed.previous.previous.previous.payload.0.as_ref();
     assert!(
         !identity_payload.to_string().contains("gpt-5.6-sol"),
@@ -114,7 +114,7 @@ fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruct
         &V3HubRelayResponseHookProfile::empty(),
     )
     .expect("Resp03 must keep ordinary instructions");
-    let (governed, _, _) = outcome.into_parts();
+    let (governed, _) = outcome.into_parts();
     let ordinary_payload = governed.previous.previous.previous.payload.0.as_ref();
     assert_eq!(ordinary_payload["instructions"], ordinary);
     assert_eq!(ordinary_payload["model"], "client-visible-model");

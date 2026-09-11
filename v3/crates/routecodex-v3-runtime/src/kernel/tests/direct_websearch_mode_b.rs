@@ -9,7 +9,7 @@ use super::*;
 async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
     let manifest = direct_web_search_mode_b_manifest();
     let continuation_state = V3ResponsesDirectContinuationState::default();
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
     let continuation_scope = V3ResponsesDirectContinuationScope::responses(
         "/v1/responses",
         "session-ws-direct-2",
@@ -18,7 +18,7 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         "default",
     );
     // 前置：上一轮搜索结果已捕获（SearchResultCaptured，original_call_id=call_ws_1）。
-    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     let captured = crate::hub_v1::V3WebSearchCenterState::new()
         .transition_to(
             crate::hub_v1::V3WebSearchCenterPhase::LocalToolSurfaceActive,
@@ -50,7 +50,7 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         .with_normalized_result(Some(
             json!({"query": "routecodex", "text_result": "search result"}),
         ));
-    stopless_control
+    server_tool_state
         .web_search_store_for_scope(
             &scope,
             captured,
@@ -81,9 +81,9 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
             }]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
         &continuation_state,
-        &stopless_control,
+        &server_tool_state,
         &manifest,
         raw,
         continuation_scope.clone(),
@@ -94,7 +94,7 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     // Req04 配对验证：状态机收尾 Completed（不重建 payload）。
-    let state = stopless_control
+    let state = server_tool_state
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");

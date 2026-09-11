@@ -11,8 +11,8 @@
 
 use super::responses_relay_runtime::{
     find_responses_tool_output_ids, provider_target, V3ResponsesRelayRuntimeError,
-    V3ResponsesRelayStoplessControlExecution, V3ResponsesRelayStoplessControlScope,
-    V3ResponsesRelayStoplessControlState,
+    V3ResponsesRelayServerToolExecution, V3ResponsesRelayServerToolScope,
+    V3ResponsesRelayServerToolState,
 };
 use super::V3HubRelayResponseError;
 use super::{
@@ -25,11 +25,10 @@ use super::{
     build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
     build_v3_hub_req_target_06_from_v3_hub_req_execution_05,
     build_v3_provider_req_outbound_08_from_provider_req_compat_06,
-    build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08,
-    v3_stopless_center_enabled_for_server, V3HubContinuationOwnership, V3HubEntryProtocol,
-    V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
-    V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
-    V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
+    build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08, V3HubContinuationOwnership,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution,
+    V3HubTransportIntent, V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin,
+    V3ServerToolInstanceState, V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
 use super::{
     build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
@@ -48,10 +47,8 @@ use routecodex_v3_provider_responses::{
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-impl V3ResponsesRelayStoplessControlState {
-    fn web_search_center_key(
-        scope: &V3ResponsesRelayStoplessControlScope,
-    ) -> V3ServerToolCenterKey {
+impl V3ResponsesRelayServerToolState {
+    fn web_search_center_key(scope: &V3ResponsesRelayServerToolScope) -> V3ServerToolCenterKey {
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
             scope_key: format!(
@@ -67,22 +64,22 @@ impl V3ResponsesRelayStoplessControlState {
 
     pub fn web_search_load_for_scope(
         &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
+        scope: &V3ResponsesRelayServerToolScope,
     ) -> Result<Option<V3WebSearchCenterState>, V3ResponsesRelayRuntimeError> {
         match self
             .center
             .load(&Self::web_search_center_key(scope))
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)?
+            .map_err(|_| V3ResponsesRelayRuntimeError::ServerToolStatePoisoned)?
         {
             Some(V3ServerToolInstanceState::WebSearch(state)) => Ok(Some(state)),
-            Some(_) => Err(V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned),
+            Some(_) => Err(V3ResponsesRelayRuntimeError::ServerToolStatePoisoned),
             None => Ok(None),
         }
     }
 
     pub fn web_search_store_for_scope(
         &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
+        scope: &V3ResponsesRelayServerToolScope,
         state: V3WebSearchCenterState,
         written_by: V3ServerToolCenterWriteOrigin,
         reason: Option<&str>,
@@ -96,12 +93,12 @@ impl V3ResponsesRelayStoplessControlState {
                 reason,
                 request_id,
             )
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
+            .map_err(|_| V3ResponsesRelayRuntimeError::ServerToolStatePoisoned)
     }
 
     pub fn web_search_clear_for_scope(
         &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
+        scope: &V3ResponsesRelayServerToolScope,
         written_by: V3ServerToolCenterWriteOrigin,
         reason: Option<&str>,
         request_id: Option<&str>,
@@ -113,8 +110,32 @@ impl V3ResponsesRelayStoplessControlState {
                 reason,
                 request_id,
             )
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
+            .map_err(|_| V3ResponsesRelayRuntimeError::ServerToolStatePoisoned)
     }
+}
+
+pub(crate) fn store_v3_responses_relay_web_search_state(
+    server_tool_state: Option<&V3ResponsesRelayServerToolExecution<'_>>,
+    state: Option<&V3WebSearchCenterState>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(state) = state else { return Ok(()) };
+    let Some(execution) = server_tool_state else {
+        return Ok(());
+    };
+    if !execution.commit_effects || !execution.scope.has_client_session_scope() {
+        return Ok(());
+    }
+    execution.control.web_search_store_for_scope(
+        &execution.scope,
+        state.clone(),
+        V3ServerToolCenterWriteOrigin {
+            module: "responses_relay_runtime",
+            symbol: "store_v3_responses_relay_web_search_state",
+            stage: "req04_server_tool",
+        },
+        Some("persist web_search server tool state"),
+        None,
+    )
 }
 
 /// Mode B 搜索 hop：一次额外的 provider/search 往返（非主模型 re-entry）。
@@ -600,13 +621,10 @@ pub(crate) fn resolve_request_web_search_backend_binding(
 pub(crate) fn apply_v3_responses_relay_web_search_control_completion(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
-    stopless_control: Option<&V3ResponsesRelayStoplessControlExecution<'_>>,
+    server_tool_state: Option<&V3ResponsesRelayServerToolExecution<'_>>,
     payload: &Value,
 ) -> Result<(), V3ResponsesRelayRuntimeError> {
-    if !v3_stopless_center_enabled_for_server(manifest, server_id) {
-        return Ok(());
-    }
-    let Some(execution) = stopless_control else {
+    let Some(execution) = server_tool_state else {
         return Ok(());
     };
     if !execution.commit_effects || !execution.scope.has_client_session_scope() {

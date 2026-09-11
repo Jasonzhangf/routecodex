@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import YAML from 'yaml';
 
-const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs');
+const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const repoRoot = resolve(v3Root, '..');
+const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs');
 const copied = [
-  'package.json',
-  'docs/architecture/v3-resource-operation-map.yml',
-  'docs/architecture/v3-mainline-call-map.yml',
-  'docs/architecture/v3-function-map.yml',
-  'docs/architecture/v3-verification-map.yml',
-  'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs',
-  'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs',
+  [resolve(v3Root, 'package.json'), 'package.json'],
+  [resolve(repoRoot, 'docs/architecture/v3-resource-operation-map.yml'), 'docs/architecture/v3-resource-operation-map.yml'],
+  [resolve(repoRoot, 'docs/architecture/v3-mainline-call-map.yml'), 'docs/architecture/v3-mainline-call-map.yml'],
+  [resolve(repoRoot, 'docs/architecture/v3-function-map.yml'), 'docs/architecture/v3-function-map.yml'],
+  [resolve(repoRoot, 'docs/architecture/v3-verification-map.yml'), 'docs/architecture/v3-verification-map.yml'],
+  [resolve(v3Root, 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs'), 'scripts/architecture/verify-v3-resource-relation-edge-lock.mjs'],
+  [resolve(v3Root, 'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs'), 'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs'],
 ];
 
 function mutateYaml(source, mutate) {
@@ -220,7 +222,9 @@ const failures = [];
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-resource-relation-edge-lock-red-'));
   try {
-    for (const rel of copied) cpSync(resolve(repo, rel), resolve(root, rel), { recursive: true });
+    for (const [source, destination] of copied) {
+      cpSync(source, resolve(root, destination), { recursive: true });
+    }
     const target = resolve(root, testCase.path);
     const original = readFileSync(target, 'utf8');
     const mutated = testCase.mutate(original);
@@ -229,7 +233,11 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_ADMISSION_WORKSPACE: '1' },
+    });
     const output = (result.stdout || '') + '\n' + (result.stderr || '');
     if (result.status === 0) failures.push(testCase.name + ': verifier unexpectedly passed');
     else if (!testCase.diagnostic.test(output)) failures.push(testCase.name + ': wrong diagnostic: ' + output.slice(-1200));

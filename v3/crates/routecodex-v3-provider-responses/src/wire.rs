@@ -185,7 +185,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
         current_request_body,
     )?;
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
-    normalize_deepseek_thinking_stopless_tool_choice(&mut body, &target);
+    normalize_deepseek_thinking_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
     // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
     //    接受密文，保留透传；响应侧主防线（`apply_v3_response_cipher_policy`，
@@ -543,10 +543,7 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
     }
 }
 
-fn normalize_deepseek_thinking_stopless_tool_choice(
-    body: &mut Value,
-    target: &V3ResponsesProviderTarget,
-) {
+fn normalize_deepseek_thinking_tool_choice(body: &mut Value, target: &V3ResponsesProviderTarget) {
     if matches!(target.provider_type.as_str(), "openai_chat" | "responses")
         && (target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash")
@@ -1040,11 +1037,6 @@ pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
     "resumeMeta",
     "servertool_state",
     "servertoolState",
-    "stopless_state",
-    "stoplessState",
-    "stopless_center",
-    "stoplessCenter",
-    "__routecodex_stopless_center",
     "error_chain",
     "errorChain",
     "node_trace",

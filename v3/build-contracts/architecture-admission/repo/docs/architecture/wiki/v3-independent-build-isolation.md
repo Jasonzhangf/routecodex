@@ -38,7 +38,7 @@ flowchart LR
 
 ## Ownership Review
 
-- `provider-compat-core`, `servertool-core`, and `stop-message-core` move byte-first
+- `provider-compat-core` and `servertool-core` move byte-first
   into `v3/crates/`; path edits follow the move.
 - The old shared owners are removed only after zero-consumer, metadata/tree, focused
   test, workspace test, and behavioral equivalence evidence.

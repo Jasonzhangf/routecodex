@@ -306,7 +306,6 @@ where
                 None,
                 "in_progress",
                 provider_failure_events.clone(),
-                false,
             );
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
@@ -577,8 +576,7 @@ where
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
-                            provider_failure_events.clone(),
-                            false,
+                provider_failure_events.clone(),
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                         let projected =
@@ -753,8 +751,7 @@ where
                         "json",
                         Some(provider_status),
                         "failed",
-                        provider_failure_events.clone(),
-                        false,
+                provider_failure_events.clone(),
                     );
                     observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                     let projected = V3ErrorHandlingCenter::project_terminal(policy_result.decision);
@@ -887,8 +884,7 @@ where
                                 "json",
                                 policy_result.event.as_ref().map(|event| event.status),
                                 "failed",
-                                provider_failure_events.clone(),
-                                false,
+                provider_failure_events.clone(),
                             );
                             observability.attempts =
                                 Some(total_attempts(&accumulator, send_attempts));
@@ -1052,8 +1048,7 @@ where
                                     "sse",
                                     policy_result.event.as_ref().map(|event| event.status),
                                     "failed",
-                                    provider_failure_events.clone(),
-                                    false,
+                provider_failure_events.clone(),
                                 );
                                 observability.attempts =
                                     Some(total_attempts(&accumulator, send_attempts));
@@ -1146,8 +1141,7 @@ where
             v3_direct_client_transport_label(&client_payload),
             Some(provider_status),
             "completed",
-            provider_failure_events.clone(),
-            false,
+                provider_failure_events.clone(),
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
         if committed_client_sse {

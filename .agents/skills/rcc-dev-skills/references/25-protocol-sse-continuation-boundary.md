@@ -32,7 +32,7 @@ Do not use success in one question as evidence for another.
 1. Capture provider-bound request N and N+1.
 2. Prove persisted prefix is unchanged; N+1 may append only finalized assistant output and current incoming delta.
 3. Reject partial prefix replay, completed call-id replay, orphan output, duplicate output, scope mismatch, or guessed repair.
-4. Keep continuation state separate from routing, health, Stopless, debug, and client/provider payload.
+4. Keep continuation state separate from routing, health, debug, and client/provider payload.
 
 ## Verification
 

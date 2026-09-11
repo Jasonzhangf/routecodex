@@ -19,7 +19,7 @@ Canonical sources:
 
 Request lifecycle starts at Client SSE Request Start: server accept -> request normalization -> tool output pair normalization -> continuation owner check -> Req04 restore -> current-turn merge/governance -> ReqExecution handoff.
 
-Response lifecycle is separate: provider raw -> provider response compat -> RespInbound normalization -> Resp03 text harvest -> complete/repair tool frames -> inspect finish_reason -> branch tool_call/stop into different servertool hooks -> ordinary tool governance for non-servertool tool_call -> Resp04 continuation save -> RespOutbound projection.
+Response lifecycle is separate: provider raw -> provider response compat -> RespInbound normalization -> Resp03 text harvest -> complete/repair tool frames -> inspect finish_reason -> tool_call servertool hook -> ordinary tool governance for non-servertool tool_call -> Resp04 continuation save -> RespOutbound projection. A terminal stop remains an ordinary response and does not enter an internal continuation hook.
 
 Audit labels locked for generated HTML:
 - Client SSE Request Start
@@ -40,7 +40,7 @@ Audit labels locked for generated HTML:
 - Inspect finish_reason
 - Tool-call Servertool Hook
 - Ordinary Tool Governance
-- Stop Servertool Hook
+- Terminal Response Branch
 - Request node logic
 - Response node logic
 - Error feedback is preserved
@@ -76,12 +76,12 @@ flowchart TD
   D --> E[Complete / Repair Tool Frames\ncomment: may correct finish_reason]
   E --> F[Inspect finish_reason]
   F -- tool_call --> G[Tool-call Servertool Hook\ncomment: servertool intercept first]
-  F -- stop --> H[Stop Servertool Hook\ncomment: stop/servertool/stopless hook]
+  F -- stop --> H[Terminal Response Branch\ncomment: preserve ordinary terminal response]
   F -- other --> K[Emit Resp03 Governed Semantic]
   G -- servertool intercepted --> I[Update Runtime Control Side-Channel]
   G -- not servertool --> J[Ordinary Tool Governance\ncomment: exec_command/apply_patch/client tools]
   J --> I
-  H --> I
+  H --> K
   I --> K
   K --> L[Resp04 continuation save only]
   L --> M[RespOutbound05 Client Semantic]
@@ -99,7 +99,7 @@ flowchart TD
 | Continuation Restore at Req04 | Restores canonical local context saved by previous Resp04. | Restored context is canonical; do not read it as raw history again. |
 | Merge Current Tool Surfaces | Merges current request top-level `tools` and `input[].additional_tools.tools`. | Preserve original surface; `additional_tools` is Codex capability declaration surface. |
 | Preserve Client Tool Feedback | Adds current client tool execution results to governed request truth. | Pair only by explicit protocol fields `call_id`/type; error feedback is model correction input. |
-| Inject Current Internal Tools | Injects current-turn internal tools such as `reasoningStop`. | At most once; append/augment current turn; do not clear system/developer/user context. |
+| Inject Current Internal Tools | Injects current-turn internal tools declared by the active tool policy. | At most once; append/augment current turn; do not clear system/developer/user context. |
 | Emit Req04 Governed Request | Emits restored context + current request deltas to ReqExecution05. | Provider malformed fields are fixed in ReqOutbound/provider codec, not by deleting Req04 truth. |
 
 ## Response node logic
@@ -107,15 +107,15 @@ flowchart TD
 | Node | 干什么 | 逻辑 |
 | --- | --- | --- |
 | Provider Response Raw | Receives provider raw JSON/SSE response truth. | No governance or projection here. |
-| Provider Response Compat | Applies provider-specific response compatibility. | Compat precedes RespInbound normalization and cannot own servertool/stopless/ordinary tool governance. |
+| Provider Response Compat | Applies provider-specific response compatibility. | Compat precedes RespInbound normalization and cannot own servertool or ordinary tool governance. |
 | RespInbound Normalization | Normalizes compat output into Hub response semantic. | Establishes response semantic input only; finish_reason split and governance wait until Resp03. |
 | Text Harvest First | Harvests text, reasoning, and accumulated deltas first. | Tool decisions must not run on incomplete text/delta state. |
 | Complete / Repair Tool Frames | Completes or repairs tool frames that are determinable from response semantics. | This can correct finish_reason, for example stop -> tool_call, before branch selection. |
-| Inspect finish_reason | Branches by corrected `finish_reason`. | `tool_call` and `stop` have different servertool hooks and are modeled as separate Resp03 branches. |
+| Inspect finish_reason | Branches by corrected `finish_reason`. | `tool_call` enters the registered servertool hook; `stop` remains an ordinary terminal response. |
 | Tool-call Servertool Hook | Runs servertool interception under `finish_reason=tool_call`. | Servertool intercept runs before ordinary tool governance. If intercepted, do not process as ordinary exec/apply_patch. |
 | Ordinary Tool Governance | Governs non-servertool tool calls such as `exec_command`, `apply_patch`, and client tools. | Runs only after tool-call servertool hook passes through. |
-| Stop Servertool Hook | Runs stop/servertool/stopless hook under `finish_reason=stop`. | Stop branch hook is distinct from tool_call branch hook. |
-| Update Runtime Control Side-Channel | Updates runtime control after either branch. | Side-channel only; no provider/client normal payload pollution. |
+| Terminal Response Branch | Preserves ordinary terminal response under `finish_reason=stop`. | Stop is not an internal continuation hook and does not create a servertool projection. |
+| Update Runtime Control Side-Channel | Updates servertool runtime state after the registered tool-call hook. | Side-channel only; no provider/client normal payload pollution. |
 | Emit Resp03 Governed Semantic | Emits governed response semantic after branch convergence. | Response governance is complete at Resp03 exit; later nodes only save/project. |
 | Resp04 Continuation Save | Commits/releases continuation context from Resp03-governed output and ends Chat Process. | No response reinterpretation, tool repair, history repair, or guidance injection; after this, only outbound projection and JSON→SSE framing may run. |
 | RespOutbound Client Semantic | Projects governed response to client protocol semantic after Chat Process endpoint. | Projection only; no continuation save/restore and no error swallowing. |
@@ -134,9 +134,9 @@ flowchart TD
 | Provider response compat | ProviderRespCompat02ProviderCompat | Provider-specific response shape compatibility only; no response governance. |
 | Text/tool-frame harvested response | Resp03 | Text harvest and tool frame completion happen before finish_reason split. |
 | Tool-call servertool action | Resp03 tool_call branch | Servertool interception before ordinary tool governance. |
-| Stop servertool action | Resp03 stop branch | Stop/servertool/stopless hook distinct from tool_call hook. |
+| Terminal response | Resp03 terminal branch | Preserve ordinary stop semantics without internal continuation. |
 | Ordinary tool calls | Resp03 ordinary tool governance | Exec/apply_patch/client tools are governed after servertool pass-through. |
-| Stopless runtime control | Metadata side-channel / StoplessCenter | Read at Req04, update at Resp03; never enter provider/client normal payload. |
+| Servertool runtime control | Metadata side-channel / ServerToolCenter | Read/update only at the registered servertool hook; never enter provider/client normal payload. |
 | Provider malformed fields | ReqOutbound / provider codec owner | Provider codec owns malformed provider fields; fix provider-bound field generation before send. |
 
 ## Allowed Actions
@@ -146,12 +146,12 @@ flowchart TD
 - Req04 may normalize current tool output pairing by explicit call_id/type.
 - Req04 may restore local continuation context after scope/owner/entry validation.
 - Req04 may merge current tool declarations and current tool outputs into governed request truth.
-- Req04 may inject internal tools such as `reasoningStop` only when policy allows.
+- Req04 may inject internal tools only when the active tool policy allows.
 - Response chain must run provider raw -> ProviderRespCompat02 -> RespInbound normalization before Resp03 governance.
 - Resp03 may harvest text first, complete/repair tool frames, and correct finish_reason before branching.
-- Resp03 may run distinct servertool hooks for `finish_reason=tool_call` and `finish_reason=stop`.
-- Resp03 may run ordinary tool governance after tool-call servertool pass-through.
-- Resp03 may update runtime control through side-channel resources.
+- Resp03 may run the registered servertool hook for `finish_reason=tool_call`.
+- Resp03 may preserve ordinary terminal semantics for `finish_reason=stop`.
+- Resp03 may update servertool runtime control through side-channel resources.
 - Resp04 may save/commit or release continuation truth after Resp03 governance.
 - RespOutbound may project governed response semantic to client protocol.
 
@@ -164,13 +164,13 @@ flowchart TD
 - Delete only one side of a matching call/output pair.
 - Skip ProviderRespCompat02 before RespInbound normalization.
 - Make finish_reason branch decisions before text harvest and tool frame completion/repair.
-- Treat stop servertool hook and tool_call servertool hook as one node.
+- Treat the registered tool_call servertool hook as distinct from ordinary tool governance.
 - Run ordinary exec/apply_patch/client-tool governance before tool-call servertool interception.
-- Move response-side tool/servertool/stopless governance out of Resp03.
+- Move response-side tool/servertool governance out of Resp03.
 - Let Resp04 repair response semantics, tools, history, or prompt guidance.
 - Repair provider-specific fields in Req04 or Resp03.
 - Downgrade `tool_call` / `tool_output` into plain text.
-- Put stopless/servertool/debug/snapshot metadata into provider body or client normal payload.
+- Put servertool/debug/snapshot metadata into provider body or client normal payload.
 
 ## Review Checklist
 
@@ -187,7 +187,7 @@ flowchart TD
 | C9 | `additional_tools` reach provider-visible tools. |
 | C10 | Response starts at provider raw and passes ProviderRespCompat02 before RespInbound normalization. |
 | C11 | Resp03 text harvest and tool frame completion/repair happen before finish_reason split. |
-| C12 | `finish_reason=tool_call` and `finish_reason=stop` have distinct servertool hooks. |
+| C12 | `finish_reason=tool_call` enters the registered servertool hook; `finish_reason=stop` remains an ordinary terminal response. |
 | C13 | Ordinary tool governance runs only after tool-call servertool pass-through. |
 | C14 | Resp04 saves/commits continuation truth as Chat Process endpoint, before RespOutbound and JSON→SSE. |
 | C15 | Provider-specific malformed fields are fixed in ReqOutbound/provider codec. |

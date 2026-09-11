@@ -1138,8 +1138,8 @@ fn responses_builtin_tool_types_encode_with_anthropic_native_web_search_and_obje
         "model":"MiniMax-M3",
         "stream": false,
         "tool_choice": "required",
-        "input": "Use a tool or reasoningStop.",
-        "tools": [{"type":"function","name":"reasoningStop","parameters":{"type":"object","properties":{"stopreason":{"type":"integer"}},"required":["stopreason"]}}]
+        "input": "Use a tool.",
+        "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}}]
     }))
     .expect("Responses required tool_choice must encode as Anthropic any");
     assert_eq!(required_choice["tool_choice"], json!({"type":"any"}));
@@ -1257,9 +1257,9 @@ fn responses_additional_tools_input_item_projects_to_anthropic_tool_surface() {
                     },
                     {
                         "type":"function",
-                        "name":"reasoningStop",
-                        "description":"0=完成 1=阻塞 2=继续 evidence reason",
-                        "parameters":{"type":"object","properties":{"stopreason":{"type":"integer"}},"required":["stopreason"]}
+                        "name":"exec_command",
+                        "description":"Run a command.",
+                        "parameters":{"type":"object","properties":{"cmd":{"type":"string"}},"required":["cmd"]}
                     }
                 ]
             }
@@ -1277,14 +1277,11 @@ fn responses_additional_tools_input_item_projects_to_anthropic_tool_surface() {
         .collect::<Vec<_>>();
     assert_eq!(
         names,
-        vec!["exec", "wait", "request_user_input", "reasoningStop"],
+        vec!["exec", "wait", "request_user_input", "exec_command"],
         "Anthropic provider wire dropped restored Responses additional_tools: {provider_request}"
     );
     assert_eq!(tools[0]["input_schema"]["required"], json!(["cmd"]));
-    assert_eq!(
-        tools[3]["description"],
-        json!("0=完成 1=阻塞 2=继续 evidence reason")
-    );
+    assert_eq!(tools[3]["description"], json!("Run a command."));
 }
 
 #[test]

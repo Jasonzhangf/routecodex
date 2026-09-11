@@ -38,7 +38,6 @@ forbidden_semantics:
   - required_action
   - tool_call
   - continuation
-  - stopless
   - servertool
   - retry_or_reroute_policy
 canonical_docs:

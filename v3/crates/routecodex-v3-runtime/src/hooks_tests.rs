@@ -373,7 +373,7 @@ fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
         "input": "hello",
         "reasoning": {"effort": "high"},
         "tools": [
-            {"type": "function", "name": "reasoningStop"},
+            {"type": "function", "name": "exec_command"},
             {"type": "namespace", "name": "multi_agent_v1", "tools": [
                 {"type": "function", "name": "spawn_agent", "parameters": {"type": "object"}}
             ]}
@@ -412,7 +412,7 @@ fn responses_direct_responses_target_applies_deepseek_thinking_compat() {
         "model": "client-route-alias",
         "input": "hello",
         "reasoning": {"effort": "high"},
-        "tools": [{"type": "function", "name": "reasoningStop"}],
+        "tools": [{"type": "function", "name": "exec_command"}],
         "tool_choice": "required"
     });
 

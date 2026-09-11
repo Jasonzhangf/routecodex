@@ -105,7 +105,6 @@ fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
             r#"
 version = 3
 [features]
-stopless_center = false
 [servers.s]
 bind = "127.0.0.1"
 port = 5555
@@ -189,7 +188,7 @@ async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait
     }
 }
 
-async fn assert_direct_response_request_does_not_inject_stopless(response: Value, label: &str) {
+async fn assert_direct_response_request_preserves_client_tools(response: Value, label: &str) {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
     let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
@@ -197,7 +196,7 @@ async fn assert_direct_response_request_does_not_inject_stopless(response: Value
         &manifest,
         request(json!({
             "model": "gpt-5.5",
-            "input": format!("direct stopless negative {label}"),
+            "input": format!("direct tool preservation negative {label}"),
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
@@ -218,18 +217,17 @@ async fn assert_direct_response_request_does_not_inject_stopless(response: Value
     assert_eq!(
         wire["tools"].as_array().map(|items| items.len()),
         Some(1),
-        "{label}: direct path must preserve original tools and not append stopless: {wire}"
+        "{label}: direct path must preserve original tools without internal additions: {wire}"
     );
     assert_eq!(wire["tools"][0]["name"], "exec_command");
     for forbidden in [
-        "reasoningStop",
-        "<rcc_stop_schema>",
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
+        "<internal_control_schema>",
+        "call_internal_control",
+        "routecodex internal control",
     ] {
         assert!(
             !wire_serialized.contains(forbidden),
-            "{label}: direct provider wire leaked relay stopless artifact: {forbidden}"
+            "{label}: direct provider wire leaked relay internal artifact: {forbidden}"
         );
     }
     assert!(
@@ -241,7 +239,7 @@ async fn assert_direct_response_request_does_not_inject_stopless(response: Value
     );
 }
 
-async fn assert_direct_response_passthrough_without_stopless(response: Value, label: &str) {
+async fn assert_direct_response_passthrough_without_relay_governance(response: Value, label: &str) {
     let expected_status = response.get("status").cloned();
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
@@ -250,7 +248,7 @@ async fn assert_direct_response_passthrough_without_stopless(response: Value, la
         &manifest,
         request(json!({
             "model": "gpt-5.5",
-            "input": format!("direct stopless pass {label}"),
+            "input": format!("direct pass-through {label}"),
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
@@ -275,17 +273,14 @@ async fn assert_direct_response_passthrough_without_stopless(response: Value, la
         assert_eq!(
             parsed.get("status"),
             Some(&expected_status),
-            "{label}: direct inactive stopless must pass provider status through: {parsed}"
+            "{label}: direct path must pass provider status through: {parsed}"
         );
     }
     let client_serialized = serde_json::to_string(parsed).unwrap();
-    for forbidden in [
-        "call_stopless_reasoning",
-        "routecodex hook run reasoningStop",
-    ] {
+    for forbidden in ["call_internal_control", "routecodex internal control"] {
         assert!(
             !client_serialized.contains(forbidden),
-            "{label}: direct response leaked relay stopless projection: {forbidden}"
+            "{label}: direct response leaked relay internal projection: {forbidden}"
         );
     }
 }
@@ -588,7 +583,7 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
 
     let original_request = json!({
         "model": "gpt-5.5",
-        "input": "direct uses stopless when completed response has no summary",
+        "input": "direct preserves completed response without summary",
         "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
         "stream": false
     });
@@ -613,12 +608,12 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
     assert_eq!(
         wire.get("tools"),
         original_request.get("tools"),
-        "direct provider request must preserve the original Responses $.tools field exactly and must not inject request-side stopless guidance"
+        "direct provider request must preserve the original Responses $.tools field exactly and must not inject internal guidance"
     );
     assert_eq!(
         wire["tools"].as_array().map(|items| items.len()),
         Some(1),
-        "direct path must preserve only client tools without injecting stopless: {wire}"
+        "direct path must preserve only client tools without injecting internal guidance: {wire}"
     );
     assert_eq!(wire["tools"][0]["name"], "exec_command");
     assert!(
@@ -626,17 +621,13 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
             || !wire["instructions"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("reasoningStop"),
-        "direct provider request must not get request-side stopless guidance: {wire}"
+                .contains("routecodex internal"),
+        "direct provider request must not get request-side internal guidance: {wire}"
     );
-    for forbidden in [
-        "reasoningStop",
-        "<rcc_stop_schema>",
-        "call_stopless_reasoning",
-    ] {
+    for forbidden in ["<internal_control_schema>", "call_internal_control"] {
         assert!(
             !wire_serialized.contains(forbidden),
-            "direct provider wire leaked request-side stopless artifact: {forbidden}"
+            "direct provider wire leaked request-side internal artifact: {forbidden}"
         );
     }
     assert!(
@@ -655,17 +646,17 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
     };
     assert_eq!(
         parsed["status"], "completed",
-        "direct inactive schema guidance must not synthesize stopless no-op: {parsed}"
+        "direct path must not synthesize an internal no-op: {parsed}"
     );
     assert_eq!(parsed["id"], "resp_direct_missing_schema");
     let serialized = serde_json::to_string(parsed).unwrap();
     assert!(
-        !serialized.contains("call_stopless_reasoning"),
-        "direct inactive no-summary stop must not project client-visible no-op call: {serialized}"
+        !serialized.contains("call_internal_control"),
+        "direct no-summary response must not project client-visible internal call: {serialized}"
     );
     assert!(
-        !serialized.contains("routecodex hook run reasoningStop"),
-        "direct inactive no-summary stop must not project no-input reasoningStop CLI: {serialized}"
+        !serialized.contains("routecodex internal control"),
+        "direct no-summary response must not project an internal CLI call: {serialized}"
     );
     assert!(
         serialized.contains("direct response without stop schema"),
@@ -698,7 +689,7 @@ async fn direct_kernel_passes_summary_matrix_when_schema_guidance_inactive() {
                 "output":[{
                     "type":"message",
                     "role":"assistant",
-                    "content":[{"type":"output_text","text":"{\"stopreason\":\"bad\",\"reason\":\"not numeric\"}"}]
+                    "content":[{"type":"output_text","text":"{\"state\":\"bad\",\"reason\":\"invalid\"}"}]
                 }]
             }),
         ),
@@ -711,7 +702,7 @@ async fn direct_kernel_passes_summary_matrix_when_schema_guidance_inactive() {
                 "output": [{
                     "type": "message",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": "done\n<rcc_stop_schema>\n{\"stopreason\":0,\"reason\":\"done\",\"has_evidence\":1,\"evidence\":\"direct proof\",\"needs_user_input\":false}\n</rcc_stop_schema>"}]
+                    "content": [{"type": "output_text", "text": "done\n<internal_control_schema>\n{\"state\":\"done\",\"evidence\":\"direct proof\"}\n</internal_control_schema>"}]
                 }]
             }),
         ),
@@ -735,21 +726,21 @@ async fn direct_kernel_passes_summary_matrix_when_schema_guidance_inactive() {
             }),
         ),
         (
-            "reasoning_stop_text_shaped",
+            "internal_control_text_shaped",
             json!({
                 "object":"response",
-                "id":"resp_direct_matrix_reasoning_stop_text",
+                "id":"resp_direct_matrix_internal_control_text",
                 "status":"completed",
                 "output":[{
                     "type":"message",
                     "role":"assistant",
-                    "content":[{"type":"output_text","text":"provider text mentions reasoningStop and <rcc_stop_schema> but direct must not enter relay stopless"}]
+                    "content":[{"type":"output_text","text":"provider text mentions internal control but direct must not enter relay governance"}]
                 }]
             }),
         ),
     ];
     for (label, payload) in payloads {
-        assert_direct_response_request_does_not_inject_stopless(payload.clone(), label).await;
-        assert_direct_response_passthrough_without_stopless(payload, label).await;
+        assert_direct_response_request_preserves_client_tools(payload.clone(), label).await;
+        assert_direct_response_passthrough_without_relay_governance(payload, label).await;
     }
 }

@@ -126,96 +126,14 @@ provider pinning fields have been physically removed from Virtual Router semanti
 恢复正常路由
 ```
 
-### 7. 自动续写 stopMessage（基于 routing state）
+### 7. 自动续写与 Stopless（已退休）
 
-> 仅当 RouteCodex 内置的 `stop_message_auto` servertool 启用时生效。
+V3 已移除内置 `stop_message_auto`、Stopless runtime、`reasoningStop`、旧
+stop hook、CLI projection、MetadataCenter 状态和相关状态机；本页不再提供
+这些功能的语法或执行合同。
 
-**语法（仅 `sm`）：**
-
-- `<**sm:"补齐交付证据",30**>` → 目标 + 轮次；
-- `<**sm:"补齐交付证据"**>` → 只有目标（持续执行直到目标达成）；
-- `<**sm:on/30**>` / `<**sm:30**>` → 无显式目标时使用默认目标“继续执行”；
-- `<**sm:<file://stopMessage/message1.md>**>` → 读取 `~/.rcc/stopMessage/message1.md` 作为 stopMessage 文案；
-- `<**sm:off**>` → 清理 stopMessage 状态。
-
-**行为：**
-
-- 标签只在路由层解析，不会透传给上游模型；
-- 解析后写入当前 routing-state session 状态：
-  - `stopMessageText`：自动补发的用户消息内容；
-  - `stopMessageMaxRepeats`：允许自动续写的最大次数（>=1）；
-  - `stopMessageUsed`：已执行次数（从 0 开始计数）；
-- marker 生命周期规则：
-  - 只以最新一条 user 消息为准；
-  - 同条消息中存在多个 `sm` 时，`off` 优先；否则最后一条生效；
-  - 注入成功后 `stopMessageUsed += 1`，达到上限后自动停用；
-- stopMessage 阶段策略的 BD 状态判定：默认优先尝试真实命令查询（`bd --no-db list/ready --json`），命令失败时直接报错不降级；
-  - 可用 `ROUTECODEX_STOPMESSAGE_BD_MODE=runtime` 控制（仅允许真实命令查询，`auto`/`heuristic` 废弃）；
-  - 可用 `ROUTECODEX_STOPMESSAGE_BD_TIMEOUT_MS`、`ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS`、`ROUTECODEX_STOPMESSAGE_BD_WORKDIR` 调整运行参数；
-- 当满足以下条件时，servertool 会自动发起后续请求：
-  - 当前响应的 `choices[0].finish_reason === "stop"`；
-  - 当前轮没有工具调用（`tool_calls` 为空）；
-  - `stopMessageUsed < stopMessageMaxRepeats`；
-  - 客户端仍处于连接状态（HTTP 层会在断连时设置 `clientDisconnected=true`，servertool 检测到后停止自动续写）；
-- 自动续写时：
-  - 生成下一步 followup 文本（默认 review 模式，`ai:on`）；
-  - 通过 `clientInjectOnly` 路径向绑定 tmux 客户端注入文本（不走嵌套 reenter 请求）；
-  - 自增 `stopMessageUsed` 并写回 routing-state 存储；
-  - 注入失败时清理 stopMessage 激活状态并保留主请求完成。
-- 错误管理：
-  - 非法 marker（如 `sm:on/not-a-number`）忽略且不改写状态；
-  - 无法解析的 `file://` marker 不生效，但主请求继续；
-- 注入失败会清理 stopMessage 激活状态，避免坏状态自循环。
-
-**示例：**
-
-```text
-<**sm:"继续",3**>
-帮我把这个项目的架构分 3 步讲完，每一步结束后我会说“继续”。
-```
-
-在该会话中：
-- 当模型先给出第 1 段回答并以 `finish_reason=stop` 结束时，服务器会自动追加一条用户消息 `继续` 并发起第 2 轮；
-- 若第 2 轮仍以 `stop` 结束且客户端仍连接，则再次自动补一条 `继续` 并发起第 3 轮；
-- 使用次数达到 `maxRepeats` 后自动停止，不再继续补发。
-
-### 8. `stopless`（RCC 目标生命周期）
-
-**唯一语法：**
-
-```text
-<**rcc**>
-stopless start
-<goal body>
-</rcc**>
-```
-
-同一套 RCC fence 还承载：
-
-- `stopless pause`
-- `stopless resume`
-- `stopless stop`
-- `stopless done`
-
-**效果：**
-
-- 只解析最新 user turn 中的 `<**rcc**> ... </rcc**>` block；
-- parser 真源在 Rust hotpath；
-- `stopless start` 的 body 作为目标正文透传上游；不再写入本地 goal/routing state；
-- `pause/resume/stop/done` 不再维护本地目标状态；
-- stopless 是否继续只看当前请求闭环的 MetadataCenter `runtime_control.stopless` 与 tool output，不再读取 goal state。
-
-**唯一状态：**
-
-- `idle`
-- `active`
-- `paused`
-- `stopped`
-- `completed`
-
-**实现锚点：**
-
-- `docs/design/rcc-unified-fence-marker-spec.md`
+未来的官方 Stop Hook、定时 hook、memory hook 由独立 hooks daemon 与
+codexapp 输入接口承载，属于后续设计，不回接 V3 路由指令或 servertool。
 
 ## 目标标识格式
 
@@ -248,7 +166,7 @@ stopless start
    - 否则回退为当前 `metadata.requestId`。
 
 因此：
-- Chat/Anthropic/Gemini 等协议下，同一 `sessionId` 或同一 `conversationId` 下的请求共享 allow / disable / stopMessage / stopless 本地状态；
+- Chat/Anthropic/Gemini 等协议下，同一 `sessionId` 或同一 `conversationId` 下的请求共享 allow / disable 本地状态；
 - Responses continuation 只恢复对应 request chain 的上下文，不把普通 provider 选择粘到整个会话；
 - 没有显式会话信息时，会退化为按 requestId（以及 Resume 的 previousRequestId）维持的短期状态。
 

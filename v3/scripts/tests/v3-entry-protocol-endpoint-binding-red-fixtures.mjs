@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs');
+const verifier = resolve(
+  repo,
+  existsSync(resolve(repo, 'scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs'))
+    ? 'scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs'
+    : 'v3/scripts/architecture/verify-v3-entry-protocol-endpoint-binding.mjs',
+);
 const copied = [
   'package.json',
   'docs/architecture/v3-function-map.yml',

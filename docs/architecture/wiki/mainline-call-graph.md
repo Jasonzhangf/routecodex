@@ -117,70 +117,6 @@ flowchart LR
 | v3-v2-config-01 | `V3Config01FileSource -> V3Config02AuthoringParsed` | anchored | `parse_authoring_for_store -> compile_v2_config_02_authoring_from_file` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
 | v3-v2-config-02 | `V3Config02AuthoringParsed -> V3Config05ManifestPublished` | anchored | `load_snapshot_with_source_identity -> validate_v3_config_03_schema_from_v3_config_02` |  | `v3.v2_config_toml_compat_5555`<br/>V3 config store can compile a V2 root TOML plus provider config.v2.toml files into an executable V3 manifest with Hub V1 endpoint bindings for the 5555 routing contract |
 
-## servertool.hook_skeleton.mainline
-
-Servertool standard hook skeleton: CLI remains the business execution lifecycle, while request/result injection, response interception, schema validation, hook response injection, followup/reenter effect planning, and finalization are governed by Rust-owned required/optional hooks.
-
-Entry contract: `HubRespChatProcess03Governed` via `docs/architecture/wiki/servertool-hook-skeleton-mainline-source.md`
-
-```mermaid
-flowchart LR
-  HubReqChatProcess03Governed["HubReqChatProcess03Governed"]
-  ServertoolReqHook04RequestFinalized["ServertoolReqHook04RequestFinalized"]
-  ServertoolReqHook03ToolInjected["ServertoolReqHook03ToolInjected"]
-  ServertoolReqHook02TextRewritten["ServertoolReqHook02TextRewritten"]
-  ServertoolReqHook01ResultParsed["ServertoolReqHook01ResultParsed"]
-  ChatProcReqContinuation03CanonicalRestored["ChatProcReqContinuation03CanonicalRestored"]
-  ServertoolCli04ClientExecuted["ServertoolCli04ClientExecuted"]
-  HubRespOutbound04ClientSemantic["HubRespOutbound04ClientSemantic"]
-  ServertoolRespHook06ProjectionFinalized["ServertoolRespHook06ProjectionFinalized"]
-  ServertoolRespHook03HookResponseInjected["ServertoolRespHook03HookResponseInjected"]
-  ServertoolRespHook02SchemaValidated["ServertoolRespHook02SchemaValidated"]
-  ServertoolRespHook01Intercepted["ServertoolRespHook01Intercepted"]
-  HubRespChatProcess03Governed["HubRespChatProcess03Governed"]
-  HubRespChatProcess03Governed -->|sth-resp-01| ServertoolRespHook01Intercepted
-  ServertoolRespHook01Intercepted -->|sth-resp-02| ServertoolRespHook02SchemaValidated
-  ServertoolRespHook02SchemaValidated -->|sth-resp-03| ServertoolRespHook03HookResponseInjected
-  ServertoolRespHook03HookResponseInjected -->|sth-resp-06| ServertoolRespHook06ProjectionFinalized
-  ServertoolRespHook06ProjectionFinalized -->|sth-resp-07| HubRespOutbound04ClientSemantic
-  ServertoolRespHook03HookResponseInjected -->|sth-cli-01| ServertoolCli04ClientExecuted
-  ChatProcReqContinuation03CanonicalRestored -->|sth-req-01| ServertoolReqHook01ResultParsed
-  ServertoolReqHook01ResultParsed -->|sth-req-02| ServertoolReqHook02TextRewritten
-  ServertoolReqHook02TextRewritten -->|sth-req-03| ServertoolReqHook03ToolInjected
-  ServertoolReqHook03ToolInjected -->|sth-req-04| ServertoolReqHook04RequestFinalized
-  ServertoolReqHook04RequestFinalized -->|sth-req-05| HubReqChatProcess03Governed
-  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
-  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
-  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class HubRespChatProcess03Governed anchored;
-  class ServertoolRespHook01Intercepted anchored;
-  class ServertoolRespHook02SchemaValidated anchored;
-  class ServertoolRespHook03HookResponseInjected anchored;
-  class ServertoolRespHook06ProjectionFinalized anchored;
-  class HubRespOutbound04ClientSemantic anchored;
-  class ServertoolCli04ClientExecuted anchored;
-  class ChatProcReqContinuation03CanonicalRestored anchored;
-  class ServertoolReqHook01ResultParsed anchored;
-  class ServertoolReqHook02TextRewritten anchored;
-  class ServertoolReqHook03ToolInjected anchored;
-  class ServertoolReqHook04RequestFinalized anchored;
-  class HubReqChatProcess03Governed anchored;
-```
-
-| step | transition | status | caller -> callee | split binding | owner |
-| --- | --- | --- | --- | --- | --- |
-| sth-resp-01 | `HubRespChatProcess03Governed -> ServertoolRespHook01Intercepted` | anchored | `execute -> run_servertool_response_hooks` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-resp-02 | `ServertoolRespHook01Intercepted -> ServertoolRespHook02SchemaValidated` | anchored | `run_stopless_response_hook -> inspect_stop_gateway_signal` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-resp-03 | `ServertoolRespHook02SchemaValidated -> ServertoolRespHook03HookResponseInjected` | anchored | `run_stopless_response_hook -> run_stopless_auto_handler_runtime_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-resp-06 | `ServertoolRespHook03HookResponseInjected -> ServertoolRespHook06ProjectionFinalized` | anchored | `run_stopless_response_hook -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-resp-07 | `ServertoolRespHook06ProjectionFinalized -> HubRespOutbound04ClientSemantic` | anchored | `finalize_hub_resp_outbound_04_client_semantic -> build_hub_resp_outbound_04_client_payload_for_protocol` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-cli-01 | `ServertoolRespHook03HookResponseInjected -> ServertoolCli04ClientExecuted` | anchored | `build_stopless_auto_cli_projection_from_engine_json -> build_stopless_auto_cli_projection_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-req-01 | `ChatProcReqContinuation03CanonicalRestored -> ServertoolReqHook01ResultParsed` | anchored | `run_servertool_request_hooks -> apply_req_process_tool_governance` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| sth-req-02 | `ServertoolReqHook01ResultParsed -> ServertoolReqHook02TextRewritten` | anchored | `normalize_responses_input_function_calls -> build_stop_hook_guidance_text_from_output` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
-| sth-req-03 | `ServertoolReqHook02TextRewritten -> ServertoolReqHook03ToolInjected` | anchored | `apply_req_process_tool_governance -> maybe_apply_servertool_orchestration` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
-| sth-req-04 | `ServertoolReqHook03ToolInjected -> ServertoolReqHook04RequestFinalized` | anchored | `apply_req_process_tool_governance -> build_processed_request` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
-| sth-req-05 | `ServertoolReqHook04RequestFinalized -> HubReqChatProcess03Governed` | anchored | `apply_hub_req_chatprocess_03_tool_governance -> run_hub_req_chatprocess_03_governed_entrypoint` |  | `hub.req_chatprocess_governance`<br/>Rust req_chatprocess owner governs request-side tool semantics before the request re-enters the normal Hub mainline |
-
 ## request.mainline
 
 HTTP request enters host, standardizes in Hub, routes via VR, exits through provider wire build.
@@ -783,54 +719,6 @@ flowchart LR
 | rtl-15 | `ServerStopCommand -> PortScopedListenerRelease` | anchored | `createStopCommand -> registerHttpRoutes` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
 | rtl-16 | `PortScopedListenerRelease -> PortRegistry` | anchored | `registerHttpRoutes -> removePort` |  | `runtime.lifecycle.port_scoped_start_stop`<br/>V2 lifecycle port-scoped takeover and single-port stop release only the requested listener, preserving sibling ports in the same process |
 
-## stopless.session.mainline
-
-Stopless three-round contract inside Chat Process boundary: every managed relay request injects stopless system guidance plus exactly one provider-facing/model-visible internal reasoningStop tool, Round-1/2 missing or invalid stops project a client-visible no-input CLI, the next provider request receives only a StoplessCenter state-machine-selected complete non-persistent ordinary user continuation guideline plus the fresh tool contract, and guard terminal stops without another CLI projection.
-
-Entry contract: `StoplessResp01StopDetected` via `docs/architecture/wiki/stopless-session-mainline-source.md`
-
-```mermaid
-flowchart LR
-  VrRoute04SelectedTarget["VrRoute04SelectedTarget"]
-  StoplessReq09SchemaContractInjected["StoplessReq09SchemaContractInjected"]
-  StoplessReq08GuidanceRewritten["StoplessReq08GuidanceRewritten"]
-  StoplessReq07ContinuationRestored["StoplessReq07ContinuationRestored"]
-  StoplessCli06ClientExecuted["StoplessCli06ClientExecuted"]
-  StoplessCli04ProjectionPlanned["StoplessCli04ProjectionPlanned"]
-  StoplessState03RuntimeSnapshotResolved["StoplessState03RuntimeSnapshotResolved"]
-  StoplessResp02SchemaGateEvaluated["StoplessResp02SchemaGateEvaluated"]
-  StoplessResp01StopDetected["StoplessResp01StopDetected"]
-  StoplessResp01StopDetected -->|stl-01| StoplessResp02SchemaGateEvaluated
-  StoplessResp02SchemaGateEvaluated -->|stl-02| StoplessState03RuntimeSnapshotResolved
-  StoplessState03RuntimeSnapshotResolved -->|stl-03| StoplessCli04ProjectionPlanned
-  StoplessCli06ClientExecuted -->|stl-05| StoplessReq07ContinuationRestored
-  StoplessReq07ContinuationRestored -->|stl-06| StoplessReq08GuidanceRewritten
-  StoplessReq08GuidanceRewritten -->|stl-07| StoplessReq09SchemaContractInjected
-  StoplessReq09SchemaContractInjected -->|stl-08| VrRoute04SelectedTarget
-  classDef anchored fill:#edf7ed,stroke:#2e7d32,stroke-width:1px,color:#1b1f23;
-  classDef partial fill:#fff7e6,stroke:#b26a00,stroke-width:1px,color:#1b1f23;
-  classDef pending fill:#f4f4f5,stroke:#6b7280,stroke-width:1px,stroke-dasharray: 5 5,color:#1b1f23;
-  class StoplessResp01StopDetected anchored;
-  class StoplessResp02SchemaGateEvaluated anchored;
-  class StoplessState03RuntimeSnapshotResolved anchored;
-  class StoplessCli04ProjectionPlanned anchored;
-  class StoplessCli06ClientExecuted anchored;
-  class StoplessReq07ContinuationRestored anchored;
-  class StoplessReq08GuidanceRewritten anchored;
-  class StoplessReq09SchemaContractInjected anchored;
-  class VrRoute04SelectedTarget anchored;
-```
-
-| step | transition | status | caller -> callee | split binding | owner |
-| --- | --- | --- | --- | --- | --- |
-| stl-01 | `StoplessResp01StopDetected -> StoplessResp02SchemaGateEvaluated` | anchored | `run_stopless_response_hook -> run_stopless_auto_handler_runtime_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-02 | `StoplessResp02SchemaGateEvaluated -> StoplessState03RuntimeSnapshotResolved` | anchored | `run_stopless_auto_handler_runtime_json -> plan_stopless_execution_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-03 | `StoplessState03RuntimeSnapshotResolved -> StoplessCli04ProjectionPlanned` | anchored | `run_stopless_response_hook -> build_stopless_auto_cli_projection_from_engine_json` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-05 | `StoplessCli06ClientExecuted -> StoplessReq07ContinuationRestored` | anchored | `apply_req_process_tool_governance -> latest_stopless_cli_output_from_resume` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-06 | `StoplessReq07ContinuationRestored -> StoplessReq08GuidanceRewritten` | anchored | `normalize_responses_input_function_calls -> build_stop_hook_guidance_text_from_output` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-07 | `StoplessReq08GuidanceRewritten -> StoplessReq09SchemaContractInjected` | anchored | `apply_req_process_tool_governance -> inject_stopless_system_instruction` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-| stl-08 | `StoplessReq09SchemaContractInjected -> VrRoute04SelectedTarget` | anchored | `classify -> classify` |  | `hub.servertool_stopless_cli_continuation`<br/>transparent stopless CLI continuation and provider system-schema planning inside the Chat Process request/response boundary |
-
 ## metadata.center.mainline
 
 single request-scoped metadata center mainline: one bound center flows across server -> Hub Pipeline -> provider/runtime -> response closeout; request truth is materialized once, continuation/runtime/provider observation attach as separate families, and later stages consume read-only projections before closeout release.
@@ -1010,7 +898,6 @@ flowchart LR
   V3Error06ClientProjected["V3Error06ClientProjected"]
   V3ConsoleError01HumanBlock["V3ConsoleError01HumanBlock"]
   V3Error01SourceRaised["V3Error01SourceRaised"]
-  V3ConsoleStopless05ExceptionalBlock["V3ConsoleStopless05ExceptionalBlock"]
   V3ConsoleProvider04ExceptionalBlock["V3ConsoleProvider04ExceptionalBlock"]
   V3ConsoleResp03HumanBlock["V3ConsoleResp03HumanBlock"]
   V3ConsoleReq02HumanBlock["V3ConsoleReq02HumanBlock"]
@@ -1018,11 +905,8 @@ flowchart LR
   V3ConsoleObs01RuntimeObservability -->|v3-console-01| V3ConsoleReq02HumanBlock
   V3ConsoleObs01RuntimeObservability -->|v3-console-02| V3ConsoleResp03HumanBlock
   V3ConsoleObs01RuntimeObservability -->|v3-console-03| V3ConsoleProvider04ExceptionalBlock
-  V3ConsoleObs01RuntimeObservability -->|v3-console-04| V3ConsoleStopless05ExceptionalBlock
   V3ConsoleObs01RuntimeObservability -->|v3-console-05| V3ConsoleResp03HumanBlock
-  V3ConsoleObs01RuntimeObservability -->|v3-console-06| V3ConsoleStopless05ExceptionalBlock
   V3ConsoleObs01RuntimeObservability -->|v3-console-07| V3ConsoleResp03HumanBlock
-  V3ConsoleObs01RuntimeObservability -->|v3-console-08| V3ConsoleStopless05ExceptionalBlock
   V3Error01SourceRaised -->|v3-console-09| V3ConsoleError01HumanBlock
   V3Error01SourceRaised -->|v3-console-10| V3ConsoleError01HumanBlock
   V3Error06ClientProjected -->|v3-console-11| V3ConsoleError06HumanBlock
@@ -1045,7 +929,6 @@ flowchart LR
   class V3ConsoleReq02HumanBlock anchored;
   class V3ConsoleResp03HumanBlock anchored;
   class V3ConsoleProvider04ExceptionalBlock anchored;
-  class V3ConsoleStopless05ExceptionalBlock anchored;
   class V3Error01SourceRaised anchored;
   class V3ConsoleError01HumanBlock anchored;
   class V3Error06ClientProjected anchored;
@@ -1064,11 +947,8 @@ flowchart LR
 | v3-console-01 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleReq02HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_route_hit_console_line_for_observability` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-02 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-03 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleProvider04ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_provider_observability_console_lines` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
-| v3-console-04 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_v3_observability_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-05 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
-| v3-console-06 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_relay_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-07 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleResp03HumanBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_request_complete_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
-| v3-console-08 | `V3ConsoleObs01RuntimeObservability -> V3ConsoleStopless05ExceptionalBlock` | anchored | `emit_direct_sse_complete_console_lines -> emit_v3_stopless_console_line` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-09 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_relay_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-10 | `V3Error01SourceRaised -> V3ConsoleError01HumanBlock` | anchored | `emit_direct_sse_failure_console_line -> emit_v3_post_commit_sse_source_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
 | v3-console-11 | `V3Error06ClientProjected -> V3ConsoleError06HumanBlock` | anchored | `emit_v3_direct_frame_console_lines -> emit_v3_frame_error_console_line_for_context` |  | `v3.console_human_readable_layering`<br/>V3 Server projects Runtime-owned Responses observability, post-commit typed Error01, pre-commit Error06, startup, and debug-sink failures into bright human headlines plus complete dim diagnostic detail. |
@@ -1177,7 +1057,7 @@ flowchart LR
 | v3-runtime-timing-11 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingTerminal` | anchored | `wrap_direct_sse_provider_outcome_stream -> finish_runtime` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
 | v3-runtime-timing-12 | `V3RuntimeTimingTerminal -> V3RuntimeTimingStreamObservation` | anchored | `wrap_direct_sse_provider_outcome_stream -> record_timing` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
 | v3-runtime-timing-13 | `V3RuntimeTimingExternalComplete -> V3RuntimeTimingProtocolHandoff` | anchored | `execute_v3_responses_direct_runtime_kernel_core -> with_additional_attempts` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
-| v3-runtime-timing-14 | `V3RuntimeTimingProtocolHandoff -> V3RuntimeTimingExternalAttempt` | anchored | `execute_responses_direct_server_outcome -> execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
+| v3-runtime-timing-14 | `V3RuntimeTimingProtocolHandoff -> V3RuntimeTimingExternalAttempt` | anchored | `execute_responses_direct_server_outcome -> execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target` |  | `v3.runtime_timing_observability`<br/>Responses Direct/Relay Runtime owns monotonic total, accumulated provider external, and derived internal timing; Server is a read-only projection. |
 
 ## v3.codex_sample_retention_snap_scope
 
@@ -1231,7 +1111,6 @@ flowchart LR
 | native.responses_context_capture | `captureReqInboundResponsesContextSnapshotJson` | `hub.req_inbound_responses_context_capture`<br/>Rust req_inbound owner captures and normalizes relay `/v1/responses` request context before any TS bridge reuse | Host/native wrapper; truth owner remains Rust hub_req_inbound_context_capture. |
 | native.responses_client_projection | `projectResponsesClientPayloadForClientNative` | `hub.response_responses_client_projection`<br/>OpenAI Responses client-visible payload projection for JSON body and SSE frames after HubRespChatProcess03Governed normalization, including apply_patch freeform custom tool output plus client-visible model/reasoning restore | Thin host/native facade; truth owner remains Rust. |
 | native.provider_response_metadata_sync_effect | `plan_provider_response_metadata_sync_effect_json` | `hub.provider_response_metadata_sync_effect_plan`<br/>Rust-owned provider-response MetadataCenter bind/merge/write effect plan | Rust selects provider-response MetadataCenter no-op/bind/write effects; TS executes only opaque center binding and returned writes. |
-| native.provider_response_stopless_runtime_control_effect | `plan_provider_response_stopless_runtime_control_effect_json` | `hub.provider_response_stopless_runtime_control_effect_plan`<br/>Rust-owned provider-response stopless runtime-control effect plan | Rust validates the direct stopless MetadataCenter write-plan shape and selects no-op/apply_runtime_control with the complete runtime-control projection; TS executes only returned MetadataCenter IO. |
 | native.provider_response_stream_pipe_effect | `plan_provider_response_stream_pipe_effect_json` | `hub.provider_response_stream_pipe_effect_plan`<br/>Rust-owned provider-response stream-pipe effect plan | Rust validates metadata-only streamPipe and selects no_pipe/use_pipe with canonical codec/requestId while rejecting effect-owned payload/body; TS reuses the top-level client semantic reference for Node stream IO. |
 | native.provider_response_diagnostic_alarm_effect | `plan_provider_response_diagnostic_alarm_effect_json` | `hub.provider_response_diagnostic_alarm_effect_plan`<br/>Rust-owned provider-response diagnostic alarm console effect plan | Rust selects diagnostic alarm entries and emits complete console message effects; TS executes console.warn IO only. |
 | native.provider_response_outbound_effect_materialization | `materialize_provider_response_outbound_effect_plan_json` | `hub.provider_response_outbound_effect_materialization`<br/>Rust-owned provider-response outbound payload/effect materialization; TS only executes request-local host IO | Rust validates the total response plan and returns payload, request/diagnostic projection, and normalized runtime effects; TS performs host IO only. |

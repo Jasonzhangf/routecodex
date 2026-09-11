@@ -72,25 +72,25 @@ pub type V3RuntimeProviderFailureEventSink = Arc<
 pub type V3RuntimeRouteSelectionEventSink =
     Arc<dyn Fn(&V3RuntimeObservability) + Send + Sync + 'static>;
 
-pub struct V3ResponsesRelayLocalStoplessControlInput<'a> {
+pub struct V3ResponsesRelayLocalServerToolInput<'a> {
     pub state: &'a V3ResponsesRelayLocalContinuationState,
-    pub stopless_control: &'a V3ResponsesRelayStoplessControlState,
+    pub server_tool_state: &'a V3ResponsesRelayServerToolState,
     pub scope: V3ResponsesRelayLocalContinuationScope,
     pub now_epoch_ms: u64,
     pub provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     pub route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
 }
 
-impl<'a> V3ResponsesRelayLocalStoplessControlInput<'a> {
+impl<'a> V3ResponsesRelayLocalServerToolInput<'a> {
     pub fn new(
         state: &'a V3ResponsesRelayLocalContinuationState,
-        stopless_control: &'a V3ResponsesRelayStoplessControlState,
+        server_tool_state: &'a V3ResponsesRelayServerToolState,
         scope: V3ResponsesRelayLocalContinuationScope,
         now_epoch_ms: u64,
     ) -> Self {
         Self {
             state,
-            stopless_control,
+            server_tool_state,
             scope,
             now_epoch_ms,
             provider_failure_event_sink: None,
@@ -237,7 +237,6 @@ pub struct V3RuntimeObservability {
     pub provider_status: Option<u16>,
     pub response_status: Option<String>,
     pub finish_reason: Option<String>,
-    pub stopless_activation: bool,
     pub attempts: Option<usize>,
     pub unavailable_candidates: Vec<String>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
@@ -676,7 +675,7 @@ impl V3ResponsesRelayLocalContinuationState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct V3ResponsesRelayStoplessControlScope {
+pub struct V3ResponsesRelayServerToolScope {
     pub(crate) entry_endpoint: String,
     pub(crate) session_id: String,
     pub(crate) conversation_id: String,
@@ -684,7 +683,7 @@ pub struct V3ResponsesRelayStoplessControlScope {
     pub(crate) routing_group: String,
 }
 
-impl V3ResponsesRelayStoplessControlScope {
+impl V3ResponsesRelayServerToolScope {
     pub fn new(
         entry_endpoint: impl Into<String>,
         session_id: impl Into<String>,
@@ -711,7 +710,7 @@ impl V3ResponsesRelayStoplessControlScope {
     }
 }
 
-impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayStoplessControlScope {
+impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayServerToolScope {
     fn from(scope: &V3ResponsesRelayLocalContinuationScope) -> Self {
         Self::new(
             scope.entry_endpoint.clone(),
@@ -724,84 +723,8 @@ impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayStoplessC
 }
 
 #[derive(Debug, Default)]
-pub struct V3ResponsesRelayStoplessControlState {
+pub struct V3ResponsesRelayServerToolState {
     pub(crate) center: V3ServerToolCenter,
-}
-
-impl V3ResponsesRelayStoplessControlState {
-    pub(crate) fn center_key(
-        scope: &V3ResponsesRelayStoplessControlScope,
-    ) -> V3ServerToolCenterKey {
-        V3ServerToolCenterKey {
-            tool_name: V3ServerToolName::Stopless,
-            scope_key: format!(
-                "{}|{}|{}|{}|{}",
-                scope.entry_endpoint,
-                scope.port,
-                scope.routing_group,
-                scope.session_id,
-                scope.conversation_id
-            ),
-        }
-    }
-
-    pub fn len(&self) -> Result<usize, V3ResponsesRelayRuntimeError> {
-        self.center
-            .len()
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
-    }
-
-    pub fn is_empty(&self) -> Result<bool, V3ResponsesRelayRuntimeError> {
-        self.center
-            .is_empty()
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
-    }
-
-    pub fn load_for_scope(
-        &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
-    ) -> Result<Option<V3StoplessCenterState>, V3ResponsesRelayRuntimeError> {
-        match self
-            .center
-            .load(&Self::center_key(scope))
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)?
-        {
-            Some(V3ServerToolInstanceState::Stopless(state)) => Ok(Some(state)),
-            Some(_) => Err(V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned),
-            None => Ok(None),
-        }
-    }
-
-    pub fn store_for_scope(
-        &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
-        state: V3StoplessCenterState,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), V3ResponsesRelayRuntimeError> {
-        self.center
-            .store(
-                Self::center_key(scope),
-                V3ServerToolInstanceState::Stopless(state),
-                written_by,
-                reason,
-                request_id,
-            )
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
-    }
-
-    pub fn clear_for_scope(
-        &self,
-        scope: &V3ResponsesRelayStoplessControlScope,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), V3ResponsesRelayRuntimeError> {
-        self.center
-            .clear(&Self::center_key(scope), written_by, reason, request_id)
-            .map_err(|_| V3ResponsesRelayRuntimeError::StoplessControlStatePoisoned)
-    }
 }
 
 #[derive(Clone)]
@@ -1325,6 +1248,6 @@ pub enum V3ResponsesRelayRuntimeError {
     LocalContinuationScopeMismatch,
     #[error("V3 Responses Relay local continuation state lock is poisoned")]
     LocalContinuationStatePoisoned,
-    #[error("V3 Responses Relay stopless runtime_control state lock is poisoned")]
-    StoplessControlStatePoisoned,
+    #[error("V3 Responses Relay server tool state lock is poisoned")]
+    ServerToolStatePoisoned,
 }

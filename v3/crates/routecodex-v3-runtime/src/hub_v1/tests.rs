@@ -493,7 +493,6 @@ fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
         "opaqueTarget",
         "resumeMeta",
         "servertoolState",
-        "stoplessState",
         "errorChain",
         "nodeTrace",
         "capturedChatRequest",
@@ -679,15 +678,15 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
     let canonical_request = json!({
         "input": [{"role": "user", "content": "original task"}],
         "tools": [{"type": "function", "name": "exec_command"}],
-        "instructions": "base instructions with stopreason"
+        "instructions": "base instructions"
     });
     let finalized_response = json!({
         "status": "requires_action",
         "output": [{
             "type": "function_call",
-            "call_id": "call_stopless_reasoning",
+            "call_id": "call_exec_tool",
             "name": "exec_command",
-            "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+            "arguments": "{\"cmd\":\"pwd\"}"
         }]
     });
     let context = build_v3_relay_local_continuation_context_at_resp04(
@@ -698,17 +697,17 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
     assert_eq!(
         context["messages"],
         json!([
-            {"role": "system", "content": "base instructions with stopreason"},
+            {"role": "system", "content": "base instructions"},
             {"role": "user", "content": "original task"},
             {
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [{
-                    "id": "call_stopless_reasoning",
+                    "id": "call_exec_tool",
                     "type": "function",
                     "function": {
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                        "arguments": "{\"cmd\":\"pwd\"}"
                     }
                 }]
             }
@@ -720,7 +719,7 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
     let mut current = json!({
         "messages": [{
             "role": "tool",
-            "tool_call_id": "call_stopless_reasoning",
+            "tool_call_id": "call_exec_tool",
             "content": "",
             "routecodex_chat_extension": {
                 "responses_tool_output_type": "function_call_output"
@@ -731,23 +730,23 @@ fn local_continuation_context_preserves_request_history_tools_and_response_delta
     assert_eq!(
         current["messages"],
         json!([
-            {"role": "system", "content": "base instructions with stopreason"},
+            {"role": "system", "content": "base instructions"},
             {"role": "user", "content": "original task"},
             {
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [{
-                    "id": "call_stopless_reasoning",
+                    "id": "call_exec_tool",
                     "type": "function",
                     "function": {
                         "name": "exec_command",
-                        "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                        "arguments": "{\"cmd\":\"pwd\"}"
                     }
                 }]
             },
             {
                 "role": "tool",
-                "tool_call_id": "call_stopless_reasoning",
+                "tool_call_id": "call_exec_tool",
                 "content": "",
                 "routecodex_chat_extension": {
                     "responses_tool_output_type": "function_call_output"
@@ -844,7 +843,7 @@ fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_i
 }
 
 #[test]
-fn local_continuation_context_never_carries_stopless_center_state() {
+fn local_continuation_context_never_carries_runtime_control_state() {
     let canonical_request = json!({
         "input": [{"role": "user", "content": "original task"}],
         "tools": [{"type": "function", "name": "exec_command"}],
@@ -854,9 +853,9 @@ fn local_continuation_context_never_carries_stopless_center_state() {
         "status": "requires_action",
         "output": [{
             "type": "function_call",
-            "call_id": "call_stopless_reasoning",
+            "call_id": "call_exec_tool",
             "name": "exec_command",
-            "arguments": "{\"cmd\":\"routecodex hook run reasoningStop\"}"
+            "arguments": "{\"cmd\":\"pwd\"}"
         }]
     });
     let context = build_v3_relay_local_continuation_context_at_resp04(
@@ -866,15 +865,14 @@ fn local_continuation_context_never_carries_stopless_center_state() {
     .unwrap();
     let serialized = serde_json::to_string(&context).unwrap();
     for forbidden in [
-        "__routecodex_stopless_center",
-        "stopless_center",
-        "stoplessCenter",
+        "runtime_control",
+        "runtimeControl",
         "natural_stop_count",
         "max_natural_stops",
     ] {
         assert!(
             !serialized.contains(forbidden),
-            "relay local continuation context leaked stopless control field {forbidden}: {serialized}"
+            "relay local continuation context leaked runtime control field {forbidden}: {serialized}"
         );
     }
 }

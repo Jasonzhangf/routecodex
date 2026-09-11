@@ -159,7 +159,11 @@ function requireAnyText(source, owner, phrases, label) {
 function requirePackageScript(name, expectedCommand) {
   try {
     const parsed = JSON.parse(text.packageJson);
-    if (parsed.scripts?.[name] !== expectedCommand) {
+    const acceptedCommands = new Set([
+      expectedCommand,
+      expectedCommand.replace('node scripts/', 'node v3/scripts/'),
+    ]);
+    if (!acceptedCommands.has(parsed.scripts?.[name])) {
       failures.push(`${files.packageJson}: script ${name} must be ${expectedCommand}`);
     }
   } catch (error) {

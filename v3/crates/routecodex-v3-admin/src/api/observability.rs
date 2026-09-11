@@ -186,8 +186,6 @@ pub(crate) struct SourceRow {
     #[serde(default)]
     pub servertool: bool,
     #[serde(default)]
-    pub stopless: bool,
-    #[serde(default)]
     pub tokens_output: Option<u64>,
     #[serde(default)]
     pub raw_artifact_ref: Option<String>,
@@ -238,8 +236,6 @@ struct QueryRow {
     timing_external_ms: Option<u64>,
     #[serde(default)]
     servertool: bool,
-    #[serde(default)]
-    stopless: bool,
     raw_artifact_ref: Option<String>,
 }
 
@@ -699,7 +695,6 @@ fn to_attempt_query_row(row: SourceRow) -> QueryRow {
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
-        stopless: row.stopless,
         raw_artifact_ref: row.raw_artifact_ref,
     }
 }
@@ -1210,7 +1205,6 @@ mod tests {
             timing_internal_ms: None,
             timing_external_ms: None,
             servertool: false,
-            stopless: false,
             raw_artifact_ref: None,
         }
     }

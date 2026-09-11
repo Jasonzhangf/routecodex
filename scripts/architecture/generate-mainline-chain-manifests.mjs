@@ -37,7 +37,6 @@ const chainToWikiPage = {
   'internal_error_numbering.mainline': 'docs/architecture/wiki/internal-error-numbering-mainline-source.md',
   'error.mainline':             'docs/architecture/wiki/error-mainline-call-graph.md',
   'runtime.lifecycle.mainline':  'docs/architecture/wiki/runtime-lifecycle-call-graph.md',
-  'stopless.session.mainline':  'docs/architecture/wiki/stopless-session-mainline-source.md',
   'metadata.center.mainline':   'docs/architecture/wiki/metadata-center-mainline-source.md',
 };
 
