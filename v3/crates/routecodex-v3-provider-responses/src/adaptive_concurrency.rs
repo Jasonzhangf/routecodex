@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 pub const V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS: u64 = 10 * 60_000;
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3AdaptiveConcurrencySnapshot {
@@ -21,9 +29,9 @@ pub enum V3AdaptiveConcurrencyAdmission {
     Probe,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct V3AdaptiveConcurrencyLease {
-    pub admission: V3AdaptiveConcurrencyAdmission,
+    admission: V3AdaptiveConcurrencyAdmission,
     permit: V3AdaptiveConcurrencyPermit,
 }
 
@@ -47,35 +55,48 @@ pub enum V3AdaptiveConcurrencyProbeResult {
     RateLimited,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct V3AdaptiveConcurrencyPermit {
     provider_key: String,
     probe: bool,
 }
 
-pub struct V3AdaptiveConcurrencyPermitGuard {
+pub(crate) struct V3AdaptiveConcurrencyPermitGuard {
     controller: V3AdaptiveConcurrencyController,
     permit: Option<V3AdaptiveConcurrencyPermit>,
+    probe_result: Option<V3AdaptiveConcurrencyProbeResult>,
 }
 
 impl V3AdaptiveConcurrencyPermitGuard {
-    pub fn new(
+    pub(crate) fn new(
         controller: V3AdaptiveConcurrencyController,
         permit: V3AdaptiveConcurrencyPermit,
     ) -> Self {
         Self {
             controller,
             permit: Some(permit),
+            probe_result: None,
         }
+    }
+
+    pub(crate) fn with_probe_result(mut self, result: V3AdaptiveConcurrencyProbeResult) -> Self {
+        self.probe_result = Some(result);
+        self
     }
 }
 
 impl Drop for V3AdaptiveConcurrencyPermitGuard {
     fn drop(&mut self) {
         if let Some(permit) = self.permit.take() {
-            self.controller
-                .release(permit)
-                .expect("adaptive concurrency permit release must never fail: lease underflow or missing provider key indicates invariant corruption and must fail fast instead of silently hanging the provider");
+            if let Some(result) = self.probe_result.take() {
+                self.controller
+                    .complete_probe(permit, result, current_epoch_ms())
+                    .expect("adaptive concurrency probe completion must never fail: lease underflow or missing provider key indicates invariant corruption and must fail fast instead of silently hanging the provider");
+            } else {
+                self.controller
+                    .release(permit)
+                    .expect("adaptive concurrency permit release must never fail: lease underflow or missing provider key indicates invariant corruption and must fail fast instead of silently hanging the provider");
+            }
         }
     }
 }
@@ -334,6 +355,9 @@ impl V3AdaptiveConcurrencyController {
             return Err("adaptive concurrency lease underflow".to_string());
         }
         state.in_flight -= 1;
+        if permit.probe {
+            state.probe_in_flight = false;
+        }
         let notify = state.notify.clone();
         drop(states);
         notify.notify_waiters();
@@ -576,6 +600,53 @@ mod tests {
         controller.release(second.into_permit()).unwrap();
     }
 
+    #[test]
+    fn non_rate_limited_probe_release_resets_probe_state() {
+        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        let probe = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        controller.release(first.into_permit()).unwrap();
+        controller.release(second.into_permit()).unwrap();
+        controller.release(probe.into_permit()).unwrap();
+        let snapshot = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(snapshot.in_flight, 0);
+        assert!(
+            !snapshot.probe_in_flight,
+            "non-rate-limited probe failure must clear probe_in_flight"
+        );
+        let next = controller
+            .try_acquire("opencode-go:key1", 0)
+            .expect("probe release must reopen capacity");
+        assert!(!next.is_probe());
+        controller.release(next.into_permit()).unwrap();
+    }
+
+    #[test]
+    fn probe_result_guard_finalizes_when_dropped_not_from_raw_ok() {
+        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        let probe = controller.try_acquire("opencode-go:key1", 0).unwrap();
+        controller.release(first.into_permit()).unwrap();
+        controller.release(second.into_permit()).unwrap();
+
+        let guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), probe.into_permit())
+            .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted);
+        let active = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(active.in_flight, 1);
+        assert!(
+            active.probe_in_flight,
+            "probe must remain in flight while active stream owns the guard"
+        );
+
+        drop(guard);
+        let after = controller.snapshot("opencode-go:key1").unwrap();
+        assert_eq!(after.budget, 3);
+        assert_eq!(after.in_flight, 0);
+        assert!(!after.probe_in_flight);
+    }
+
     #[tokio::test]
     async fn waiter_is_released_without_acquire_timeout() {
         let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
@@ -621,7 +692,10 @@ mod tests {
         let lease = controller.try_acquire("opencode-go:key1", 0).unwrap();
         assert!(controller
             .complete_probe(
-                lease.clone().into_permit(),
+                V3AdaptiveConcurrencyPermit {
+                    provider_key: "opencode-go:key1".to_string(),
+                    probe: false,
+                },
                 V3AdaptiveConcurrencyProbeResult::Accepted,
                 0,
             )
