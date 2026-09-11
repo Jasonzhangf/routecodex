@@ -787,12 +787,17 @@ fn validate_provider_wire_tool_names(
         match value {
             Value::Object(object) => {
                 let kind = object.get("type").and_then(Value::as_str);
-                if matches!(kind, Some("function_call" | "custom_tool_call" | "tool_use")) {
+                if matches!(
+                    kind,
+                    Some("function_call" | "custom_tool_call" | "tool_use")
+                ) {
                     if let Some(name) = object.get("name").and_then(Value::as_str) {
                         if !is_provider_wire_tool_name(name) {
                             return Err(V3ProviderError::FunctionToolShapeFailed {
                                 request_id: request_id.to_owned(),
-                                detail: format!("{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"),
+                                detail: format!(
+                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
+                                ),
                             });
                         }
                     }
