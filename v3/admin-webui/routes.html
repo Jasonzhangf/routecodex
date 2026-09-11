@@ -67,6 +67,8 @@ const state = {
   pickerTarget: null,
   pickerSelected: null,
   busy: false,
+  collapsedPools: new Set(),
+  collapsedTiers: new Set(),
 };
 
 const tree = document.getElementById("route-tree");
@@ -99,7 +101,10 @@ function setBusy(busy, label) {
   tree.setAttribute("aria-busy", String(busy));
   saveButton.disabled = busy || !isDirty();
   discardButton.disabled = busy || !isDirty();
-  if (label) saveState.textContent = label;
+  if (label) {
+    saveState.textContent = label;
+    saveState.classList.toggle("dirty", isDirty() && !busy);
+  }
 }
 
 function announce(kind, message) {
@@ -109,6 +114,7 @@ function announce(kind, message) {
 
 function markDirty() {
   saveState.textContent = "Unsaved changes";
+  saveState.classList.add("dirty");
   saveButton.disabled = false;
   discardButton.disabled = false;
   announce("info", "Changes are local until you save.");
@@ -151,10 +157,11 @@ function renderRoutes() {
   tree.innerHTML = pools.map(pool => {
     const poolIndex = group.pools.indexOf(pool);
     const tiers = pool.tiers.map((tier, tierIndex) => renderTier(pool, poolIndex, tier, tierIndex)).join("");
-    return `<article class="route-pool-card">
+    const collapsed = state.collapsedPools.has(poolIndex) ? " collapsed" : "";
+    return `<article class="route-pool-card route-pool${collapsed}">
       <div class="route-pool-head">
-        <div><p class="eyebrow">Pool</p><h2>${esc(pool.name)}</h2></div>
-        <button class="btn" data-action="add-tier" data-pool="${poolIndex}">Add backup tier</button>
+        <button type="button" class="pool-toggle" data-action="toggle-pool" data-pool="${poolIndex}" aria-expanded="${!state.collapsedPools.has(poolIndex)}"><span class="caret">▾</span><h2>${esc(pool.name)}</h2></button>
+        <button class="btn route-add-tier" data-action="add-tier" data-pool="${poolIndex}">Add backup tier</button>
       </div>
       <div class="route-tier-list">${tiers}</div>
     </article>`;
@@ -169,13 +176,14 @@ function renderTier(pool, poolIndex, tier, tierIndex) {
     const showWeight = tier.members.length > 1;
     return `<div class="route-member">
       <div class="route-member-name"><strong>${esc(provider)}</strong><span>${esc(model)}</span></div>
-      ${showWeight ? `<label class="route-weight">Weight<span class="sr-only"> for ${esc(member.use)}</span><input type="number" min="1" step="1" inputmode="numeric" placeholder="Equal" value="${member.weight ?? ""}" data-action="weight" data-pool="${poolIndex}" data-tier="${tierIndex}" data-member="${memberIndex}"></label>` : ""}
+      ${showWeight ? `<label class="route-weight">Weight<span class="sr-only"> for ${esc(member.use)}</span><input type="number" min="1" step="1" inputmode="numeric" placeholder="Equal" value="${member.weight ?? ""}" data-action="weight" data-pool="${poolIndex}" data-tier="${tierIndex}" data-member="${memberIndex}"></label>` : `<span class="mono muted tiny">equal weight</span>`}
       <button class="icon-btn danger" data-action="remove-member" data-pool="${poolIndex}" data-tier="${tierIndex}" data-member="${memberIndex}" ${tier.members.length === 1 ? "disabled" : ""} aria-label="Remove ${esc(member.use)}">×</button>
     </div>`;
   }).join("");
-  return `<section class="route-tier" aria-labelledby="tier-${poolIndex}-${tierIndex}">
+  const collapsed = state.collapsedTiers.has(`${poolIndex}:${tierIndex}`) ? " collapsed" : "";
+  return `<section class="route-tier${collapsed}" aria-labelledby="tier-${poolIndex}-${tierIndex}">
     <div class="route-tier-head">
-      <div><span class="route-tier-number">${tierIndex + 1}</span><h3 id="tier-${poolIndex}-${tierIndex}">Tier ${tierIndex + 1}</h3><span class="muted">${tierIndex === 0 ? "First choice" : "Backup"}</span></div>
+      <button type="button" class="tier-toggle" data-action="toggle-tier" data-pool="${poolIndex}" data-tier="${tierIndex}" aria-expanded="${!state.collapsedTiers.has(`${poolIndex}:${tierIndex}`)}"><span class="caret">▾</span><h3 id="tier-${poolIndex}-${tierIndex}">Tier ${tierIndex + 1}</h3><span class="role">${tierIndex === 0 ? "首选" : "备选"}</span></button>
       <div class="route-tier-actions">
         <button class="icon-btn" data-action="tier-up" data-pool="${poolIndex}" data-tier="${tierIndex}" ${tierIndex === 0 ? "disabled" : ""} aria-label="Move tier up">↑</button>
         <button class="icon-btn" data-action="tier-down" data-pool="${poolIndex}" data-tier="${tierIndex}" ${tierIndex === pool.tiers.length - 1 ? "disabled" : ""} aria-label="Move tier down">↓</button>
@@ -194,6 +202,18 @@ function poolFrom(target) {
 tree.addEventListener("click", event => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  if (button.dataset.action === "toggle-pool") {
+    const poolIndex = Number(button.dataset.pool);
+    state.collapsedPools.has(poolIndex) ? state.collapsedPools.delete(poolIndex) : state.collapsedPools.add(poolIndex);
+    renderRoutes();
+    return;
+  }
+  if (button.dataset.action === "toggle-tier") {
+    const key = `${button.dataset.pool}:${button.dataset.tier}`;
+    state.collapsedTiers.has(key) ? state.collapsedTiers.delete(key) : state.collapsedTiers.add(key);
+    renderRoutes();
+    return;
+  }
   const pool = poolFrom(button);
   if (!pool) return;
   const tierIndex = Number(button.dataset.tier);
@@ -318,13 +338,19 @@ document.getElementById("validate-btn").addEventListener("click", async () => {
 });
 saveButton.addEventListener("click", async () => {
   setBusy(true, "Saving"); announce("info", "Validating and saving routes…");
+  saveButton.textContent = "Saving…";
   try {
     const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ servers: state.servers, reason: "webui routes update" }) });
     state.servers = result.servers; state.baseline = snapshot();
     renderServerSelector(); renderRoutes();
     announce("ok", `Routes saved as revision #${result.revision_seq}.`);
     setBusy(false, "Saved");
-  } catch (error) { announce("err", `Save failed: ${error.message}`); setBusy(false, "Save failed"); }
+  } catch (error) {
+    announce("err", `Save failed: ${error.message}`);
+    setBusy(false, "Save failed");
+  } finally {
+    saveButton.textContent = "Save routes";
+  }
 });
 discardButton.addEventListener("click", () => {
   state.servers = JSON.parse(state.baseline); renderServerSelector(); renderRoutes();
