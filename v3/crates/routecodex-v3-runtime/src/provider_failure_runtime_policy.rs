@@ -808,13 +808,23 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<(), String> {
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         // 统一错误模型：post-commit 流失败同样经 internal 全局策略表盖章。
+        // 旧瞬态分类（HealthNeutralTransient/NotProviderHealth）显式转换为
+        // recoverable counted，不允许 health-neutral 旁路绕过冷却/探活。
         let status = source
             .external_error
             .as_ref()
             .and_then(|error| error.status)
             .unwrap_or(0);
+        let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        if matches!(
+            action.recovery,
+            V3ProviderRecoveryKind::HealthNeutralTransient
+                | V3ProviderRecoveryKind::NotProviderHealth
+        ) {
+            action = V3ProviderFailureAction::recoverable(&source.code);
+        }
         let action = apply_v3_internal_provider_failure_policy(
-            build_v3_provider_failure_action_from_v3_error_02(&classified),
+            action,
             source.source_stage,
             status,
             &source.code,
