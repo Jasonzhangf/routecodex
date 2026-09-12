@@ -1,4 +1,6 @@
-use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
+use crate::provider_failure_runtime_policy::{
+    apply_v3_internal_provider_failure_policy, V3ProviderFailureRuntimeHealth,
+};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_provider_failure_action_from_v3_error_02,
@@ -90,7 +92,18 @@ impl V3ProviderFailureRuntimeHealth {
         else {
             return Ok(());
         };
-        let action = build_v3_provider_failure_action_from_v3_error_02(classified);
+        let status = classified
+            .source
+            .external_error
+            .as_ref()
+            .and_then(|error| error.status)
+            .unwrap_or(0);
+        let action = apply_v3_internal_provider_failure_policy(
+            build_v3_provider_failure_action_from_v3_error_02(classified),
+            classified.source.source_stage,
+            status,
+            &classified.source.code,
+        );
         self.record_provider_key_failure_action(
             provider_id,
             auth_alias,

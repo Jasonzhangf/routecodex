@@ -7,7 +7,7 @@ async fn normal_direct_request_does_not_consume_unrelated_provider_failure_gate(
 }
 
 #[test]
-fn direct_provider_failure_uses_health_score_without_legacy_threshold_cooldown() {
+fn direct_provider_failure_blocks_after_configured_threshold() {
     let mut manifest = test_manifest();
     manifest
         .forwarders
@@ -75,8 +75,10 @@ fn direct_provider_failure_uses_health_score_without_legacy_threshold_cooldown()
         .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 200)
         .expect("direct health projection");
     assert_eq!(projection.score_milli, 85);
+    // 统一错误模型：连续 3 次 recoverable 失败（429/5xx 阈值 3）进入全局
+    // 冷却，等待后台探活或真实成功恢复；分数衰减保留为诊断信息。
     assert!(
-        projection.available,
-        "health score should be non-zero after three recoverable failures"
+        !projection.available,
+        "three consecutive 502 failures must trigger threshold cooldown"
     );
 }

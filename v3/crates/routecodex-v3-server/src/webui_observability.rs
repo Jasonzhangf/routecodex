@@ -156,6 +156,7 @@ impl V3ObsEventType {
 
 /// scope carried on every event for grouping/filtering.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct V3ObsScope {
     pub port: u16,
     pub workdir: Option<String>,
@@ -164,6 +165,7 @@ pub(crate) struct V3ObsScope {
 
 /// Request identity fields shown in the main table + collapsible identity detail.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct V3ObsRequestMeta {
     pub request_id: String,
     pub endpoint: String,
@@ -188,7 +190,10 @@ pub(crate) struct V3ObsRequestMeta {
 }
 
 /// The mutable request projection (one row per requestKey).
+/// The store replays records written by older binaries; every field defaults so
+/// late additions (stopless, servertool, …) never make legacy rows undecodable.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct V3ObsRequestRow {
     pub request_key: String,
     pub event_type: String,
@@ -213,6 +218,7 @@ pub(crate) struct V3ObsRequestRow {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct V3ObsUsageSummary {
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
@@ -352,25 +358,47 @@ impl V3WebuiObservability {
         }
     }
 
-    pub(crate) fn load_persisted(path: &std::path::Path) -> Result<Self, String> {
+    /// Load the persisted request projection without ever blocking listener
+    /// startup. The store is Debug surface: legacy rows missing late fields
+    /// decode through serde defaults, and any line a strict read or row decode
+    /// still rejects is skipped into the alarm instead of failing the load.
+    pub(crate) fn load_persisted(path: &std::path::Path) -> Self {
         let handle = Self::with_persistence_path(Some(path.to_path_buf()));
-        let values = routecodex_v3_debug::v3_webui_observability_read_rows_bounded(
+        let report = routecodex_v3_debug::observability_store::v3_webui_observability_read_rows_bounded_lenient(
             path,
             V3_WEBUI_RECENT_REQUEST_CAPACITY,
-        )
-        .map_err(|error| format!("read observability store {}: {error}", path.display()))?;
-        let mut inner = handle
-            .inner
-            .lock()
-            .map_err(|_| "v3 webui observability state is poisoned".to_string())?;
-        for value in values {
-            let row: V3ObsRequestRow = serde_json::from_value(value).map_err(|error| {
-                format!("decode observability record {}: {error}", path.display())
-            })?;
-            inner.requests.insert(row.request_key.clone(), row);
+        );
+        let mut skipped = report.skipped;
+        match handle.inner.lock() {
+            Ok(mut inner) => {
+                for value in report.rows {
+                    match serde_json::from_value::<V3ObsRequestRow>(value) {
+                        Ok(row) => {
+                            inner.requests.insert(row.request_key.clone(), row);
+                        }
+                        Err(error) => {
+                            skipped.push(format!(
+                                "observability record {} skipped: {error}",
+                                path.display()
+                            ));
+                        }
+                    }
+                }
+            }
+            Err(_) => skipped.push("v3 webui observability state is poisoned".to_string()),
         }
-        drop(inner);
-        Ok(handle)
+        if !skipped.is_empty() {
+            set_v3_webui_observability_alarm(
+                &handle.alarm,
+                format!(
+                    "observability load skipped {} undecodable record(s) in {}: {}",
+                    skipped.len(),
+                    path.display(),
+                    skipped.join("; ")
+                ),
+            );
+        }
+        handle
     }
 
     pub(crate) fn persistence_path(&self) -> Option<PathBuf> {
@@ -695,13 +723,85 @@ mod tests {
             "persisted body must contain request id"
         );
 
-        let second = V3WebuiObservability::load_persisted(&path).unwrap();
+        let second = V3WebuiObservability::load_persisted(&path);
         let rows = second.rows().unwrap();
         assert_eq!(rows.len(), 1, "persisted record must reload");
         let row = rows.get(&key).expect("reloaded row");
         assert_eq!(row.result.as_deref(), Some("success"));
         assert!(row.duration_ms.is_some());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_persisted_survives_legacy_rows_and_undecodable_lines() {
+        let dir = std::env::temp_dir().join(format!(
+            "v3-webui-records-legacy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("records.jsonl");
+        let legacy_key = build_v3_obs_request_key(5555, "r-legacy");
+        let legacy_row = serde_json::json!({
+            "request_key": legacy_key,
+            "event_type": "request.completed",
+            "started_epoch_ms": 1u64,
+            "updated_epoch_ms": 2u64,
+            "finished_epoch_ms": 2u64,
+            "duration_ms": 1u64,
+            "meta": {
+                "request_id": "r-legacy",
+                "endpoint": "/v1/chat/completions"
+            },
+            "scope": { "port": 5555 },
+            "result": "success",
+            "attempts": 1u64,
+            "failed_attempts": 0u64,
+            "switches": 0u64
+        });
+        let legacy_envelope = serde_json::json!({
+            "schema_version": 1u64,
+            "row": legacy_row
+        });
+        let newer_envelope = serde_json::json!({
+            "schema_version": 1u64,
+            "row": {
+                "request_key": "k2",
+                "event_type": "request.started",
+                "started_epoch_ms": 3u64,
+                "updated_epoch_ms": 3u64
+            }
+        });
+        // One legacy row predating stopless/servertool, one torn line, one
+        // row without request_key, and one newer row missing whole sections.
+        std::fs::write(
+            &path,
+            format!(
+                "{legacy_envelope}\n{{\"torn\": \n{{\"no_request_key\": true}}\n{newer_envelope}\n"
+            ),
+        )
+        .unwrap();
+
+        let loaded = V3WebuiObservability::load_persisted(&path);
+        let rows = loaded.rows().unwrap();
+        let row = rows.get(legacy_key.as_str()).expect("legacy row must load");
+        assert!(
+            !row.servertool,
+            "legacy row without servertool must default to false"
+        );
+        assert!(rows.contains_key("k2"), "valid later rows must still load");
+        let alarm = loaded.alarm();
+        assert!(
+            alarm
+                .as_deref()
+                .map(|message| message.contains("skipped"))
+                .unwrap_or(false),
+            "undecodable lines must surface as alarm, got {alarm:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

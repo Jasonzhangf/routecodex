@@ -13,6 +13,9 @@ use tokio::sync::Notify;
 mod terminal_projection;
 include!("provider_action_gate_tests.rs");
 
+#[path = "classified_global_tests.rs"]
+mod classified_global;
+
 fn test_provider_failure_scope(
     server_id: &str,
     routing_group: &str,
@@ -214,7 +217,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[test]
-fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() {
+fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
     let manifest = account_threshold_manifest();
     for status in [401, 403] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -228,7 +231,7 @@ fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() 
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 99)
             .expect("initial health projection");
-        for index in 0..5 {
+        for index in 0..2 {
             let record = health
                 .record_provider_failure_record_with_policy(
                     None,
@@ -246,7 +249,6 @@ fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() 
                     100 + index,
                 )
                 .unwrap();
-            assert_eq!(record.failure_count, (index + 1) as u32);
             assert_eq!(record.state, "healthy");
         }
         assert!(
@@ -269,7 +271,7 @@ fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() 
         .store()
         .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 199)
         .expect("initial health projection");
-    for index in 0..20 {
+    for index in 0..3 {
         let record = other_health
             .record_provider_failure_record_with_policy(
                 None,
@@ -594,15 +596,16 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
-    let manifest = global_pool_alive_manifest("global_status_policy");
-    let cases = [
-        (401, 5),
-        (403, 5),
-        (429, 20),
-        (500, 20),
-        (502, 20),
-        (599, 20),
-    ];
+    let mut manifest = global_pool_alive_manifest("global_status_policy");
+    // 归一化优先级基线，隔离自适应分数阻断，专测阈值语义。
+    for group in manifest.route_groups.values_mut() {
+        for pool in group.pools.values_mut() {
+            for target in &mut pool.targets {
+                target.priority = Some(100);
+            }
+        }
+    }
+    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -646,29 +649,48 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    health
-        .record_provider_failure_record_with_policy(
-            None,
-            &manifest,
-            &scope,
-            "first",
-            Some("responses"),
-            Some("key1"),
-            Some("gpt-test"),
-            Some("request-shaped failure"),
-            "V3ProviderReqOutbound09TransportRequest",
-            400,
-            Some("provider_http_error"),
-            "request rejected",
-            20_000,
-        )
-        .expect("request-shaped failure should remain session-scoped");
-    assert!(
+    // 统一错误模型：400/请求形失败同样计入全局健康，单次仍可用，
+    // 连续 3 次进入全局冷却，由探活/真实成功恢复。
+    for attempt in 0..3 {
         health
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("request-shaped failure"),
+                "V3ProviderReqOutbound09TransportRequest",
+                400,
+                Some("provider_http_error"),
+                "request rejected",
+                20_000 + attempt as u64,
+            )
+            .expect("request-shaped failure should record into global health");
+        let available = health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
-            .available
-    );
+            .availability_for_session(
+                &scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                20_000 + attempt as u64,
+            )
+            .available;
+        if attempt < 2 {
+            assert!(
+                available,
+                "a single/second request-shaped failure must not block the key yet"
+            );
+        } else {
+            assert!(
+                !available,
+                "three consecutive request-shaped failures must block the key"
+            );
+        }
+    }
 }
 
 #[test]

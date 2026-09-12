@@ -283,6 +283,88 @@ pub fn v3_webui_observability_read_rows_bounded(
         .collect())
 }
 
+/// Rows plus per-line records that a strict read would have rejected. The
+/// store is Debug surface, never business truth, so a torn append or a legacy
+/// row must degrade into `skipped` evidence instead of failing the reader.
+#[derive(Debug, Default, Clone)]
+pub struct V3WebuiObservabilityLenientRead {
+    pub rows: Vec<Value>,
+    pub skipped: Vec<String>,
+}
+
+/// Lenient sibling of `v3_webui_observability_read_rows_bounded`: identical
+/// request_key folding and bounding, but undecodable lines and rows without a
+/// request_key are skipped and reported instead of aborting the whole read.
+/// This read never fails; even an unreadable file yields an empty report with
+/// a skipped note so observability loading cannot block listener startup.
+pub fn v3_webui_observability_read_rows_bounded_lenient(
+    path: &Path,
+    max_rows: usize,
+) -> V3WebuiObservabilityLenientRead {
+    let mut report = V3WebuiObservabilityLenientRead::default();
+    if max_rows == 0 {
+        return report;
+    }
+    if !path.exists() {
+        return report;
+    }
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            report.skipped.push(format!(
+                "open observability store {}: {error}",
+                path.display()
+            ));
+            return report;
+        }
+    };
+    let mut latest_by_key = BTreeMap::<String, Value>::new();
+    let mut order = VecDeque::<String>::new();
+    for (line_number, line) in BufReader::new(file).lines().enumerate() {
+        let skipped_note = |reason: String| {
+            format!(
+                "observability record {}:{} skipped: {reason}",
+                path.display(),
+                line_number + 1
+            )
+        };
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                report.skipped.push(skipped_note(error.to_string()));
+                continue;
+            }
+        };
+        let row = match decode_observability_row(path, line_number, line) {
+            Ok(row) => row,
+            Err(error) => {
+                report.skipped.push(skipped_note(error.to_string()));
+                continue;
+            }
+        };
+        let Some(key) = row.get("request_key").and_then(Value::as_str) else {
+            report
+                .skipped
+                .push(skipped_note("has no request_key".to_string()));
+            continue;
+        };
+        if latest_by_key.contains_key(key) {
+            order.retain(|existing| existing != key);
+        } else if latest_by_key.len() >= max_rows {
+            if let Some(oldest) = order.pop_front() {
+                latest_by_key.remove(&oldest);
+            }
+        }
+        order.push_back(key.to_string());
+        latest_by_key.insert(key.to_string(), row);
+    }
+    report.rows = order
+        .into_iter()
+        .filter_map(|key| latest_by_key.remove(&key))
+        .collect();
+    report
+}
+
 /// Reads the store in file order without folding lifecycle rows by request_key.
 /// Admin uses this raw view so every failed provider attempt remains visible
 /// even when a later retry or completion succeeds.
