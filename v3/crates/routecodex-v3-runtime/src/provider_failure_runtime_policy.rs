@@ -979,7 +979,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         matched_policy,
         context.retry_policy.same_candidate_retries,
     );
-    let mut transient_admission = if transient {
+    let mut transient_admission = if transient && matched_policy.is_none() {
         Some(
             context
                 .provider_health
@@ -995,6 +995,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     } else {
         None
     };
+    let transient_wait_ms = transient_admission
+        .as_ref()
+        .map(|admission| admission.minimum_delay_ms);
+    // A held transient admission would invalidate a recovery witness created
+    // later in the same policy decision, so release it before retry/reselect
+    // records the next action-gate generation.
+    drop(transient_admission.take());
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
@@ -1185,11 +1192,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                             wait_ms: recovery
                                 .as_ref()
                                 .map(|record| record.minimum_delay_ms)
-                                .or_else(|| {
-                                    transient_admission
-                                        .as_ref()
-                                        .map(|admission| admission.minimum_delay_ms)
-                                }),
+                                .or_else(|| transient_wait_ms),
                         },
                     ),
                 });
