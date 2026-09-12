@@ -206,6 +206,7 @@ pub(crate) struct V3ObsRequestRow {
     pub timing_internal_ms: Option<u64>,
     pub timing_external_ms: Option<u64>,
     pub servertool: bool,
+    #[serde(default)]
     pub stopless: bool,
     // rawArtifactRef is a controlled reference only; never the full body.
     pub raw_artifact_ref: Option<String>,
@@ -744,6 +745,56 @@ mod tests {
             .contains("persistence write failed"));
 
         std::fs::remove_dir_all(&path).expect("remove isolated invalid target");
+    }
+
+    #[test]
+    fn legacy_row_missing_stopless_still_loads() {
+        let dir = std::env::temp_dir().join(format!(
+            "v3-webui-legacy-stopless-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("records.jsonl");
+        let key = build_v3_obs_request_key(5555, "r-legacy-stopless");
+        let first = V3WebuiObservability::with_persistence_path(Some(path.clone()));
+        record(
+            &first,
+            V3ObsEventType::Completed,
+            &key,
+            scope(5555),
+            meta_with_full("r-legacy-stopless"),
+        )
+        .unwrap();
+        first
+            .flush_persistence()
+            .expect("persistence flush receipt");
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        let rewritten = body
+            .lines()
+            .map(|line| {
+                let mut envelope: Value = serde_json::from_str(line).unwrap();
+                if let Some(row) = envelope.get_mut("row") {
+                    if let Some(object) = row.as_object_mut() {
+                        object.remove("stopless");
+                    }
+                }
+                serde_json::to_string(&envelope).unwrap()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(&path, rewritten).unwrap();
+
+        let second = V3WebuiObservability::load_persisted(&path).unwrap();
+        let rows = second.rows().unwrap();
+        let row = rows.get(&key).expect("legacy row must reload");
+        assert!(!row.stopless, "missing stopless must decode as false");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
