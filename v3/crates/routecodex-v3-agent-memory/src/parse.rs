@@ -268,7 +268,11 @@ fn terminal_memory_candidate_starts(text: &str) -> Vec<usize> {
         if character != '{' {
             continue;
         }
-        let boundary_ok = index == 0 || text[..index].ends_with(char::is_whitespace);
+        let boundary_ok = index == 0
+            || text[..index]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
         if boundary_ok {
             found.push(index);
         }
