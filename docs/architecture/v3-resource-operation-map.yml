@@ -1049,6 +1049,30 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.provider.auth_key_cooldown_state
+    resource_kind: side_channel
+    lifecycle: v3.provider_auth_key_cooldown.mainline
+    owner_feature_id: v3.provider_global_subscription_probe
+    owner_crate: routecodex-v3-provider-responses
+    owner_node: V3ProviderHealthStore
+    identity: [providerId, authAlias]
+    semantic_contract:
+      policy_scope: matched provider error policy cooldown step with scope = auth_key
+      cross_session: shared
+      cross_model_same_key: shared
+      sibling_keys: isolated
+      cooldown_condition: consecutive auth-key failures >= typed policy failure_threshold
+      cooldown_deadline: typed policy cooldown_ms (401 = 18,000,000ms, 403 = 3,600,000ms)
+      revival_rule: only a due auth-key probe success clears the auth-key cooldown and consecutive failure counts
+      dry_run_rule: dry-run never acquires or sends an auth-key health probe
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
+    allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion]
+    forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload, MetadataCenter.payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [npm run test:v3-provider-health-contract, npm run test:v3-provider-session-cooldown-red-fixtures, npm run verify:v3-provider-action-gate, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries, git diff --check]
   - resource_id: v3.provider.global_cooldown_persistence
     resource_kind: side_channel_persistence
     lifecycle: v3.server.startup_and_provider_failure.mainline

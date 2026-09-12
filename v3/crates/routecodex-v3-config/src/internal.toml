@@ -36,7 +36,7 @@ policy_id = "account_http_401_two_errors"
 match = { http_status = 401 }
 path = [
   { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
-  { step = "cooldown", scope = "auth_key", duration_ms = 3600000 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 18000000 },
   { step = "project", status = 502, reason_code = "provider_account_http_401", message_mode = "code_only" },
 ]
 
