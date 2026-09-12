@@ -889,7 +889,7 @@ mod tests {
             + "\n";
         std::fs::write(&path, rewritten).unwrap();
 
-        let second = V3WebuiObservability::load_persisted(&path).unwrap();
+        let second = V3WebuiObservability::load_persisted(&path);
         let rows = second.rows().unwrap();
         let row = rows.get(&key).expect("legacy row must reload");
         assert!(!row.stopless, "missing stopless must decode as false");
