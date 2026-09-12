@@ -21,16 +21,7 @@ rg -n "feature_id: ${rcc_task_feature}" \
   docs/architecture/v3-verification-map.yml
 ```
 
-3. Lock resource edge, owner, allowed/forbidden paths, caller/callee, and required gates. Missing or ambiguous binding blocks edits.
-   Confirm these architecture truths before accepting the map binding:
-   - V3 is production; V4 is an unconnected refactor; V2 runtime/config/backup ownership is absent.
-   - The fixed skeleton is configured through typed declarations, with data and control resources physically separate.
-   - Same-protocol execution defaults to Direct unless configuration explicitly selects Relay.
-   - Direct payload rewriting exists only in registered Direct hooks. Relay payload rewriting exists only in request/response Chat Process.
-   - Inbound is lossless normalization only. Outbound is standard target-protocol projection and may filter only unrepresentable fields through declared allowlists/denylists. Compat owns provider-private adjustments only.
-   - SSE owns the client boundary. Provider attempts are fully buffered before client commit, and provider errors remain independent from client response projection.
-   - Internal request/response failures are `598`/`599`, network failures are `502`, and linked external failures retain their real status.
-   A conflicting source or map is remediation evidence, not permission to record the target contract as already implemented.
+3. Lock resource edge, owner, allowed/forbidden paths, caller/callee, and gates. Missing or ambiguous binding blocks edits. Binding must agree with `AGENTS.md`; conflicts require remediation.
 4. Read mapped source, generated review surface, current run notes, project `MEMORY.md`, and relevant history.
 5. For defects, capture one request id and find first semantic divergence. Keep one active hypothesis.
 6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
@@ -46,7 +37,10 @@ npm run verify:v3-architecture-ci
 
 ## Review Gate
 
-After verification and before commit/merge, use the reviewer selected by global AGENTS.md and its shared review standards. Apply project Semantic Invariants and mapped owner/edge/gate bindings. Preserve declared Target reselection and registered Direct/Relay differences; they do not authorize an undeclared reroute or compensating implementation. Reject payload rewriting outside Direct hooks or Relay Chat Process, partial provider-attempt exposure to clients, client reconstruction of provider errors, Inbound filtering, or provider-private behavior implemented as a second Outbound. Do not maintain a second copy of the global ablation checklist or historical-finding policy here.
+After verification and before commit/merge, use the reviewer selected by global
+AGENTS.md and its shared review standards. Apply the project Semantic Invariants
+and mapped owner/edge/gate bindings. Do not duplicate the global checklist or
+historical-finding policy here.
 
 ## Routes
 

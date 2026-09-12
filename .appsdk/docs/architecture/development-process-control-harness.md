@@ -77,7 +77,9 @@ execution state and never becomes a durable project rule automatically.
 ## L4 Full-domain routing
 
 One engine covers AppSDK as a whole. Existing governance without Guide enters
-through a read-only setup proposal before rule compilation:
+through a read-only setup proposal before rule compilation. Configured projects
+may re-enter the same bootstrap path for a non-destructive standard-template
+upgrade review:
 
 ```text
 guide status -> bootstrap setup proposal -> user approval -> guide compile
@@ -90,11 +92,14 @@ Domains select prompts and workflow contracts. They do not duplicate canonical
 commands such as `prepare`, `init`, `pin-lock`, `verify`, `compile`,
 `verify --review-admission`, `promote`, `publish-active`, or `freeze`.
 
-`guide init` is the read-only intake before a setup proposal or domain plan. If
-governance exists but Guide is absent or uncompiled, bootstrap mode discovers a
-bounded set of project-document candidates, projects existing project/module
-state, and asks the Agent to present a `GuidanceSetupProposal` for user approval.
-It does not write project or task state. After approval and compile, task intake
+`guide init` is the read-only intake before a setup proposal or domain plan.
+Bootstrap mode always discovers a bounded set of current project-document
+candidates plus the installed versioned standard template, projects existing
+project/module state, and asks the Agent to present a `GuidanceSetupProposal`
+for user approval. With compiled Guidance it returns a
+`template_upgrade_review`; otherwise it returns an initial setup. It does not
+write project or task state, and the template is not activated as a rule
+source. After approval and compile, task intake
 projects only explicitly declared AGENTS and local Skill sources, their
 precedence/digests, project/module/goal context, unresolved questions, Skill
 invocation suggestions, and next commands. AppSDK does not interpret prose,
@@ -104,10 +109,12 @@ answer questions, call a model, or persist a second intake truth.
 
 The project explicitly declares every compiled rule source in
 `.appsdk/project.json`. Runtime directory scanning is forbidden. The only
-pre-declaration discovery is bootstrap intake over root `AGENTS.md`, the bundled
-AppSDK Skill, and one direct Skill child under each standard project-local Skill
-root. Discovery produces candidates, not active rules. User approval and an
-explicit project declaration are required before compile. Markdown sources are
+pre-declaration discovery is bootstrap intake over root `AGENTS.md`, the
+installed standard template reference, the bundled AppSDK Skill, and one direct
+Skill child under each standard project-local Skill root. Discovery produces
+candidates, not active rules. The standard template remains advisory and cannot
+be declared implicitly. User approval and an explicit project declaration are
+required before compile. Markdown sources are
 then bound by path, precedence, and digest for the agent to read; AppSDK does
 not claim semantic verification of arbitrary prose. Machine contracts are JSON
 and are validated.
@@ -176,3 +183,14 @@ retry is part of guidance.
 cleanup requirements, and memory candidates. The first release never writes
 AGENTS, Skills, MEMORY, or USER files automatically. Durable-rule changes use a
 separate human-reviewed change.
+
+## L9 Human tour and process review
+
+`guide tour` lets a human inspect the generated workflow and persist an explicit
+node path. `guide review` is staged over the same append-only task ledger:
+`node_review` checks and accepts node-content revisions first; only after every
+selected node has an accepted revision can `flow_review` update edges, order, or
+rules. Flow patches retain the accepted node revision IDs and remain staged;
+they do not silently mutate the active compiled manifest. The memory reminder
+on review nodes is advisory and invokes the independent `project-memory review`
+command only at task close.

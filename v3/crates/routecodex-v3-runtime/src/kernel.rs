@@ -1150,6 +1150,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         {
             Ok(projection) => projection,
             Err(source) => {
+                let transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
                         return error_output(
@@ -1208,7 +1209,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         provider_failure_event_sink.as_ref(),
                         &policy.target,
                         "responses",
-                        "json",
+                        if provider_response_is_stream {
+                            "sse"
+                        } else {
+                            "json"
+                        },
                         Some(event.status),
                         &provider_failure_events,
                         &event,
@@ -1253,12 +1258,29 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
                             "responses",
-                            "json",
+                            if provider_response_is_stream {
+                                "sse"
+                            } else {
+                                "json"
+                            },
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
                             provider_failure_events.clone(),
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        if provider_response_is_stream
+                            && (transport_source.code == "provider_response_sse_stream"
+                                || transport_source.code == "provider_response_body_error")
+                        {
+                            return direct_runtime_helpers_stream::exhausted_sse_transport_error_output(
+                                transport_source,
+                                trace,
+                                &hook_registry,
+                                Some(observability),
+                                provider_request_snapshot,
+                                None,
+                            );
+                        }
                         let projected =
                             V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                         return projected_error_output_with_observability(

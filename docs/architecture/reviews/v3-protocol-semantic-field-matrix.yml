@@ -1682,6 +1682,11 @@ chat_semantic_translation_groups:
           - request.reasoning.context
         response_fields: []
         transform: Preserve the Responses context value without combining it with execution mode.
+      openai_chat:
+        request_fields: []
+        response_fields: []
+        transform: Explicit source-roundtrip consume before OpenAI Chat wire because this target has no equivalent
+          request policy field; invalid values fail before provider send.
       anthropic:
         request_fields: []
         response_fields: []
@@ -1693,7 +1698,8 @@ chat_semantic_translation_groups:
     chat_extension_fields:
       - request.reasoning_context_policy
     current_impl: extension_declared
-    gap: Source-roundtrip only. Non-Responses outbound must report request.reasoning_context_policy as unmapped.
+    gap: Responses round-trips the policy. OpenAI Chat consumes valid source-roundtrip-only values before wire with no
+      provider field; Anthropic and Gemini must report request.reasoning_context_policy as unmapped.
   - group_id: reasoning.request_mode
     standard_chat_field: request.reasoning_mode
     chat_fields:
@@ -5680,7 +5686,8 @@ extended_openai_chat_semantic_superset:
       mapping_status: extension_added
       semantic_owner: chat.extension_semantics
       current_impl: extension_declared
-      gap: Responses context policy is source-roundtrip only and must remain separate from reasoning mode.
+      gap: Responses context policy is source-roundtrip only; OpenAI Chat consumes valid values before wire, Anthropic
+        and Gemini reject them, and the semantic stays separate from reasoning mode.
       equivalent_fields: &a2
         responses:
           - request.reasoning.context
@@ -9121,7 +9128,8 @@ canonical_extension_registry:
     owner: chat.extension_semantics
     current_impl: extension_declared
     source_fields: *a2
-    projection_rule: Responses context source-roundtrip only; mode is a separate registered extension.
+    projection_rule: Responses context source-roundtrip only; OpenAI Chat consumes valid values before wire with no
+      provider field, Anthropic and Gemini report unmapped, and mode is a separate registered extension.
   - field: request.reasoning_include_thoughts
     semantic_id: request.reasoning_include_thoughts
     direction: request

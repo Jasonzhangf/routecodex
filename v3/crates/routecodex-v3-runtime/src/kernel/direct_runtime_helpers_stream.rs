@@ -987,6 +987,29 @@ pub(crate) fn error_output(
     projected_error_output(projected, node_trace)
 }
 
+/// SSE 传输错误在重试穷尽后的终端输出。与 `error_output` 的差异：调用方已
+/// 持有策略层的穷尽证明（terminal policy decision 已产生），因此允许
+/// ProviderFailure 来源直接投影；投影保留 SSE 传输错误原语义并附带可观测
+/// 性与快照。调用方必须传 0 候选剩余/无默认池的穷尽姿态。
+pub(crate) fn exhausted_sse_transport_error_output(
+    source: V3Error01SourceRaised,
+    node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    projected_error_output_with_observability_and_snapshots(
+        projected,
+        node_trace,
+        observability,
+        provider_request_snapshot,
+        provider_response_snapshot,
+    )
+}
+
 pub(crate) fn error_output_with_observability(
     source: V3Error01SourceRaised,
     node_trace: Vec<&'static str>,

@@ -13,6 +13,9 @@ mod terminal_projection;
 #[path = "classified_global_tests.rs"]
 mod classified_global;
 
+#[path = "classified_global_tests.rs"]
+mod classified_global;
+
 fn test_provider_failure_scope(
     server_id: &str,
     routing_group: &str,

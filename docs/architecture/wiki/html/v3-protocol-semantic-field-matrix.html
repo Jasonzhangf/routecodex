@@ -1665,7 +1665,7 @@
       <details><summary>Chat shape / value rule</summary><div>Context policy is not effort, budget, visible reasoning text, or response summary.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Source-roundtrip only. Non-Responses outbound must report request.reasoning_context_policy as unmapped.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat consumes valid source-roundtrip-only values before wire with no provider field; Anthropic and Gemini must report request.reasoning_context_policy as unmapped.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.context</code></li></ul>
@@ -4001,7 +4001,7 @@
     <td><span class="muted">— extended-only, no native OpenAI Chat field</span></td>
     <td><span class="muted">— no Anthropic equivalent</span></td>
     <td><span class="muted">— no Gemini equivalent</span></td>
-    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses context policy is source-roundtrip only and must remain separate from reasoning mode.</span></td>
+    <td><code>chat.extension_semantics</code><br><span class="badge extension_declared">extension_declared</span><br><span class="muted">Responses context policy is source-roundtrip only; OpenAI Chat consumes valid values before wire, Anthropic and Gemini reject them, and the semantic stays separate from reasoning mode.</span></td>
   </tr>
 <tr>
     <td class="standard-cell"><code>request.reasoning_include_thoughts</code><br><span class="muted">added Chat extension field</span></td>
