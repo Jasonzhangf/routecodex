@@ -2575,7 +2575,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    binding_status: design
+    binding_status: anchored
 
   - resource_id: v3.memory.schema_guidance
     resource_kind: normal_payload
@@ -2590,7 +2590,7 @@ resources:
     may_enter_provider_body: true
     may_enter_client_body: false
     may_enter_metadata_center: false
-    binding_status: design
+    binding_status: anchored
 
   - resource_id: v3.memory.response_capture
     resource_kind: response_business_capture
@@ -2605,7 +2605,7 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    binding_status: design
+    binding_status: anchored
 
   - resource_id: v3.memory.l3_publication
     resource_kind: host_owned_compatibility_publication
@@ -2624,4 +2624,4 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    binding_status: design
+    binding_status: anchored

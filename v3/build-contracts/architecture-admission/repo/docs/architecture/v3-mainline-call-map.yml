@@ -8102,7 +8102,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
     callee_symbol: inject_memory_raw_capture_guidance
     callee_file: v3/crates/routecodex-v3-agent-memory/src/lib.rs
-    status: binding_pending
+    status: anchored
     owner_feature_id: v3.memory_raw_capture
     resource_flow:
       consumes: [v3.memory.raw_capture_config]
@@ -8116,7 +8116,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
     callee_symbol: inject_memory_raw_capture_guidance
     callee_file: v3/crates/routecodex-v3-agent-memory/src/lib.rs
-    status: binding_pending
+    status: anchored
     owner_feature_id: v3.memory_raw_capture
     resource_flow:
       consumes: [v3.memory.raw_capture_config]
@@ -8130,7 +8130,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
     callee_symbol: capture_responses_json
     callee_file: v3/crates/routecodex-v3-agent-memory/src/lib.rs
-    status: binding_pending
+    status: anchored
     owner_feature_id: v3.memory_raw_capture
     resource_flow:
       consumes: [v3.memory.raw_capture_config, v3.response.provider_raw]
@@ -8144,7 +8144,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     callee_symbol: capture_responses_json
     callee_file: v3/crates/routecodex-v3-agent-memory/src/lib.rs
-    status: binding_pending
+    status: anchored
     owner_feature_id: v3.memory_raw_capture
     resource_flow:
       consumes: [v3.memory.raw_capture_config, v3.hub.response_semantic]

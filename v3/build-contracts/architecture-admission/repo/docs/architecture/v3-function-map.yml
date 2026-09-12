@@ -5667,7 +5667,7 @@ features:
   - git diff --check
 
 - feature_id: v3.memory_raw_capture
-  status: design_bound_implementation_pending
+  status: active
   change_risk: high
   owner_kind: rust_v3_responses_memory_raw_capture
   owner_scope: Optional Responses-only schema guidance, declared output-unit parsing, complete client stripping, and atomic new AppSDK-compatible L3 Markdown publication after protocol-equivalent end_turn.

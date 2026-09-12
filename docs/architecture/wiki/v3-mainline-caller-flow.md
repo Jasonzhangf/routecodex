@@ -148,10 +148,6 @@ flowchart TD
 | v3.openai_chat_sse_typed_tree | v3-chat-sse-tree-02 | HubRespChatProcess03Governed | HubRespOutbound04ClientSemantic |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-01 | V3Front01StableRequestOwner | V3Front02RequestLeaseBound |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-02 | V3Front02RequestLeaseBound | V3Front08ClientTerminalOrError |
-| v3.memory_raw_capture | v3-memory-raw-capture-direct-req04 | V3ResponsesDirect11Policy | V3Provider12ResponsesWirePayload |
-| v3.memory_raw_capture | v3-memory-raw-capture-relay-req04 | V3HubReqContinuation03Classified | V3HubReqChatProcess04Governed |
-| v3.memory_raw_capture | v3-memory-raw-capture-direct-resp03 | V3ProviderResp14Raw | V3DirectResp14ProviderProjectionPrepared |
-| v3.memory_raw_capture | v3-memory-raw-capture-relay-resp03 | V3HubRespInbound02Normalized | V3HubRespChatProcess03Governed |
 
 ### Missing caller/callee fields
 
@@ -3008,8 +3004,8 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-memory-raw-capture-direct-req04` | `V3ResponsesDirect11Policy` → `V3Provider12ResponsesWirePayload` | binding_pending | responses_direct_request_projection_hook_with_key_catalog<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
-| `v3-memory-raw-capture-relay-req04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | binding_pending | V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
-| `v3-memory-raw-capture-direct-resp03` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | binding_pending | apply_v3_direct_response_projection_hooks<br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
-| `v3-memory-raw-capture-relay-resp03` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | binding_pending | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-direct-req04` | `V3ResponsesDirect11Policy` → `V3Provider12ResponsesWirePayload` | anchored | responses_direct_request_projection_hook_with_key_catalog<br/><small>routecodex-v3-runtime/src/hooks.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-relay-req04` | `V3HubReqContinuation03Classified` → `V3HubReqChatProcess04Governed` | anchored | V3HubRelayRequestHooks::run_from_normalized_with_events<br/><small>routecodex-v3-runtime/src/hub_v1/relay_request.rs</small> | inject_memory_raw_capture_guidance<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-direct-resp03` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | apply_v3_direct_response_projection_hooks<br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
+| `v3-memory-raw-capture-relay-resp03` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
 | `v3-direct-sse-full-attempt-terminal-commit` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | `v3.responses_direct_full_attempt_commit` |

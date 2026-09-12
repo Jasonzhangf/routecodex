@@ -3540,7 +3540,7 @@ features:
     commit_push: exact_reviewed_commit_required
 
 - feature_id: v3.memory_raw_capture
-  status: design_bound_implementation_pending
+  status: active
   change_risk: high
   owner_kind: rust_v3_responses_memory_raw_capture
   owner_scope: Responses-only optional raw memory capture into new AppSDK-compatible L3 Markdown, with declared output grammar stripped before client commit.
