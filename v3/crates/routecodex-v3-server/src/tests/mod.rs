@@ -5,6 +5,44 @@ use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
 
+#[tokio::test]
+async fn listener_bind_retries_eintr_once_before_success() {
+    let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = probe.local_addr().unwrap();
+    drop(probe);
+
+    let mut calls = 0;
+    let listener = bind_v3_tcp_listener_retry_eintr(|| {
+        let attempt = calls + 1;
+        calls += 1;
+        async move {
+            if attempt == 1 {
+                return Err(io::Error::from_raw_os_error(libc::EINTR));
+            }
+            TcpListener::bind(addr).await
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(calls, 2);
+    assert_eq!(listener.local_addr().unwrap().port(), addr.port());
+}
+
+#[tokio::test]
+async fn listener_bind_returns_non_eintr_without_retry() {
+    let mut calls = 0;
+    let error = bind_v3_tcp_listener_retry_eintr(|| {
+        calls += 1;
+        async { Err(io::Error::new(io::ErrorKind::AddrInUse, "occupied")) }
+    })
+    .await
+    .unwrap_err();
+
+    assert_eq!(calls, 1);
+    assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+}
+
 static TEST_TZ_LOCK: StdMutex<()> = StdMutex::new(());
 static TEST_HOME_LOCK: StdMutex<()> = StdMutex::new(());
 
