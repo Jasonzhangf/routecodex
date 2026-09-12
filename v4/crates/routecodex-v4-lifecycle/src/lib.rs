@@ -449,13 +449,20 @@ pub fn release_for_foreground(
 /// executable on the requested address. Ambiguous or foreign listeners fail
 /// closed; no port-wide or broad process termination is attempted.
 pub fn release_unmanaged_listener(address: &str, timeout: Duration) -> Result<(), LifecycleError> {
+    // A free listener needs no process inspection.  This fast path keeps a
+    // normal V4 start independent from a busy host's global lsof scan.
+    if std::net::TcpListener::bind(address).is_ok() {
+        return Ok(());
+    }
     let Some(port) = address.rsplit(':').next() else {
         return Ok(());
     };
-    let output = std::process::Command::new("/usr/sbin/lsof")
-        .args(["-nP", "-Fpct", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
-        .output()
-        .map_err(|error| io_error(Path::new(address), error))?;
+    let port_filter = format!("-iTCP:{port}");
+    let output = run_bounded_command(
+        Path::new("/usr/sbin/lsof"),
+        &["-b", "-nP", "-Fpct", &port_filter, "-sTCP:LISTEN"],
+        timeout,
+    )?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut pid = None;
     let mut command = None;
@@ -477,13 +484,70 @@ pub fn release_unmanaged_listener(address: &str, timeout: Duration) -> Result<()
             return Err(io_error(Path::new(address), error));
         }
     }
-    wait_until(timeout, || {
-        std::process::Command::new("/usr/sbin/lsof")
-            .args(["-nP", "-Fp", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
-            .output()
-            .map(|result| result.stdout.is_empty())
-            .unwrap_or(false)
-    })
+    let deadline = Instant::now() + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(LifecycleError::CommandTimeout(timeout.as_millis() as u64));
+        }
+        let output = run_bounded_command(
+            Path::new("/usr/sbin/lsof"),
+            &["-b", "-nP", "-Fp", &port_filter, "-sTCP:LISTEN"],
+            remaining,
+        )?;
+        if output.stdout.is_empty() {
+            return Ok(());
+        }
+        thread::sleep(remaining.min(Duration::from_millis(25)));
+    }
+}
+
+/// Run one external probe with a hard deadline and clean up only its own
+/// child process when the deadline expires.  `Command::output` cannot be used
+/// here because it waits indefinitely for a slow or wedged probe.
+fn run_bounded_command(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<std::process::Output, LifecycleError> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    // lsof can create helper processes while inspecting a busy host. Keep
+    // them in the probe's own process group so a timeout cannot leave a
+    // descendant running after this function returns.
+    command.process_group(0);
+    let mut child = command.spawn().map_err(|error| io_error(program, error))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait().map_err(|error| io_error(program, error))? {
+            Some(_) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| io_error(program, error));
+            }
+            None if Instant::now() >= deadline => {
+                let process_group = -(child.id() as libc::pid_t);
+                let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
+                if result == -1 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(io_error(program, error));
+                    }
+                }
+                // Do not wait synchronously here.  A wedged lsof can remain
+                // in an uninterruptible kernel call; waiting would recreate
+                // the unbounded hang this helper is meant to prevent.
+                return Err(LifecycleError::CommandTimeout(timeout.as_millis() as u64));
+            }
+            None => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                thread::sleep(remaining.min(Duration::from_millis(5)));
+            }
+        }
+    }
 }
 
 pub fn request_restart(
@@ -670,5 +734,22 @@ fn io_error(path: &Path, error: impl std::fmt::Display) -> LifecycleError {
     LifecycleError::Io {
         path: path.display().to_string(),
         message: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{run_bounded_command, LifecycleError};
+    use std::path::Path;
+    use std::time::Duration;
+
+    #[test]
+    fn bounded_command_returns_timeout_for_slow_probe() {
+        let result = run_bounded_command(
+            Path::new("/bin/sh"),
+            &["-c", "sleep 1"],
+            Duration::from_millis(50),
+        );
+        assert!(matches!(result, Err(LifecycleError::CommandTimeout(50))));
     }
 }

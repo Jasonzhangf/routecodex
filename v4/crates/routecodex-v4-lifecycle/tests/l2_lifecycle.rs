@@ -1,6 +1,6 @@
 use routecodex_v4_lifecycle::{
-    release_unmanaged_listener, repair_stale, status_managed, ManagedAction, ManagedControlPlane,
-    ManagedInstanceRecord, V4LifecyclePaths,
+    release_unmanaged_listener, repair_stale, status_managed, LifecycleError, ManagedAction,
+    ManagedControlPlane, ManagedInstanceRecord, V4LifecyclePaths,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -108,6 +108,10 @@ fn repair_stale_removes_socket_only_after_owner_probe_fails() {
 fn unmanaged_takeover_never_signals_foreign_listener() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener");
     let address = listener.local_addr().expect("address").to_string();
-    release_unmanaged_listener(&address, Duration::from_millis(100)).expect("safe no-op");
+    let result = release_unmanaged_listener(&address, Duration::from_millis(100));
+    assert!(
+        matches!(result, Ok(()) | Err(LifecycleError::CommandTimeout(100))),
+        "foreign listener must remain untouched; bounded probe result: {result:?}"
+    );
     assert!(std::net::TcpStream::connect(&address).is_ok());
 }
