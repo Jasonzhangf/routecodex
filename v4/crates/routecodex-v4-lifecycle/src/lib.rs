@@ -10,6 +10,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -510,6 +511,7 @@ fn run_bounded_command(
     args: &[&str],
     timeout: Duration,
 ) -> Result<std::process::Output, LifecycleError> {
+    let deadline = Instant::now() + timeout;
     let mut command = Command::new(program);
     command
         .args(args)
@@ -520,13 +522,44 @@ fn run_bounded_command(
     // descendant running after this function returns.
     command.process_group(0);
     let mut child = command.spawn().map_err(|error| io_error(program, error))?;
-    let deadline = Instant::now() + timeout;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io_error(program, "probe stdout pipe was not created"))?;
+    let (output_tx, output_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = output_tx.send(result);
+    });
     loop {
         match child.try_wait().map_err(|error| io_error(program, error))? {
-            Some(_) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|error| io_error(program, error));
+            Some(status) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                match output_rx.recv_timeout(remaining) {
+                    Ok(Ok(stdout)) => {
+                        return Ok(std::process::Output {
+                            status,
+                            stdout,
+                            stderr: Vec::new(),
+                        });
+                    }
+                    Ok(Err(error)) => return Err(io_error(program, error)),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let process_group = -(child.id() as libc::pid_t);
+                        let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
+                        if result == -1 {
+                            let error = std::io::Error::last_os_error();
+                            if error.raw_os_error() != Some(libc::ESRCH) {
+                                return Err(io_error(program, error));
+                            }
+                        }
+                        return Err(LifecycleError::CommandTimeout(timeout.as_millis() as u64));
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(io_error(program, "probe stdout reader stopped"));
+                    }
+                }
             }
             None if Instant::now() >= deadline => {
                 let process_group = -(child.id() as libc::pid_t);
@@ -740,8 +773,10 @@ fn io_error(path: &Path, error: impl std::fmt::Display) -> LifecycleError {
 #[cfg(test)]
 mod tests {
     use super::{run_bounded_command, LifecycleError};
+    use std::fs;
     use std::path::Path;
-    use std::time::Duration;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn bounded_command_returns_timeout_for_slow_probe() {
@@ -751,5 +786,47 @@ mod tests {
             Duration::from_millis(50),
         );
         assert!(matches!(result, Err(LifecycleError::CommandTimeout(50))));
+    }
+
+    #[test]
+    fn bounded_command_deadline_covers_descendant_holding_stdout() {
+        let marker = std::env::temp_dir().join(format!(
+            "routecodex-v4-bounded-command-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&marker);
+        let marker_text = marker.to_str().expect("temporary marker path is UTF-8");
+        let started = Instant::now();
+        let result = run_bounded_command(
+            Path::new("/bin/sh"),
+            &[
+                "-c",
+                "(sleep 0.2; printf escaped > \"$1\") & exit 0",
+                "bounded-command-test",
+                marker_text,
+            ],
+            Duration::from_millis(75),
+        );
+        assert!(matches!(result, Err(LifecycleError::CommandTimeout(75))));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(250));
+        assert!(
+            !marker.exists(),
+            "descendant escaped the probe process group"
+        );
+        let _ = fs::remove_file(marker);
+    }
+
+    #[test]
+    fn bounded_command_returns_complete_stdout_for_fast_command() {
+        let output = run_bounded_command(
+            Path::new("/bin/sh"),
+            &["-c", "printf complete-output; exit 7"],
+            Duration::from_secs(1),
+        )
+        .expect("fast command should complete");
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(output.stdout, b"complete-output");
+        assert!(output.stderr.is_empty());
     }
 }
