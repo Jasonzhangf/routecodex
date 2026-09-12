@@ -64,40 +64,54 @@ pub(crate) fn instance_residual_pids_for_listener_set(
 }
 
 pub(crate) fn listening_pids_for_port(port: u16) -> Result<Vec<u32>, V3LifecycleError> {
-    let output = Command::new("lsof")
-        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
-        .output()
-        .map_err(|error| {
-            V3LifecycleError::Validation(format!(
-                "failed to discover explicit listener PID for port {port}: {error}"
-            ))
-        })?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() && stdout.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    if !output.status.success() {
-        return Err(V3LifecycleError::Validation(format!(
-            "failed to discover explicit listener PID for port {port}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let mut pids = Vec::new();
-    for line in stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+    #[cfg(target_os = "macos")]
     {
-        let pid = line.parse::<u32>().map_err(|error| {
-            V3LifecycleError::Validation(format!(
-                "lsof returned non-numeric listener PID for port {port}: {line}: {error}"
-            ))
-        })?;
-        if pid > 0 {
-            pids.push(pid);
-        }
+        let rows = netstat_listener_rows()?;
+        let pids = rows
+            .iter()
+            .filter(|row| row.port == port)
+            .map(|row| row.pid)
+            .collect::<BTreeSet<_>>();
+        Ok(pids.into_iter().collect())
     }
-    Ok(pids)
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let output = Command::new("lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+            .output()
+            .map_err(|error| {
+                V3LifecycleError::Validation(format!(
+                    "failed to discover explicit listener PID for port {port}: {error}"
+                ))
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() && stdout.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        if !output.status.success() {
+            return Err(V3LifecycleError::Validation(format!(
+                "failed to discover explicit listener PID for port {port}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let mut pids = Vec::new();
+        for line in stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            let pid = line.parse::<u32>().map_err(|error| {
+                V3LifecycleError::Validation(format!(
+                    "lsof returned non-numeric listener PID for port {port}: {line}: {error}"
+                ))
+            })?;
+            if pid > 0 {
+                pids.push(pid);
+            }
+        }
+        Ok(pids)
+    }
 }
 
 pub(crate) fn guard_explicit_listener_pids_are_scoped_to_target_ports(
@@ -122,41 +136,100 @@ pub(crate) fn guard_explicit_listener_pids_are_scoped_to_target_ports(
 }
 
 pub(crate) fn listening_ports_for_pid(pid: u32) -> Result<BTreeSet<u16>, V3LifecycleError> {
-    let pid_arg = pid.to_string();
-    let output = Command::new("lsof")
-        .args(["-nP", "-a", "-p", &pid_arg, "-iTCP", "-sTCP:LISTEN", "-Fn"])
+    #[cfg(target_os = "macos")]
+    {
+        Ok(netstat_listener_rows()?
+            .into_iter()
+            .filter(|row| row.pid == pid)
+            .map(|row| row.port)
+            .collect())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let pid_arg = pid.to_string();
+        let output = Command::new("lsof")
+            .args(["-nP", "-a", "-p", &pid_arg, "-iTCP", "-sTCP:LISTEN", "-Fn"])
+            .output()
+            .map_err(|error| {
+                V3LifecycleError::Validation(format!(
+                    "failed to discover listener ports for PID {pid}: {error}"
+                ))
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if !output.status.success() && stdout.trim().is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        if !output.status.success() {
+            return Err(V3LifecycleError::Validation(format!(
+                "failed to discover listener ports for PID {pid}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let mut ports = BTreeSet::new();
+        for line in stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with('n'))
+        {
+            let Some(port) = line
+                .rsplit(':')
+                .next()
+                .and_then(|candidate| candidate.parse::<u16>().ok())
+            else {
+                continue;
+            };
+            ports.insert(port);
+        }
+        Ok(ports)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn netstat_listener_rows() -> Result<Vec<NetstatListenerRow>, V3LifecycleError> {
+    let output = Command::new("netstat")
+        .args(["-anv", "-p", "tcp"])
         .output()
         .map_err(|error| {
             V3LifecycleError::Validation(format!(
-                "failed to discover listener ports for PID {pid}: {error}"
+                "failed to read macOS listener table via netstat: {error}"
             ))
         })?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() && stdout.trim().is_empty() {
-        return Ok(BTreeSet::new());
-    }
     if !output.status.success() {
         return Err(V3LifecycleError::Validation(format!(
-            "failed to discover listener ports for PID {pid}: {}",
+            "failed to read macOS listener table via netstat: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
-    let mut ports = BTreeSet::new();
-    for line in stdout
+    Ok(parse_netstat_listener_rows(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+struct NetstatListenerRow {
+    pid: u32,
+    port: u16,
+}
+
+#[cfg(target_os = "macos")]
+fn parse_netstat_listener_rows(stdout: &str) -> Vec<NetstatListenerRow> {
+    stdout
         .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with('n'))
-    {
-        let Some(port) = line
-            .rsplit(':')
-            .next()
-            .and_then(|candidate| candidate.parse::<u16>().ok())
-        else {
-            continue;
-        };
-        ports.insert(port);
-    }
-    Ok(ports)
+        .filter_map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() < 11
+                || !matches!(fields[0], "tcp4" | "tcp6" | "tcp46")
+                || fields[5] != "LISTEN"
+            {
+                return None;
+            }
+            let port = fields[3].rsplit('.').next()?.parse::<u16>().ok()?;
+            let pid = fields[10].rsplit(':').next()?.parse::<u32>().ok()?;
+            Some(NetstatListenerRow { pid, port })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy)]
