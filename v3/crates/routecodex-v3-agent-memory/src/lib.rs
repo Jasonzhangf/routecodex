@@ -34,18 +34,11 @@ pub fn inject_memory_raw_capture_guidance(body: &mut Value) -> Result<(), String
         .as_object_mut()
         .ok_or_else(|| "responses request body must be an object".to_owned())?;
     let guidance = memory_raw_capture_guidance_text();
-    let messages_already_guided = object
-        .get("messages")
-        .is_some_and(|messages| messages_contain_guidance(messages, &guidance));
     match object.get_mut("instructions") {
         Some(Value::String(current)) => {
-            if current.contains(&guidance) {
-                return Ok(());
-            }
             current.push('\n');
             current.push_str(&guidance);
         }
-        None if messages_already_guided => {}
         None => {
             object.insert("instructions".to_owned(), Value::String(guidance));
         }
@@ -54,20 +47,6 @@ pub fn inject_memory_raw_capture_guidance(body: &mut Value) -> Result<(), String
         }
     }
     Ok(())
-}
-
-fn messages_contain_guidance(messages: &Value, guidance: &str) -> bool {
-    messages.as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            matches!(
-                item.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            ) && item
-                .get("content")
-                .and_then(Value::as_str)
-                .is_some_and(|content| content.contains(guidance))
-        })
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

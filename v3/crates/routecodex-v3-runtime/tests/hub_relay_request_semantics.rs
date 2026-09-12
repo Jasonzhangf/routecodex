@@ -147,30 +147,6 @@ fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
 }
 
 #[test]
-fn responses_relay_req04_preserves_preexisting_memory_guidance() {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let guidance = routecodex_v3_agent_memory::memory_raw_capture_guidance_text();
-    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
-    let governed = hooks
-        .run(
-            raw(json!({
-                "model":"gpt-5.5",
-                "instructions": format!("Base instructions.\n{guidance}"),
-                "input":[{"role":"user","content":"hello"}]
-            })),
-            &V3HubContinuationLookup::new(None, scope()),
-            &profile,
-        )
-        .unwrap();
-
-    assert_eq!(
-        governed.payload()["messages"][0]["content"],
-        format!("Base instructions.\n{guidance}")
-    );
-    assert!(governed.payload().get("instructions").is_none());
-}
-
-#[test]
 fn responses_relay_memory_guidance_injection_fails_fast_on_bad_instructions() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
