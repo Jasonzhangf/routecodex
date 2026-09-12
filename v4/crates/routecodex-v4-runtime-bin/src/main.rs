@@ -32,7 +32,7 @@ use routecodex_v4_standard_plugins::diagnostic;
 use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde_json::Value;
 use std::future::Future;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
@@ -48,6 +48,30 @@ struct CordisAdmission {
     graph_hash: String,
 }
 
+const CORDIS_ADMISSION_TIMEOUT: Duration = Duration::from_secs(15);
+
+fn read_cordis_response_line(
+    stream: &mut std::os::unix::net::UnixStream,
+    label: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|error| format!("{label} read timeout setup failed: {error}"))?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    let bytes = reader.read_line(&mut line).map_err(|error| {
+        format!(
+            "{label} response read failed after {}ms: {error}",
+            timeout.as_millis()
+        )
+    })?;
+    if bytes == 0 {
+        return Err(format!("{label} response ended before a JSON line"));
+    }
+    Ok(line)
+}
+
 impl CordisAdmission {
     fn admit(
         expected_graph_hash: &str,
@@ -60,26 +84,43 @@ impl CordisAdmission {
         let mut handshake_stream = UnixStream::connect(&socket_path)
             .map_err(|error| format!("Cordis admission socket connect failed: {error}"))?;
         handshake_stream
+            .set_write_timeout(Some(CORDIS_ADMISSION_TIMEOUT))
+            .map_err(|error| format!("Cordis handshake write timeout setup failed: {error}"))?;
+        handshake_stream
             .write_all(format!("{{\"op\":\"handshake\",\"protocolVersion\":1,\"graphHash\":\"{expected_graph_hash}\"}}\n").as_bytes())
-            .map_err(|error| format!("Cordis admission request failed: {error}"))?;
-        let mut handshake = String::new();
-        handshake_stream.read_to_string(&mut handshake).map_err(|error| error.to_string())?;
-        let value: Value = serde_json::from_str(handshake.trim()).map_err(|error| error.to_string())?;
+            .map_err(|error| format!("Cordis handshake request failed: {error}"))?;
+        let handshake = read_cordis_response_line(
+            &mut handshake_stream,
+            "Cordis handshake",
+            CORDIS_ADMISSION_TIMEOUT,
+        )?;
+        let value: Value = serde_json::from_str(handshake.trim())
+            .map_err(|error| format!("Cordis handshake response is invalid JSON: {error}"))?;
         if value.get("ok") != Some(&Value::Bool(true)) {
             return Err("Cordis admission handshake rejected".to_string());
         }
         let generation = value["snapshot"]["generation"]
             .as_u64().ok_or_else(|| "Cordis admission snapshot has no generation".to_string())?;
-        let mut stream = UnixStream::connect(&socket_path).map_err(|error| error.to_string())?;
+        let mut stream = UnixStream::connect(&socket_path)
+            .map_err(|error| format!("Cordis admission socket connect failed: {error}"))?;
         let request = serde_json::json!({
             "op": "admission", "protocolVersion": 1, "generation": generation,
             "graphHash": expected_graph_hash, "manifestHash": expected_manifest_hash,
             "epochId": expected_epoch_id,
         });
-        stream.write_all(format!("{request}\n").as_bytes()).map_err(|error| error.to_string())?;
-        let mut response = String::new();
-        stream.read_to_string(&mut response).map_err(|error| error.to_string())?;
-        let response: Value = serde_json::from_str(response.trim()).map_err(|error| error.to_string())?;
+        stream
+            .set_write_timeout(Some(CORDIS_ADMISSION_TIMEOUT))
+            .map_err(|error| format!("Cordis admission write timeout setup failed: {error}"))?;
+        stream
+            .write_all(format!("{request}\n").as_bytes())
+            .map_err(|error| format!("Cordis admission request failed: {error}"))?;
+        let response = read_cordis_response_line(
+            &mut stream,
+            "Cordis admission",
+            CORDIS_ADMISSION_TIMEOUT,
+        )?;
+        let response: Value = serde_json::from_str(response.trim())
+            .map_err(|error| format!("Cordis admission response is invalid JSON: {error}"))?;
         if response.get("ok") != Some(&Value::Bool(true)) {
             return Err(format!("Cordis admission rejected: {}", response["message"].as_str().unwrap_or("unknown error")));
         }
@@ -847,6 +888,7 @@ mod tests {
     use routecodex_v4_router::TargetSelectionRequest;
     use routecodex_v4_server::ResponseStream;
     use std::collections::VecDeque;
+    use std::io::{BufRead, BufReader};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct CordisReadinessReport {
@@ -945,6 +987,56 @@ mod tests {
             server_id: "rccv4".to_string(),
             port: 5520,
         }
+    }
+
+    #[test]
+    fn cordis_response_line_does_not_wait_for_eof() {
+        use std::os::unix::net::{UnixListener, UnixStream};
+        use std::sync::mpsc;
+
+        let socket_path = std::env::temp_dir().join(format!(
+            "rccv4-cordis-line-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let listener = UnixListener::bind(&socket_path).expect("bind test socket");
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test client");
+            {
+                let mut request = String::new();
+                let mut reader = BufReader::new(&mut stream);
+                reader.read_line(&mut request).expect("read request");
+            }
+            std::io::Write::write_all(&mut stream, b"{\"ok\":true}\n")
+                .expect("write response");
+            reply_tx.send(()).expect("signal response");
+            release_rx.recv().expect("release server");
+        });
+
+        let mut client = UnixStream::connect(&socket_path).expect("connect test client");
+        std::io::Write::write_all(&mut client, b"{\"op\":\"handshake\"}\n")
+            .expect("write request");
+        reply_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("server wrote response");
+        let started = std::time::Instant::now();
+        let response = read_cordis_response_line(
+            &mut client,
+            "test Cordis",
+            Duration::from_secs(1),
+        )
+        .expect("newline-delimited response");
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert_eq!(response, "{\"ok\":true}\n");
+
+        release_tx.send(()).expect("release server");
+        server.join().expect("join test server");
+        std::fs::remove_file(socket_path).expect("remove test socket");
     }
 
     #[test]
