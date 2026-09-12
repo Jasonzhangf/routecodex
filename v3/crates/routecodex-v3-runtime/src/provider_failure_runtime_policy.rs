@@ -147,14 +147,18 @@ impl Default for V3RelayProviderFailureRetryPolicy {
 
 impl V3RelayProviderFailureRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
+        // 同候选预算只由显式 RetrySame 模式供给；ReselectBeforeClientProjection
+        // 表示等待后立即换候选（aedeac2/a6a1985 不变量）。
         let same_candidate_retries = manifest
             .error
             .provider_error_default_path
             .iter()
             .find_map(|step| match step {
-                V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
-                    Some(max_attempts.saturating_sub(1) as usize)
-                }
+                V3ProviderDispositionStepManifest::WaitRetry {
+                    retry_mode: V3ProviderErrorRetryMode::RetrySame,
+                    max_attempts,
+                    ..
+                } => Some(max_attempts.saturating_sub(1) as usize),
                 _ => None,
             })
             .unwrap_or(0);
