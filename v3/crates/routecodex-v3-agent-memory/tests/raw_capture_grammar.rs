@@ -40,6 +40,34 @@ fn memory_guidance_injection_is_idempotent_for_pre_guided_instructions() {
     );
 }
 
+#[test]
+fn memory_schema_marker_alone_does_not_suppress_guidance_in_instructions() {
+    let guidance = memory_raw_capture_guidance_text();
+    let mut body = json!({
+        "instructions": format!("The schema is {ROUTE_CODEX_MEMORY_RAW_ENTRY_V1}.")
+    });
+
+    inject_memory_raw_capture_guidance(&mut body).unwrap();
+
+    let instructions = body["instructions"].as_str().unwrap();
+    assert!(instructions.contains(&guidance));
+}
+
+#[test]
+fn memory_schema_marker_alone_does_not_suppress_guidance_in_system_message() {
+    let guidance = memory_raw_capture_guidance_text();
+    let mut body = json!({
+        "messages": [{
+            "role": "system",
+            "content": format!("The schema is {ROUTE_CODEX_MEMORY_RAW_ENTRY_V1}.")
+        }]
+    });
+
+    inject_memory_raw_capture_guidance(&mut body).unwrap();
+
+    assert_eq!(body["instructions"], guidance);
+}
+
 fn valid_entry() -> Value {
     json!({
         "schema": ROUTE_CODEX_MEMORY_RAW_ENTRY_V1,

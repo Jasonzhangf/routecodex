@@ -36,10 +36,10 @@ pub fn inject_memory_raw_capture_guidance(body: &mut Value) -> Result<(), String
     let guidance = memory_raw_capture_guidance_text();
     let messages_already_guided = object
         .get("messages")
-        .is_some_and(messages_contain_guidance_marker);
+        .is_some_and(|messages| messages_contain_guidance(messages, &guidance));
     match object.get_mut("instructions") {
         Some(Value::String(current)) => {
-            if current.contains(MEMORY_RAW_CAPTURE_GUIDANCE_MARKER) {
+            if current.contains(&guidance) {
                 return Ok(());
             }
             current.push('\n');
@@ -56,7 +56,7 @@ pub fn inject_memory_raw_capture_guidance(body: &mut Value) -> Result<(), String
     Ok(())
 }
 
-fn messages_contain_guidance_marker(messages: &Value) -> bool {
+fn messages_contain_guidance(messages: &Value, guidance: &str) -> bool {
     messages.as_array().is_some_and(|items| {
         items.iter().any(|item| {
             matches!(
@@ -65,7 +65,7 @@ fn messages_contain_guidance_marker(messages: &Value) -> bool {
             ) && item
                 .get("content")
                 .and_then(Value::as_str)
-                .is_some_and(|content| content.contains(MEMORY_RAW_CAPTURE_GUIDANCE_MARKER))
+                .is_some_and(|content| content.contains(guidance))
         })
     })
 }
