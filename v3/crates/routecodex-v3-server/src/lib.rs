@@ -449,8 +449,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 server.port,
             );
             let webui_observability =
-                V3WebuiObservability::load_persisted(&observability_store_path)
-                    .map_err(std::io::Error::other)?;
+                V3WebuiObservability::load_persisted(&observability_store_path);
             observability_writers.push(webui_observability.clone());
             build_v3_listener_router(V3ListenerState {
                 server,

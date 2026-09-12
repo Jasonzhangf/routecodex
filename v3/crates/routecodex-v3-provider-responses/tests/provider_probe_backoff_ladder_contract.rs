@@ -34,7 +34,7 @@ fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
 }
 
 #[test]
-fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
+fn first_probe_is_due_exactly_30s_after_block_and_success_or_probe_resurrects() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
         fail(&store, now_ms);
@@ -57,7 +57,8 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
         "first probe must be due at 30s"
     );
     // While the probe entry exists the key stays unavailable for every
-    // session; a business success alone must not resurrect it.
+    // session until a real success or a passed probe revives it
+    // (bug 61863a0: a real success on the key revives globally at once).
     assert!(
         !store
             .availability_for_session(
@@ -73,7 +74,7 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
         .record_provider_key_success("provider-a", "key-a", "model-a", first_due)
         .unwrap();
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope(),
                 "provider-a",
@@ -82,27 +83,7 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
                 first_due + 1,
             )
             .available,
-        "business success must not resurrect a key that still owns a probe entry"
-    );
-    // The probe itself is the only in-code resurrection path.
-    assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
-        .unwrap()
-        .is_some());
-    store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("model-a"))
-        .unwrap();
-    assert!(
-        store
-            .availability_for_session(
-                &scope(),
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                first_due + 2,
-            )
-            .available,
-        "successful probe must resurrect the key"
+        "business success must resurrect a globally cooled key immediately"
     );
 }
 

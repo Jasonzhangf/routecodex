@@ -160,7 +160,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
+fn key_success_revives_global_cooldown_immediately() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
     for now_ms in 100..120 {
@@ -169,19 +169,21 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
             .expect("failure");
     }
 
-    let blocked_success = store
+    // 全局复活契约（bug 61863a0）：冷却中的 key 收到真实成功调用时必须立即
+    // 解除全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
+    // （complete_probe_success）仍是无人成功调用时的恢复路径。
+    let revived = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 103)
-        .expect("success evidence");
-    assert_eq!(blocked_success.score_milli, 1);
-    assert_eq!(blocked_success.success_streak, 1);
-    assert!(blocked_success.cooldown);
-    assert!(!blocked_success.available);
+        .expect("success revival");
+    assert!(revived.available, "success must clear global cooldown");
+    assert!(!revived.cooldown);
+    assert_eq!(revived.success_streak, 1);
+    assert_eq!(revived.score_milli, 100);
 
-    let recovered = store
+    let probe_recovered = store
         .complete_probe_success("provider-a", "key-a", "model-a", 104)
-        .expect("probe success");
-    assert!(recovered.available);
-    assert_eq!(recovered.score_milli, 100);
+        .expect("probe success stays available");
+    assert!(probe_recovered.available);
     let post_probe_success = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 105)
         .expect("post-probe success");
@@ -204,7 +206,9 @@ fn health_score_uses_only_the_latest_100_calls() {
     let success = store
         .record_provider_key_success("p", "k", "m", 101)
         .expect("success");
-    assert_eq!(success.score_milli, 0);
+    // 成功即全局复活（bug 61863a0）：分数重置回 configured_priority 基线，
+    // 窗口同时清空；后续 100 次成功仍只按最近 100 次调用计分。
+    assert_eq!(success.score_milli, 100);
     for now_ms in 102..202 {
         store
             .record_provider_key_success("p", "k", "m", now_ms)

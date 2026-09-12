@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{is_v3_retryable_transient_source, V3Error02Classified, V3ErrorSourceKind};
+use crate::{V3Error02Classified, V3ErrorSourceKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum V3ProviderRecoveryKind {
@@ -70,21 +70,8 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .external_error
         .as_ref()
         .and_then(|error| error.status);
-    let response_stream_failure = classified.source.code == "provider_response_sse_stream";
-    let http_status_is_health_counted = matches!(status, Some(429 | 500 | 502 | 503));
-    if !response_stream_failure
-        && !http_status_is_health_counted
-        && is_v3_retryable_transient_source(&classified.source)
-    {
-        return V3ProviderFailureAction {
-            class_code: classified.source.code.clone(),
-            recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
-            scope: V3ProviderHealthScope::None,
-            score_delta_milli: 0,
-            failure_threshold: 0,
-            cooldown_ms: 0,
-        };
-    }
+    // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
+    // 全局健康，连续达到阈值即进入全局冷却，由后台探活或真实成功恢复。
     if matches!(status, Some(401 | 402 | 403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
@@ -99,18 +86,14 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
                 .unwrap_or(60 * 60_000),
         };
     }
-    if response_stream_failure || http_status_is_health_counted {
-        let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
-        if let Some(status) = status {
-            if let Some(policy) = build_v3_provider_global_failure_policy(status) {
-                action.failure_threshold = policy.failure_threshold;
-                action.cooldown_ms = policy.cooldown_ms;
-            }
+    let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
+    if let Some(status) = status {
+        if let Some(policy) = build_v3_provider_global_failure_policy(status) {
+            action.failure_threshold = policy.failure_threshold;
+            action.cooldown_ms = policy.cooldown_ms;
         }
-        action
-    } else {
-        V3ProviderFailureAction::recoverable_session(&classified.source.code)
     }
+    action
 }
 
 fn is_irrecoverable_provider_failure_code(code: &str) -> bool {
@@ -319,5 +302,27 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.failure_threshold, 3);
+    }
+
+    #[test]
+    fn every_provider_failure_class_counts_global_health() {
+        // 400（客户端请求错误）也计入全局健康：同一 key 连续失败必须冷却，
+        // 由后台探活恢复，而不是永远保持可选（P0 风暴根因之一）。
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_http_400",
+            400,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+
+        // 瞬态重试来源不再豁免健康计数：连续瞬态失败同样进入冷却+探活。
+        let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderResp14Raw",
+            "provider.sse_decode",
+            200,
+        ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
     }
 }
