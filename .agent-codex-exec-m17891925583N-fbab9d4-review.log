@@ -1,0 +1,2354 @@
+Reading additional input from stdin...
+OpenAI Codex v0.153.4
+--------
+workdir: /Users/fanzhang/Documents/github/routecodex/playground/main-final-0911
+model: gpt-5.6-luna
+provider: oauth
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a0942f-d8e3-78a3-aeed-06af2dbb4f24
+--------
+user
+# Review Standards（AGY / Codex 共享）
+
+只读审查当前变更。先判断任务范围与规则适用性，再检查质量；不修改代码，不替作者扩大任务。
+
+## 1. 强制质量边界
+
+- 功能满足当前契约；关键成功与失败路径有相称的验证。
+- 不引入安全漏洞、数据丢失、共享状态损坏、吞错、伪造成功或证据失真。
+- 遵守已声明的 owner、允许/禁止路径、控制与业务数据边界。
+- 证据绑定准确的源代码、依赖/配置、产物和必要环境；缺少适用的必需证据必须阻断。
+- 遵守用户授权、他人工作保护和安全 Git/发布边界。
+
+项目特有语言、pipeline、固定 operation/hook、maps 和 gate 只在该项目声明且
+受本次变更影响时适用。不得为普通任务强制新增整套架构或治理骨架。
+已声明错误策略与协议适配不是临时补偿；按真实语义判断。
+
+## 2. 消融与奥卡姆剃刀
+
+检查删除、复用、直接实现是否能减少实际复杂度并满足同一契约。
+函数、配置、注册表、hook 不预设优先级；一个明确条件不必换成状态机。
+优先少概念、少重复事实、少间接层，不以文件数、行数或设计模式名称裁决。
+
+阻断结构问题必须给出具体证据：例如两个 owner 导致状态分歧、重复规则会
+产生不一致行为、跨层耦合破坏已声明边界，或新增复杂度造成实质维护回归。
+指出受影响路径、后果及最小修复方向。
+
+“还能更短”“另一个组织方式更优雅”“超过 1k 行”本身仅是建议。
+作者说明实际设计取舍即可，不必逐分支证明不存在更简单方案。
+不要为消融增加逐项证明表、审批层或重复检查。
+
+## 3. 审查方法
+
+1. 读任务、diff 和受影响调用链，确认真实行为与 owner。
+2. 检查适用的质量、安全、契约和证据门禁；只读相关 maps。
+3. 检查实质结构回归与可选简化，明确区分。
+4. 检查验证是否覆盖当前风险。未改变相关输入且仍有效的证据可以复用；
+   不因 review 结束而要求无条件重新构建、安装、重启或全套回归。
+5. 报告高置信问题；每条给 file、line、失败条件/后果与最小修复方向。
+
+Collab、Memory、Guidance 默认辅助。它们缺失、未关闭或没有新增记录，不能
+单独判定工程质量失败。实际并发共享写入缺少可靠隔离、或已声明必需 gate
+被跳过，仍阻断相关操作。
+
+未触及历史问题一般建议处理；仅在直接影响当前安全、契约、证据或必需
+交付时阻断，并说明因果关系。
+
+## 4. 严重度与 controller
+
+- **P0**：严重安全、数据损坏、不可恢复影响、证据伪造等明确硬后果。
+- **P1**：当前功能/契约错误、必需验证缺失、授权边界违反、具有具体后果的
+  实质结构回归。必须说明触发条件或受影响不变量。
+- **P2**：可选简化、可读性、风格、无当前影响的历史问题。
+
+无 P0/P1 才可 PASS。P2 不阻断，不要求作者为每条建议申请豁免。
+输出遵守调用方 JSON 契约；无证据不编造问题，无最终结论不声称 PASS。
+
+# Codex / AGY 只读 review 输出契约
+
+审查规则、适用性、消融门禁与严重度唯一真源为同目录 `review-standards.md`。按该文件检查本次 scope；本文件只定义输出，不复制第二套治理规则。
+
+输出严格为 supplied JSON Schema 的一个对象。禁止 Markdown、代码围栏、`VERDICT`、`PASS`、`FAIL`、confidence 或自行裁决。
+
+- `contract_version` 固定为 `"1"`。
+- `scope` 回显 controller 给出的 `mode`、`commit`、`base`；`uncommitted` 也可将当前 HEAD 作为只读锚点填入 `commit`。不要填入其他提交。
+- `module_boundary_evidence` 每个涉及模块写 `module`、`owner`、`paths`、`edges`、`resources`、`gates`。按 standards 记录实际边界和验证；不适用项给出 scope 理由，缺失的必需证据按标准进入 findings。
+- `findings` 仅写可核验证据的问题：`severity`（P0/P1/P2）、`file`、正整数 `line`、`rule`、`evidence`、`remediation`。严重度遵循 `review-standards.md`，不在此维护副本。
+- 空 `findings` 只表示未发现阻塞问题；controller 独立裁决。P0/P1 必须写入；P2 可记录，不阻塞。
+
+Review scope: mode=commit; commit=089ee36ae; base=ec51c3ad7. Repo: /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911 (branch bug/fbab9d4-multimodal-0911).
+Focus: bug fbab9d4 — codex view_image function_call_output carriers (stringified JSON output with input_image/file_url data URLs) must set has_current_turn_image so the request routes to the configured multimodal pool. Regression test codex_view_image_function_call_output_drives_multimodal_route is red before / green after.
+The controller owns PASS/FAIL. Do not output VERDICT, PASS, FAIL, confidence, or a reviewer decision.
+Return only one JSON object matching the supplied output schema. Empty findings means no blocking finding was found.
+Read only. Do not modify the repository, tests, configuration, generated files, or review evidence.
+warning: clamping SessionEnd hook timeout to 3s in /Users/fanzhang/.codex/hooks.json
+hook: SessionStart
+hook: SessionStart
+hook: SessionStart
+hook: SessionStart Completed
+hook: SessionStart Completed
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+hook: UserPromptSubmit Completed
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[],"findings":[]}
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[],"findings":[]}
+exec
+/bin/zsh -lc "pwd; rg --files -g 'AGENTS.md' -g 'docs/architecture/*map*' -g '.agents/skills/rcc-dev-skills/SKILL.md' -g 'review-standards.md' | sort" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+/Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+AGENTS.md
+docs/architecture/function-map.yml
+docs/architecture/mainline-call-map.yml
+docs/architecture/resource-operation-map.yml
+docs/architecture/v3-function-map.yml
+docs/architecture/v3-mainline-call-map.yml
+docs/architecture/v3-resource-operation-map.yml
+docs/architecture/v3-verification-map.yml
+docs/architecture/verification-map.yml
+
+exec
+/bin/zsh -lc 'git status --short --branch && git show --stat --oneline --decorate --no-renames 089ee36ae && git diff --no-ext-diff --unified=80 ec51c3ad7 089ee36ae --' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 8469ms:
+2026-09-11 22:56:18.114 xcodebuild[68506:488865235]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:18.529 xcodebuild[68506:488865219] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-HZXQkrGa' (errno=Operation not permitted)
+2026-09-11 22:56:19.343 xcodebuild[69205:488865993]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:19.615 xcodebuild[69205:488865981] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+## bug/fbab9d4-multimodal-0911
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-2LVHdbdG' (errno=Operation not permitted)
+2026-09-11 22:56:21.135 xcodebuild[70169:488867134]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:21.536 xcodebuild[70169:488867128] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-KNrMVlMS' (errno=Operation not permitted)
+2026-09-11 22:56:22.143 xcodebuild[70533:488867588]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:22.344 xcodebuild[70533:488867585] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+089ee36ae (HEAD -> bug/fbab9d4-multimodal-0911) fix(v3): decode codex view_image carriers in current-turn image detection
+ .../src/active_turn.rs                             | 27 ++++++++++++++-
+ .../routecodex-v3-route-classifier/src/tests.rs    | 38 ++++++++++++++++++++++
+ 2 files changed, 64 insertions(+), 1 deletion(-)
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-dysEPR8t' (errno=Operation not permitted)
+2026-09-11 22:56:23.789 xcodebuild[71244:488868416]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:24.049 xcodebuild[71244:488868378] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-1ybsXLez' (errno=Operation not permitted)
+2026-09-11 22:56:24.644 xcodebuild[71634:488868863]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:24.870 xcodebuild[71634:488868861] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+index 0295793e2..d5a4ac997 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+@@ -609,111 +609,136 @@ fn responses_kind_for_value(value: &Value) -> ResponsesTurnKind {
+     }
+     if type_value == "reasoning" {
+         return ResponsesTurnKind::Reasoning;
+     }
+     ResponsesTurnKind::Other
+ }
+ 
+ fn responses_entry_has_web_search(value: &Value) -> bool {
+     let type_value = value
+         .get("type")
+         .and_then(Value::as_str)
+         .map(|value| value.trim().to_ascii_lowercase())
+         .unwrap_or_default();
+     // web_search_call is a tool-call type; web_search_part inside content[] is the route fact.
+     matches!(type_value.as_str(), "web_search" | "websearch")
+ }
+ 
+ fn tool_output_is_error(value: &Value) -> bool {
+     value
+         .get("output")
+         .and_then(|output| output.get("is_error"))
+         .and_then(Value::as_bool)
+         .unwrap_or(false)
+         || value
+             .get("is_error")
+             .and_then(Value::as_bool)
+             .unwrap_or(false)
+ }
+ 
+ fn tool_category_from_call_value(value: &Value) -> Option<String> {
+     let entry_type = value
+         .get("type")
+         .and_then(Value::as_str)
+         .map(|value| value.trim().to_ascii_lowercase())
+         .unwrap_or_default();
+     let name = value
+         .pointer("/function/name")
+         .or_else(|| value.get("name"))
+         .and_then(Value::as_str)
+         .or_else(|| (entry_type == "web_search_call").then_some("web_search"))?;
+     let arguments = value
+         .pointer("/function/arguments")
+         .or_else(|| value.get("arguments"))
+         .or_else(|| value.get("input"));
+     if let Some(classification) = classify_tool_call(name, arguments) {
+         return Some(classification.category);
+     }
+     None
+ }
+ 
+ fn project_gemini_entries(contents: &[Value]) -> Vec<GeminiTurnEntry> {
+     contents
+         .iter()
+         .map(|content| GeminiTurnEntry {
+             role: match content.get("role").and_then(Value::as_str) {
+                 Some("user") => GeminiTurnRole::User,
+                 Some("model") => GeminiTurnRole::Assistant,
+                 _ => GeminiTurnRole::Other,
+             },
+             parts: project_chat_parts(content.get("parts")),
+         })
+         .collect()
+ }
+ 
+ fn value_as_array(value: &Value) -> Option<Vec<Value>> {
+     if let Some(items) = value.as_array() {
+         return Some(items.clone());
+     }
+     let raw = value.as_str()?.trim();
+     if raw.is_empty() {
+         return None;
+     }
+     serde_json::from_str::<Value>(raw)
+         .ok()
+         .and_then(|parsed| parsed.as_array().cloned())
+ }
+ 
+ fn value_contains_image(value: &Value) -> bool {
+     match value {
+         Value::Array(items) => items.iter().any(value_contains_image),
++        // fbab9d4: Codex view_image carriers embed the screenshot as a
++        // stringified JSON array (or a bare data URL) inside
++        // `function_call_output.output`; decode and recurse.
++        Value::String(text) => string_carries_image(text),
+         Value::Object(values) => {
+             let type_value = values
+                 .get("type")
+                 .and_then(Value::as_str)
+                 .map(|value| value.trim().to_ascii_lowercase())
+                 .unwrap_or_default();
+             if type_value.contains("image") {
+                 return true;
+             }
+             if values.contains_key("image_url") {
+                 return true;
+             }
+             if values.contains_key("inline_data") || values.contains_key("file_data") {
+                 return true;
+             }
+             if values
+                 .get("data")
+                 .and_then(Value::as_str)
+                 .map(|value| value.trim().to_ascii_lowercase())
+                 .is_some_and(|value| value.starts_with("data:image/"))
+             {
+                 return true;
+             }
+-            ["content", "parts"]
++            if values
++                .get("file_url")
++                .and_then(Value::as_str)
++                .map(|value| value.trim().to_ascii_lowercase())
++                .is_some_and(|value| value.starts_with("data:image/"))
++            {
++                return true;
++            }
++            ["content", "parts", "output"]
+                 .into_iter()
+                 .filter_map(|field| values.get(field))
+                 .any(value_contains_image)
+         }
+         _ => false,
+     }
+ }
++
++fn string_carries_image(text: &str) -> bool {
++    let trimmed = text.trim();
++    if trimmed.starts_with("data:image/") {
++        return true;
++    }
++    if trimmed.starts_with('[') || trimmed.starts_with('{') {
++        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
++            return value_contains_image(&value);
++        }
++    }
++    false
++}
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/tests.rs b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+index 281bf9577..61c46825c 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/tests.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+@@ -573,160 +573,198 @@ fn route_classifier_input_has_no_control_state_fields() {
+ // current-turn image plus history_image blocks already normalized to the
+ // typed attachment placeholder.
+ #[test]
+ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_carrier() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"what does this mean"},
+                 {"type":"input_image","file_id":"current-turn-1"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         signals.has_current_turn_image,
+         "current-turn image must activate multimodal route fact via typed carrier"
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_eq!(route.route_name, "multimodal");
+     assert!(
+         route.reasoning.contains("multimodal:metadata-attachment"),
+         "expected multimodal:metadata-attachment reasoning, got {:?}",
+         route.reasoning
+     );
+ }
+ 
+ // Negative regression: historical input_image must NOT drive the multimodal
+ // route when the current-turn message carries only text. Mirrors the
+ // 4444 Responses shape `route_reason=multimodal:metadata-attachment` BUT
+ // without any current-turn image, so the typed carrier must report
+ // `has_current_turn_image=false` and classify_route must avoid the
+ // multimodal / vision path entirely.
+ #[test]
+ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"describe the recent changes"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         !signals.has_current_turn_image,
+         "history image must not leak into current-turn multimodal signal; signals={:?}",
+         signals
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_ne!(
+         route.route_name, "multimodal",
+         "text-only current turn must not pick multimodal; route={:?}",
+         route
+     );
+     assert!(
+         !route.reasoning.contains("multimodal:metadata-attachment"),
+         "negative case must not log multimodal:metadata-attachment; route={:?}",
+         route
+     );
+ }
+ 
++// fbab9d4: Codex view_image returns the screenshot inside a
++// `function_call_output` whose `output` is a stringified JSON array of
++// input_image blocks carrying data: URLs. The current-turn walker must
++// decode that carrier and set has_current_turn_image so the request
++// routes to the configured multimodal pool (which excludes glm-5.3).
++#[test]
++fn codex_view_image_function_call_output_drives_multimodal_route() {
++    use serde_json::json;
++    let request = json!({
++        "model": "gpt-5.6-sol",
++        "input": [
++            {"type":"message","role":"user","content":[
++                {"type":"input_text","text":"show me the chart"}
++            ]},
++            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
++            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
++        ]
++    });
++    let entries = project_v3_current_turn_entries_from_value(&request);
++    let signals = build_v3_current_turn_route_facts(&entries);
++    assert!(
++        signals.has_current_turn_image,
++        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
++    );
++    let route = classify_route(&RouteClassifierInput {
++        latest_message_from_user: signals.latest_message_from_user,
++        has_image_attachment: signals.has_current_turn_image,
++        has_current_turn_tool_output: signals.has_current_turn_tool_output,
++        ..Default::default()
++    });
++    assert_eq!(route.route_name, "multimodal");
++    assert!(
++        route.reasoning.contains("multimodal:metadata-attachment"),
++        "expected multimodal:metadata-attachment reasoning, got {:?}",
++        route.reasoning
++    );
++}
++
+ // Positive projection: Responses tool-side entries must classify as Tool
+ // (and the typed carrier must distinguish them from the rare explicit
+ // role=system entry). Both `role=tool` and the typed kind=ToolOutput entry
+ // shape (no role field, only `type=function_call_output`) must project to
+ // ResponsesTurnRole::Tool; only an explicit `role=system` (or
+ // role-bearing system message) is allowed to land in System.
+ #[test]
+ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_system() {
+     use serde_json::json;
+     let tool_payload = json!({"role": "tool", "content": [{"type": "text", "text": "ok"}]});
+     let tool_output_payload = json!({
+         "type": "function_call_output",
+         "call_id": "call-1",
+         "output": "ok"
+     });
+     let system_payload = json!({"role": "system", "content": "stay terse"});
+     let assistant_payload = json!({"role": "assistant", "content": "hi"});
+     let user_payload = json!({"role": "user", "content": "hi"});
+ 
+     let tool_entries = project_responses_entries_from_array(&[tool_payload.clone()]);
+     assert_eq!(tool_entries.len(), 1);
+     assert_eq!(tool_entries[0].role, ResponsesTurnRole::Tool);
+     // role=tool with a content[] of text parts is mapped to kind=Other because
+     // typed Responses entries require an explicit typed kind; the role
+     // projection itself is the contract under test here.
+     assert_ne!(tool_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let tool_output_entries = project_responses_entries_from_array(&[tool_output_payload.clone()]);
+     assert_eq!(tool_output_entries.len(), 1);
+     assert_eq!(tool_output_entries[0].role, ResponsesTurnRole::Tool);
+     assert_eq!(tool_output_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let system_entries = project_responses_entries_from_array(&[system_payload.clone()]);
+     assert_eq!(system_entries[0].role, ResponsesTurnRole::System);
+ 
+     // Negative check: assistant / user roles stay out of System.
+     let assistant_entries = project_responses_entries_from_array(&[assistant_payload]);
+     assert_ne!(assistant_entries[0].role, ResponsesTurnRole::System);
+     let user_entries = project_responses_entries_from_array(&[user_payload]);
+     assert_ne!(user_entries[0].role, ResponsesTurnRole::System);
+ 
+     // End-to-end: a multi-entry Responses thread that mixes role=tool and
+     // role=function_call_output yields a current-turn segment whose
+     // tool-output accounting lights up, but the role distribution must
+     // keep System empty.
+     let thread = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"role":"user","content":"run the build"},
+             {"role":"assistant","tool_calls":[{
+                 "type":"function","function":{"name":"exec_command","arguments":"{}"}
+             }]},
+             {"role":"tool","content":"build ok"},
+             {"type":"function_call_output","call_id":"c1","output":"done"}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&thread);
+     if let V3CurrentTurnEntries::Responses(es) = entries {
+         let system_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::System)
+             .count();
+         assert_eq!(
+             system_count, 0,
+             "role=tool / tool_output must not project as System; got entries={:?}",
+             es
+         );
+         let tool_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::Tool)
+             .count();
+         assert!(
+             tool_count >= 1,
+             "tool side should map to Tool role; entries={:?}",
+             es
+         );
+     } else {
+         panic!("expected Responses typed entries for fixture thread");
+     }
+ }
+
+exec
+/bin/zsh -lc 'rg -n "value_contains_image|string_carries_image|has_current_turn_image|project_v3_current_turn_entries_from_value|build_v3_current_turn_route_facts" v3/crates/routecodex-v3-route-classifier/src v3/crates/routecodex-v3-route-classifier/Cargo.toml' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:21:    let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:40:    let signals = build_v3_current_turn_route_facts_from_value(&fresh);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:55:    let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:62:    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:73:    let signals = build_v3_current_turn_route_facts_from_value(&json!({
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:103:    let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:117:    let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:150:    let signals = build_v3_current_turn_route_facts_from_value(&continuation);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:176:    let signals = build_v3_current_turn_route_facts_from_value(&fresh);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:205:        let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:219:    let keyword = build_v3_current_turn_route_facts_from_value(&json!({
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:235:    let declaration_only = build_v3_current_turn_route_facts_from_value(&json!({
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:259:    let signals = build_v3_current_turn_route_facts_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:435:    let thinking_signals = build_v3_current_turn_route_facts_from_value(&thinking_request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:459:    let tools_signals = build_v3_current_turn_route_facts_from_value(&tools_request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:589:    let entries = project_v3_current_turn_entries_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:590:    let signals = build_v3_current_turn_route_facts(&entries);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:592:        signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:597:        has_image_attachment: signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:613:// `has_current_turn_image=false` and classify_route must avoid the
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:628:    let entries = project_v3_current_turn_entries_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:629:    let signals = build_v3_current_turn_route_facts(&entries);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:631:        !signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:637:        has_image_attachment: signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:656:// decode that carrier and set has_current_turn_image so the request
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:671:    let entries = project_v3_current_turn_entries_from_value(&request);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:672:    let signals = build_v3_current_turn_route_facts(&entries);
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:674:        signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:679:        has_image_attachment: signals.has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/tests.rs:747:    let entries = project_v3_current_turn_entries_from_value(&thread);
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:12:    pub has_current_turn_image: bool,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:127:pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:152:            has_current_turn_image: latest_user
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:160:    let mut has_current_turn_image = latest_user_index
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:167:                has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:202:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:235:            has_current_turn_image: latest_user_index.is_some_and(|index| {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:247:    let mut has_current_turn_image =
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:252:            has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:292:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:303:    let mut has_current_turn_image = false;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:308:                has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:317:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:375:pub fn build_v3_current_turn_route_facts_from_value(request: &Value) -> V3CurrentTurnSignals {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:376:    let entries = project_v3_current_turn_entries_from_value(request);
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:377:    build_v3_current_turn_route_facts(&entries)
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:380:pub fn project_v3_current_turn_entries_from_value(request: &Value) -> V3CurrentTurnEntries {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:511:    if !part.has_image && value_contains_image(value) {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:541:    entry.has_image = value_contains_image(value);
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:686:fn value_contains_image(value: &Value) -> bool {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:688:        Value::Array(items) => items.iter().any(value_contains_image),
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:692:        Value::String(text) => string_carries_image(text),
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:727:                .any(value_contains_image)
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:733:fn string_carries_image(text: &str) -> bool {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:740:            return value_contains_image(&value);
+v3/crates/routecodex-v3-route-classifier/src/lib.rs:9:    build_v3_current_turn_route_facts, build_v3_current_turn_route_facts_from_value,
+v3/crates/routecodex-v3-route-classifier/src/lib.rs:10:    project_responses_entries_from_array, project_v3_current_turn_entries_from_value,
+
+exec
+/bin/zsh -lc "sed -n '1,240p' AGENTS.md; sed -n '1,220p' docs/architecture/v3-function-map.yml; sed -n '1,220p' docs/architecture/v3-verification-map.yml" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+# RouteCodex V3 Contract
+
+## Project Truth
+
+- RouteCodex V3 is the only active production implementation.
+- RouteCodex V4 is a refactor of V3 and is not connected to the production baseline.
+- RouteCodex V2 is retired completely. Do not retain or restore a V2 runtime, V2 config reader, V2 migration path, or V2 backup.
+- Runtime, routing, protocol projection, provider execution, lifecycle, and CLI live in the `v3/` Rust workspace.
+- Installed command: `rccv3`. Default authoring: `~/.rcc/config.v3.toml`.
+- `routecodex` and `rcc` are compatibility shims; do not create new runtime or config ownership under them.
+
+## Semantic Invariants
+
+- General safety, ablation, rule precedence, and review policy inherit the global AGENTS.md. This section adds RouteCodex protocol and ownership constraints.
+- The runtime is a fixed skeleton configured by typed declarations. Data-plane payloads and control-plane resources remain physically separate.
+- Proxy behavior stays transparent: preserve request, response, history, and observable protocol meaning.
+- Every request enters as JSON. Inbound only performs lossless request/response normalization into Chat Process: it preserves every field, maps Chat semantics into the canonical Chat shape, and carries non-Chat semantics as extensions. Inbound never filters or rewrites payload meaning.
+- Relay payload rewriting is owned only by request/response Chat Process. Direct payload rewriting is owned only by registered Direct hooks. No other stage rewrites payloads.
+- Outbound projects canonical Chat plus extensions into the target standard protocol. It may filter only fields that cannot be represented compatibly, through an explicit allowlist/denylist contract.
+- Provider Compat performs only provider-private adjustments after standard outbound projection and before or after provider transport as declared. It is not a second Chat Process or a general Outbound implementation.
+- No guessed repair, fallback, downgrade, silent drop, hidden history rewrite, or success-wrapped error.
+- Control state uses typed control resources or Error chain only. Business payload cannot carry or reconstruct it.
+- Request, response, and error graphs remain separate.
+- Internal request-stage failures project `598`; internal response-stage failures project `599`; network failures project `502`. External failures retain their real external status and are not rewritten.
+- SSE is the client communication boundary and is decoupled from Provider. Provider attempts are fully buffered before any client response is committed; provider errors enter the Error chain independently of client response projection.
+
+## Runtime Ownership
+
+- Server: listener, HTTP/WebSocket framing, body limits, client disconnect.
+- Runtime: complete request lifecycle, fixed skeleton/node/hook order, provider transport relay, and full-attempt buffering.
+- Inbound: lossless request/response normalization only; no filtering or payload rewriting.
+- Chat Process: Relay-only payload rewriting, standard Chat semantic mapping, non-Chat extension governance, tool/history governance, and continuation restore/save boundaries.
+- Outbound: canonical Chat and extension projection to the target standard protocol; compatibility filtering only through declared allowlists/denylists.
+- Compat: provider-private protocol adjustments only.
+- Virtual Router: classify and select one opaque route target.
+- Target Interpreter: expand candidates and reselect only inside selected target.
+- Provider: wire construction, auth, transport, and provider health mutation.
+- SSE: all client-facing communication, transport framing, and projection of committed client payload or typed terminal error.
+- Error: classify source failure, plan action, decide exhaustion, project client error.
+- Debug: logs, snapshots, dry-run, replay; never business truth.
+- Direct: default for a same-protocol target unless configuration explicitly selects Relay; all payload rewrites occur inside registered Direct hooks.
+- Relay: selected for cross-protocol execution or by explicit configuration; all payload rewrites occur inside Chat Process.
+- Direct still reaches Provider through the runtime provider transport relay. That transport relay is distinct from the Relay protocol-conversion execution mode.
+
+## Architecture Truth
+
+- Resource relations: `docs/architecture/v3-resource-operation-map.yml`.
+- Feature owner and allowed/forbidden paths: `docs/architecture/v3-function-map.yml`.
+- Request/response/error caller edges: `docs/architecture/v3-mainline-call-map.yml`.
+- Required tests, gates, and runtime evidence: `docs/architecture/v3-verification-map.yml`.
+- Human review surface: `docs/architecture/wiki/v3-mainline-caller-flow.md`.
+- Maps, source anchors, generated review surfaces, and gates must agree. Unbound or ambiguous ownership blocks implementation.
+
+## Git Protection
+
+- `.githooks/pre-commit` rejects protected-branch commits; `.githooks/pre-push` rejects protected-ref pushes.
+- Bootstrap with `npm run setup:git-main-protection`; verify with `appsdk verify-git-main-protection .`.
+- PASS proves Git protection only.
+
+## Task Routing
+
+Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply methods only. This contract describes V3; work under a separately governed subtree must load its scoped AGENTS.md and skill before applying V3 commands or gates.
+
+| Need | Read |
+| --- | --- |
+| completion evidence | `docs/agent-routing/05-foundation-contract.md` |
+| development/debug | `.agents/skills/rcc-dev-skills/SKILL.md` |
+| runtime owner lookup | `docs/agent-routing/10-runtime-ssot-routing.md` |
+| build/install/restart | `docs/agent-routing/20-build-test-release-routing.md` |
+| servertool | `docs/agent-routing/30-servertool-lifecycle-routing.md` |
+| task memory | `docs/agent-routing/40-task-memory-routing.md` |
+| AppSDK lifecycle | `.appsdk/skills/appsdk-project-governance/SKILL.md` |
+
+## Evidence Boundary
+
+Report source, test, build, install, restart, health, same-entry replay, review, merge, and remote receipt separately. Never infer a later level from an earlier one.
+version: 1
+status: h1_typed_skeleton_and_static_registry_bound
+features:
+- feature_id: v3.provider_key_health_model_granularity
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: high
+  owner_kind: rust_v3_provider_key_health
+  owner_crates:
+  - routecodex-v3-provider-responses
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  resource_bindings:
+  - v3.provider.key_health_state
+  entry_symbols:
+  - V3ProviderHealthStore::record_provider_failure_action
+  - V3ProviderHealthStore::record_provider_key_success
+  - V3ProviderHealthStore::complete_probe_success
+  - V3ProviderHealthStore::complete_probe_failure
+  - V3ProviderHealthStore::scheduling_projection
+  - V3ProviderHealthStore::provider_cooldown_probe_keys
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  - docs/architecture
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - v3/crates/routecodex-v3-virtual-router
+  - v3/crates/routecodex-v3-target/src/lib.rs
+  required_gates:
+  - npm run test:v3-provider-health-contract
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-provider-key-health-model-binding
+  - npm run test:v3-provider-key-health-model-binding-red-fixtures
+  - git diff --check
+- feature_id: v3.provider_global_cooldown_persistence
+  status: source_active_live_verification_required
+  owner_crate: routecodex-v3-provider-responses
+  owner_files:
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
+  resource_bindings:
+  - v3.provider.global_cooldown_persistence
+  entry_symbols:
+  - V3ProviderCooldownCoordinator::load
+  - V3ProviderCooldownCoordinator::record_failure
+  - V3ProviderCooldownCoordinator::acquire_startup_probe
+  - V3ProviderCooldownCoordinator::acquire_due_probe
+  - V3ProviderCooldownCoordinator::apply_probe_success
+  - V3ProviderCooldownCoordinator::apply_probe_failure
+  - V3ProviderCooldownCoordinator::persist
+  allowed_paths:
+  - v3/crates/routecodex-v3-provider-responses/src/global_cooldown.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - docs/architecture
+  required_gates:
+  - npm run test:v3-provider-global-cooldown-persistence
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+- feature_id: v3.managed_server_lifecycle
+  owner_crate: routecodex-v3-lifecycle
+  owner_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+  resource_bindings:
+  - v3.config.source_identity
+  - v3.config.published_manifest
+  - v3.server.listener_set
+  - v3.lifecycle.instance_declaration
+  - v3.lifecycle.pid_cache
+  - v3.lifecycle.control_channel
+  - v3.lifecycle.operation_lock
+  - v3.lifecycle.restart_plan
+  - v3.lifecycle.hooks_sidecar_declaration
+  - v3.lifecycle.hooks_sidecar_process
+  entry_symbols:
+  - V3ManagedLifecycle::declaration
+  - V3ManagedLifecycle::start
+  - V3ManagedLifecycle::start_foreground
+  - V3ManagedLifecycle::with_snapshots_enabled
+  - V3ManagedLifecycle::with_console_enabled
+  - run_cli
+  - resolve_v3_cli_snapshot_flags
+  - resolve_v3_cli_debug_flag
+  - configure_v3_snapshot_flags
+  - V3ManagedLifecycle::status
+  - V3ManagedLifecycle::restart
+  - V3ManagedLifecycle::stop
+  - V3ManagedLifecycle::run_managed_child
+  - V3ServerStartup01ListenerSetPreflight
+  - V3Server03HttpRequestRaw
+  - release_listener_set_for_start
+  - release_foreign_managed_listener_ports_for_start
+  - control_release_ports
+  - guard_explicit_listener_pids_are_scoped_to_target_ports
+  - explicit_listener_pids_for_ports
+  - occupied_listener_ports
+  - send_release_ports_control
+  - start_configured_hooks_sidecar
+  - V3HooksSidecarProcess::stop
+  allowed_paths:
+  - v3/crates/routecodex-v3-lifecycle
+  - v3/crates/routecodex-v3-cli
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-config/Cargo.toml
+  - v3/Cargo.toml
+  - docs/goals/v3-managed-live-server-lifecycle-plan.md
+  - docs/goals/v3-managed-server-lifecycle-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - docs/architecture/wiki/v3-managed-server-lifecycle.md
+  - scripts/architecture/verify-v3-managed-server-lifecycle.mjs
+  - scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs
+  - scripts/architecture/verify-v3-module-boundaries.mjs
+  forbidden_paths:
+  - sharedmodule/llmswitch-core
+  - src
+  - v3/crates/routecodex-v3-runtime
+  - v3/crates/routecodex-v3-provider-responses
+  required_gates:
+  - npm run verify:v3-managed-server-lifecycle
+  - npm run test:v3-managed-server-lifecycle-red-fixtures
+  - npm run test:v3-managed-server-lifecycle
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-rust-only
+  - npm run verify:function-map-compile-gate
+  - npm run verify:v3-cargo-fmt
+  - npm run verify:v3-clippy
+  - npm run test:v3-workspace
+  runtime_status: source_controlled_and_live_5555_release_rollover_verified
+- feature_id: v3.config_server_full_function
+  owner_crates:
+  - routecodex-v3-config
+  - routecodex-v3-server
+  - routecodex-v3-error
+  owner_files:
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  resource_bindings:
+  - v3.config.authoring_parsed
+  - v3.config.schema_validated
+  - v3.config.resource_registry
+  - v3.config.published_manifest
+  - v3.config.hub_pipeline_declarations
+  - v3.config.route_pool_match_declarations
+  - v3.server.listener_set
+  - v3.server.validated_http_input
+  - v3.error.chain
+  entry_symbols:
+  - compile_hub_v1
+  - compile_server_execution
+  - compile_pool_match
+  - compile_provider_health
+  - spawn_v3_server_aggregate
+  - read_json_payload
+  - project_v3_http_boundary_error
+  allowed_paths:
+  - v3/crates/routecodex-v3-config
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-error
+  - v3/crates/routecodex-v3-cli
+  forbidden_paths:
+  - v3/crates/routecodex-v3-provider-responses/src
+  - src
+  - sharedmodule
+  required_gates:
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run test:v3-source-gate-red-fixtures
+  - npm run test:v3-workspace
+  runtime_status: config_and_server_bound_p6_preserved
+- feature_id: v3.config_interpreter_contract
+  owner_crate: routecodex-v3-config
+  owner_files:
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/attempt_store.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+  - v3/crates/routecodex-v3-config/src/defaults.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  resource_bindings:
+  - v3.config.file_source
+  - v3.config.authoring_parsed
+  - v3.config.schema_validated
+  - v3.config.resource_registry
+  - v3.config.published_manifest
+  - v3.config.hub_pipeline_declarations
+  - v3.config.route_pool_match_declarations
+  - v3.provider_error.policy_manifest
+  - v3.hub.runtime_resource_declarations
+  - v3.secret.provider_auth_handle
+  mainline_bindings:
+  - v3-cfg-01
+  - v3-cfg-02
+  - v3-cfg-03
+version: 2
+status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
+scope: routecodex-v3-p0-p6-plus-hub-v1-h1
+features:
+- feature_id: v3.provider_key_health_model_granularity
+  status: source_controlled_runtime_pending_live_replay
+  change_risk: high
+  owner_kind: provider_health_model_identity
+  owner_modules:
+  - v3/crates/routecodex-v3-provider-responses/src/key_health.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
+  contract:
+  - docs/design/v3-provider-health-scoring-cooldown-design.md
+  - docs/goals/v3-provider-health-scoring-cooldown-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  required_positive:
+  - same provider and auth key share health across sessions for the same model
+  - same provider and auth key remain available for a different model
+  - legacy model-specific entries remain isolated during migration
+  - health score changes never modify configured priority or move a candidate across priority buckets
+  - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
+  required_negative:
+  - v3 persistence without probe_model_id fails explicitly
+  - duplicate v4 key health identities fail instead of silently overwriting control truth
+  - degraded, healthy, and elevated scores all preserve configured priority
+  - mainline caller/callee symbols, edge owners, and resource writer/reader bindings must resolve to the registered modules
+  - key health state never enters provider or client payload
+  required_gates:
+  - npm run test:v3-provider-health-contract
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime recovered_primary_failback_is_not_starved_by_backup_successes -- --nocapture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-provider-key-health-model-binding
+  - npm run test:v3-provider-key-health-model-binding-red-fixtures
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+    global_install_restart: required
+    live_evidence: required
+    dsh_review: required
+- feature_id: v3.provider_global_cooldown_persistence
+  status: source_active_live_verification_required
+  owner_kind: provider_health_persistence
+  owner_modules:
+  - routecodex-v3-provider-responses
+  - routecodex-v3-runtime
+  - routecodex-v3-server
+  contract:
+  - docs/goals/v3-global-provider-cooldown-persistence-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  required_positive:
+  - persisted cooldown remains unavailable after restart until startup probe succeeds
+  - due probe failure preserves cooldown and success removes it
+  required_negative:
+  - cooldown state never enters provider or client payload
+  - lock and persistence failures are not converted into availability success
+  required_gates:
+  - npm run test:v3-provider-global-cooldown-persistence
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+- feature_id: v3.global_binary_install
+  status: source_active_live_verification_required
+  change_risk: high
+  owner_kind: build_and_runtime_install_control
+  owner_scope: Direct publication of the self-contained Rust V3 binary and its local command aliases.
+  owner_modules:
+  - v3-global-binary-install
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Installed rccv3 path is ~/.local/bin/rccv3 and reports the embedded RouteCodex build version.
+  - routecodex and rcc execute the same installed binary.
+  - Aggregate restart and every configured listener health endpoint succeed after installation.
+  required_negative:
+  - Installation does not create ~/.rcc/install/current or ~/.rcc/install/releases.
+  - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
+  - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
+  - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
+  - CI build consumes the declared package version without changing package.json or package-lock.json; version mutation belongs to the explicit release operation.
+  required_gates:
+  - npm --prefix v3 run test:distribution
+  - npm --prefix v3 run test:install-cleanup
+  - npm --prefix v3 run verify:v3-resource-map
+  - npm --prefix v3 run verify:v3-module-boundaries
+  completion_rule:
+    source: Distribution and owned-target tests plus architecture gates pass.
+    runtime: Direct global install, aggregate restart, all-listener health, command path, version, and absence of ~/.rcc/install are verified.
+- feature_id: v3.config_management
+  status: implementation_active_pending_release_rollover
+  change_risk: medium
+  owner_kind: rust_project_v3
+  owner_scope: 'RCC V3 Config Management: Config Core + CLI init + WebUI Backend/Pages + Runtime Reload'
+  owner_modules:
+  - v3/crates/routecodex-v3-config-mgmt
+  - v3/crates/routecodex-v3-admin
+  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-cli/src/init.rs
+  design:
+  - docs/design/RCC_V4_Config_Management_Design_v1.0.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/repository-filesystem-module-registry.yml
+  required_unit:
+  - config.v2.toml parse+generate roundtrip preserves all fields
+  - route Groups tree (Port->Pool->Tier->Member) roundtrip preserves priority
+  - atomic replace (tmp+rename) keeps file consistent
+  - backup file naming <path>.bak-<UTC-compact>-<reason> matches manual style
+  - revision store append is monotonic and survives restart
+  - invalid commit fails without touching the file
+  - CLI init with --provider preset writes provider/<id>/config.v2.toml + minimal default pool
+  - WebUI static pages (Dashboard/Routes/Providers) render without console errors
+  - admin /api/routes/validate rejects invalid authoring without commit
+  required_integration:
+  - full workspace cargo test green
+  - rccv3 init non-interactive (preset+key+port) end-to-end creates provider+config
+  - rccv3-admin serves Dashboard / Routes / Providers from real ~/.rcc config
+  - PUT /api/routes persists new authoring with backup + revision entry
+  - routecodex restart triggered via /api/reload preserves running requests
+  required_gates:
+  - cargo test -p routecodex-v3-config-mgmt
+  - cargo test -p routecodex-v3-admin
+  - cargo test --workspace --no-fail-fast
+  completion_rule:
+    source: all unit + integration tests pass
+    runtime: WebUI/CLI behave correctly against real ~/.rcc config
+- feature_id: v3.simplified_user_config
+  status: default_config_toml_source_cutover
+  change_risk: high
+  owner_kind: rust_v3_config_authoring_projection
+  owner_scope: Strict minimal config.toml parser and deterministic projection into the existing V3Config02 authoring contract.
+  owner_modules:
+  - v3/crates/routecodex-v3-config/src/user_config.rs
+  contract:
+  - docs/goals/v3-simplified-config-test-design.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - Ordered outer tiers compile to deterministic descending internal priority values (`N..1`), because current V3 Target selects the maximum numeric priority.
+  - Omitted weights in one multi-member tier compile to equal weights.
+  - Different TOML table ordering and explicit equal weights produce the same normalized authoring and Manifest output.
+  - The projected authoring enters the existing Config03, Config04, and Config05 functions without a second compiler.
+  - Exact basename config.toml selects V3UserConfigStore once in the Config owner and server status consumes its loaded snapshot.
+  - CLI lifecycle and config commands without an explicit path resolve only ~/.rcc/config.toml.
+  - Explicit config.v3.toml remains on V3ConfigStore until the retirement phase.
+  required_negative:
+  - Unknown user fields, internal fields, malformed provider/model refs, empty pools or tiers, duplicate members, invalid weights, and unknown topology fail before Manifest publication.
+  - Runtime, Server, Virtual Router, Target, Provider, and Error crates do not read config.toml or call the user parser.
+  - Parse failure never retries config.v3.toml and config.v3 failure never retries config.toml.
+  - Lifecycle does not directly choose a parser or re-read config.toml through the legacy store.
+  - No user-config value enters request, response, provider wire, protocol metadata, Error payload, or debug payload.
+  required_gates:
+  - npm run verify:v3-simplified-user-config
+  - npm run test:v3-simplified-user-config-red-fixtures
+  - npm run test:v3-user-config-contract
+  - npm run test:v3-user-config-cli
+  - npm run verify:v3-managed-server-lifecycle
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Standalone parser/projector, exact-path CLI/lifecycle blackbox, negative, mutation, architecture, differential tests, and the default config.toml resolver pass.
+    runtime: Explicit config.toml status, dry-run, aggregate restart, health, browser and same-entry replay pass before default-path cutover; no-argument aggregate restart and the same live matrix must pass after cutover.
+- feature_id: v3.managed_server_lifecycle
+  status: source_controlled_and_live_5555_release_rollover_verified
+  change_risk: high
+  owner_kind: rust_project_v3
+  owner_scope: Managed process control for one V3 aggregate instance; request/response Runtime remains the only business lifecycle.
+  owner_modules:
+  - v3/crates/routecodex-v3-lifecycle
+  - v3/crates/routecodex-v3-cli
+  - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/store.rs
+  design:
+  - docs/goals/v3-managed-live-server-lifecycle-plan.md
+  - docs/goals/v3-managed-server-lifecycle-test-design.md
+  contract:
+  - docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/wiki/v3-managed-server-lifecycle.md
+  required_unit:
+  - Config-owned source identity is stable, source-sensitive, deterministic, and secret-free
+  - deterministic identity and strict state schema
+  - configured hooks sidecar starts only after CodexApp readiness, fails closed on missing readiness, and drains before CodexApp
+  - exclusive operation lock and auth-handle preflight
+  - no resolved secret in lifecycle projection
+  - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
+  - terminal same-config release executable rollover succeeds while running or missing-terminal rollover fails without reaping
+  - config-path restart transfers only to a typed target declaration with the exact same listener set; listener drift is rejected
+  - top-level lifecycle commands without -c resolve ~/.rcc/config.toml and --snap forces snapshots
+  - foreground start forces startup and common HTTP request console even when config log_console is false
+  - routecodex dev shim may enable snap/debug by default while rcc/rccv3 stable shims require explicit --snap/--debug and restart.plan.json remains previous-release compatible
+  required_integration:
+  - actual CLI start/status/duplicate-start/restart/stop on temporary aggregate listeners
+  - foreground startup emits the standard minimal human status line instead of raw debug JSON, while Relay/Direct requests emit colorized old-production request monitor output; human server logs persist
+    the same ANSI-colored monitor lines; scoped prefix is `[port:entry:sessionID:<data>][project][provider.model][route]`; started/route/terminal/error lines after target selection use Runtime observability
+    provider.model/route, not request payload model, pre-route pending scope, or SSE transport bytes; terminal failed lines are ANSI red; route hit uses `[virtual-router-hit] req=... route=... target=provider[key].wire_model
+    reason=...`; usage uses `usage_in/usage_out/usage_cache/usage_total` or `usage=unreported`, `time_i/time_e/time_t`, and `finish_reason=...`; all data values are highlighted as whole values, not digit-by-digit.
+  - stable instance identity, preserved PID, refreshed start nonce, same-binary executable preservation, explicit new-release executable republish across restart, and port-scoped foreign managed listener
+    release when a configured listener is already owned by another managed instance
+  - release-a stop followed by release-b start preserves the instance ID and republishes the canonical executable path; release-a running restart from release-b execs in place into the new executable
+  - all listeners close on one stop
+  - RouteCodex managed start/stop owns the installed hooks supervisor process without broad kill
+  - lifecycle state, argv, log, and evidence contain no resolved secret
+  - live managed 5555 restart with concurrent V2 health and real JSON/SSE Responses
+  required_gates:
+  - npm run verify:v3-managed-server-lifecycle
+  - npm run test:v3-managed-server-lifecycle-red-fixtures
+  - npm run test:v3-managed-server-lifecycle
+  - npm run verify:v3-architecture-docs
+  - npm run verify:v3-resource-map
+
+exec
+/bin/zsh -lc 'git show 089ee36ae''^:v3/crates/routecodex-v3-route-classifier/src/active_turn.rs | sed -n '"'1,180p'; git diff --check ec51c3ad7 089ee36ae" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 5735ms:
+2026-09-11 22:56:36.516 xcodebuild[77551:488875805]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:36.758 xcodebuild[77551:488875801] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-u0rO3myy' (errno=Operation not permitted)
+2026-09-11 22:56:37.459 xcodebuild[77907:488876213]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:37.732 xcodebuild[77907:488876208] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+use serde_json::{json, Value};
+
+use crate::{classify_tool_call, RouteToolCallClassification};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3CurrentTurnSignals {
+    pub latest_message_from_user: bool,
+    pub has_current_turn_tool_output: bool,
+    pub has_current_turn_tool_execution_error: bool,
+    pub is_compaction: bool,
+    pub has_current_turn_web_search: bool,
+    pub has_current_turn_image: bool,
+    pub last_assistant_tool: Option<RouteToolCallClassification>,
+    pub current_user_text: String,
+}
+
+// Typed current-turn entry carrier.
+//
+// vr.current_turn_typed_route_facts forbids the route classifier from reading
+// raw request payload. This enum is the only input allowed into the typed
+// builder; it carries only the structured facts that classify_route consumes
+// (role, entry kind, image / web_search / tool flags, user text). It must not
+// expose request business text, history beyond the current-turn segment, or
+// response/SSE metadata carriers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum V3CurrentTurnEntries {
+    Chat(Vec<ChatTurnEntry>),
+    Responses(Vec<ResponsesTurnEntry>),
+    Gemini(Vec<GeminiTurnEntry>),
+    PromptText(String),
+    #[default]
+    Empty,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatTurnEntry {
+    pub role: ChatTurnRole,
+    pub parts: Vec<TurnPart>,
+    pub tool_calls: Vec<ChatToolCall>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatToolCall {
+    pub name: String,
+    pub arguments: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatTurnRole {
+    #[default]
+    User,
+    Assistant,
+    Tool,
+    System,
+    Other,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResponsesTurnEntry {
+    pub role: ResponsesTurnRole,
+    pub kind: ResponsesTurnKind,
+    pub has_image: bool,
+    pub has_web_search: bool,
+    pub is_tool_output_error: bool,
+    pub tool_call_category: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResponsesTurnRole {
+    #[default]
+    User,
+    Assistant,
+    Tool,
+    System,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResponsesTurnKind {
+    #[default]
+    Text,
+    Image,
+    WebSearch,
+    ToolCall,
+    ToolOutput,
+    Compaction,
+    Reasoning,
+    Other,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GeminiTurnEntry {
+    pub role: GeminiTurnRole,
+    pub parts: Vec<TurnPart>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GeminiTurnRole {
+    #[default]
+    User,
+    Assistant,
+    Other,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TurnPart {
+    pub kind: TurnPartKind,
+    pub has_image: bool,
+    pub has_web_search: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnPartKind {
+    #[default]
+    Text,
+    Image,
+    WebSearch,
+    ToolCall,
+    ToolOutput,
+    Other,
+}
+
+// Typed boundary builder. classify_route consumes V3CurrentTurnRouteFacts;
+// this builder is the sole source of the typed intermediate that fills
+// `has_image_attachment` / `has_current_turn_*` fields.
+pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
+    match entries {
+        V3CurrentTurnEntries::Chat(entries) => extract_chat_signals(entries),
+        V3CurrentTurnEntries::Responses(entries) => extract_responses_signals(entries),
+        V3CurrentTurnEntries::Gemini(entries) => extract_gemini_signals(entries),
+        V3CurrentTurnEntries::PromptText(_) => V3CurrentTurnSignals {
+            latest_message_from_user: true,
+            ..Default::default()
+        },
+        V3CurrentTurnEntries::Empty => V3CurrentTurnSignals::default(),
+    }
+}
+
+fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
+    let latest_role = entries.iter().rev().map(|entry| entry.role).next();
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ChatTurnRole::User));
+    let Some(segment) = chat_active_segment(entries, latest_user_index, latest_role) else {
+        let latest_user = latest_user_index.and_then(|index| entries.get(index));
+        return V3CurrentTurnSignals {
+            latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
+            current_user_text: latest_user.map(extract_chat_user_text).unwrap_or_default(),
+            has_current_turn_web_search: latest_user
+                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_web_search)),
+            has_current_turn_image: latest_user
+                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image)),
+            ..Default::default()
+        };
+    };
+    let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_tool_execution_error = false;
+    let mut has_current_turn_web_search = false;
+    let mut has_current_turn_image = latest_user_index
+        .and_then(|index| entries.get(index))
+        .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image));
+    let mut last_assistant_tool = None;
+    for entry in segment {
+        for part in &entry.parts {
+            if part.has_image {
+                has_current_turn_image = true;
+            }
+            if part.has_web_search {
+                has_current_turn_web_search = true;
+            }
+            match entry.role {
+                ChatTurnRole::Tool => {
+                    has_current_turn_tool_output = true;
+                    if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
+                        has_current_turn_tool_execution_error = true;
+                    }
+                }
+                _ => {}
+            }
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-3iOrbd8v' (errno=Operation not permitted)
+2026-09-11 22:56:39.149 xcodebuild[78676:488877073]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:39.594 xcodebuild[78676:488877066] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-2TLer6Lc' (errno=Operation not permitted)
+2026-09-11 22:56:40.281 xcodebuild[79161:488877595]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:40.608 xcodebuild[79161:488877590] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+
+exec
+/bin/zsh -lc "sed -n '220,570p' v3/crates/routecodex-v3-route-classifier/src/active_turn.rs; sed -n '1,140p' v3/crates/routecodex-v3-route-classifier/src/lib.rs" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+            })
+            .unwrap_or(0);
+        return V3CurrentTurnSignals {
+            latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
+            current_user_text: String::new(),
+            is_compaction: latest_user_index.is_some_and(|index| {
+                entries[index..]
+                    .iter()
+                    .any(|entry| entry.kind == ResponsesTurnKind::Compaction)
+            }),
+            has_current_turn_web_search: latest_user_index.is_some_and(|index| {
+                entries[current_turn_start..=index]
+                    .iter()
+                    .any(|entry| entry.has_web_search)
+            }),
+            has_current_turn_image: latest_user_index.is_some_and(|index| {
+                entries[current_turn_start..=index]
+                    .iter()
+                    .any(|entry| entry.has_image)
+            }),
+            ..Default::default()
+        };
+    };
+    let mut has_current_turn_tool_output = false;
+    let mut has_current_turn_tool_execution_error = false;
+    let mut is_compaction = false;
+    let mut has_current_turn_web_search = false;
+    let mut has_current_turn_image =
+        latest_user_index.is_some_and(|index| entries[index..].iter().any(|entry| entry.has_image));
+    let mut last_assistant_tool = None;
+    for entry in segment {
+        if entry.has_image {
+            has_current_turn_image = true;
+        }
+        if entry.has_web_search {
+            has_current_turn_web_search = true;
+        }
+        if entry.kind == ResponsesTurnKind::Compaction {
+            is_compaction = true;
+        }
+        if matches!(
+            entry.kind,
+            ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
+        ) {
+            has_current_turn_tool_output = true;
+            if let Some(category) = &entry.tool_call_category {
+                last_assistant_tool = classify_category(category);
+            }
+            continue;
+        }
+        if matches!(entry.kind, ResponsesTurnKind::ToolOutput) {
+            has_current_turn_tool_output = true;
+            if entry.is_tool_output_error {
+                has_current_turn_tool_execution_error = true;
+            }
+            continue;
+        }
+        if entry.role != ResponsesTurnRole::Assistant {
+            continue;
+        }
+        if let Some(category) = &entry.tool_call_category {
+            has_current_turn_tool_output = true;
+            last_assistant_tool = classify_category(category);
+        }
+    }
+    V3CurrentTurnSignals {
+        latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
+        current_user_text: String::new(),
+        has_current_turn_tool_output,
+        has_current_turn_tool_execution_error,
+        is_compaction,
+        has_current_turn_web_search,
+        has_current_turn_image,
+        last_assistant_tool,
+    }
+}
+
+fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
+    let latest_role = entries.iter().rev().map(|entry| entry.role).next();
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
+    let segment_start = latest_user_index.unwrap_or(0);
+    let mut has_current_turn_image = false;
+    let mut has_current_turn_web_search = false;
+    for entry in entries.iter().skip(segment_start) {
+        for part in &entry.parts {
+            if part.has_image {
+                has_current_turn_image = true;
+            }
+            if part.has_web_search {
+                has_current_turn_web_search = true;
+            }
+        }
+    }
+    V3CurrentTurnSignals {
+        latest_message_from_user: matches!(latest_role, Some(GeminiTurnRole::User)),
+        has_current_turn_image,
+        has_current_turn_web_search,
+        ..Default::default()
+    }
+}
+
+fn chat_active_segment<'a>(
+    entries: &'a [ChatTurnEntry],
+    latest_user_index: Option<usize>,
+    latest_role: Option<ChatTurnRole>,
+) -> Option<&'a [ChatTurnEntry]> {
+    if matches!(latest_role, Some(ChatTurnRole::User)) {
+        return None;
+    }
+    let start = latest_user_index.map(|index| index + 1).unwrap_or(0);
+    Some(&entries[start..])
+}
+
+fn responses_active_segment<'a>(
+    entries: &'a [ResponsesTurnEntry],
+    latest_user_index: Option<usize>,
+    latest_role: Option<ResponsesTurnRole>,
+) -> Option<&'a [ResponsesTurnEntry]> {
+    if matches!(latest_role, Some(ResponsesTurnRole::User)) {
+        return None;
+    }
+    let start = latest_user_index.map(|index| index + 1).unwrap_or(0);
+    Some(&entries[start..])
+}
+
+fn extract_chat_user_text(entry: &ChatTurnEntry) -> String {
+    entry
+        .parts
+        .iter()
+        .find(|part| part.kind == TurnPartKind::Text)
+        .map(|part| part.text.clone())
+        .unwrap_or_default()
+}
+
+fn classify_category(category: &str) -> Option<RouteToolCallClassification> {
+    if matches!(
+        category,
+        "thinking" | "coding" | "search" | "websearch" | "other"
+    ) {
+        Some(RouteToolCallClassification {
+            category: category.to_string(),
+            name: String::new(),
+            snippet: None,
+        })
+    } else {
+        None
+    }
+}
+
+// Thin shim that callers using raw `&Value` (e.g. legacy nodes.rs paths)
+// must route through. This is the single place that converts raw request
+// payload into typed entries; downstream code must only consume the typed
+// result, never re-read raw payload.
+pub fn build_v3_current_turn_route_facts_from_value(request: &Value) -> V3CurrentTurnSignals {
+    let entries = project_v3_current_turn_entries_from_value(request);
+    build_v3_current_turn_route_facts(&entries)
+}
+
+pub fn project_v3_current_turn_entries_from_value(request: &Value) -> V3CurrentTurnEntries {
+    if let Some(messages) = request.get("messages").and_then(value_as_array) {
+        if !messages.is_empty() {
+            return V3CurrentTurnEntries::Chat(project_chat_entries(&messages));
+        }
+    }
+    if let Some(input) = request.get("input") {
+        let entries = project_responses_entries(input);
+        if !entries.is_empty() {
+            return V3CurrentTurnEntries::Responses(entries);
+        }
+    }
+    if let Some(contents) = request.get("contents").and_then(value_as_array) {
+        if !contents.is_empty() {
+            return V3CurrentTurnEntries::Gemini(project_gemini_entries(&contents));
+        }
+    }
+    if let Some(prompt) = request
+        .get("prompt")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return V3CurrentTurnEntries::PromptText(prompt.to_string());
+    }
+    if let Some(input) = request
+        .pointer("/semantics/responses/context/input")
+        .and_then(value_as_array)
+    {
+        if !input.is_empty() {
+            return V3CurrentTurnEntries::Responses(project_responses_entries_from_array(&input));
+        }
+    }
+    V3CurrentTurnEntries::Empty
+}
+
+fn project_chat_entries(messages: &[Value]) -> Vec<ChatTurnEntry> {
+    messages
+        .iter()
+        .map(|message| ChatTurnEntry {
+            role: chat_role(message.get("role").and_then(Value::as_str)),
+            parts: project_chat_parts(message.get("content")),
+            tool_calls: project_chat_tool_calls(message.get("tool_calls")),
+        })
+        .collect()
+}
+
+fn project_chat_tool_calls(value: Option<&Value>) -> Vec<ChatToolCall> {
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .map(|item| ChatToolCall {
+            name: item
+                .pointer("/function/name")
+                .or_else(|| item.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            arguments: item
+                .pointer("/function/arguments")
+                .or_else(|| item.get("arguments"))
+                .or_else(|| item.get("input"))
+                .map(|value| value.to_string()),
+        })
+        .collect()
+}
+
+fn chat_role(role: Option<&str>) -> ChatTurnRole {
+    match role
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("user") => ChatTurnRole::User,
+        Some("assistant") => ChatTurnRole::Assistant,
+        Some("tool") => ChatTurnRole::Tool,
+        Some("system") => ChatTurnRole::System,
+        _ => ChatTurnRole::Other,
+    }
+}
+
+fn project_chat_parts(value: Option<&Value>) -> Vec<TurnPart> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    match value {
+        Value::String(text) => vec![TurnPart {
+            kind: TurnPartKind::Text,
+            text: text.clone(),
+            ..Default::default()
+        }],
+        Value::Array(items) => items.iter().map(project_chat_part).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn project_chat_part(value: &Value) -> TurnPart {
+    let mut part = TurnPart::default();
+    if let Some(obj) = value.as_object() {
+        let type_value = obj
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if type_value.contains("image") {
+            part.kind = TurnPartKind::Image;
+            part.has_image = true;
+        }
+        if type_value == "web_search" || type_value == "websearch" {
+            part.kind = TurnPartKind::WebSearch;
+            part.has_web_search = true;
+        }
+        if matches!(
+            type_value.as_str(),
+            "tool_call" | "tool_use" | "function_call"
+        ) {
+            part.kind = TurnPartKind::ToolCall;
+        }
+        if matches!(
+            type_value.as_str(),
+            "tool_result" | "tool_output" | "function_call_output"
+        ) {
+            part.kind = TurnPartKind::ToolOutput;
+        }
+        if part.kind == TurnPartKind::Text || part.kind == TurnPartKind::Other {
+            if let Some(text) = obj.get("text").and_then(Value::as_str) {
+                part.text = text.to_string();
+            }
+        }
+    }
+    if !part.has_image && value_contains_image(value) {
+        part.has_image = true;
+        if part.kind == TurnPartKind::Text {
+            part.kind = TurnPartKind::Image;
+        }
+    }
+    part
+}
+
+fn project_responses_entries(value: &Value) -> Vec<ResponsesTurnEntry> {
+    let items = match value {
+        Value::Array(items) => items.clone(),
+        Value::String(text) if !text.trim().is_empty() => {
+            vec![json!({"type": "input_text", "text": text})]
+        }
+        _ => return Vec::new(),
+    };
+    project_responses_entries_from_array(&items)
+}
+
+pub fn project_responses_entries_from_array(items: &[Value]) -> Vec<ResponsesTurnEntry> {
+    items.iter().map(project_responses_entry).collect()
+}
+
+fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
+    let mut entry = ResponsesTurnEntry::default();
+    let role = responses_role_for_value(value);
+    entry.role = role;
+    let kind = responses_kind_for_value(value);
+    entry.kind = kind;
+    entry.has_image = value_contains_image(value);
+    entry.has_web_search = responses_entry_has_web_search(value);
+    entry.is_tool_output_error =
+        matches!(kind, ResponsesTurnKind::ToolOutput) && tool_output_is_error(value);
+    if matches!(
+        kind,
+        ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
+    ) {
+        if let Some(category) = tool_category_from_call_value(value) {
+            entry.tool_call_category = Some(category);
+        }
+    }
+    entry
+}
+
+fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
+    if let Some(role) = value.get("role").and_then(Value::as_str) {
+        return match role.trim().to_ascii_lowercase().as_str() {
+            "user" => ResponsesTurnRole::User,
+            "assistant" => ResponsesTurnRole::Assistant,
+            "tool" => ResponsesTurnRole::Tool,
+            "system" => ResponsesTurnRole::System,
+            _ => ResponsesTurnRole::Other,
+        };
+    }
+    let kind = responses_kind_for_value(value);
+    match kind {
+        ResponsesTurnKind::Text | ResponsesTurnKind::Image => ResponsesTurnRole::User,
+        ResponsesTurnKind::WebSearch
+        | ResponsesTurnKind::ToolCall
+// feature_id: v3.route_classifier_local_owner
+mod active_turn;
+mod policy;
+mod route;
+mod shell;
+mod tools;
+
+pub use active_turn::{
+    build_v3_current_turn_route_facts, build_v3_current_turn_route_facts_from_value,
+    project_responses_entries_from_array, project_v3_current_turn_entries_from_value,
+    ChatTurnEntry, ChatTurnRole, GeminiTurnEntry, GeminiTurnRole, ResponsesTurnEntry,
+    ResponsesTurnKind, ResponsesTurnRole, TurnPart, TurnPartKind, V3CurrentTurnEntries,
+    V3CurrentTurnSignals,
+};
+pub use policy::{
+    evaluate_v3_route_policies, V3RouteCondition, V3RouteHistoryFacts, V3RouteHistoryWindow,
+    V3RoutePolicy, V3RoutePolicyAction, V3RoutePolicyEvaluationError, V3RouteTurnObservation,
+};
+pub use route::{
+    classify_route, RouteClassification, RouteClassifierInput, V3CurrentTurnRouteFacts,
+    DEFAULT_ROUTE, ROUTE_PRIORITY,
+};
+
+pub use tools::{classify_tool_call, RouteToolCallClassification};
+
+#[cfg(test)]
+mod tests;
+
+exec
+/bin/zsh -lc 'rg -n -C 8 "route.classifier|route_classifier|current_turn|multimodal|metadata-attachment" docs/architecture/v3-function-map.yml docs/architecture/v3-mainline-call-map.yml docs/architecture/v3-resource-operation-map.yml docs/architecture/v3-verification-map.yml | head -n 260' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+docs/architecture/v3-function-map.yml-707-  - responses_direct_provider_transport_hook
+docs/architecture/v3-function-map.yml-708-  - build_v3_provider_12_responses_wire_payload
+docs/architecture/v3-function-map.yml-709-  - wire_preserves_historical_tool_output_data_images_byte_for_byte
+docs/architecture/v3-function-map.yml-710-  - wire_preserves_historical_reasoning_even_when_legacy_cleanup_is_configured
+docs/architecture/v3-function-map.yml-711-  - validate_current_responses_data_images
+docs/architecture/v3-function-map.yml-712-  - build_v3_transport_13_responses_http_request_from_v3_provider_12
+docs/architecture/v3-function-map.yml-713-  - ReqwestResponsesTransport::send
+docs/architecture/v3-function-map.yml-714-  - V3ProviderResp14Raw::from_json
+docs/architecture/v3-function-map.yml:715:  - current_turn_invalid_png_data_image_is_rejected_before_provider_transport
+docs/architecture/v3-function-map.yml-716-  - direct_runtime_rejects_invalid_current_data_image_before_provider_send
+docs/architecture/v3-function-map.yml-717-  - general_provider::sse_request_accepts_json_provider_response_as_json_raw_body
+docs/architecture/v3-function-map.yml-718-  - general_provider::json_request_rejects_sse_provider_response_without_switching_response_kind
+docs/architecture/v3-function-map.yml-719-  allowed_paths:
+docs/architecture/v3-function-map.yml-720-  - v3/crates/routecodex-v3-provider-responses
+docs/architecture/v3-function-map.yml-721-  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+docs/architecture/v3-function-map.yml-722-  - v3/crates/routecodex-v3-target
+docs/architecture/v3-function-map.yml-723-  - docs/goals/v3-responses-direct-mvp-implementation-plan.md
+--
+docs/architecture/v3-function-map.yml-815-  - v3/crates/routecodex-v3-config/src/validate.rs
+docs/architecture/v3-function-map.yml-816-  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+docs/architecture/v3-function-map.yml-817-  - v3/crates/routecodex-v3-runtime
+docs/architecture/v3-function-map.yml-818-  - v3/crates/routecodex-v3-server
+docs/architecture/v3-function-map.yml-819-  - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+docs/architecture/v3-function-map.yml-820-  - docs/architecture/repository-filesystem-module-registry.yml
+docs/architecture/v3-function-map.yml-821-  - docs/goals/v3-virtual-router-target-interpreter-plan.md
+docs/architecture/v3-function-map.yml-822-  - docs/goals/v3-target-priority-context-heuristic-test-design.md
+docs/architecture/v3-function-map.yml:823:  - docs/goals/v3-v2-route-classifier-parity-test-design.md
+docs/architecture/v3-function-map.yml-824-  - docs/design/v3-system-definition.md
+docs/architecture/v3-function-map.yml-825-  - docs/design/v3-routecodex-rust-module-boundaries.md
+docs/architecture/v3-function-map.yml-826-  - docs/design/v3-routecodex-runtime-resource-contract.md
+docs/architecture/v3-function-map.yml-827-  - docs/architecture/v3-resource-operation-map.yml
+docs/architecture/v3-function-map.yml-828-  - docs/architecture/v3-function-map.yml
+docs/architecture/v3-function-map.yml-829-  - docs/architecture/v3-mainline-call-map.yml
+docs/architecture/v3-function-map.yml-830-  - docs/architecture/v3-verification-map.yml
+docs/architecture/v3-function-map.yml-831-  - docs/architecture/wiki/v3-responses-direct-mainline.md
+--
+docs/architecture/v3-function-map.yml-848-  - npm run test:v3-compile-fail
+docs/architecture/v3-function-map.yml-849-  - npm run verify:v3-cargo-fmt
+docs/architecture/v3-function-map.yml-850-  - npm run verify:v3-clippy
+docs/architecture/v3-function-map.yml-851-  - npm run test:v3-workspace
+docs/architecture/v3-function-map.yml-852-  - npm run build:v3-cli
+docs/architecture/v3-function-map.yml-853-  - git diff --check
+docs/architecture/v3-function-map.yml-854-  required_contract:
+docs/architecture/v3-function-map.yml-855-  - Request image/media facts are normal request data and must enter V3RouterRequestFacts
+docs/architecture/v3-function-map.yml:856:    as multimodal/vision before pool matching.
+docs/architecture/v3-function-map.yml-857-  - Request tool facts include top-level tools and Responses additional_tools; Codex
+docs/architecture/v3-function-map.yml-858-    coding tools set coding and tool_search sets search from current-turn calls.
+docs/architecture/v3-function-map.yml-859-    web_search route activation requires strict current-user keyword intent or an
+docs/architecture/v3-function-map.yml-860-    explicit current-turn model web-search call; exposed tool declarations alone
+docs/architecture/v3-function-map.yml-861-    never set the web_search route or capability.
+docs/architecture/v3-function-map.yml-862-  - V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool
+docs/architecture/v3-function-map.yml-863-    selection signals; route selection is not model capability filtering.
+docs/architecture/v3-function-map.yml-864-  - 'Target hard capability_mismatch is allowed only for capabilities the selected
+docs/architecture/v3-function-map.yml:865:    model/provider may genuinely lack: web_search/search and multimodal/vision.'
+docs/architecture/v3-function-map.yml:866:  - After genuine web_search/search and multimodal/vision capability validation, Target10
+docs/architecture/v3-function-map.yml-867-    preserves configured candidate order among candidates within their declared context
+docs/architecture/v3-function-map.yml-868-    window; a candidate whose max_context_tokens is below request_input_tokens is marked
+docs/architecture/v3-function-map.yml-869-    context_window_exceeded and skipped before availability/transport. Explicit direct pins
+docs/architecture/v3-function-map.yml-870-    and the default-pool floor remain last-resort eligible with the typed overflow reason,
+docs/architecture/v3-function-map.yml-871-    while Provider availability/health and request-local provider-failure exclusion remain
+docs/architecture/v3-function-map.yml-872-    explicit switch inputs.
+docs/architecture/v3-function-map.yml-873-  - Tools, tool_outputs, reasoning/thinking, coding, longcontext, remote_continuation,
+docs/architecture/v3-function-map.yml-874-    and local_materialization are route/protocol/continuation ownership signals; they
+--
+docs/architecture/v3-function-map.yml-2482-  - npm run verify:sse-architecture-boundary
+docs/architecture/v3-function-map.yml-2483-  - npm run verify:v3-provider-action-gate
+docs/architecture/v3-function-map.yml-2484-  - npm run verify:v3-runtime-timing-observability
+docs/architecture/v3-function-map.yml-2485-  - npm run test:v3-openai-chat-relay-runtime-integration
+docs/architecture/v3-function-map.yml-2486-  migration_target: rust
+docs/architecture/v3-function-map.yml-2487-  notes:
+docs/architecture/v3-function-map.yml-2488-  - OpenAI Chat finish_reason is semantic protocol data; [DONE] is transport-only.
+docs/architecture/v3-function-map.yml-2489-  - Unsupported or malformed standard protocol events fail at the adjacent codec.
+docs/architecture/v3-function-map.yml:2490:- feature_id: vr.current_turn_typed_route_facts
+docs/architecture/v3-function-map.yml-2491-  status: source_controlled_runtime_pending_live_replay
+docs/architecture/v3-function-map.yml-2492-  # 2026-08-12：typed route-facts carrier and classifier boundary implemented.
+docs/architecture/v3-function-map.yml-2493-  # Raw request parsing is confined to the named current-turn builder; the
+docs/architecture/v3-function-map.yml-2494-  # classifier consumes only V3CurrentTurnRouteFacts. No raw Value reaches it.
+docs/architecture/v3-function-map.yml-2495-  summary: Virtual Router consumes explicit typed route facts for the current
+docs/architecture/v3-function-map.yml-2496-    request turn and never reconstructs control from request business content.
+docs/architecture/v3-function-map.yml-2497-  owner_kind: rust_ssot
+docs/architecture/v3-function-map.yml-2498-  owner_scope: >-
+docs/architecture/v3-function-map.yml-2499-    Route fact carrier and classifier boundary only; no request history, free
+docs/architecture/v3-function-map.yml-2500-    text, prompt, tool argument text, image bytes, or response/SSE inference.
+docs/architecture/v3-function-map.yml:2501:  owner_module: v3/crates/routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml-2502-  resource_bindings:
+docs/architecture/v3-function-map.yml-2503-    writes:
+docs/architecture/v3-function-map.yml-2504-    - v3.route.request_facts@V3RouteClassification
+docs/architecture/v3-function-map.yml-2505-    reads:
+docs/architecture/v3-function-map.yml:2506:    - v3.route.current_turn_facts@V3HubReqExecution05Planned
+docs/architecture/v3-function-map.yml-2507-    forbidden:
+docs/architecture/v3-function-map.yml-2508-    - request.normal_payload
+docs/architecture/v3-function-map.yml-2509-    - v3.hub.entry_protocol
+docs/architecture/v3-function-map.yml-2510-    - v3.hub.provider_protocol
+docs/architecture/v3-function-map.yml-2511-    - v3.response.provider_raw
+docs/architecture/v3-function-map.yml-2512-  canonical_types:
+docs/architecture/v3-function-map.yml-2513-  - V3CurrentTurnRouteFacts
+docs/architecture/v3-function-map.yml-2514-  - RouteClassification
+docs/architecture/v3-function-map.yml-2515-  canonical_builders:
+docs/architecture/v3-function-map.yml:2516:  - build_v3_current_turn_route_facts
+docs/architecture/v3-function-map.yml-2517-  - classify_route
+docs/architecture/v3-function-map.yml-2518-  allowed_paths:
+docs/architecture/v3-function-map.yml:2519:  - v3/crates/routecodex-v3-route-classifier/src
+docs/architecture/v3-function-map.yml-2520-  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+docs/architecture/v3-function-map.yml-2521-  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+docs/architecture/v3-function-map.yml-2522-  - v3/crates/routecodex-v3-runtime/tests
+docs/architecture/v3-function-map.yml-2523-  - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+docs/architecture/v3-function-map.yml-2524-  forbidden_paths:
+docs/architecture/v3-function-map.yml-2525-  - v3/crates/routecodex-v3-sse
+docs/architecture/v3-function-map.yml-2526-  - v3/crates/routecodex-v3-server
+docs/architecture/v3-function-map.yml-2527-  - v3/crates/routecodex-v3-provider-responses
+docs/architecture/v3-function-map.yml-2528-  - v3/crates/routecodex-v3-target
+docs/architecture/v3-function-map.yml-2529-  - MetadataCenter
+docs/architecture/v3-function-map.yml-2530-  required_tests:
+docs/architecture/v3-function-map.yml:2531:  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+docs/architecture/v3-function-map.yml-2532-  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+docs/architecture/v3-function-map.yml-2533-  required_gates:
+docs/architecture/v3-function-map.yml:2534:  - npm run test:route-classifier-semantics
+docs/architecture/v3-function-map.yml-2535-  - npm run verify:v3-resource-map
+docs/architecture/v3-function-map.yml-2536-  - npm run verify:v3-module-boundaries
+docs/architecture/v3-function-map.yml-2537-  migration_target: rust
+docs/architecture/v3-function-map.yml:2538:  owner: route-classifier owner（v3-route-classifier crate）
+docs/architecture/v3-function-map.yml-2539-  implementation_plan:
+docs/architecture/v3-function-map.yml-2540-    phase: 1
+docs/architecture/v3-function-map.yml-2541-    steps:
+docs/architecture/v3-function-map.yml-2542-    - P1: '定义 V3CurrentTurnRouteFacts typed carrier（current-turn 结构化字段，与 RouteClassification 同 crate；禁止历史/自由文本/tool 参数/图片字节）。'
+docs/architecture/v3-function-map.yml:2543:    - P2: 'build_v3_current_turn_route_facts 从现有 build_v3_router_request_facts_for_entry_with_control 的输入提取 typed 字段，使 classify_route 只消费 typed facts（不再直接扫描原始 payload）。'
+docs/architecture/v3-function-map.yml:2544:    - P3: 'nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除 payload-scanning 推断路径（硬护栏 12）。'
+docs/architecture/v3-function-map.yml:2545:    - P4: 'VR 消费方（provider-failure policy / route facts 使用者）改为只读 v3.route.current_turn_facts@V3HubReqExecution05Planned，禁止重建。'
+docs/architecture/v3-function-map.yml-2546-    status: 'source_controlled（typed carrier and builder symbols exist; live replay remains required）'
+docs/architecture/v3-function-map.yml-2547-  notes:
+docs/architecture/v3-function-map.yml-2548-  - Current-turn scope is an ownership boundary, not a license to scan historical payload.
+docs/architecture/v3-function-map.yml-2549-  - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
+docs/architecture/v3-function-map.yml-2550-  - 'Source status is not runtime closeout: install, aggregate restart, and exact positive/reverse live replay remain required before delivery.'
+docs/architecture/v3-function-map.yml-2551-- feature_id: v3.protocol_conversion_field_parity
+docs/architecture/v3-function-map.yml-2552-  owner_crates:
+docs/architecture/v3-function-map.yml-2553-  - routecodex-v3-runtime
+--
+docs/architecture/v3-function-map.yml-4458-  - npm --prefix v3 run test:install-cleanup
+docs/architecture/v3-function-map.yml-4459-  - npm run verify:v3-resource-map
+docs/architecture/v3-function-map.yml-4460-  - npm run verify:v3-module-boundaries
+docs/architecture/v3-function-map.yml-4461-  mainline_bindings:
+docs/architecture/v3-function-map.yml-4462-  - v3-install-01
+docs/architecture/v3-function-map.yml-4463-  - v3-install-02
+docs/architecture/v3-function-map.yml-4464-  - v3-install-03
+docs/architecture/v3-function-map.yml-4465-  runtime_status: direct_binary_install_live_verified_0_90_4574
+docs/architecture/v3-function-map.yml:4466:- feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-function-map.yml-4467-  status: source_controlled_runtime_boundary_verified
+docs/architecture/v3-function-map.yml-4468-  change_risk: critical
+docs/architecture/v3-function-map.yml-4469-  owner_kind: rust_project_v3_route_classification
+docs/architecture/v3-function-map.yml:4470:  owner_crate: routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:4471:  owner_file: v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml-4472-  resource_bindings: []
+docs/architecture/v3-function-map.yml-4473-  entry_symbols:
+docs/architecture/v3-function-map.yml-4474-  - classify_route
+docs/architecture/v3-function-map.yml:4475:  - build_v3_current_turn_route_facts
+docs/architecture/v3-function-map.yml-4476-  - classify_tool_call
+docs/architecture/v3-function-map.yml-4477-  - RouteClassification
+docs/architecture/v3-function-map.yml-4478-  - V3CurrentTurnRouteFacts
+docs/architecture/v3-function-map.yml-4479-  - RouteClassifierInput
+docs/architecture/v3-function-map.yml-4480-  allowed_paths:
+docs/architecture/v3-function-map.yml:4481:  - v3/crates/routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml-4482-  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+docs/architecture/v3-function-map.yml-4483-  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+docs/architecture/v3-function-map.yml-4484-  - docs/architecture/v3-mainline-call-map.yml
+docs/architecture/v3-function-map.yml-4485-  - docs/architecture/v3-function-map.yml
+docs/architecture/v3-function-map.yml-4486-  - docs/architecture/v3-verification-map.yml
+docs/architecture/v3-function-map.yml-4487-  forbidden_paths:
+docs/architecture/v3-function-map.yml-4488-  - src
+docs/architecture/v3-function-map.yml-4489-  - sharedmodule
+docs/architecture/v3-function-map.yml-4490-  required_gates:
+docs/architecture/v3-function-map.yml:4491:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml-4492-  - npm run verify:v3-module-boundaries
+docs/architecture/v3-function-map.yml-4493-  - git diff --check
+docs/architecture/v3-function-map.yml-4494-  mainline_bindings:
+docs/architecture/v3-function-map.yml:4495:  - v3-route-classifier-facts-01
+docs/architecture/v3-function-map.yml-4496-  runtime_status: source_controlled_runtime_boundary_verified
+docs/architecture/v3-function-map.yml-4497-
+docs/architecture/v3-function-map.yml-4498-- feature_id: v3.relay_runtime_core
+docs/architecture/v3-function-map.yml-4499-  status: active_skeleton
+docs/architecture/v3-function-map.yml-4500-  change_risk: critical
+docs/architecture/v3-function-map.yml-4501-  owner_kind: rust_project_v3_runtime_skeleton
+docs/architecture/v3-function-map.yml-4502-  owner_scope: Unified Relay main-loop skeleton. Single lifecycle owner for relay
+docs/architecture/v3-function-map.yml-4503-    orchestration (VR retry loop, provider action recovery, error policy loop);
+--
+docs/architecture/v3-function-map.yml-4587-  runtime_status: source_controlled_runtime_boundary_verified
+docs/architecture/v3-function-map.yml-4588-
+docs/architecture/v3-function-map.yml-4589-- feature_id: v3.history_image_cleanup
+docs/architecture/v3-function-map.yml-4590-  status: active_normalization_and_session_compat_projection
+docs/architecture/v3-function-map.yml-4591-  change_risk: medium
+docs/architecture/v3-function-map.yml-4592-  owner_kind: rust_project_v3_req_inbound_normalization
+docs/architecture/v3-function-map.yml-4593-  owner_scope: ReqInbound history-turn image normalization plus the adjacent
+docs/architecture/v3-function-map.yml-4594-    ProviderReqCompat06 session-preserving compatibility projection for a
+docs/architecture/v3-function-map.yml:4595:    selected target without multimodal/vision capability. Image facts must
+docs/architecture/v3-function-map.yml:4596:    select multimodal first; the projection is allowed only after typed target
+docs/architecture/v3-function-map.yml-4597-    selection and preserves turn/tool/continuation structure.
+docs/architecture/v3-function-map.yml-4598-  owner_crates:
+docs/architecture/v3-function-map.yml-4599-  - routecodex-v3-runtime
+docs/architecture/v3-function-map.yml-4600-  owner_files:
+docs/architecture/v3-function-map.yml-4601-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+docs/architecture/v3-function-map.yml-4602-  allowed_paths:
+docs/architecture/v3-function-map.yml-4603-  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+docs/architecture/v3-function-map.yml-4604-  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+docs/architecture/v3-function-map.yml-4605-  forbidden_paths:
+docs/architecture/v3-function-map.yml-4606-  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+docs/architecture/v3-function-map.yml-4607-  - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+docs/architecture/v3-function-map.yml-4608-  required_gates:
+docs/architecture/v3-function-map.yml-4609-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+docs/architecture/v3-function-map.yml-4610-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
+docs/architecture/v3-function-map.yml:4611:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
+docs/architecture/v3-function-map.yml:4612:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+docs/architecture/v3-function-map.yml-4613-  - npm run verify:responses-continuation-immutable-boundary
+docs/architecture/v3-function-map.yml-4614-  runtime_status: source_controlled_runtime_boundary_verified
+docs/architecture/v3-function-map.yml-4615-
+docs/architecture/v3-function-map.yml-4616-- feature_id: v3.direct_runtime_kernel_core
+docs/architecture/v3-function-map.yml-4617-  status: active_skeleton
+docs/architecture/v3-function-map.yml-4618-  change_risk: critical
+docs/architecture/v3-function-map.yml-4619-  owner_kind: rust_project_v3_runtime_direct_skeleton
+docs/architecture/v3-function-map.yml-4620-  owner_scope: Unified Direct main-loop skeleton. Single lifecycle owner for
+--
+docs/architecture/v3-function-map.yml-4797-  - npm run test:v3-workspace
+docs/architecture/v3-function-map.yml-4798-  - git diff --check
+docs/architecture/v3-function-map.yml-4799-  runtime_status: implementation_in_progress
+docs/architecture/v3-function-map.yml-4800-
+docs/architecture/v3-function-map.yml-4801-- feature_id: v3.route_policy_condition_evaluation
+docs/architecture/v3-function-map.yml-4802-  status: source_controlled_runtime_pending_live_replay
+docs/architecture/v3-function-map.yml-4803-  owner_crates:
+docs/architecture/v3-function-map.yml-4804-  - routecodex-v3-config
+docs/architecture/v3-function-map.yml:4805:  - routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml-4806-  - routecodex-v3-runtime
+docs/architecture/v3-function-map.yml-4807-  - routecodex-v3-virtual-router
+docs/architecture/v3-function-map.yml-4808-  owner_files:
+docs/architecture/v3-function-map.yml-4809-  - v3/crates/routecodex-v3-config/src/types.rs
+docs/architecture/v3-function-map.yml-4810-  - v3/crates/routecodex-v3-config/src/validate.rs
+docs/architecture/v3-function-map.yml-4811-  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+docs/architecture/v3-function-map.yml:4812:  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-function-map.yml:4813:  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml-4814-  - v3/crates/routecodex-v3-runtime/src/route_policy.rs
+docs/architecture/v3-function-map.yml-4815-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+docs/architecture/v3-function-map.yml-4816-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+docs/architecture/v3-function-map.yml-4817-  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+docs/architecture/v3-function-map.yml-4818-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_resp15_finalize.rs
+docs/architecture/v3-function-map.yml-4819-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+docs/architecture/v3-function-map.yml-4820-  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+docs/architecture/v3-function-map.yml-4821-  - v3/crates/routecodex-v3-virtual-router/src/tests/mod.rs
+--
+docs/architecture/v3-function-map.yml-4834-  - execute_v3_responses_direct_runtime_kernel_core
+docs/architecture/v3-function-map.yml-4835-  - plan_v3_responses_protocol_execution_with_provider_health
+docs/architecture/v3-function-map.yml-4836-  - execute_v3_direct_runtime_kernel_core
+docs/architecture/v3-function-map.yml-4837-  - V3VirtualRouter::resolve_route_pool_plan
+docs/architecture/v3-function-map.yml-4838-  allowed_paths:
+docs/architecture/v3-function-map.yml-4839-  - v3/crates/routecodex-v3-config/src/types.rs
+docs/architecture/v3-function-map.yml-4840-  - v3/crates/routecodex-v3-config/src/validate.rs
+docs/architecture/v3-function-map.yml-4841-  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
+docs/architecture/v3-function-map.yml:4842:  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-function-map.yml:4843:  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml:4844:  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+docs/architecture/v3-function-map.yml-4845-  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+docs/architecture/v3-function-map.yml-4846-  - v3/crates/routecodex-v3-runtime/src/route_policy.rs
+docs/architecture/v3-function-map.yml-4847-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+docs/architecture/v3-function-map.yml-4848-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+
+exec
+/bin/zsh -lc "git log -1 --format='%H%n%P%n%s' 089ee36ae; git show --format=fuller --no-patch 089ee36ae; git status --porcelain=v1" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 9117ms:
+2026-09-11 22:56:51.203 xcodebuild[83998:488883137]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:51.507 xcodebuild[83998:488883129] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-opPiTgMQ' (errno=Operation not permitted)
+2026-09-11 22:56:52.316 xcodebuild[84469:488883653]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:52.630 xcodebuild[84469:488883652] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+089ee36ae89316fb26629a8384ab021a426eed1d
+ec51c3ad7a184cb767774e9475e721a01fe6740b
+fix(v3): decode codex view_image carriers in current-turn image detection
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-SrCcrBsb' (errno=Operation not permitted)
+2026-09-11 22:56:54.394 xcodebuild[85404:488884770]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:54.713 xcodebuild[85404:488884757] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-DUrJLtoH' (errno=Operation not permitted)
+2026-09-11 22:56:55.407 xcodebuild[85879:488885327]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:55.728 xcodebuild[85879:488885301] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+commit 089ee36ae89316fb26629a8384ab021a426eed1d
+Author:     codex <codex@local>
+AuthorDate: Fri Sep 11 22:55:29 2026 -0700
+Commit:     codex <codex@local>
+CommitDate: Fri Sep 11 22:55:29 2026 -0700
+
+    fix(v3): decode codex view_image carriers in current-turn image detection
+    
+    fbab9d4：Codex view_image 的截图藏在 function_call_output.output 的
+    字符串化 JSON（input_image/file_url data: URL）里，current-turn 检测只扫
+    content/parts 且不解析字符串载体，导致 has_current_turn_image=false、
+    请求落到 longcontext/glm 而非 multimodal 池。修复：value_contains_image
+    支持字符串载体解析（JSON/data: 前缀）、递归 output 字段、识别 file_url
+    data URL。新增 codex_view_image_function_call_output_drives_multimodal_route
+    回归（红→绿）。
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-JQHhV4hD' (errno=Operation not permitted)
+2026-09-11 22:56:57.502 xcodebuild[86860:488886619]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:57.746 xcodebuild[86860:488886609] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-NKAuf1zR' (errno=Operation not permitted)
+2026-09-11 22:56:58.530 xcodebuild[87277:488887084]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:56:58.805 xcodebuild[87277:488887069] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+
+exec
+/bin/zsh -lc "nl -ba v3/crates/routecodex-v3-route-classifier/src/active_turn.rs | sed -n '480,555p;675,750p'; nl -ba v3/crates/routecodex-v3-route-classifier/src/tests.rs | sed -n '646,692p'" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+   480	        let type_value = obj
+   481	            .get("type")
+   482	            .and_then(Value::as_str)
+   483	            .map(|value| value.trim().to_ascii_lowercase())
+   484	            .unwrap_or_default();
+   485	        if type_value.contains("image") {
+   486	            part.kind = TurnPartKind::Image;
+   487	            part.has_image = true;
+   488	        }
+   489	        if type_value == "web_search" || type_value == "websearch" {
+   490	            part.kind = TurnPartKind::WebSearch;
+   491	            part.has_web_search = true;
+   492	        }
+   493	        if matches!(
+   494	            type_value.as_str(),
+   495	            "tool_call" | "tool_use" | "function_call"
+   496	        ) {
+   497	            part.kind = TurnPartKind::ToolCall;
+   498	        }
+   499	        if matches!(
+   500	            type_value.as_str(),
+   501	            "tool_result" | "tool_output" | "function_call_output"
+   502	        ) {
+   503	            part.kind = TurnPartKind::ToolOutput;
+   504	        }
+   505	        if part.kind == TurnPartKind::Text || part.kind == TurnPartKind::Other {
+   506	            if let Some(text) = obj.get("text").and_then(Value::as_str) {
+   507	                part.text = text.to_string();
+   508	            }
+   509	        }
+   510	    }
+   511	    if !part.has_image && value_contains_image(value) {
+   512	        part.has_image = true;
+   513	        if part.kind == TurnPartKind::Text {
+   514	            part.kind = TurnPartKind::Image;
+   515	        }
+   516	    }
+   517	    part
+   518	}
+   519	
+   520	fn project_responses_entries(value: &Value) -> Vec<ResponsesTurnEntry> {
+   521	    let items = match value {
+   522	        Value::Array(items) => items.clone(),
+   523	        Value::String(text) if !text.trim().is_empty() => {
+   524	            vec![json!({"type": "input_text", "text": text})]
+   525	        }
+   526	        _ => return Vec::new(),
+   527	    };
+   528	    project_responses_entries_from_array(&items)
+   529	}
+   530	
+   531	pub fn project_responses_entries_from_array(items: &[Value]) -> Vec<ResponsesTurnEntry> {
+   532	    items.iter().map(project_responses_entry).collect()
+   533	}
+   534	
+   535	fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
+   536	    let mut entry = ResponsesTurnEntry::default();
+   537	    let role = responses_role_for_value(value);
+   538	    entry.role = role;
+   539	    let kind = responses_kind_for_value(value);
+   540	    entry.kind = kind;
+   541	    entry.has_image = value_contains_image(value);
+   542	    entry.has_web_search = responses_entry_has_web_search(value);
+   543	    entry.is_tool_output_error =
+   544	        matches!(kind, ResponsesTurnKind::ToolOutput) && tool_output_is_error(value);
+   545	    if matches!(
+   546	        kind,
+   547	        ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
+   548	    ) {
+   549	        if let Some(category) = tool_category_from_call_value(value) {
+   550	            entry.tool_call_category = Some(category);
+   551	        }
+   552	    }
+   553	    entry
+   554	}
+   555	
+   675	        return Some(items.clone());
+   676	    }
+   677	    let raw = value.as_str()?.trim();
+   678	    if raw.is_empty() {
+   679	        return None;
+   680	    }
+   681	    serde_json::from_str::<Value>(raw)
+   682	        .ok()
+   683	        .and_then(|parsed| parsed.as_array().cloned())
+   684	}
+   685	
+   686	fn value_contains_image(value: &Value) -> bool {
+   687	    match value {
+   688	        Value::Array(items) => items.iter().any(value_contains_image),
+   689	        // fbab9d4: Codex view_image carriers embed the screenshot as a
+   690	        // stringified JSON array (or a bare data URL) inside
+   691	        // `function_call_output.output`; decode and recurse.
+   692	        Value::String(text) => string_carries_image(text),
+   693	        Value::Object(values) => {
+   694	            let type_value = values
+   695	                .get("type")
+   696	                .and_then(Value::as_str)
+   697	                .map(|value| value.trim().to_ascii_lowercase())
+   698	                .unwrap_or_default();
+   699	            if type_value.contains("image") {
+   700	                return true;
+   701	            }
+   702	            if values.contains_key("image_url") {
+   703	                return true;
+   704	            }
+   705	            if values.contains_key("inline_data") || values.contains_key("file_data") {
+   706	                return true;
+   707	            }
+   708	            if values
+   709	                .get("data")
+   710	                .and_then(Value::as_str)
+   711	                .map(|value| value.trim().to_ascii_lowercase())
+   712	                .is_some_and(|value| value.starts_with("data:image/"))
+   713	            {
+   714	                return true;
+   715	            }
+   716	            if values
+   717	                .get("file_url")
+   718	                .and_then(Value::as_str)
+   719	                .map(|value| value.trim().to_ascii_lowercase())
+   720	                .is_some_and(|value| value.starts_with("data:image/"))
+   721	            {
+   722	                return true;
+   723	            }
+   724	            ["content", "parts", "output"]
+   725	                .into_iter()
+   726	                .filter_map(|field| values.get(field))
+   727	                .any(value_contains_image)
+   728	        }
+   729	        _ => false,
+   730	    }
+   731	}
+   732	
+   733	fn string_carries_image(text: &str) -> bool {
+   734	    let trimmed = text.trim();
+   735	    if trimmed.starts_with("data:image/") {
+   736	        return true;
+   737	    }
+   738	    if trimmed.starts_with('[') || trimmed.starts_with('{') {
+   739	        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+   740	            return value_contains_image(&value);
+   741	        }
+   742	    }
+   743	    false
+   744	}
+   646	    assert!(
+   647	        !route.reasoning.contains("multimodal:metadata-attachment"),
+   648	        "negative case must not log multimodal:metadata-attachment; route={:?}",
+   649	        route
+   650	    );
+   651	}
+   652	
+   653	// fbab9d4: Codex view_image returns the screenshot inside a
+   654	// `function_call_output` whose `output` is a stringified JSON array of
+   655	// input_image blocks carrying data: URLs. The current-turn walker must
+   656	// decode that carrier and set has_current_turn_image so the request
+   657	// routes to the configured multimodal pool (which excludes glm-5.3).
+   658	#[test]
+   659	fn codex_view_image_function_call_output_drives_multimodal_route() {
+   660	    use serde_json::json;
+   661	    let request = json!({
+   662	        "model": "gpt-5.6-sol",
+   663	        "input": [
+   664	            {"type":"message","role":"user","content":[
+   665	                {"type":"input_text","text":"show me the chart"}
+   666	            ]},
+   667	            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
+   668	            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
+   669	        ]
+   670	    });
+   671	    let entries = project_v3_current_turn_entries_from_value(&request);
+   672	    let signals = build_v3_current_turn_route_facts(&entries);
+   673	    assert!(
+   674	        signals.has_current_turn_image,
+   675	        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
+   676	    );
+   677	    let route = classify_route(&RouteClassifierInput {
+   678	        latest_message_from_user: signals.latest_message_from_user,
+   679	        has_image_attachment: signals.has_current_turn_image,
+   680	        has_current_turn_tool_output: signals.has_current_turn_tool_output,
+   681	        ..Default::default()
+   682	    });
+   683	    assert_eq!(route.route_name, "multimodal");
+   684	    assert!(
+   685	        route.reasoning.contains("multimodal:metadata-attachment"),
+   686	        "expected multimodal:metadata-attachment reasoning, got {:?}",
+   687	        route.reasoning
+   688	    );
+   689	}
+   690	
+   691	// Positive projection: Responses tool-side entries must classify as Tool
+   692	// (and the typed carrier must distinguish them from the rare explicit
+
+exec
+/bin/zsh -lc 'cargo fmt --manifest-path v3/Cargo.toml --all -- --check' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 1132ms:
+exec
+/bin/zsh -lc 'npm run test:route-classifier-semantics' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+exec
+/bin/zsh -lc 'git diff --numstat ec51c3ad7 089ee36ae; git diff --name-only ec51c3ad7 089ee36ae; rg -n "route_classifier_local_owner|route-classifier-semantics|v3-route-classifier-facts-01" docs/architecture/v3-mainline-call-map.yml docs/architecture/v3-verification-map.yml docs/architecture/v3-function-map.yml' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+exec
+/bin/zsh -lc 'npm run verify:v3-module-boundaries' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ exited 1 in 59ms:
+node:internal/modules/package_json_reader:314
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'yaml' imported from /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911/v3/scripts/architecture/verify-v3-module-boundaries.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)
+    at packageResolve (node:internal/modules/esm/resolve:768:81)
+    at moduleResolve (node:internal/modules/esm/resolve:855:18)
+    at defaultResolve (node:internal/modules/esm/resolve:985:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:731:20)
+    at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+    at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:310:38)
+    at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v22.22.2
+
+ exited 86 in 324ms:
+
+> routecodex@0.90.4601 test:v3-route-classifier-semantics
+> npm --prefix v3 run test:v3-route-classifier-semantics
+
+
+> routecodex-v3@0.90.4779 test:v3-route-classifier-semantics
+> CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-route-classifier --lib -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime nodes::tests --lib -- --nocapture && CARGO_NET_OFFLINE=true npm run test:v3-p5-router-target
+
+[v3-cargo-test] EPERM: operation not permitted, mkdir '/Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911/v3/target/.routecodex-v3-test.lock'
+
+ succeeded in 5209ms:
+2026-09-11 22:57:34.366 xcodebuild[3571:488906671]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:57:34.588 xcodebuild[3571:488906654] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-ccMCQg4b' (errno=Operation not permitted)
+2026-09-11 22:57:35.283 xcodebuild[4040:488907289]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:57:35.539 xcodebuild[4040:488907282] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+26	1	v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+38	0	v3/crates/routecodex-v3-route-classifier/src/tests.rs
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-r8Q29cVj' (errno=Operation not permitted)
+2026-09-11 22:57:37.015 xcodebuild[5804:488909284]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:57:37.296 xcodebuild[5804:488909265] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-1EUykDED' (errno=Operation not permitted)
+2026-09-11 22:57:37.929 xcodebuild[6440:488909923]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 22:57:38.173 xcodebuild[6440:488909912] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+v3/crates/routecodex-v3-route-classifier/src/tests.rs
+docs/architecture/v3-mainline-call-map.yml:7036:  owner_feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-mainline-call-map.yml:7039:  - step_id: v3-route-classifier-facts-01
+docs/architecture/v3-mainline-call-map.yml:7048:    owner_feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-mainline-call-map.yml:7131:    owner_feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-verification-map.yml:1778:  - npm run test:route-classifier-semantics
+docs/architecture/v3-verification-map.yml:2927:- feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-verification-map.yml:2935:  - docs/architecture/v3-function-map.yml#v3.route_classifier_local_owner
+docs/architecture/v3-function-map.yml:2534:  - npm run test:route-classifier-semantics
+docs/architecture/v3-function-map.yml:4466:- feature_id: v3.route_classifier_local_owner
+docs/architecture/v3-function-map.yml:4495:  - v3-route-classifier-facts-01
+
+exec
+/bin/zsh -lc 'rg -n "required_gates|test:v3-route-classifier-semantics|verify:v3-module-boundaries" docs/architecture/v3-verification-map.yml | tail -n 30' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+2945:  - npm run verify:v3-module-boundaries
+2959:  required_gates:
+2978:  required_gates:
+2992:  required_gates:
+3004:  required_gates:
+3023:  required_gates:
+3057:  required_gates:
+3066:  - npm run verify:v3-module-boundaries
+3099:  required_gates:
+3107:  - npm run verify:v3-module-boundaries
+3147:  required_gates:
+3154:  - npm run verify:v3-module-boundaries
+3187:  required_gates:
+3192:  - npm run verify:v3-module-boundaries
+3218:  required_gates:
+3223:  - npm run verify:v3-module-boundaries
+3261:  required_gates:
+3271:  - npm run verify:v3-module-boundaries
+3319:  required_gates:
+3332:  - npm run verify:v3-module-boundaries
+3373:  required_gates:
+3392:  required_gates:
+3403:  required_gates:
+3414:  required_gates:
+3424:  required_gates:
+3434:  required_gates:
+3444:  required_gates:
+3512:  required_gates:
+3520:  - npm run verify:v3-module-boundaries
+3564:  required_gates:
+
+exec
+/bin/zsh -lc "nl -ba docs/architecture/v3-function-map.yml | sed -n '4466,4496p'; nl -ba docs/architecture/v3-verification-map.yml | sed -n '2927,2950p'; nl -ba docs/architecture/v3-mainline-call-map.yml | sed -n '7030,7055p'" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+  4466	- feature_id: v3.route_classifier_local_owner
+  4467	  status: source_controlled_runtime_boundary_verified
+  4468	  change_risk: critical
+  4469	  owner_kind: rust_project_v3_route_classification
+  4470	  owner_crate: routecodex-v3-route-classifier
+  4471	  owner_file: v3/crates/routecodex-v3-route-classifier/src/lib.rs
+  4472	  resource_bindings: []
+  4473	  entry_symbols:
+  4474	  - classify_route
+  4475	  - build_v3_current_turn_route_facts
+  4476	  - classify_tool_call
+  4477	  - RouteClassification
+  4478	  - V3CurrentTurnRouteFacts
+  4479	  - RouteClassifierInput
+  4480	  allowed_paths:
+  4481	  - v3/crates/routecodex-v3-route-classifier
+  4482	  - v3/crates/routecodex-v3-virtual-router/src/lib.rs
+  4483	  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  4484	  - docs/architecture/v3-mainline-call-map.yml
+  4485	  - docs/architecture/v3-function-map.yml
+  4486	  - docs/architecture/v3-verification-map.yml
+  4487	  forbidden_paths:
+  4488	  - src
+  4489	  - sharedmodule
+  4490	  required_gates:
+  4491	  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  4492	  - npm run verify:v3-module-boundaries
+  4493	  - git diff --check
+  4494	  mainline_bindings:
+  4495	  - v3-route-classifier-facts-01
+  4496	  runtime_status: source_controlled_runtime_boundary_verified
+  2927	- feature_id: v3.route_classifier_local_owner
+  2928	  status: source_controlled_runtime_boundary_verified
+  2929	  change_risk: critical
+  2930	  owner_kind: rust_project_v3_route_classification
+  2931	  owner_scope: Pure route classification consumed by Virtual Router and runtime request-facts builders; no payload patches, no provider-specific branches, no control state in request/response bodies.
+  2932	  owner_modules:
+  2933	  - v3/crates/routecodex-v3-route-classifier
+  2934	  design:
+  2935	  - docs/architecture/v3-function-map.yml#v3.route_classifier_local_owner
+  2936	  - docs/architecture/v3-mainline-call-map.yml#v3.route_classifier.facts_classification
+  2937	  contract:
+  2938	  - docs/architecture/v3-resource-operation-map.yml
+  2939	  - docs/architecture/v3-mainline-call-map.yml
+  2940	  required_unit:
+  2941	  - classify_route consumes only typed request facts and returns a classification decision; it never reads raw payloads or writes control state into bodies.
+  2942	  - build_v3_current_turn_route_facts reads protocol fields only and emits typed current-turn facts; business text does not create route-control state.
+  2943	  required_gates:
+  2944	  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+  2945	  - npm run verify:v3-module-boundaries
+  2946	  - git diff --check
+  2947	  completion_rule:
+  2948	    source: Route classifier unit tests, module boundary gate, and diff check pass.
+  2949	    runtime: No install or live replay is required because classification is consumed before provider transport and cannot enter payload paths.
+  2950	- feature_id: v3.relay_runtime_core
+  7030	      resource_flow:
+  7031	        consumes: [v3.build.dependency_cache, v3.build.ordinary_cargo_target]
+  7032	        produces: [v3.build.assembled_binary, v3.build.install_target]
+  7033	        side_channel_reads: []
+  7034	        side_channel_writes: []
+  7035	- chain_id: v3.route_classifier.facts_classification
+  7036	  owner_feature_id: v3.route_classifier_local_owner
+  7037	  summary: Route facts classification stays local to the route-classifier crate; Virtual Router and runtime request-facts builders consume classification decisions, never payload patches.
+  7038	  edges:
+  7039	  - step_id: v3-route-classifier-facts-01
+  7040	    from_node: V3RouterRequestFacts
+  7041	    to_node: V3RouteClassification
+  7042	    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+  7043	    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+  7044	    callee_symbol: classify_route
+  7045	    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+  7046	    status: anchored
+  7047	    binding_kind: v3_route_classifier_facts
+  7048	    owner_feature_id: v3.route_classifier_local_owner
+  7049	    resource_flow:
+  7050	      consumes: [v3.request.normal_payload]
+  7051	      produces: [v3.route.request_facts]
+  7052	      side_channel_reads: []
+  7053	      side_channel_writes: []
+  7054	- chain_id: v3.sse.protocol_codec_projection_boundary
+  7055	  owner_feature_id: v3.sse_protocol_codec_projection_boundary
+
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[{"module":"v3 route classifier","owner":"v3.route_classifier_local_owner; routecodex-v3-route-classifier","paths":"Changed paths are within allowed v3/crates/routecodex-v3-route-classifier/src; no forbidden src or sharedmodule paths touched.","edges":"v3-route-classifier-facts-01: runtime build_v3_router_request_facts_for_entry_with_control -> classify_route; typed current-turn entries are projected by project_v3_current_turn_entries_from_value before route facts are built.","resources":"Writes v3.route.request_facts@V3RouteClassification; reads v3.route.current_turn_facts@V3HubReqExecution05Planned; no control state is added to request/response payloads. The new image detection remains in the typed-boundary projection path.","gates":"git diff --check passed; cargo fmt --manifest-path v3/Cargo.toml --all -- --check passed. Required cargo test could not start because v3/target/.cargo-build-lock was not writable (EPERM). Required npm run verify:v3-module-boundaries could not start because package yaml was unavailable (ERR_MODULE_NOT_FOUND)."}],"findings":[{"severity":"P1","file":"docs/architecture/v3-verification-map.yml","line":2944,"rule":"Required route-classifier verification gate","evidence":"The feature contract requires cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier. The exact targeted regression command and the mapped npm test both stopped before compilation with EPERM opening/creating v3/target/.cargo-build-lock or v3/target/.routecodex-v3-test.lock, so green test evidence is absent for this commit.","remediation":"Run the mapped route-classifier cargo test, including codex_view_image_function_call_output_drives_multimodal_route, in a writable checkout with the required Cargo target state; retain the complete command result."},{"severity":"P1","file":"docs/architecture/v3-verification-map.yml","line":2945,"rule":"Required module-boundary verification gate","evidence":"The feature contract requires npm run verify:v3-module-boundaries. The command failed before evaluating the changed paths because Node could not resolve package yaml (ERR_MODULE_NOT_FOUND). Boundary compliance therefore lacks the required executable evidence.","remediation":"Install or otherwise restore the repository-declared yaml dependency in the review environment, then rerun npm run verify:v3-module-boundaries and retain its result."}]}
+hook: Stop
+hook: Stop
+hook: Stop Completed
+hook: Stop Completed
+tokens used
+72,387
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[{"module":"v3 route classifier","owner":"v3.route_classifier_local_owner; routecodex-v3-route-classifier","paths":"Changed paths are within allowed v3/crates/routecodex-v3-route-classifier/src; no forbidden src or sharedmodule paths touched.","edges":"v3-route-classifier-facts-01: runtime build_v3_router_request_facts_for_entry_with_control -> classify_route; typed current-turn entries are projected by project_v3_current_turn_entries_from_value before route facts are built.","resources":"Writes v3.route.request_facts@V3RouteClassification; reads v3.route.current_turn_facts@V3HubReqExecution05Planned; no control state is added to request/response payloads. The new image detection remains in the typed-boundary projection path.","gates":"git diff --check passed; cargo fmt --manifest-path v3/Cargo.toml --all -- --check passed. Required cargo test could not start because v3/target/.cargo-build-lock was not writable (EPERM). Required npm run verify:v3-module-boundaries could not start because package yaml was unavailable (ERR_MODULE_NOT_FOUND)."}],"findings":[{"severity":"P1","file":"docs/architecture/v3-verification-map.yml","line":2944,"rule":"Required route-classifier verification gate","evidence":"The feature contract requires cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier. The exact targeted regression command and the mapped npm test both stopped before compilation with EPERM opening/creating v3/target/.cargo-build-lock or v3/target/.routecodex-v3-test.lock, so green test evidence is absent for this commit.","remediation":"Run the mapped route-classifier cargo test, including codex_view_image_function_call_output_drives_multimodal_route, in a writable checkout with the required Cargo target state; retain the complete command result."},{"severity":"P1","file":"docs/architecture/v3-verification-map.yml","line":2945,"rule":"Required module-boundary verification gate","evidence":"The feature contract requires npm run verify:v3-module-boundaries. The command failed before evaluating the changed paths because Node could not resolve package yaml (ERR_MODULE_NOT_FOUND). Boundary compliance therefore lacks the required executable evidence.","remediation":"Install or otherwise restore the repository-declared yaml dependency in the review environment, then rerun npm run verify:v3-module-boundaries and retain its result."}]}

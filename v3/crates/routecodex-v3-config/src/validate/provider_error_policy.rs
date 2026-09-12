@@ -291,8 +291,10 @@ fn validate_provider_error_path(
 
 fn default_provider_error_path() -> Vec<V3ProviderDispositionStepManifest> {
     vec![
+        // aedeac2/a6a1985 不变量：候选仍在时，typed provider 失败默认
+        // WaitThenReselect，而不是 RetrySame；客户端错误仅在池枯竭后投射。
         V3ProviderDispositionStepManifest::WaitRetry {
-            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            retry_mode: V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
             max_attempts: 3,
             backoff_ms: 0,
             backoff_multiplier: None,

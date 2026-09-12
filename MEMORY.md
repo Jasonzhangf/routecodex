@@ -1,4 +1,3 @@
-
 ## 2026-07-25 - V3 Responses Relay accepts known reasoning summary SSE events
 - Verified root cause: Responses Relay provider SSE codec rejected `response.reasoning_summary_part.added` / related known OpenAI Responses reasoning events as unsupported, which entered provider failure policy and triggered switch/cooldown.
 - Durable rule: known Responses reasoning summary/content/content_part events must materialize into terminal output items at `responses_relay_runtime` provider event codec; unknown `response.*` events still fail-fast. Do not convert known reasoning summary events into provider failure or silent discard.
@@ -48,13 +47,6 @@
 - Required lock: Rust unit covers positive projection, negative clamp to zero, and no-op without `usageLogInfo.clientInjectWaitMs`; Jest source scan rejects reintroduced local TS `attachTimingBreakdown`, `clientInjectWaitMsRaw`, and local `hubResponseExcludedMs` projection.
 - Native JSON boundary rule: TS wrapper must not send live `sseStream` objects through native JSON serialization; it strips `sseStream` before the native call and reattaches the exact original reference afterward.
 - This closes only timing projection. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage recorder, usage extraction / finish reason, stream/body capture, and provider context/error mapping; those remain separate owner slices.
-
-# 2026-07-12: Provider-response timing breakdown projection is Rust-owned
-
-- `convertProviderResponseIfNeeded` must not locally rebuild `timingBreakdown.clientInjectWaitMs` or default `hubResponseExcludedMs` in TS. It calls `buildProviderResponseTimingBreakdownWithNative(...)`, backed by Rust/NAPI `buildProviderResponseTimingBreakdownJson`.
-- Rust owner: `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/provider_response_shared_pure_blocks/payload_extraction.rs::build_provider_response_timing_breakdown`.
-- Required lock: Rust unit and Jest source scan must reject local TS `function attachTimingBreakdown`, `clientInjectWaitMsRaw`, and `hubResponseExcludedMs: response.timingBreakdown?.hubResponseExcludedMs ?? clientInjectWaitMs`; tests must also prove `sseStream` identity remains TS host IO and does not enter the native JSON payload.
-- This closes only a timing projection sub-slice. `convertProviderResponseIfNeeded` still has TS host glue for SSE wrapper error remap, MetadataCenter sync, stage recorder, and stream/body capture; those remain separate owner slices.
 
 # 2026-07-12: Provider-response choices-array bridge debug details are Rust-owned
 

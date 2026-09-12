@@ -123,6 +123,27 @@ pub(super) fn project_openai_chat_reasoning_summary_policy(
     Ok(())
 }
 
+pub(super) fn project_openai_chat_reasoning_context_policy(
+    projected: &mut Value,
+) -> Result<(), String> {
+    let Some(row) = projected.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(context) = row.remove("reasoning_context_policy") else {
+        return Ok(());
+    };
+    let valid = context
+        .as_str()
+        .is_some_and(|value| matches!(value, "auto" | "current_turn" | "all_turns"));
+    if !valid {
+        return Err(
+            "MalformedOutboundField target_protocol=openai_chat path=$.request.reasoning_context_policy"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn reasoning_effort_rank(value: &str) -> Option<u8> {
     match value {
         "none" | "minimal" => Some(0),

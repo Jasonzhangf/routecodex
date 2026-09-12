@@ -686,6 +686,10 @@ fn value_as_array(value: &Value) -> Option<Vec<Value>> {
 fn value_contains_image(value: &Value) -> bool {
     match value {
         Value::Array(items) => items.iter().any(value_contains_image),
+        // fbab9d4: Codex view_image carriers embed the screenshot as a
+        // stringified JSON array (or a bare data URL) inside
+        // `function_call_output.output`; decode and recurse.
+        Value::String(text) => string_carries_image(text),
         Value::Object(values) => {
             let type_value = values
                 .get("type")
@@ -709,11 +713,32 @@ fn value_contains_image(value: &Value) -> bool {
             {
                 return true;
             }
-            ["content", "parts"]
+            if values
+                .get("file_url")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .is_some_and(|value| value.starts_with("data:image/"))
+            {
+                return true;
+            }
+            ["content", "parts", "output"]
                 .into_iter()
                 .filter_map(|field| values.get(field))
                 .any(value_contains_image)
         }
         _ => false,
     }
+}
+
+fn string_carries_image(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with("data:image/") {
+        return true;
+    }
+    if trimmed.starts_with('[') || trimmed.starts_with('{') {
+        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+            return value_contains_image(&value);
+        }
+    }
+    false
 }

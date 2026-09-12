@@ -1894,9 +1894,11 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         terminal.error_chain.as_deref(),
         Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
     );
+    // 统一错误模型：pinned 目标已进入健康冷却时，不再消耗 isolated/sustained
+    // gate 等待（不给不可用 provider 制造额外延迟），立即以类型化错误链终止。
     assert!(
-        started.elapsed() >= Duration::from_millis(2_000),
-        "pinned health-unavailable path bypassed the configured isolated and sustained gates"
+        started.elapsed() < Duration::from_millis(2_000),
+        "health cooldown must short-circuit the isolated/sustained gate waits"
     );
     assert_eq!(
         continuation_state.len().unwrap(),

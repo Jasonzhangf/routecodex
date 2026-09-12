@@ -291,7 +291,7 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_event_type(event_type: &str
     )
 }
 
-pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_event(
+pub(crate) fn is_v3_provider_sse_transport_keepalive_event(
     event_name: Option<&str>,
     event: &Value,
 ) -> bool {
@@ -479,7 +479,26 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
     is_v3_provider_sse_keepalive_text(data)
         || serde_json::from_str::<Value>(data.trim())
             .ok()
-            .is_some_and(|value| value.is_null())
+            .is_some_and(|value| {
+                value.is_null() || is_v3_provider_sse_transport_keepalive_event(None, &value)
+            })
+}
+
+pub(crate) fn is_v3_provider_sse_transport_keepalive_frame(fields: &[SseField]) -> bool {
+    let data = collect_v3_provider_sse_json_data(fields);
+    if is_v3_provider_sse_transport_keepalive_data(&data) {
+        return true;
+    }
+    let Some(event_name) = fields.iter().find_map(|field| match field {
+        SseField::Named { name, value } if name == "event" => Some(value.as_str()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Ok(event) = serde_json::from_str::<Value>(data.trim()) else {
+        return false;
+    };
+    is_v3_provider_sse_transport_keepalive_event(Some(event_name), &event)
 }
 
 pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[SseField]) -> bool {
@@ -492,7 +511,7 @@ pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[S
     }
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_transport_keepalive_data(&data)
-        || is_v3_provider_responses_sse_transport_keepalive_event(
+        || is_v3_provider_sse_transport_keepalive_event(
             None,
             &serde_json::from_str::<Value>(data.trim()).unwrap_or(Value::Null),
         )
@@ -502,9 +521,7 @@ pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[S
     event_name.is_some_and(|name| {
         serde_json::from_str::<Value>(data.trim())
             .ok()
-            .is_some_and(|event| {
-                is_v3_provider_responses_sse_transport_keepalive_event(Some(name), &event)
-            })
+            .is_some_and(|event| is_v3_provider_sse_transport_keepalive_event(Some(name), &event))
     })
 }
 

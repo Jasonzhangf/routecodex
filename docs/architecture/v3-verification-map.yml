@@ -1830,8 +1830,9 @@ features:
   - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
   - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents `thinking.budget_tokens`.
   - Responses reasoning.effort is preserved until concrete target selection; DeepSeek lower/unknown values project to high and xhigh/max values project to max; MiniMax active effort uses adaptive thinking without `output_config.effort`.
-  - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat and Gemini reject them when the target has no equivalent
-    request policy, while Anthropic consumes a valid summary policy only as a registered local response-shaping hint with no provider-wire field. A response reasoning field never authorizes reconstructing
+  - Responses reasoning.summary, reasoning.context, and reasoning.mode remain separate Chat payload extensions and round-trip to Responses; OpenAI Chat consumes valid context policy
+    as source-roundtrip-only before wire because it has no request policy field, while Gemini rejects reasoning.context/mode when the target has no equivalent request policy, and Anthropic consumes
+    a valid summary policy only as a registered local response-shaping hint with no provider-wire field. A response reasoning field never authorizes reconstructing
     the source request policy.
   - Anthropic thinking.budget_tokens and Gemini thinkingBudget share the numeric budget extension only after target constraint validation; OpenAI targets reject numeric budget rather than compressing it
     into qualitative effort.

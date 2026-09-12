@@ -1,0 +1,1907 @@
+Reading additional input from stdin...
+OpenAI Codex v0.153.4
+--------
+workdir: /Users/fanzhang/Documents/github/routecodex/playground/main-final-0911
+model: gpt-5.6-luna
+provider: oauth
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a09434-0330-7dc3-8d01-5e4d660df917
+--------
+user
+# Review Standards（AGY / Codex 共享）
+
+只读审查当前变更。先判断任务范围与规则适用性，再检查质量；不修改代码，不替作者扩大任务。
+
+## 1. 强制质量边界
+
+- 功能满足当前契约；关键成功与失败路径有相称的验证。
+- 不引入安全漏洞、数据丢失、共享状态损坏、吞错、伪造成功或证据失真。
+- 遵守已声明的 owner、允许/禁止路径、控制与业务数据边界。
+- 证据绑定准确的源代码、依赖/配置、产物和必要环境；缺少适用的必需证据必须阻断。
+- 遵守用户授权、他人工作保护和安全 Git/发布边界。
+
+项目特有语言、pipeline、固定 operation/hook、maps 和 gate 只在该项目声明且
+受本次变更影响时适用。不得为普通任务强制新增整套架构或治理骨架。
+已声明错误策略与协议适配不是临时补偿；按真实语义判断。
+
+## 2. 消融与奥卡姆剃刀
+
+检查删除、复用、直接实现是否能减少实际复杂度并满足同一契约。
+函数、配置、注册表、hook 不预设优先级；一个明确条件不必换成状态机。
+优先少概念、少重复事实、少间接层，不以文件数、行数或设计模式名称裁决。
+
+阻断结构问题必须给出具体证据：例如两个 owner 导致状态分歧、重复规则会
+产生不一致行为、跨层耦合破坏已声明边界，或新增复杂度造成实质维护回归。
+指出受影响路径、后果及最小修复方向。
+
+“还能更短”“另一个组织方式更优雅”“超过 1k 行”本身仅是建议。
+作者说明实际设计取舍即可，不必逐分支证明不存在更简单方案。
+不要为消融增加逐项证明表、审批层或重复检查。
+
+## 3. 审查方法
+
+1. 读任务、diff 和受影响调用链，确认真实行为与 owner。
+2. 检查适用的质量、安全、契约和证据门禁；只读相关 maps。
+3. 检查实质结构回归与可选简化，明确区分。
+4. 检查验证是否覆盖当前风险。未改变相关输入且仍有效的证据可以复用；
+   不因 review 结束而要求无条件重新构建、安装、重启或全套回归。
+5. 报告高置信问题；每条给 file、line、失败条件/后果与最小修复方向。
+
+Collab、Memory、Guidance 默认辅助。它们缺失、未关闭或没有新增记录，不能
+单独判定工程质量失败。实际并发共享写入缺少可靠隔离、或已声明必需 gate
+被跳过，仍阻断相关操作。
+
+未触及历史问题一般建议处理；仅在直接影响当前安全、契约、证据或必需
+交付时阻断，并说明因果关系。
+
+## 4. 严重度与 controller
+
+- **P0**：严重安全、数据损坏、不可恢复影响、证据伪造等明确硬后果。
+- **P1**：当前功能/契约错误、必需验证缺失、授权边界违反、具有具体后果的
+  实质结构回归。必须说明触发条件或受影响不变量。
+- **P2**：可选简化、可读性、风格、无当前影响的历史问题。
+
+无 P0/P1 才可 PASS。P2 不阻断，不要求作者为每条建议申请豁免。
+输出遵守调用方 JSON 契约；无证据不编造问题，无最终结论不声称 PASS。
+
+# Codex / AGY 只读 review 输出契约
+
+审查规则、适用性、消融门禁与严重度唯一真源为同目录 `review-standards.md`。按该文件检查本次 scope；本文件只定义输出，不复制第二套治理规则。
+
+输出严格为 supplied JSON Schema 的一个对象。禁止 Markdown、代码围栏、`VERDICT`、`PASS`、`FAIL`、confidence 或自行裁决。
+
+- `contract_version` 固定为 `"1"`。
+- `scope` 回显 controller 给出的 `mode`、`commit`、`base`；`uncommitted` 也可将当前 HEAD 作为只读锚点填入 `commit`。不要填入其他提交。
+- `module_boundary_evidence` 每个涉及模块写 `module`、`owner`、`paths`、`edges`、`resources`、`gates`。按 standards 记录实际边界和验证；不适用项给出 scope 理由，缺失的必需证据按标准进入 findings。
+- `findings` 仅写可核验证据的问题：`severity`（P0/P1/P2）、`file`、正整数 `line`、`rule`、`evidence`、`remediation`。严重度遵循 `review-standards.md`，不在此维护副本。
+- 空 `findings` 只表示未发现阻塞问题；controller 独立裁决。P0/P1 必须写入；P2 可记录，不阻塞。
+
+Review scope: mode=commit; commit=089ee36ae; base=ec51c3ad7. Repo: /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911 (branch bug/fbab9d4-multimodal-0911).
+Focus: bug fbab9d4 — codex view_image function_call_output carriers (stringified JSON output with input_image/file_url data URLs) must set has_current_turn_image so the request routes to the configured multimodal pool. Round-1 findings were environment-only (cargo lock EPERM, missing yaml dependency); the environment now has v3/node_modules installed and no concurrent build. Executed receipts: route-classifier targeted test codex_view_image_function_call_output_drives_multimodal_route 1/1 pass, full classifier suite 32/32 pass, npm run verify:v3-module-boundaries ok.
+The controller owns PASS/FAIL. Do not output VERDICT, PASS, FAIL, confidence, or a reviewer decision.
+Return only one JSON object matching the supplied output schema. Empty findings means no blocking finding was found.
+Read only. Do not modify the repository, tests, configuration, generated files, or review evidence.
+warning: clamping SessionEnd hook timeout to 3s in /Users/fanzhang/.codex/hooks.json
+hook: SessionStart
+hook: SessionStart
+hook: SessionStart
+hook: SessionStart Completed
+hook: SessionStart Completed
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+hook: UserPromptSubmit Completed
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[],"findings":[]}
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[],"findings":[]}
+exec
+/bin/zsh -lc 'git status --short && git show --stat --oneline --decorate --no-renames 089ee36ae && git diff --no-ext-diff --unified=80 ec51c3ad7 089ee36ae -- v3 docs package.json' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 10005ms:
+2026-09-11 23:00:52.328 xcodebuild[11210:489066983]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:00:52.717 xcodebuild[11210:489066965] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-LvoKSjfy' (errno=Operation not permitted)
+2026-09-11 23:00:53.530 xcodebuild[11876:489067855]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:00:53.896 xcodebuild[11876:489067847] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+ M v3/package-lock.json
+ M v3/package.json
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-qqYT3kFM' (errno=Operation not permitted)
+2026-09-11 23:00:55.733 xcodebuild[13223:489069800]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:00:56.052 xcodebuild[13223:489069789] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-PGgbANqY' (errno=Operation not permitted)
+2026-09-11 23:00:56.886 xcodebuild[13992:489070788]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:00:57.199 xcodebuild[13992:489070776] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+089ee36ae (HEAD -> bug/fbab9d4-multimodal-0911) fix(v3): decode codex view_image carriers in current-turn image detection
+ .../src/active_turn.rs                             | 27 ++++++++++++++-
+ .../routecodex-v3-route-classifier/src/tests.rs    | 38 ++++++++++++++++++++++
+ 2 files changed, 64 insertions(+), 1 deletion(-)
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-SZCDjETd' (errno=Operation not permitted)
+2026-09-11 23:00:59.059 xcodebuild[15327:489072540]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:00:59.459 xcodebuild[15327:489072503] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-bCZcSFLj' (errno=Operation not permitted)
+2026-09-11 23:01:00.120 xcodebuild[15859:489073393]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:00.511 xcodebuild[15859:489073386] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+index 0295793e2..d5a4ac997 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+@@ -609,111 +609,136 @@ fn responses_kind_for_value(value: &Value) -> ResponsesTurnKind {
+     }
+     if type_value == "reasoning" {
+         return ResponsesTurnKind::Reasoning;
+     }
+     ResponsesTurnKind::Other
+ }
+ 
+ fn responses_entry_has_web_search(value: &Value) -> bool {
+     let type_value = value
+         .get("type")
+         .and_then(Value::as_str)
+         .map(|value| value.trim().to_ascii_lowercase())
+         .unwrap_or_default();
+     // web_search_call is a tool-call type; web_search_part inside content[] is the route fact.
+     matches!(type_value.as_str(), "web_search" | "websearch")
+ }
+ 
+ fn tool_output_is_error(value: &Value) -> bool {
+     value
+         .get("output")
+         .and_then(|output| output.get("is_error"))
+         .and_then(Value::as_bool)
+         .unwrap_or(false)
+         || value
+             .get("is_error")
+             .and_then(Value::as_bool)
+             .unwrap_or(false)
+ }
+ 
+ fn tool_category_from_call_value(value: &Value) -> Option<String> {
+     let entry_type = value
+         .get("type")
+         .and_then(Value::as_str)
+         .map(|value| value.trim().to_ascii_lowercase())
+         .unwrap_or_default();
+     let name = value
+         .pointer("/function/name")
+         .or_else(|| value.get("name"))
+         .and_then(Value::as_str)
+         .or_else(|| (entry_type == "web_search_call").then_some("web_search"))?;
+     let arguments = value
+         .pointer("/function/arguments")
+         .or_else(|| value.get("arguments"))
+         .or_else(|| value.get("input"));
+     if let Some(classification) = classify_tool_call(name, arguments) {
+         return Some(classification.category);
+     }
+     None
+ }
+ 
+ fn project_gemini_entries(contents: &[Value]) -> Vec<GeminiTurnEntry> {
+     contents
+         .iter()
+         .map(|content| GeminiTurnEntry {
+             role: match content.get("role").and_then(Value::as_str) {
+                 Some("user") => GeminiTurnRole::User,
+                 Some("model") => GeminiTurnRole::Assistant,
+                 _ => GeminiTurnRole::Other,
+             },
+             parts: project_chat_parts(content.get("parts")),
+         })
+         .collect()
+ }
+ 
+ fn value_as_array(value: &Value) -> Option<Vec<Value>> {
+     if let Some(items) = value.as_array() {
+         return Some(items.clone());
+     }
+     let raw = value.as_str()?.trim();
+     if raw.is_empty() {
+         return None;
+     }
+     serde_json::from_str::<Value>(raw)
+         .ok()
+         .and_then(|parsed| parsed.as_array().cloned())
+ }
+ 
+ fn value_contains_image(value: &Value) -> bool {
+     match value {
+         Value::Array(items) => items.iter().any(value_contains_image),
++        // fbab9d4: Codex view_image carriers embed the screenshot as a
++        // stringified JSON array (or a bare data URL) inside
++        // `function_call_output.output`; decode and recurse.
++        Value::String(text) => string_carries_image(text),
+         Value::Object(values) => {
+             let type_value = values
+                 .get("type")
+                 .and_then(Value::as_str)
+                 .map(|value| value.trim().to_ascii_lowercase())
+                 .unwrap_or_default();
+             if type_value.contains("image") {
+                 return true;
+             }
+             if values.contains_key("image_url") {
+                 return true;
+             }
+             if values.contains_key("inline_data") || values.contains_key("file_data") {
+                 return true;
+             }
+             if values
+                 .get("data")
+                 .and_then(Value::as_str)
+                 .map(|value| value.trim().to_ascii_lowercase())
+                 .is_some_and(|value| value.starts_with("data:image/"))
+             {
+                 return true;
+             }
+-            ["content", "parts"]
++            if values
++                .get("file_url")
++                .and_then(Value::as_str)
++                .map(|value| value.trim().to_ascii_lowercase())
++                .is_some_and(|value| value.starts_with("data:image/"))
++            {
++                return true;
++            }
++            ["content", "parts", "output"]
+                 .into_iter()
+                 .filter_map(|field| values.get(field))
+                 .any(value_contains_image)
+         }
+         _ => false,
+     }
+ }
++
++fn string_carries_image(text: &str) -> bool {
++    let trimmed = text.trim();
++    if trimmed.starts_with("data:image/") {
++        return true;
++    }
++    if trimmed.starts_with('[') || trimmed.starts_with('{') {
++        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
++            return value_contains_image(&value);
++        }
++    }
++    false
++}
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/tests.rs b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+index 281bf9577..61c46825c 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/tests.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+@@ -573,160 +573,198 @@ fn route_classifier_input_has_no_control_state_fields() {
+ // current-turn image plus history_image blocks already normalized to the
+ // typed attachment placeholder.
+ #[test]
+ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_carrier() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"what does this mean"},
+                 {"type":"input_image","file_id":"current-turn-1"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         signals.has_current_turn_image,
+         "current-turn image must activate multimodal route fact via typed carrier"
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_eq!(route.route_name, "multimodal");
+     assert!(
+         route.reasoning.contains("multimodal:metadata-attachment"),
+         "expected multimodal:metadata-attachment reasoning, got {:?}",
+         route.reasoning
+     );
+ }
+ 
+ // Negative regression: historical input_image must NOT drive the multimodal
+ // route when the current-turn message carries only text. Mirrors the
+ // 4444 Responses shape `route_reason=multimodal:metadata-attachment` BUT
+ // without any current-turn image, so the typed carrier must report
+ // `has_current_turn_image=false` and classify_route must avoid the
+ // multimodal / vision path entirely.
+ #[test]
+ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"describe the recent changes"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         !signals.has_current_turn_image,
+         "history image must not leak into current-turn multimodal signal; signals={:?}",
+         signals
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_ne!(
+         route.route_name, "multimodal",
+         "text-only current turn must not pick multimodal; route={:?}",
+         route
+     );
+     assert!(
+         !route.reasoning.contains("multimodal:metadata-attachment"),
+         "negative case must not log multimodal:metadata-attachment; route={:?}",
+         route
+     );
+ }
+ 
++// fbab9d4: Codex view_image returns the screenshot inside a
++// `function_call_output` whose `output` is a stringified JSON array of
++// input_image blocks carrying data: URLs. The current-turn walker must
++// decode that carrier and set has_current_turn_image so the request
++// routes to the configured multimodal pool (which excludes glm-5.3).
++#[test]
++fn codex_view_image_function_call_output_drives_multimodal_route() {
++    use serde_json::json;
++    let request = json!({
++        "model": "gpt-5.6-sol",
++        "input": [
++            {"type":"message","role":"user","content":[
++                {"type":"input_text","text":"show me the chart"}
++            ]},
++            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
++            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
++        ]
++    });
++    let entries = project_v3_current_turn_entries_from_value(&request);
++    let signals = build_v3_current_turn_route_facts(&entries);
++    assert!(
++        signals.has_current_turn_image,
++        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
++    );
++    let route = classify_route(&RouteClassifierInput {
++        latest_message_from_user: signals.latest_message_from_user,
++        has_image_attachment: signals.has_current_turn_image,
++        has_current_turn_tool_output: signals.has_current_turn_tool_output,
++        ..Default::default()
++    });
++    assert_eq!(route.route_name, "multimodal");
++    assert!(
++        route.reasoning.contains("multimodal:metadata-attachment"),
++        "expected multimodal:metadata-attachment reasoning, got {:?}",
++        route.reasoning
++    );
++}
++
+ // Positive projection: Responses tool-side entries must classify as Tool
+ // (and the typed carrier must distinguish them from the rare explicit
+ // role=system entry). Both `role=tool` and the typed kind=ToolOutput entry
+ // shape (no role field, only `type=function_call_output`) must project to
+ // ResponsesTurnRole::Tool; only an explicit `role=system` (or
+ // role-bearing system message) is allowed to land in System.
+ #[test]
+ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_system() {
+     use serde_json::json;
+     let tool_payload = json!({"role": "tool", "content": [{"type": "text", "text": "ok"}]});
+     let tool_output_payload = json!({
+         "type": "function_call_output",
+         "call_id": "call-1",
+         "output": "ok"
+     });
+     let system_payload = json!({"role": "system", "content": "stay terse"});
+     let assistant_payload = json!({"role": "assistant", "content": "hi"});
+     let user_payload = json!({"role": "user", "content": "hi"});
+ 
+     let tool_entries = project_responses_entries_from_array(&[tool_payload.clone()]);
+     assert_eq!(tool_entries.len(), 1);
+     assert_eq!(tool_entries[0].role, ResponsesTurnRole::Tool);
+     // role=tool with a content[] of text parts is mapped to kind=Other because
+     // typed Responses entries require an explicit typed kind; the role
+     // projection itself is the contract under test here.
+     assert_ne!(tool_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let tool_output_entries = project_responses_entries_from_array(&[tool_output_payload.clone()]);
+     assert_eq!(tool_output_entries.len(), 1);
+     assert_eq!(tool_output_entries[0].role, ResponsesTurnRole::Tool);
+     assert_eq!(tool_output_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let system_entries = project_responses_entries_from_array(&[system_payload.clone()]);
+     assert_eq!(system_entries[0].role, ResponsesTurnRole::System);
+ 
+     // Negative check: assistant / user roles stay out of System.
+     let assistant_entries = project_responses_entries_from_array(&[assistant_payload]);
+     assert_ne!(assistant_entries[0].role, ResponsesTurnRole::System);
+     let user_entries = project_responses_entries_from_array(&[user_payload]);
+     assert_ne!(user_entries[0].role, ResponsesTurnRole::System);
+ 
+     // End-to-end: a multi-entry Responses thread that mixes role=tool and
+     // role=function_call_output yields a current-turn segment whose
+     // tool-output accounting lights up, but the role distribution must
+     // keep System empty.
+     let thread = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"role":"user","content":"run the build"},
+             {"role":"assistant","tool_calls":[{
+                 "type":"function","function":{"name":"exec_command","arguments":"{}"}
+             }]},
+             {"role":"tool","content":"build ok"},
+             {"type":"function_call_output","call_id":"c1","output":"done"}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&thread);
+     if let V3CurrentTurnEntries::Responses(es) = entries {
+         let system_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::System)
+             .count();
+         assert_eq!(
+             system_count, 0,
+             "role=tool / tool_output must not project as System; got entries={:?}",
+             es
+         );
+         let tool_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::Tool)
+             .count();
+         assert!(
+             tool_count >= 1,
+             "tool side should map to Tool role; entries={:?}",
+             es
+         );
+     } else {
+         panic!("expected Responses typed entries for fixture thread");
+     }
+ }
+
+exec
+/bin/zsh -lc "git diff --no-ext-diff --unified=120 ec51c3ad7 089ee36ae -- v3/crates/routecodex-v3-runtime/src/active_turn.rs v3/crates/routecodex-v3-route-classifier/src/tests.rs; printf '\\n--- maps ---\\n'; rg -n \"has_current_turn_image|active_turn|route-classifier|multimodal\" docs/architecture/v3-function-map.yml docs/architecture/v3-mainline-call-map.yml docs/architecture/v3-verification-map.yml docs/architecture/v3-resource-operation-map.yml | head -160; printf '\\n--- standards ---\\n'; if [ -f /Users/fanzhang/.agents/skills/codex-review/review-standards.md ]; then wc -l /Users/fanzhang/.agents/skills/codex-review/review-standards.md; sed -n '1,240p' /Users/fanzhang/.agents/skills/codex-review/review-standards.md; fi" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 2990ms:
+2026-09-11 23:01:11.809 xcodebuild[24604:489085653]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:12.092 xcodebuild[24604:489085635] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-L7G72VTG' (errno=Operation not permitted)
+2026-09-11 23:01:12.727 xcodebuild[25378:489086599]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:13.114 xcodebuild[25378:489086573] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/tests.rs b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+index 281bf9577..61c46825c 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/tests.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+@@ -533,200 +533,238 @@ fn route_classifier_input_has_no_control_state_fields() {
+     // Compile-time check passed: every field is enumerated. If a new field
+     // is added, this destructuring must be updated — that is the
+     // deliberate friction that forces an ownership review.
+     //
+     // Runtime check (defensive): the field set is exactly the 9 known
+     // names. Any drift is a P0 violation.
+     let allowed = [
+         "reached_long_context",
+         "has_image_attachment",
+         "latest_message_from_user",
+         "has_current_turn_tool_output",
+         "has_current_turn_web_search",
+         "last_assistant_tool_category",
+         "has_background_keyword",
+         "is_compaction",
+     ];
+     let forbidden = [
+         "metadata",
+         "previous_usage",
+         "prev_usage",
+         "raw_metadata",
+         "control",
+         "control_state",
+         "session_scope",
+         "conversation_metadata",
+     ];
+     for f in forbidden {
+         assert!(
+             !allowed.iter().any(|a| a.eq_ignore_ascii_case(f)),
+             "P0 violation: forbidden control-state name '{f}' appeared in allowed set"
+         );
+     }
+ }
+ 
+ // Regression for live Responses case where historical image is preserved as
+ // typed attachment and current-turn image drives the multimodal route fact
+ // without scanning payload text. The fixture mirrors the
+ // `route_reason=multimodal:metadata-attachment` row observed at port 4444
+ // in /Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl (2026-08-28
+ // 06:50 row 61): the request carries a trailing user message that embeds a
+ // current-turn image plus history_image blocks already normalized to the
+ // typed attachment placeholder.
+ #[test]
+ fn live_responses_history_image_attachment_drives_multimodal_route_via_typed_carrier() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"what does this mean"},
+                 {"type":"input_image","file_id":"current-turn-1"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         signals.has_current_turn_image,
+         "current-turn image must activate multimodal route fact via typed carrier"
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_eq!(route.route_name, "multimodal");
+     assert!(
+         route.reasoning.contains("multimodal:metadata-attachment"),
+         "expected multimodal:metadata-attachment reasoning, got {:?}",
+         route.reasoning
+     );
+ }
+ 
+ // Negative regression: historical input_image must NOT drive the multimodal
+ // route when the current-turn message carries only text. Mirrors the
+ // 4444 Responses shape `route_reason=multimodal:metadata-attachment` BUT
+ // without any current-turn image, so the typed carrier must report
+ // `has_current_turn_image=false` and classify_route must avoid the
+ // multimodal / vision path entirely.
+ #[test]
+ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+     use serde_json::json;
+     let request = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"type":"input_image","file_id":"hist-1"},
+             {"type":"input_text","text":"summary of past chart"},
+             {"type":"message","role":"user","content":[
+                 {"type":"input_text","text":"describe the recent changes"}
+             ]}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&request);
+     let signals = build_v3_current_turn_route_facts(&entries);
+     assert!(
+         !signals.has_current_turn_image,
+         "history image must not leak into current-turn multimodal signal; signals={:?}",
+         signals
+     );
+     let route = classify_route(&RouteClassifierInput {
+         latest_message_from_user: signals.latest_message_from_user,
+         has_image_attachment: signals.has_current_turn_image,
+         has_current_turn_tool_output: signals.has_current_turn_tool_output,
+         ..Default::default()
+     });
+     assert_ne!(
+         route.route_name, "multimodal",
+         "text-only current turn must not pick multimodal; route={:?}",
+         route
+     );
+     assert!(
+         !route.reasoning.contains("multimodal:metadata-attachment"),
+         "negative case must not log multimodal:metadata-attachment; route={:?}",
+         route
+     );
+ }
+ 
++// fbab9d4: Codex view_image returns the screenshot inside a
++// `function_call_output` whose `output` is a stringified JSON array of
++// input_image blocks carrying data: URLs. The current-turn walker must
++// decode that carrier and set has_current_turn_image so the request
++// routes to the configured multimodal pool (which excludes glm-5.3).
++#[test]
++fn codex_view_image_function_call_output_drives_multimodal_route() {
++    use serde_json::json;
++    let request = json!({
++        "model": "gpt-5.6-sol",
++        "input": [
++            {"type":"message","role":"user","content":[
++                {"type":"input_text","text":"show me the chart"}
++            ]},
++            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
++            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
++        ]
++    });
++    let entries = project_v3_current_turn_entries_from_value(&request);
++    let signals = build_v3_current_turn_route_facts(&entries);
++    assert!(
++        signals.has_current_turn_image,
++        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
++    );
++    let route = classify_route(&RouteClassifierInput {
++        latest_message_from_user: signals.latest_message_from_user,
++        has_image_attachment: signals.has_current_turn_image,
++        has_current_turn_tool_output: signals.has_current_turn_tool_output,
++        ..Default::default()
++    });
++    assert_eq!(route.route_name, "multimodal");
++    assert!(
++        route.reasoning.contains("multimodal:metadata-attachment"),
++        "expected multimodal:metadata-attachment reasoning, got {:?}",
++        route.reasoning
++    );
++}
++
+ // Positive projection: Responses tool-side entries must classify as Tool
+ // (and the typed carrier must distinguish them from the rare explicit
+ // role=system entry). Both `role=tool` and the typed kind=ToolOutput entry
+ // shape (no role field, only `type=function_call_output`) must project to
+ // ResponsesTurnRole::Tool; only an explicit `role=system` (or
+ // role-bearing system message) is allowed to land in System.
+ #[test]
+ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_system() {
+     use serde_json::json;
+     let tool_payload = json!({"role": "tool", "content": [{"type": "text", "text": "ok"}]});
+     let tool_output_payload = json!({
+         "type": "function_call_output",
+         "call_id": "call-1",
+         "output": "ok"
+     });
+     let system_payload = json!({"role": "system", "content": "stay terse"});
+     let assistant_payload = json!({"role": "assistant", "content": "hi"});
+     let user_payload = json!({"role": "user", "content": "hi"});
+ 
+     let tool_entries = project_responses_entries_from_array(&[tool_payload.clone()]);
+     assert_eq!(tool_entries.len(), 1);
+     assert_eq!(tool_entries[0].role, ResponsesTurnRole::Tool);
+     // role=tool with a content[] of text parts is mapped to kind=Other because
+     // typed Responses entries require an explicit typed kind; the role
+     // projection itself is the contract under test here.
+     assert_ne!(tool_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let tool_output_entries = project_responses_entries_from_array(&[tool_output_payload.clone()]);
+     assert_eq!(tool_output_entries.len(), 1);
+     assert_eq!(tool_output_entries[0].role, ResponsesTurnRole::Tool);
+     assert_eq!(tool_output_entries[0].kind, ResponsesTurnKind::ToolOutput);
+ 
+     let system_entries = project_responses_entries_from_array(&[system_payload.clone()]);
+     assert_eq!(system_entries[0].role, ResponsesTurnRole::System);
+ 
+     // Negative check: assistant / user roles stay out of System.
+     let assistant_entries = project_responses_entries_from_array(&[assistant_payload]);
+     assert_ne!(assistant_entries[0].role, ResponsesTurnRole::System);
+     let user_entries = project_responses_entries_from_array(&[user_payload]);
+     assert_ne!(user_entries[0].role, ResponsesTurnRole::System);
+ 
+     // End-to-end: a multi-entry Responses thread that mixes role=tool and
+     // role=function_call_output yields a current-turn segment whose
+     // tool-output accounting lights up, but the role distribution must
+     // keep System empty.
+     let thread = json!({
+         "model": "gpt-5.6-sol",
+         "input": [
+             {"role":"user","content":"run the build"},
+             {"role":"assistant","tool_calls":[{
+                 "type":"function","function":{"name":"exec_command","arguments":"{}"}
+             }]},
+             {"role":"tool","content":"build ok"},
+             {"type":"function_call_output","call_id":"c1","output":"done"}
+         ]
+     });
+     let entries = project_v3_current_turn_entries_from_value(&thread);
+     if let V3CurrentTurnEntries::Responses(es) = entries {
+         let system_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::System)
+             .count();
+         assert_eq!(
+             system_count, 0,
+             "role=tool / tool_output must not project as System; got entries={:?}",
+             es
+         );
+         let tool_count = es
+             .iter()
+             .filter(|e| e.role == ResponsesTurnRole::Tool)
+             .count();
+         assert!(
+             tool_count >= 1,
+             "tool side should map to Tool role; entries={:?}",
+             es
+         );
+     } else {
+         panic!("expected Responses typed entries for fixture thread");
+     }
+ }
+
+--- maps ---
+docs/architecture/v3-resource-operation-map.yml:228:      target_hard_capabilities: [multimodal, vision, search, web_search]
+docs/architecture/v3-resource-operation-map.yml:1395:    owner_crate: routecodex-v3-route-classifier
+docs/architecture/v3-resource-operation-map.yml:1978:    owner_crate: routecodex-v3-route-classifier
+docs/architecture/v3-resource-operation-map.yml:2000:    owner_crate: routecodex-v3-route-classifier
+docs/architecture/v3-verification-map.yml:1233:  - Request image/media facts survive trailing tool/function outputs and are carried to Target as multimodal/vision requirements
+docs/architecture/v3-verification-map.yml:1235:  - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext/remote_continuation/local_materialization
+docs/architecture/v3-verification-map.yml:1237:  - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; a candidate whose max_context_tokens is below request_input_tokens is marked context_window_exceeded and skipped before availability/transport. Explicit direct pins and the default-pool floor remain last-resort eligible with the typed overflow reason, while provider health and request-local provider-failure exclusion remain explicit switch inputs
+docs/architecture/v3-verification-map.yml:1291:    to the canonical model id (unknown model fails as a config error without reroute), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local
+docs/architecture/v3-verification-map.yml:1755:  owner: "route-classifier owner\uFF08v3-route-classifier crate\uFF09"
+docs/architecture/v3-verification-map.yml:1778:  - npm run test:route-classifier-semantics
+docs/architecture/v3-verification-map.yml:2933:  - v3/crates/routecodex-v3-route-classifier
+docs/architecture/v3-verification-map.yml:2944:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+docs/architecture/v3-verification-map.yml:3001:  owner_scope: ReqInbound history image normalization plus typed-target-gated session compatibility projection for selected non-multimodal targets; multimodal targets preserve image bytes.
+docs/architecture/v3-verification-map.yml:3007:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
+docs/architecture/v3-verification-map.yml:3008:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+docs/architecture/v3-verification-map.yml:3124:  - routecodex-v3-route-classifier
+docs/architecture/v3-verification-map.yml:3149:  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:823:  - docs/goals/v3-v2-route-classifier-parity-test-design.md
+docs/architecture/v3-function-map.yml:856:    as multimodal/vision before pool matching.
+docs/architecture/v3-function-map.yml:865:    model/provider may genuinely lack: web_search/search and multimodal/vision.'
+docs/architecture/v3-function-map.yml:866:  - After genuine web_search/search and multimodal/vision capability validation, Target10
+docs/architecture/v3-function-map.yml:2501:  owner_module: v3/crates/routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:2519:  - v3/crates/routecodex-v3-route-classifier/src
+docs/architecture/v3-function-map.yml:2531:  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+docs/architecture/v3-function-map.yml:2534:  - npm run test:route-classifier-semantics
+docs/architecture/v3-function-map.yml:2538:  owner: route-classifier owner（v3-route-classifier crate）
+docs/architecture/v3-function-map.yml:2544:    - P3: 'nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除 payload-scanning 推断路径（硬护栏 12）。'
+docs/architecture/v3-function-map.yml:4470:  owner_crate: routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:4471:  owner_file: v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml:4481:  - v3/crates/routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:4491:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:4495:  - v3-route-classifier-facts-01
+docs/architecture/v3-function-map.yml:4595:    selected target without multimodal/vision capability. Image facts must
+docs/architecture/v3-function-map.yml:4596:    select multimodal first; the projection is allowed only after typed target
+docs/architecture/v3-function-map.yml:4611:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
+docs/architecture/v3-function-map.yml:4612:  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_projects_image_to_session_placeholder
+docs/architecture/v3-function-map.yml:4805:  - routecodex-v3-route-classifier
+docs/architecture/v3-function-map.yml:4812:  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-function-map.yml:4813:  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml:4842:  - v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-function-map.yml:4843:  - v3/crates/routecodex-v3-route-classifier/src/lib.rs
+docs/architecture/v3-function-map.yml:4844:  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+docs/architecture/v3-function-map.yml:4864:  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-route-classifier
+docs/architecture/v3-mainline-call-map.yml:216:  summary: The request provider-compat node consumes the adjacent provider-semantic payload plus the selected target capability carrier, validates the normal-payload boundary, applies the selected provider-family wire profile, and performs the registered session-preserving image compatibility projection only for a selected target without multimodal/vision capability.
+docs/architecture/v3-mainline-call-map.yml:7037:  summary: Route facts classification stays local to the route-classifier crate; Virtual Router and runtime request-facts builders consume classification decisions, never payload patches.
+docs/architecture/v3-mainline-call-map.yml:7039:  - step_id: v3-route-classifier-facts-01
+docs/architecture/v3-mainline-call-map.yml:7045:    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+docs/architecture/v3-mainline-call-map.yml:7112:    caller_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+docs/architecture/v3-mainline-call-map.yml:7114:    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+docs/architecture/v3-mainline-call-map.yml:7122:  - step_id: v3-route-classifier-facts-02
+docs/architecture/v3-mainline-call-map.yml:7128:    callee_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+docs/architecture/v3-mainline-call-map.yml:7450:    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-mainline-call-map.yml:7452:    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-mainline-call-map.yml:7464:    caller_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-mainline-call-map.yml:7466:    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+docs/architecture/v3-mainline-call-map.yml:7508:    callee_file: v3/crates/routecodex-v3-route-classifier/src/policy.rs
+
+--- standards ---
+      55 /Users/fanzhang/.agents/skills/codex-review/review-standards.md
+# Review Standards（AGY / Codex 共享）
+
+只读审查当前变更。先判断任务范围与规则适用性，再检查质量；不修改代码，不替作者扩大任务。
+
+## 1. 强制质量边界
+
+- 功能满足当前契约；关键成功与失败路径有相称的验证。
+- 不引入安全漏洞、数据丢失、共享状态损坏、吞错、伪造成功或证据失真。
+- 遵守已声明的 owner、允许/禁止路径、控制与业务数据边界。
+- 证据绑定准确的源代码、依赖/配置、产物和必要环境；缺少适用的必需证据必须阻断。
+- 遵守用户授权、他人工作保护和安全 Git/发布边界。
+
+项目特有语言、pipeline、固定 operation/hook、maps 和 gate 只在该项目声明且
+受本次变更影响时适用。不得为普通任务强制新增整套架构或治理骨架。
+已声明错误策略与协议适配不是临时补偿；按真实语义判断。
+
+## 2. 消融与奥卡姆剃刀
+
+检查删除、复用、直接实现是否能减少实际复杂度并满足同一契约。
+函数、配置、注册表、hook 不预设优先级；一个明确条件不必换成状态机。
+优先少概念、少重复事实、少间接层，不以文件数、行数或设计模式名称裁决。
+
+阻断结构问题必须给出具体证据：例如两个 owner 导致状态分歧、重复规则会
+产生不一致行为、跨层耦合破坏已声明边界，或新增复杂度造成实质维护回归。
+指出受影响路径、后果及最小修复方向。
+
+“还能更短”“另一个组织方式更优雅”“超过 1k 行”本身仅是建议。
+作者说明实际设计取舍即可，不必逐分支证明不存在更简单方案。
+不要为消融增加逐项证明表、审批层或重复检查。
+
+## 3. 审查方法
+
+1. 读任务、diff 和受影响调用链，确认真实行为与 owner。
+2. 检查适用的质量、安全、契约和证据门禁；只读相关 maps。
+3. 检查实质结构回归与可选简化，明确区分。
+4. 检查验证是否覆盖当前风险。未改变相关输入且仍有效的证据可以复用；
+   不因 review 结束而要求无条件重新构建、安装、重启或全套回归。
+5. 报告高置信问题；每条给 file、line、失败条件/后果与最小修复方向。
+
+Collab、Memory、Guidance 默认辅助。它们缺失、未关闭或没有新增记录，不能
+单独判定工程质量失败。实际并发共享写入缺少可靠隔离、或已声明必需 gate
+被跳过，仍阻断相关操作。
+
+未触及历史问题一般建议处理；仅在直接影响当前安全、契约、证据或必需
+交付时阻断，并说明因果关系。
+
+## 4. 严重度与 controller
+
+- **P0**：严重安全、数据损坏、不可恢复影响、证据伪造等明确硬后果。
+- **P1**：当前功能/契约错误、必需验证缺失、授权边界违反、具有具体后果的
+  实质结构回归。必须说明触发条件或受影响不变量。
+- **P2**：可选简化、可读性、风格、无当前影响的历史问题。
+
+无 P0/P1 才可 PASS。P2 不阻断，不要求作者为每条建议申请豁免。
+输出遵守调用方 JSON 契约；无证据不编造问题，无最终结论不声称 PASS。
+
+exec
+/bin/zsh -lc "git show --format=fuller --no-ext-diff --find-renames --find-copies 089ee36ae --; printf '\\n--- active_turn symbols ---\\n'; rg -n \"view_image|function_call_output|file_url|data:image|has_current_turn_image|project_v3_current_turn_entries_from_value|build_v3_current_turn_route_facts\" v3/crates/routecodex-v3-route-classifier/src/active_turn.rs v3/crates/routecodex-v3-route-classifier/src/lib.rs v3/crates/routecodex-v3-route-classifier/src/route.rs" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 2860ms:
+2026-09-11 23:01:22.514 xcodebuild[32201:489095891]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:22.788 xcodebuild[32201:489095859] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-UK8zZGDD' (errno=Operation not permitted)
+2026-09-11 23:01:23.632 xcodebuild[32738:489096644]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:23.997 xcodebuild[32738:489096625] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+commit 089ee36ae89316fb26629a8384ab021a426eed1d
+Author:     codex <codex@local>
+AuthorDate: Fri Sep 11 22:55:29 2026 -0700
+Commit:     codex <codex@local>
+CommitDate: Fri Sep 11 22:55:29 2026 -0700
+
+    fix(v3): decode codex view_image carriers in current-turn image detection
+    
+    fbab9d4：Codex view_image 的截图藏在 function_call_output.output 的
+    字符串化 JSON（input_image/file_url data: URL）里，current-turn 检测只扫
+    content/parts 且不解析字符串载体，导致 has_current_turn_image=false、
+    请求落到 longcontext/glm 而非 multimodal 池。修复：value_contains_image
+    支持字符串载体解析（JSON/data: 前缀）、递归 output 字段、识别 file_url
+    data URL。新增 codex_view_image_function_call_output_drives_multimodal_route
+    回归（红→绿）。
+
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+index 0295793e2..d5a4ac997 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+@@ -686,6 +686,10 @@ fn value_as_array(value: &Value) -> Option<Vec<Value>> {
+ fn value_contains_image(value: &Value) -> bool {
+     match value {
+         Value::Array(items) => items.iter().any(value_contains_image),
++        // fbab9d4: Codex view_image carriers embed the screenshot as a
++        // stringified JSON array (or a bare data URL) inside
++        // `function_call_output.output`; decode and recurse.
++        Value::String(text) => string_carries_image(text),
+         Value::Object(values) => {
+             let type_value = values
+                 .get("type")
+@@ -709,7 +713,15 @@ fn value_contains_image(value: &Value) -> bool {
+             {
+                 return true;
+             }
+-            ["content", "parts"]
++            if values
++                .get("file_url")
++                .and_then(Value::as_str)
++                .map(|value| value.trim().to_ascii_lowercase())
++                .is_some_and(|value| value.starts_with("data:image/"))
++            {
++                return true;
++            }
++            ["content", "parts", "output"]
+                 .into_iter()
+                 .filter_map(|field| values.get(field))
+                 .any(value_contains_image)
+@@ -717,3 +729,16 @@ fn value_contains_image(value: &Value) -> bool {
+         _ => false,
+     }
+ }
++
++fn string_carries_image(text: &str) -> bool {
++    let trimmed = text.trim();
++    if trimmed.starts_with("data:image/") {
++        return true;
++    }
++    if trimmed.starts_with('[') || trimmed.starts_with('{') {
++        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
++            return value_contains_image(&value);
++        }
++    }
++    false
++}
+diff --git a/v3/crates/routecodex-v3-route-classifier/src/tests.rs b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+index 281bf9577..61c46825c 100644
+--- a/v3/crates/routecodex-v3-route-classifier/src/tests.rs
++++ b/v3/crates/routecodex-v3-route-classifier/src/tests.rs
+@@ -650,6 +650,44 @@ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
+     );
+ }
+ 
++// fbab9d4: Codex view_image returns the screenshot inside a
++// `function_call_output` whose `output` is a stringified JSON array of
++// input_image blocks carrying data: URLs. The current-turn walker must
++// decode that carrier and set has_current_turn_image so the request
++// routes to the configured multimodal pool (which excludes glm-5.3).
++#[test]
++fn codex_view_image_function_call_output_drives_multimodal_route() {
++    use serde_json::json;
++    let request = json!({
++        "model": "gpt-5.6-sol",
++        "input": [
++            {"type":"message","role":"user","content":[
++                {"type":"input_text","text":"show me the chart"}
++            ]},
++            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
++            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
++        ]
++    });
++    let entries = project_v3_current_turn_entries_from_value(&request);
++    let signals = build_v3_current_turn_route_facts(&entries);
++    assert!(
++        signals.has_current_turn_image,
++        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
++    );
++    let route = classify_route(&RouteClassifierInput {
++        latest_message_from_user: signals.latest_message_from_user,
++        has_image_attachment: signals.has_current_turn_image,
++        has_current_turn_tool_output: signals.has_current_turn_tool_output,
++        ..Default::default()
++    });
++    assert_eq!(route.route_name, "multimodal");
++    assert!(
++        route.reasoning.contains("multimodal:metadata-attachment"),
++        "expected multimodal:metadata-attachment reasoning, got {:?}",
++        route.reasoning
++    );
++}
++
+ // Positive projection: Responses tool-side entries must classify as Tool
+ // (and the typed carrier must distinguish them from the rare explicit
+ // role=system entry). Both `role=tool` and the typed kind=ToolOutput entry
+
+--- active_turn symbols ---
+v3/crates/routecodex-v3-route-classifier/src/lib.rs:9:    build_v3_current_turn_route_facts, build_v3_current_turn_route_facts_from_value,
+v3/crates/routecodex-v3-route-classifier/src/lib.rs:10:    project_responses_entries_from_array, project_v3_current_turn_entries_from_value,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:12:    pub has_current_turn_image: bool,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:127:pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:152:            has_current_turn_image: latest_user
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:160:    let mut has_current_turn_image = latest_user_index
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:167:                has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:202:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:235:            has_current_turn_image: latest_user_index.is_some_and(|index| {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:247:    let mut has_current_turn_image =
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:252:            has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:292:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:303:    let mut has_current_turn_image = false;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:308:                has_current_turn_image = true;
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:317:        has_current_turn_image,
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:375:pub fn build_v3_current_turn_route_facts_from_value(request: &Value) -> V3CurrentTurnSignals {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:376:    let entries = project_v3_current_turn_entries_from_value(request);
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:377:    build_v3_current_turn_route_facts(&entries)
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:380:pub fn project_v3_current_turn_entries_from_value(request: &Value) -> V3CurrentTurnEntries {
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:501:            "tool_result" | "tool_output" | "function_call_output"
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:603:        "function_call_output" | "tool_call_output" | "custom_tool_call_output"
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:689:        // fbab9d4: Codex view_image carriers embed the screenshot as a
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:691:        // `function_call_output.output`; decode and recurse.
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:712:                .is_some_and(|value| value.starts_with("data:image/"))
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:717:                .get("file_url")
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:720:                .is_some_and(|value| value.starts_with("data:image/"))
+v3/crates/routecodex-v3-route-classifier/src/active_turn.rs:735:    if trimmed.starts_with("data:image/") {
+
+exec
+/bin/zsh -lc "nl -ba v3/crates/routecodex-v3-route-classifier/src/active_turn.rs | sed -n '120,330p;360,760p'; printf '\\n--- map sections ---\\n'; sed -n '2480,2555p' docs/architecture/v3-function-map.yml; sed -n '7020,7150p' docs/architecture/v3-mainline-call-map.yml; sed -n '1735,1790p' docs/architecture/v3-verification-map.yml" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 0ms:
+   120	    ToolOutput,
+   121	    Other,
+   122	}
+   123	
+   124	// Typed boundary builder. classify_route consumes V3CurrentTurnRouteFacts;
+   125	// this builder is the sole source of the typed intermediate that fills
+   126	// `has_image_attachment` / `has_current_turn_*` fields.
+   127	pub fn build_v3_current_turn_route_facts(entries: &V3CurrentTurnEntries) -> V3CurrentTurnSignals {
+   128	    match entries {
+   129	        V3CurrentTurnEntries::Chat(entries) => extract_chat_signals(entries),
+   130	        V3CurrentTurnEntries::Responses(entries) => extract_responses_signals(entries),
+   131	        V3CurrentTurnEntries::Gemini(entries) => extract_gemini_signals(entries),
+   132	        V3CurrentTurnEntries::PromptText(_) => V3CurrentTurnSignals {
+   133	            latest_message_from_user: true,
+   134	            ..Default::default()
+   135	        },
+   136	        V3CurrentTurnEntries::Empty => V3CurrentTurnSignals::default(),
+   137	    }
+   138	}
+   139	
+   140	fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
+   141	    let latest_role = entries.iter().rev().map(|entry| entry.role).next();
+   142	    let latest_user_index = entries
+   143	        .iter()
+   144	        .rposition(|entry| matches!(entry.role, ChatTurnRole::User));
+   145	    let Some(segment) = chat_active_segment(entries, latest_user_index, latest_role) else {
+   146	        let latest_user = latest_user_index.and_then(|index| entries.get(index));
+   147	        return V3CurrentTurnSignals {
+   148	            latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
+   149	            current_user_text: latest_user.map(extract_chat_user_text).unwrap_or_default(),
+   150	            has_current_turn_web_search: latest_user
+   151	                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_web_search)),
+   152	            has_current_turn_image: latest_user
+   153	                .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image)),
+   154	            ..Default::default()
+   155	        };
+   156	    };
+   157	    let mut has_current_turn_tool_output = false;
+   158	    let mut has_current_turn_tool_execution_error = false;
+   159	    let mut has_current_turn_web_search = false;
+   160	    let mut has_current_turn_image = latest_user_index
+   161	        .and_then(|index| entries.get(index))
+   162	        .is_some_and(|entry| entry.parts.iter().any(|part| part.has_image));
+   163	    let mut last_assistant_tool = None;
+   164	    for entry in segment {
+   165	        for part in &entry.parts {
+   166	            if part.has_image {
+   167	                has_current_turn_image = true;
+   168	            }
+   169	            if part.has_web_search {
+   170	                has_current_turn_web_search = true;
+   171	            }
+   172	            match entry.role {
+   173	                ChatTurnRole::Tool => {
+   174	                    has_current_turn_tool_output = true;
+   175	                    if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
+   176	                        has_current_turn_tool_execution_error = true;
+   177	                    }
+   178	                }
+   179	                _ => {}
+   180	            }
+   181	        }
+   182	        if matches!(entry.role, ChatTurnRole::Assistant) {
+   183	            for call in &entry.tool_calls {
+   184	                has_current_turn_tool_output = true;
+   185	                let arguments = call
+   186	                    .arguments
+   187	                    .as_deref()
+   188	                    .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+   189	                if let Some(classification) = classify_tool_call(&call.name, arguments.as_ref()) {
+   190	                    last_assistant_tool = Some(classification);
+   191	                }
+   192	            }
+   193	        }
+   194	    }
+   195	    V3CurrentTurnSignals {
+   196	        latest_message_from_user: matches!(latest_role, Some(ChatTurnRole::User)),
+   197	        current_user_text: String::new(),
+   198	        has_current_turn_tool_output,
+   199	        has_current_turn_tool_execution_error,
+   200	        is_compaction: false,
+   201	        has_current_turn_web_search,
+   202	        has_current_turn_image,
+   203	        last_assistant_tool,
+   204	    }
+   205	}
+   206	
+   207	fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSignals {
+   208	    let latest_role = entries.iter().rev().map(|entry| entry.role).next();
+   209	    let latest_user_index = entries
+   210	        .iter()
+   211	        .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User));
+   212	    let Some(segment) = responses_active_segment(entries, latest_user_index, latest_role) else {
+   213	        let current_turn_start = latest_user_index
+   214	            .map(|index| {
+   215	                entries[..index]
+   216	                    .iter()
+   217	                    .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User))
+   218	                    .map(|previous| previous + 1)
+   219	                    .unwrap_or(0)
+   220	            })
+   221	            .unwrap_or(0);
+   222	        return V3CurrentTurnSignals {
+   223	            latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
+   224	            current_user_text: String::new(),
+   225	            is_compaction: latest_user_index.is_some_and(|index| {
+   226	                entries[index..]
+   227	                    .iter()
+   228	                    .any(|entry| entry.kind == ResponsesTurnKind::Compaction)
+   229	            }),
+   230	            has_current_turn_web_search: latest_user_index.is_some_and(|index| {
+   231	                entries[current_turn_start..=index]
+   232	                    .iter()
+   233	                    .any(|entry| entry.has_web_search)
+   234	            }),
+   235	            has_current_turn_image: latest_user_index.is_some_and(|index| {
+   236	                entries[current_turn_start..=index]
+   237	                    .iter()
+   238	                    .any(|entry| entry.has_image)
+   239	            }),
+   240	            ..Default::default()
+   241	        };
+   242	    };
+   243	    let mut has_current_turn_tool_output = false;
+   244	    let mut has_current_turn_tool_execution_error = false;
+   245	    let mut is_compaction = false;
+   246	    let mut has_current_turn_web_search = false;
+   247	    let mut has_current_turn_image =
+   248	        latest_user_index.is_some_and(|index| entries[index..].iter().any(|entry| entry.has_image));
+   249	    let mut last_assistant_tool = None;
+   250	    for entry in segment {
+   251	        if entry.has_image {
+   252	            has_current_turn_image = true;
+   253	        }
+   254	        if entry.has_web_search {
+   255	            has_current_turn_web_search = true;
+   256	        }
+   257	        if entry.kind == ResponsesTurnKind::Compaction {
+   258	            is_compaction = true;
+   259	        }
+   260	        if matches!(
+   261	            entry.kind,
+   262	            ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
+   263	        ) {
+   264	            has_current_turn_tool_output = true;
+   265	            if let Some(category) = &entry.tool_call_category {
+   266	                last_assistant_tool = classify_category(category);
+   267	            }
+   268	            continue;
+   269	        }
+   270	        if matches!(entry.kind, ResponsesTurnKind::ToolOutput) {
+   271	            has_current_turn_tool_output = true;
+   272	            if entry.is_tool_output_error {
+   273	                has_current_turn_tool_execution_error = true;
+   274	            }
+   275	            continue;
+   276	        }
+   277	        if entry.role != ResponsesTurnRole::Assistant {
+   278	            continue;
+   279	        }
+   280	        if let Some(category) = &entry.tool_call_category {
+   281	            has_current_turn_tool_output = true;
+   282	            last_assistant_tool = classify_category(category);
+   283	        }
+   284	    }
+   285	    V3CurrentTurnSignals {
+   286	        latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
+   287	        current_user_text: String::new(),
+   288	        has_current_turn_tool_output,
+   289	        has_current_turn_tool_execution_error,
+   290	        is_compaction,
+   291	        has_current_turn_web_search,
+   292	        has_current_turn_image,
+   293	        last_assistant_tool,
+   294	    }
+   295	}
+   296	
+   297	fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
+   298	    let latest_role = entries.iter().rev().map(|entry| entry.role).next();
+   299	    let latest_user_index = entries
+   300	        .iter()
+   301	        .rposition(|entry| matches!(entry.role, GeminiTurnRole::User));
+   302	    let segment_start = latest_user_index.unwrap_or(0);
+   303	    let mut has_current_turn_image = false;
+   304	    let mut has_current_turn_web_search = false;
+   305	    for entry in entries.iter().skip(segment_start) {
+   306	        for part in &entry.parts {
+   307	            if part.has_image {
+   308	                has_current_turn_image = true;
+   309	            }
+   310	            if part.has_web_search {
+   311	                has_current_turn_web_search = true;
+   312	            }
+   313	        }
+   314	    }
+   315	    V3CurrentTurnSignals {
+   316	        latest_message_from_user: matches!(latest_role, Some(GeminiTurnRole::User)),
+   317	        has_current_turn_image,
+   318	        has_current_turn_web_search,
+   319	        ..Default::default()
+   320	    }
+   321	}
+   322	
+   323	fn chat_active_segment<'a>(
+   324	    entries: &'a [ChatTurnEntry],
+   325	    latest_user_index: Option<usize>,
+   326	    latest_role: Option<ChatTurnRole>,
+   327	) -> Option<&'a [ChatTurnEntry]> {
+   328	    if matches!(latest_role, Some(ChatTurnRole::User)) {
+   329	        return None;
+   330	    }
+   360	    ) {
+   361	        Some(RouteToolCallClassification {
+   362	            category: category.to_string(),
+   363	            name: String::new(),
+   364	            snippet: None,
+   365	        })
+   366	    } else {
+   367	        None
+   368	    }
+   369	}
+   370	
+   371	// Thin shim that callers using raw `&Value` (e.g. legacy nodes.rs paths)
+   372	// must route through. This is the single place that converts raw request
+   373	// payload into typed entries; downstream code must only consume the typed
+   374	// result, never re-read raw payload.
+   375	pub fn build_v3_current_turn_route_facts_from_value(request: &Value) -> V3CurrentTurnSignals {
+   376	    let entries = project_v3_current_turn_entries_from_value(request);
+   377	    build_v3_current_turn_route_facts(&entries)
+   378	}
+   379	
+   380	pub fn project_v3_current_turn_entries_from_value(request: &Value) -> V3CurrentTurnEntries {
+   381	    if let Some(messages) = request.get("messages").and_then(value_as_array) {
+   382	        if !messages.is_empty() {
+   383	            return V3CurrentTurnEntries::Chat(project_chat_entries(&messages));
+   384	        }
+   385	    }
+   386	    if let Some(input) = request.get("input") {
+   387	        let entries = project_responses_entries(input);
+   388	        if !entries.is_empty() {
+   389	            return V3CurrentTurnEntries::Responses(entries);
+   390	        }
+   391	    }
+   392	    if let Some(contents) = request.get("contents").and_then(value_as_array) {
+   393	        if !contents.is_empty() {
+   394	            return V3CurrentTurnEntries::Gemini(project_gemini_entries(&contents));
+   395	        }
+   396	    }
+   397	    if let Some(prompt) = request
+   398	        .get("prompt")
+   399	        .and_then(Value::as_str)
+   400	        .map(str::trim)
+   401	        .filter(|text| !text.is_empty())
+   402	    {
+   403	        return V3CurrentTurnEntries::PromptText(prompt.to_string());
+   404	    }
+   405	    if let Some(input) = request
+   406	        .pointer("/semantics/responses/context/input")
+   407	        .and_then(value_as_array)
+   408	    {
+   409	        if !input.is_empty() {
+   410	            return V3CurrentTurnEntries::Responses(project_responses_entries_from_array(&input));
+   411	        }
+   412	    }
+   413	    V3CurrentTurnEntries::Empty
+   414	}
+   415	
+   416	fn project_chat_entries(messages: &[Value]) -> Vec<ChatTurnEntry> {
+   417	    messages
+   418	        .iter()
+   419	        .map(|message| ChatTurnEntry {
+   420	            role: chat_role(message.get("role").and_then(Value::as_str)),
+   421	            parts: project_chat_parts(message.get("content")),
+   422	            tool_calls: project_chat_tool_calls(message.get("tool_calls")),
+   423	        })
+   424	        .collect()
+   425	}
+   426	
+   427	fn project_chat_tool_calls(value: Option<&Value>) -> Vec<ChatToolCall> {
+   428	    let Some(items) = value.and_then(Value::as_array) else {
+   429	        return Vec::new();
+   430	    };
+   431	    items
+   432	        .iter()
+   433	        .map(|item| ChatToolCall {
+   434	            name: item
+   435	                .pointer("/function/name")
+   436	                .or_else(|| item.get("name"))
+   437	                .and_then(Value::as_str)
+   438	                .unwrap_or_default()
+   439	                .to_string(),
+   440	            arguments: item
+   441	                .pointer("/function/arguments")
+   442	                .or_else(|| item.get("arguments"))
+   443	                .or_else(|| item.get("input"))
+   444	                .map(|value| value.to_string()),
+   445	        })
+   446	        .collect()
+   447	}
+   448	
+   449	fn chat_role(role: Option<&str>) -> ChatTurnRole {
+   450	    match role
+   451	        .map(|value| value.trim().to_ascii_lowercase())
+   452	        .as_deref()
+   453	    {
+   454	        Some("user") => ChatTurnRole::User,
+   455	        Some("assistant") => ChatTurnRole::Assistant,
+   456	        Some("tool") => ChatTurnRole::Tool,
+   457	        Some("system") => ChatTurnRole::System,
+   458	        _ => ChatTurnRole::Other,
+   459	    }
+   460	}
+   461	
+   462	fn project_chat_parts(value: Option<&Value>) -> Vec<TurnPart> {
+   463	    let Some(value) = value else {
+   464	        return Vec::new();
+   465	    };
+   466	    match value {
+   467	        Value::String(text) => vec![TurnPart {
+   468	            kind: TurnPartKind::Text,
+   469	            text: text.clone(),
+   470	            ..Default::default()
+   471	        }],
+   472	        Value::Array(items) => items.iter().map(project_chat_part).collect(),
+   473	        _ => Vec::new(),
+   474	    }
+   475	}
+   476	
+   477	fn project_chat_part(value: &Value) -> TurnPart {
+   478	    let mut part = TurnPart::default();
+   479	    if let Some(obj) = value.as_object() {
+   480	        let type_value = obj
+   481	            .get("type")
+   482	            .and_then(Value::as_str)
+   483	            .map(|value| value.trim().to_ascii_lowercase())
+   484	            .unwrap_or_default();
+   485	        if type_value.contains("image") {
+   486	            part.kind = TurnPartKind::Image;
+   487	            part.has_image = true;
+   488	        }
+   489	        if type_value == "web_search" || type_value == "websearch" {
+   490	            part.kind = TurnPartKind::WebSearch;
+   491	            part.has_web_search = true;
+   492	        }
+   493	        if matches!(
+   494	            type_value.as_str(),
+   495	            "tool_call" | "tool_use" | "function_call"
+   496	        ) {
+   497	            part.kind = TurnPartKind::ToolCall;
+   498	        }
+   499	        if matches!(
+   500	            type_value.as_str(),
+   501	            "tool_result" | "tool_output" | "function_call_output"
+   502	        ) {
+   503	            part.kind = TurnPartKind::ToolOutput;
+   504	        }
+   505	        if part.kind == TurnPartKind::Text || part.kind == TurnPartKind::Other {
+   506	            if let Some(text) = obj.get("text").and_then(Value::as_str) {
+   507	                part.text = text.to_string();
+   508	            }
+   509	        }
+   510	    }
+   511	    if !part.has_image && value_contains_image(value) {
+   512	        part.has_image = true;
+   513	        if part.kind == TurnPartKind::Text {
+   514	            part.kind = TurnPartKind::Image;
+   515	        }
+   516	    }
+   517	    part
+   518	}
+   519	
+   520	fn project_responses_entries(value: &Value) -> Vec<ResponsesTurnEntry> {
+   521	    let items = match value {
+   522	        Value::Array(items) => items.clone(),
+   523	        Value::String(text) if !text.trim().is_empty() => {
+   524	            vec![json!({"type": "input_text", "text": text})]
+   525	        }
+   526	        _ => return Vec::new(),
+   527	    };
+   528	    project_responses_entries_from_array(&items)
+   529	}
+   530	
+   531	pub fn project_responses_entries_from_array(items: &[Value]) -> Vec<ResponsesTurnEntry> {
+   532	    items.iter().map(project_responses_entry).collect()
+   533	}
+   534	
+   535	fn project_responses_entry(value: &Value) -> ResponsesTurnEntry {
+   536	    let mut entry = ResponsesTurnEntry::default();
+   537	    let role = responses_role_for_value(value);
+   538	    entry.role = role;
+   539	    let kind = responses_kind_for_value(value);
+   540	    entry.kind = kind;
+   541	    entry.has_image = value_contains_image(value);
+   542	    entry.has_web_search = responses_entry_has_web_search(value);
+   543	    entry.is_tool_output_error =
+   544	        matches!(kind, ResponsesTurnKind::ToolOutput) && tool_output_is_error(value);
+   545	    if matches!(
+   546	        kind,
+   547	        ResponsesTurnKind::ToolCall | ResponsesTurnKind::WebSearch
+   548	    ) {
+   549	        if let Some(category) = tool_category_from_call_value(value) {
+   550	            entry.tool_call_category = Some(category);
+   551	        }
+   552	    }
+   553	    entry
+   554	}
+   555	
+   556	fn responses_role_for_value(value: &Value) -> ResponsesTurnRole {
+   557	    if let Some(role) = value.get("role").and_then(Value::as_str) {
+   558	        return match role.trim().to_ascii_lowercase().as_str() {
+   559	            "user" => ResponsesTurnRole::User,
+   560	            "assistant" => ResponsesTurnRole::Assistant,
+   561	            "tool" => ResponsesTurnRole::Tool,
+   562	            "system" => ResponsesTurnRole::System,
+   563	            _ => ResponsesTurnRole::Other,
+   564	        };
+   565	    }
+   566	    let kind = responses_kind_for_value(value);
+   567	    match kind {
+   568	        ResponsesTurnKind::Text | ResponsesTurnKind::Image => ResponsesTurnRole::User,
+   569	        ResponsesTurnKind::WebSearch
+   570	        | ResponsesTurnKind::ToolCall
+   571	        | ResponsesTurnKind::Reasoning => ResponsesTurnRole::Assistant,
+   572	        ResponsesTurnKind::ToolOutput => ResponsesTurnRole::Tool,
+   573	        _ => ResponsesTurnRole::Other,
+   574	    }
+   575	}
+   576	
+   577	fn responses_kind_for_value(value: &Value) -> ResponsesTurnKind {
+   578	    let type_value = value
+   579	        .get("type")
+   580	        .and_then(Value::as_str)
+   581	        .map(|value| value.trim().to_ascii_lowercase())
+   582	        .unwrap_or_default();
+   583	    if type_value == "image"
+   584	        || type_value.contains("input_image")
+   585	        || type_value.contains("output_image")
+   586	    {
+   587	        return ResponsesTurnKind::Image;
+   588	    }
+   589	    if type_value == "input_text" || type_value == "output_text" || type_value == "text" {
+   590	        return ResponsesTurnKind::Text;
+   591	    }
+   592	    if type_value == "web_search_call" || type_value == "websearch_call" {
+   593	        return ResponsesTurnKind::WebSearch;
+   594	    }
+   595	    if matches!(
+   596	        type_value.as_str(),
+   597	        "function_call" | "tool_call" | "custom_tool_call"
+   598	    ) {
+   599	        return ResponsesTurnKind::ToolCall;
+   600	    }
+   601	    if matches!(
+   602	        type_value.as_str(),
+   603	        "function_call_output" | "tool_call_output" | "custom_tool_call_output"
+   604	    ) {
+   605	        return ResponsesTurnKind::ToolOutput;
+   606	    }
+   607	    if type_value == "compaction" {
+   608	        return ResponsesTurnKind::Compaction;
+   609	    }
+   610	    if type_value == "reasoning" {
+   611	        return ResponsesTurnKind::Reasoning;
+   612	    }
+   613	    ResponsesTurnKind::Other
+   614	}
+   615	
+   616	fn responses_entry_has_web_search(value: &Value) -> bool {
+   617	    let type_value = value
+   618	        .get("type")
+   619	        .and_then(Value::as_str)
+   620	        .map(|value| value.trim().to_ascii_lowercase())
+   621	        .unwrap_or_default();
+   622	    // web_search_call is a tool-call type; web_search_part inside content[] is the route fact.
+   623	    matches!(type_value.as_str(), "web_search" | "websearch")
+   624	}
+   625	
+   626	fn tool_output_is_error(value: &Value) -> bool {
+   627	    value
+   628	        .get("output")
+   629	        .and_then(|output| output.get("is_error"))
+   630	        .and_then(Value::as_bool)
+   631	        .unwrap_or(false)
+   632	        || value
+   633	            .get("is_error")
+   634	            .and_then(Value::as_bool)
+   635	            .unwrap_or(false)
+   636	}
+   637	
+   638	fn tool_category_from_call_value(value: &Value) -> Option<String> {
+   639	    let entry_type = value
+   640	        .get("type")
+   641	        .and_then(Value::as_str)
+   642	        .map(|value| value.trim().to_ascii_lowercase())
+   643	        .unwrap_or_default();
+   644	    let name = value
+   645	        .pointer("/function/name")
+   646	        .or_else(|| value.get("name"))
+   647	        .and_then(Value::as_str)
+   648	        .or_else(|| (entry_type == "web_search_call").then_some("web_search"))?;
+   649	    let arguments = value
+   650	        .pointer("/function/arguments")
+   651	        .or_else(|| value.get("arguments"))
+   652	        .or_else(|| value.get("input"));
+   653	    if let Some(classification) = classify_tool_call(name, arguments) {
+   654	        return Some(classification.category);
+   655	    }
+   656	    None
+   657	}
+   658	
+   659	fn project_gemini_entries(contents: &[Value]) -> Vec<GeminiTurnEntry> {
+   660	    contents
+   661	        .iter()
+   662	        .map(|content| GeminiTurnEntry {
+   663	            role: match content.get("role").and_then(Value::as_str) {
+   664	                Some("user") => GeminiTurnRole::User,
+   665	                Some("model") => GeminiTurnRole::Assistant,
+   666	                _ => GeminiTurnRole::Other,
+   667	            },
+   668	            parts: project_chat_parts(content.get("parts")),
+   669	        })
+   670	        .collect()
+   671	}
+   672	
+   673	fn value_as_array(value: &Value) -> Option<Vec<Value>> {
+   674	    if let Some(items) = value.as_array() {
+   675	        return Some(items.clone());
+   676	    }
+   677	    let raw = value.as_str()?.trim();
+   678	    if raw.is_empty() {
+   679	        return None;
+   680	    }
+   681	    serde_json::from_str::<Value>(raw)
+   682	        .ok()
+   683	        .and_then(|parsed| parsed.as_array().cloned())
+   684	}
+   685	
+   686	fn value_contains_image(value: &Value) -> bool {
+   687	    match value {
+   688	        Value::Array(items) => items.iter().any(value_contains_image),
+   689	        // fbab9d4: Codex view_image carriers embed the screenshot as a
+   690	        // stringified JSON array (or a bare data URL) inside
+   691	        // `function_call_output.output`; decode and recurse.
+   692	        Value::String(text) => string_carries_image(text),
+   693	        Value::Object(values) => {
+   694	            let type_value = values
+   695	                .get("type")
+   696	                .and_then(Value::as_str)
+   697	                .map(|value| value.trim().to_ascii_lowercase())
+   698	                .unwrap_or_default();
+   699	            if type_value.contains("image") {
+   700	                return true;
+   701	            }
+   702	            if values.contains_key("image_url") {
+   703	                return true;
+   704	            }
+   705	            if values.contains_key("inline_data") || values.contains_key("file_data") {
+   706	                return true;
+   707	            }
+   708	            if values
+   709	                .get("data")
+   710	                .and_then(Value::as_str)
+   711	                .map(|value| value.trim().to_ascii_lowercase())
+   712	                .is_some_and(|value| value.starts_with("data:image/"))
+   713	            {
+   714	                return true;
+   715	            }
+   716	            if values
+   717	                .get("file_url")
+   718	                .and_then(Value::as_str)
+   719	                .map(|value| value.trim().to_ascii_lowercase())
+   720	                .is_some_and(|value| value.starts_with("data:image/"))
+   721	            {
+   722	                return true;
+   723	            }
+   724	            ["content", "parts", "output"]
+   725	                .into_iter()
+   726	                .filter_map(|field| values.get(field))
+   727	                .any(value_contains_image)
+   728	        }
+   729	        _ => false,
+   730	    }
+   731	}
+   732	
+   733	fn string_carries_image(text: &str) -> bool {
+   734	    let trimmed = text.trim();
+   735	    if trimmed.starts_with("data:image/") {
+   736	        return true;
+   737	    }
+   738	    if trimmed.starts_with('[') || trimmed.starts_with('{') {
+   739	        if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+   740	            return value_contains_image(&value);
+   741	        }
+   742	    }
+   743	    false
+   744	}
+
+--- map sections ---
+  - v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs
+  required_gates:
+  - npm run verify:sse-architecture-boundary
+  - npm run verify:v3-provider-action-gate
+  - npm run verify:v3-runtime-timing-observability
+  - npm run test:v3-openai-chat-relay-runtime-integration
+  migration_target: rust
+  notes:
+  - OpenAI Chat finish_reason is semantic protocol data; [DONE] is transport-only.
+  - Unsupported or malformed standard protocol events fail at the adjacent codec.
+- feature_id: vr.current_turn_typed_route_facts
+  status: source_controlled_runtime_pending_live_replay
+  # 2026-08-12：typed route-facts carrier and classifier boundary implemented.
+  # Raw request parsing is confined to the named current-turn builder; the
+  # classifier consumes only V3CurrentTurnRouteFacts. No raw Value reaches it.
+  summary: Virtual Router consumes explicit typed route facts for the current
+    request turn and never reconstructs control from request business content.
+  owner_kind: rust_ssot
+  owner_scope: >-
+    Route fact carrier and classifier boundary only; no request history, free
+    text, prompt, tool argument text, image bytes, or response/SSE inference.
+  owner_module: v3/crates/routecodex-v3-route-classifier
+  resource_bindings:
+    writes:
+    - v3.route.request_facts@V3RouteClassification
+    reads:
+    - v3.route.current_turn_facts@V3HubReqExecution05Planned
+    forbidden:
+    - request.normal_payload
+    - v3.hub.entry_protocol
+    - v3.hub.provider_protocol
+    - v3.response.provider_raw
+  canonical_types:
+  - V3CurrentTurnRouteFacts
+  - RouteClassification
+  canonical_builders:
+  - build_v3_current_turn_route_facts
+  - classify_route
+  allowed_paths:
+  - v3/crates/routecodex-v3-route-classifier/src
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  forbidden_paths:
+  - v3/crates/routecodex-v3-sse
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-provider-responses
+  - v3/crates/routecodex-v3-target
+  - MetadataCenter
+  required_tests:
+  - v3/crates/routecodex-v3-route-classifier/src/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  required_gates:
+  - npm run test:route-classifier-semantics
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  migration_target: rust
+  owner: route-classifier owner（v3-route-classifier crate）
+  implementation_plan:
+    phase: 1
+    steps:
+    - P1: '定义 V3CurrentTurnRouteFacts typed carrier（current-turn 结构化字段，与 RouteClassification 同 crate；禁止历史/自由文本/tool 参数/图片字节）。'
+    - P2: 'build_v3_current_turn_route_facts 从现有 build_v3_router_request_facts_for_entry_with_control 的输入提取 typed 字段，使 classify_route 只消费 typed facts（不再直接扫描原始 payload）。'
+    - P3: 'nodes.rs / route-classifier 测试迁移到 typed carrier；物理删除 payload-scanning 推断路径（硬护栏 12）。'
+    - P4: 'VR 消费方（provider-failure policy / route facts 使用者）改为只读 v3.route.current_turn_facts@V3HubReqExecution05Planned，禁止重建。'
+    status: 'source_controlled（typed carrier and builder symbols exist; live replay remains required）'
+  notes:
+  - Current-turn scope is an ownership boundary, not a license to scan historical payload.
+  - Control state must arrive through typed side-channel facts; payload cannot rebuild it.
+  - 'Source status is not runtime closeout: install, aggregate restart, and exact positive/reverse live replay remain required before delivery.'
+- feature_id: v3.protocol_conversion_field_parity
+  owner_crates:
+  - routecodex-v3-runtime
+  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics.
+    Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
+        side_channel_writes: []
+    - step_id: v3-build-test-budget-03
+      from_node: V3BuildTest03OwnedArtifactsReleased
+      to_node: V3BuildTest04BudgetVerified
+      caller_symbol: runV3CargoTest
+      caller_file: v3/scripts/run-v3-cargo-test.mjs
+      callee_symbol: verifyV3DebugBudget
+      callee_file: v3/scripts/run-v3-cargo-test.mjs
+      status: anchored
+      owner_feature_id: v3.build_test_artifact_budget
+      resource_flow:
+        consumes: [v3.build.dependency_cache, v3.build.ordinary_cargo_target]
+        produces: [v3.build.assembled_binary, v3.build.install_target]
+        side_channel_reads: []
+        side_channel_writes: []
+- chain_id: v3.route_classifier.facts_classification
+  owner_feature_id: v3.route_classifier_local_owner
+  summary: Route facts classification stays local to the route-classifier crate; Virtual Router and runtime request-facts builders consume classification decisions, never payload patches.
+  edges:
+  - step_id: v3-route-classifier-facts-01
+    from_node: V3RouterRequestFacts
+    to_node: V3RouteClassification
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: classify_route
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+    status: anchored
+    binding_kind: v3_route_classifier_facts
+    owner_feature_id: v3.route_classifier_local_owner
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.route.request_facts]
+      side_channel_reads: []
+      side_channel_writes: []
+- chain_id: v3.sse.protocol_codec_projection_boundary
+  owner_feature_id: v3.sse_protocol_codec_projection_boundary
+  summary: Opaque SSE framing feeds adjacent provider/client protocol codecs;
+    runtime and server do not infer semantic terminality or control state.
+  manifest: docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml
+  edges:
+  - step_id: v3-sse-codec-01
+    from_node: V3ProviderRespInbound01Raw
+    to_node: V3SseTransportIn03ValidatedFrameStream
+    caller_symbol: project_sse_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: SseIncrementalDecoder::push
+    callee_file: v3/crates/routecodex-v3-sse/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    resource_flow:
+      consumes: [v3.response.provider_raw]
+      produces: [v3.sse.transport_validated_frame_stream]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-sse-codec-02
+    from_node: V3SseTransportIn03ValidatedFrameStream
+    to_node: V3HubRespInbound02Normalized
+    caller_symbol: project_sse_event_payload
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs
+    callee_symbol: build_v3_hub_resp_inbound_02_from_provider_resp_compat_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+    status: anchored
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    resource_flow:
+      consumes: [v3.sse.transport_validated_frame_stream, v3.hub.provider_protocol]
+      produces: [v3.hub.response_semantic, v3.sse.protocol_semantic_projection]
+      side_channel_reads: [v3.hub.provider_protocol]
+      side_channel_writes: []
+  - step_id: v3-sse-codec-03
+    from_node: V3HubRespContinuation04Committed
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: project_sse_stream
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+    status: anchored
+    owner_feature_id: v3.sse_protocol_codec_projection_boundary
+    resource_flow:
+      consumes: [v3.hub.response_semantic, v3.hub.entry_protocol, v3.sse.protocol_semantic_projection]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.hub.entry_protocol]
+      side_channel_writes: []
+- chain_id: vr.current_turn_typed_route_facts
+  owner_feature_id: vr.current_turn_typed_route_facts
+  summary: Typed current-turn route facts are produced before VR selection and
+    cannot be reconstructed from request history or business text.
+  manifest: docs/architecture/manifests/vr.route_classifier.mainline.yml
+  edges:
+  - step_id: vr-current-turn-01
+    from_node: V3HubReqExecution05Planned
+    to_node: V3CurrentTurnRouteFacts
+    caller_symbol: build_v3_current_turn_route_facts
+    caller_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+    callee_symbol: classify_route
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+    status: anchored
+    owner_feature_id: vr.current_turn_typed_route_facts
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
+      produces: [v3.route.request_facts]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-route-classifier-facts-02
+    from_node: V3RouterRequestFacts
+    to_node: V3CurrentTurnRouteFacts
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: build_v3_current_turn_route_facts
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
+    status: anchored
+    binding_kind: v3_route_classifier_facts
+    owner_feature_id: v3.route_classifier_local_owner
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.route.request_facts]
+      side_channel_reads: []
+      side_channel_writes: []
+- chain_id: v3.provider_global_subscription_probe
+  owner_feature_id: v3.provider_global_subscription_probe
+  summary: Managed aggregate lifecycle acquires due provider-global probes and completes recovery or process-lifetime suspension through the typed health resource.
+  manifest: docs/architecture/manifests/v3.provider_global_subscription_probe.mainline.yml
+  edges:
+  - step_id: v3-provider-global-probe-01
+    from_node: V3ProviderHealthStore
+    to_node: V3ProviderHealthProbePermit
+    caller_symbol: V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderHealthStore::acquire_provider_cooldown_probe
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+  - A custom key catalog changes the projected provider wire body without changing provider compatibility ownership.
+  required_negative:
+  - Key hooks cannot write MetadataCenter, routing, retry, health, continuation, response payload, or Relay JSON governance state.
+  - Key hooks do not reconstruct control state from business prompt or tool content.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_request_key_hooks
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_request_key_catalog_effect_reaches_responses_provider_wire_body
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_request_key_catalog_effect_reaches_chat_provider_wire_body
+  - CARGO_NET_OFFLINE=true cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
+  - npm run verify:v3-resource-map
+  - git diff --check
+  completion_rule:
+    source: Complete only after the three protocol direct mounts and their reverse/negative tests are wired.
+    runtime: Requires direct and relay live replay with exact provider body evidence.
+    forbidden_claim: Do not claim Relay JSON uses Direct key hooks.
+- feature_id: vr.current_turn_typed_route_facts
+  status: source_controlled_live_replay_pending
+  change_risk: critical
+  owner_kind: rust_v3_route_fact_boundary
+  owner_scope: Explicit typed current-turn facts only; no request-message or historical payload reverse inference of routing/control state.
+  owner: "route-classifier owner\uFF08v3-route-classifier crate\uFF09"
+  implementation_plan:
+    phase: 1
+    steps:
+    - P1: "\u5B9A\u4E49 V3CurrentTurnRouteFacts typed carrier\uFF08\u4E0E RouteClassification \u540C crate\uFF09\u3002"
+    - P2: "build_v3_current_turn_route_facts \u63D0\u53D6 typed \u5B57\u6BB5\uFF0Cclassify_route \u53EA\u6D88\u8D39 typed facts\uFF1B\u4E0D\u626B\u63CF\u4E1A\u52A1\u6587\u672C\u3002"
+    - P3: "nodes.rs / \u6D4B\u8BD5\u8FC1\u79FB\u5230 typed carrier\uFF1B\u7269\u7406\u5220\u9664 payload-scanning \u63A8\u65AD\uFF08\u786C\u62A4\u680F 12\uFF09\u3002"
+    - P4: "VR \u6D88\u8D39\u65B9\u53EA\u8BFB typed current-turn facts\uFF0C\u7981\u6B62\u91CD\u5EFA\u3002"
+    status_note: typed carrier and canonical builder are source-bound; live positive/reverse replay remains pending and must not be claimed complete.
+  design:
+  - docs/goals/v3-openai-chat-anthropic-sse-terminal-closeout-fix-design.md
+  contract:
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_unit:
+  - current-turn typed facts classify deterministically.
+  - historical messages and prior tool content cannot alter route facts.
+  - business text and tool arguments cannot create routing/control state.
+  required_reverse:
+  - changing only history leaves route classification unchanged.
+  - changing only request prose leaves route/control facts unchanged.
+  required_gates:
+  - npm run test:route-classifier-semantics
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - git diff --check
+  completion_rule:
+    source: Complete only when all classifier callers consume the typed current-turn carrier and no raw payload reaches classify_route.
+    runtime: Requires exact current-turn live replay and negative historical/text replay after install and aggregate restart.
+- feature_id: v3.protocol_conversion_field_parity
+  status: runtime_active_live_verified_5520
+  change_risk: high
+  owner_kind: rust_v3_protocol_codec_field_parity
+  owner_scope: Lossless V2/V3 field parity for the supported V3 Relay protocol conversion paths and same-protocol Responses Direct provider wire preservation without server/SSE/MetadataCenter repair owners.
+  compatibility_exceptions:
+
+exec
+/bin/zsh -lc "nl -ba v3/crates/routecodex-v3-route-classifier/src/active_turn.rs | sed -n '323,380p;575,635p'; rg -n \"fn responses_active_segment|project_responses_entry|value_contains_image\" v3/crates/routecodex-v3-route-classifier/src/active_turn.rs v3/crates/routecodex-v3-route-classifier/src/tests.rs; git diff --check ec51c3ad7 089ee36ae; git log -1 --format='%H %P' 089ee36ae" in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 6859ms:
+2026-09-11 23:01:45.652 xcodebuild[44257:489114300]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:46.051 xcodebuild[44257:489114284] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-4Z1DlaAv' (errno=Operation not permitted)
+2026-09-11 23:01:46.867 xcodebuild[44888:489115189]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:47.214 xcodebuild[44888:489115179] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-w44deltg' (errno=Operation not permitted)
+2026-09-11 23:01:49.154 xcodebuild[46013:489116753]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:49.620 xcodebuild[46013:489116741] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-laLO8U4M' (errno=Operation not permitted)
+2026-09-11 23:01:50.281 xcodebuild[46600:489117405]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:01:50.710 xcodebuild[46600:489117397] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+089ee36ae89316fb26629a8384ab021a426eed1d ec51c3ad7a184cb767774e9475e721a01fe6740b
+
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[],"findings":[]}
+exec
+/bin/zsh -lc 'rg -n -A55 -B8 "feature_id: vr.current_turn_typed_route_facts|feature_id: v3.route_classifier_local_owner" docs/architecture/v3-function-map.yml; rg -n -A32 -B8 "chain_id: vr.current_turn_typed_route_facts" docs/architecture/v3-mainline-call-map.yml; rg -n -A35 -B8 "route-classifier-semantics" v3/package.json package.json 2>/dev/null; git status --porcelain=v1 --untracked-files=all' in /Users/fanzhang/Documents/github/routecodex/playground/fbab9d4-multimodal-0911
+ succeeded in 4436ms:
+2026-09-11 23:02:10.708 xcodebuild[55642:489131521]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:02:11.103 xcodebuild[55642:489131516] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-npxpoqWT' (errno=Operation not permitted)
+2026-09-11 23:02:12.132 xcodebuild[56477:489132562]  DVTFilePathFSEvents: Failed to start fs event stream.
+2026-09-11 23:02:12.490 xcodebuild[56477:489132541] [MT] DVTDeveloperPaths: Failed to get length of DARWIN_USER_CACHE_DIR from confstr(3), error = Error Domain=NSPOSIXErrorDomain Code=5 "Input/output error". Using NSCachesDirectory instead.
+ M v3/package-lock.json
+ M v3/package.json
+
+codex
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[{"module":"v3 route-classifier current-turn typed route facts","owner":"route-classifier owner; v3/crates/routecodex-v3-route-classifier","paths":"Changed only v3/crates/routecodex-v3-route-classifier/src/active_turn.rs and its src/tests.rs regression fixture; both are within the feature's allowed paths. No forbidden server, SSE, provider, target, or MetadataCenter paths changed.","edges":"project_v3_current_turn_entries_from_value -> project_responses_entry -> value_contains_image -> build_v3_current_turn_route_facts -> classify_route. The new output-field recursion and stringified-JSON decoding remain inside the canonical raw-to-typed current-turn builder boundary.","resources":"Consumes the request's current-turn input to produce typed V3CurrentTurnSignals / v3.route.request_facts; classify_route continues to consume typed facts rather than raw payload. No control state is written into business payload, metadata, logs, or snapshots.","gates":"Controller-provided evidence: targeted codex_view_image_function_call_output_drives_multimodal_route test 1/1 passed; full route-classifier suite 32/32 passed; npm run verify:v3-module-boundaries passed. The commit also passes git diff --check based on read-only verification."}],"findings":[]}
+hook: Stop
+hook: Stop
+hook: Stop Completed
+hook: Stop Completed
+tokens used
+60,998
+{"contract_version":"1","scope":{"mode":"commit","commit":"089ee36ae","base":"ec51c3ad7"},"module_boundary_evidence":[{"module":"v3 route-classifier current-turn typed route facts","owner":"route-classifier owner; v3/crates/routecodex-v3-route-classifier","paths":"Changed only v3/crates/routecodex-v3-route-classifier/src/active_turn.rs and its src/tests.rs regression fixture; both are within the feature's allowed paths. No forbidden server, SSE, provider, target, or MetadataCenter paths changed.","edges":"project_v3_current_turn_entries_from_value -> project_responses_entry -> value_contains_image -> build_v3_current_turn_route_facts -> classify_route. The new output-field recursion and stringified-JSON decoding remain inside the canonical raw-to-typed current-turn builder boundary.","resources":"Consumes the request's current-turn input to produce typed V3CurrentTurnSignals / v3.route.request_facts; classify_route continues to consume typed facts rather than raw payload. No control state is written into business payload, metadata, logs, or snapshots.","gates":"Controller-provided evidence: targeted codex_view_image_function_call_output_drives_multimodal_route test 1/1 passed; full route-classifier suite 32/32 passed; npm run verify:v3-module-boundaries passed. The commit also passes git diff --check based on read-only verification."}],"findings":[]}
