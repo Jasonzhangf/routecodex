@@ -759,19 +759,16 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
         !projection.available,
         "three transient post-commit failures must cool the key down globally"
     );
+    let fresh_projection = health.store().availability_for_session(
+        &fresh_session,
+        "primary",
+        Some("key1"),
+        Some("gpt-test"),
+        v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+    );
     assert!(
-        health
-            .store()
-            .availability_for_session(
-                &fresh_session,
-                "primary",
-                Some("key1"),
-                Some("gpt-test"),
-                v3_relay_provider_policy_now_epoch_ms().expect("current epoch")
-            )
-            .available
-            == false
-            || true
+        !fresh_projection.available,
+        "global cooldown must be visible to a fresh session"
     );
 }
 
