@@ -710,6 +710,23 @@
         "generated/modules/routecodex-v4-runtime/**"
       ],
       "module_id": "routecodex-v4-runtime",
+      "registry_binding": {
+        "mode": "aggregate",
+        "modules": [
+          "routecodex-v4-runtime",
+          "routecodex-v4-runtime-bin",
+          "routecodex-v4-provider",
+          "routecodex-v4-router",
+          "routecodex-v4-server",
+          "routecodex-v4-servertool",
+          "routecodex-v4-config",
+          "routecodex-v4-debug",
+          "routecodex-v4-cli",
+          "routecodex-v4-lifecycle",
+          "routecodex-v4-admin",
+          "routecodex-v4-runtime-inspector"
+        ]
+      },
       "owned_paths": [
         "crates/routecodex-v4-runtime/**",
         "crates/routecodex-v4-runtime-bin/**",
