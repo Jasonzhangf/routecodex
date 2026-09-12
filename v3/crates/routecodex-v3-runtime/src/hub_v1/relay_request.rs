@@ -156,6 +156,7 @@ pub enum V3HubServertoolRequestProfile {
         hook_ids: Vec<&'static str>,
         web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
         tool_thinking: bool,
+        memory_raw_capture: bool,
     },
     RequiredFailure(&'static str),
 }
@@ -168,6 +169,7 @@ impl V3HubServertoolRequestProfile {
             hook_ids: hook_ids.into(),
             web_search_execution_mode: None,
             tool_thinking: false,
+            memory_raw_capture: false,
         }
     }
     pub fn with_web_search_execution_mode(
@@ -189,11 +191,29 @@ impl V3HubServertoolRequestProfile {
         }
         self
     }
+    pub fn with_memory_raw_capture_enabled(mut self, enabled: bool) -> Self {
+        if let Self::Enabled {
+            memory_raw_capture, ..
+        } = &mut self
+        {
+            *memory_raw_capture = enabled;
+        }
+        self
+    }
     pub fn tool_thinking_enabled(&self) -> bool {
         matches!(
             self,
             Self::Enabled {
                 tool_thinking: true,
+                ..
+            }
+        )
+    }
+    pub fn memory_raw_capture_enabled(&self) -> bool {
+        matches!(
+            self,
+            Self::Enabled {
+                memory_raw_capture: true,
                 ..
             }
         )
@@ -265,6 +285,8 @@ pub enum V3HubRelayRequestError {
     WebSearchToolSurfaceActivationFailed { reason: String },
     #[error("tool-thinking schema is invalid: {reason}")]
     ToolThinkingSchemaInvalid { reason: String },
+    #[error("memory raw capture guidance injection failed at Req04: {reason}")]
+    MemoryRawCaptureGuidanceInjectionFailed { reason: String },
     #[error("{protocol} tool identity is invalid at item {index}: {reason}")]
     ProtocolToolIdentityInvalid {
         protocol: &'static str,
@@ -410,6 +432,20 @@ impl V3HubRelayRequestHooks {
         }
         if let Some(key) = find_v3_hub_side_channel_key(&classified.previous.previous.payload.0) {
             return Err(V3HubRelayRequestError::SideChannelLeaked { key });
+        }
+        let memory_raw_capture_guidance_injected =
+            classified.previous.memory_raw_capture_guidance_injected;
+        if classified.previous.previous.entry_protocol == V3HubEntryProtocol::Responses
+            && profile.memory_raw_capture_enabled()
+            && !memory_raw_capture_guidance_injected
+        {
+            routecodex_v3_agent_memory::inject_memory_raw_capture_guidance(Arc::make_mut(
+                &mut classified.previous.previous.payload.0,
+            ))
+            .map_err(|reason| {
+                V3HubRelayRequestError::MemoryRawCaptureGuidanceInjectionFailed { reason }
+            })?;
+            classified.previous.memory_raw_capture_guidance_injected = true;
         }
         let (web_search_state, tool_thinking_turn_context) = govern_v3_servertool_request_at_req04(
             Arc::make_mut(&mut classified.previous.previous.payload.0),

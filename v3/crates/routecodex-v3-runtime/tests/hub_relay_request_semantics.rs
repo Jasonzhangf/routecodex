@@ -124,6 +124,51 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 }
 
 #[test]
+fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "instructions":"Base instructions.",
+                "input":[{"role":"user","content":"hello"}]
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &profile,
+        )
+        .unwrap();
+
+    let payload = governed.payload();
+    let guidance = routecodex_v3_agent_memory::memory_raw_capture_guidance_text();
+    assert_eq!(payload["instructions"], guidance);
+    assert_eq!(payload["messages"][0]["role"], "system");
+    assert_eq!(payload["messages"][0]["content"], "Base instructions.");
+}
+
+#[test]
+fn responses_relay_memory_guidance_injection_fails_fast_on_bad_instructions() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let error = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "messages":[{"role":"user","content":"hello"}],
+                "instructions": 7
+            })),
+            &V3HubContinuationLookup::new(None, scope()),
+            &profile,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        V3HubRelayRequestError::MemoryRawCaptureGuidanceInjectionFailed { reason }
+            if reason.contains("instructions must be a string")
+    ));
+}
+
+#[test]
 fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
