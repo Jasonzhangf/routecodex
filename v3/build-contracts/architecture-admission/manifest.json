@@ -528,8 +528,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.protocol_request_field_projection.yml",
       "source_path": "docs/architecture/manifests/v3.protocol_request_field_projection.yml",
-      "source_commit": "caf14d830cefeeb6c14dab61961d70eaf190c4e1",
-      "sha256": "2f3436ea0534da78ddbc2931c3168837875ed33f47911f5f1ee011140e2831f6"
+      "source_commit": "ba120848ca8ffec2b6f0bb7748e3217cf17fed21",
+      "sha256": "4dfe50b40766138ce1a7e41e14e7576427d1cf9e4d1b251bd711c009e6b291ee"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
@@ -720,8 +720,8 @@
     {
       "output_path": "repo/docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml",
       "source_path": "docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml",
-      "source_commit": "e3b3f24d803f03abeb69deb98a615da0d970ec76",
-      "sha256": "6d69f0e15c91a1e36f5f6c5242a5e4a1613954bce33651e5904c137628ed55a6"
+      "source_commit": "ba120848ca8ffec2b6f0bb7748e3217cf17fed21",
+      "sha256": "8202cbedfdd884183b774dc33903c3a444e000fc67d64370076f29df2276f18a"
     },
     {
       "output_path": "repo/docs/architecture/reviews/v3-protocol-semantic-matrix-review.md",
@@ -768,8 +768,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "74c724c6419a0896a5d7df7f71ee54eab38d992f658b0927bbf47c5e624f48b8"
+      "source_commit": "ec51c3ad7a184cb767774e9475e721a01fe6740b",
+      "sha256": "59ed7792f6859964e3dc92109c1e95734d6d02861a989cdb988b39bddb5963db"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -798,8 +798,8 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "0dd53daf4433c5fc347d1d53120067d3cdbd8a9a269c4ed09e9a2de235fde961"
+      "source_commit": "d0a40180be5d20acf4114caef5ab628499cfda9a",
+      "sha256": "af3a07330fe91f256c8c15b9c0fc409aa4dc7aeda0add5b2faf6a36f42400409"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1002,8 +1002,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html",
       "source_path": "docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html",
-      "source_commit": "01294387dd7749f3d030253c38d860a58159756b",
-      "sha256": "72a6a06357479a55acdda09cd7114aa2251fc3287d9d94188ffbdfb44f6c5c2b"
+      "source_commit": "ba120848ca8ffec2b6f0bb7748e3217cf17fed21",
+      "sha256": "cf9854abc9fa2a55d4ce262db4349869969c3d15192b092a5015fdaa6158f382"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-provider-directory-config.html",
@@ -1488,8 +1488,8 @@
     {
       "output_path": "repo/docs/design/v3-protocol-request-field-projection.md",
       "source_path": "docs/design/v3-protocol-request-field-projection.md",
-      "source_commit": "caf14d830cefeeb6c14dab61961d70eaf190c4e1",
-      "sha256": "d004c017c9f9f3b4fce7daac0c4091071d383bb6ccd26ec9f2ea88982fb63fca"
+      "source_commit": "ba120848ca8ffec2b6f0bb7748e3217cf17fed21",
+      "sha256": "eefa0e8df3647e0b1734552ed876871a0aa319a2da493963cc9ef92d93126a49"
     },
     {
       "output_path": "repo/docs/design/v3-provider-directory-config.md",
@@ -2886,9 +2886,9 @@
     {
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "9e18f780cd53ff23d535ccccd1dce1fc8b069b827e1543abe21844526e017c45"
+      "source_commit": "d0a40180be5d20acf4114caef5ab628499cfda9a",
+      "sha256": "ee8e29e3c7cab1e34fcebb13fab429fc675363f90ff8a0bfe0051653584831c4"
     }
   ],
-  "manifest_digest": "4ed981c197f91a4a4f1b0bf4b4d4de2fc7d774e0f7b0b8cb37dfa7e9d69817fd"
+  "manifest_digest": "9c8e5e9709e69eba47c52948b43ea0d654de8f221e8044a06a1c2ae1b78aa6f0"
 }

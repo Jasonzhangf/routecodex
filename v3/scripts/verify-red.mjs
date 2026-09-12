@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { run } from './_common.mjs';
 
-run('node', ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs']);
-run('node', ['tests/scripts/v3-architecture-admission-red-fixtures.mjs']);
-run('node', ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs']);
+await run('node', ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs']);
+await run('node', ['tests/scripts/v3-architecture-admission-red-fixtures.mjs']);
+await run('node', ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs']);
 for (const fixture of [
   'scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs',

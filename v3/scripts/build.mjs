@@ -10,7 +10,7 @@ const env = {
   ROUTECODEX_BUILD_VERSION: pkg.version,
 };
 
-run('node', ['scripts/verify-isolation.mjs']);
-run('cargo', ['build', '--locked', '--workspace'], { env });
-run('node', ['scripts/copy-cli-bin.mjs'], { env });
+await run('node', ['scripts/verify-isolation.mjs']);
+await run('cargo', ['build', '--locked', '--workspace'], { env });
+await run('node', ['scripts/copy-cli-bin.mjs'], { env });
 process.stdout.write(`[v3 build] PASS version=${pkg.version}\n`);
