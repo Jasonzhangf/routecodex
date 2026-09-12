@@ -1,13 +1,15 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:b3bd7c8ef3b44790f6cf50169ef7a42d61a20b66747e1e5c71b9a348f945ccb4",
-  "bundle_manifest_digest": "sha256:13fc02fb5a413309603cdb870d8e8d6d3201360bb361a3fd05708ca17bc1d768",
+  "bundle_digest": "sha256:391d99fa6fa2d74e850b5b102dbdace7896a34319b2efe163e7c432c55b25281",
+  "bundle_manifest_digest": "sha256:28ef0950599c04eb9e045b2ee30d3e878d09ff07faef6dc1b287c47ea377b1f0",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
       "contracts/project.schema.json",
       "contracts/development-scenarios.manifest.json",
       "contracts/guidance/guidance-manifest.schema.json",
+      "contracts/guidance/tour-review.schema.json",
+      "contracts/memory/memory-entry.schema.json",
       "contracts/maps/resource-map.json",
       "contracts/maps/function-map.json",
       "contracts/maps/mainline-call-map.json",
@@ -24,6 +26,7 @@
       "contracts/records/reproduction-record.schema.json",
       "contracts/records/evidence-record.schema.json",
       "contracts/records/fix-candidate-record.schema.json",
+      "contracts/records/goal-clarification-record.schema.json",
       "contracts/records/review-record.schema.json",
       "contracts/records/effectiveness-record.schema.json",
       "contracts/records/pre-review-validation-record.schema.json",
@@ -48,7 +51,8 @@
       "docs/design/appsdk-guidance-framework.md",
       "docs/test-design/appsdk-guidance-framework.md",
       "docs/architecture/development-process-control-harness.md",
-      "docs/architecture/appsdk-governance-architecture.md"
+      "docs/architecture/appsdk-governance-architecture.md",
+      "docs/design/project-memory.md"
     ],
     "rules": [
       "skills/appsdk-project-governance/SKILL.md"
@@ -62,13 +66,14 @@
       "skills/appsdk-project-governance/references/development-debug.md",
       "skills/appsdk-project-governance/references/goal-prompt.md",
       "skills/appsdk-project-governance/references/process-control-harness.md",
-      "skills/appsdk-project-governance/references/review-delivery.md"
+      "skills/appsdk-project-governance/references/review-delivery.md",
+      "skills/project-memory/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:4bbea8fefc9be8d41c308e6cfa0155385182bfbee346c32f2b81ed836d863a37",
+  "compiler_digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
   "contract_schema": 1,
-  "digest": "sha256:4bbea8fefc9be8d41c308e6cfa0155385182bfbee346c32f2b81ed836d863a37",
-  "previous_bundle_digest": "sha256:4813363da77e9eec678bb7e4bbc8664beec920479aa61677c5991d4e45f82018",
+  "digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
+  "previous_bundle_digest": "sha256:13eeb6a7e64d71ce59dd1193e4884bda1f169f459c5c3ddfd5ec5eddcc45857b",
   "sdk": "appsdk",
   "version": "0.1.6"
 }

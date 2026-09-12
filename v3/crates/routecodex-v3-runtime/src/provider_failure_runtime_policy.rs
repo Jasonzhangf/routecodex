@@ -7,11 +7,11 @@ use routecodex_v3_config::{
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
-    build_v3_provider_failure_action_from_v3_error_02, is_v3_provider_pool_exhausted,
-    V3Error01SourceRaised, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ProviderFailureSessionScope,
+    build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
+    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error02Classified,
+    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
@@ -41,6 +41,33 @@ pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
 ) -> Result<(), String> {
     probe_v3_provider_global_target_impl(target).await
+}
+
+/// internal.toml 全局错误策略表的落地点：401/403 → 连续 2 次×1h；
+/// 429/5xx → 连续 3 次×15m；其余 provider 失败沿用 typed 分类结果并按默认
+/// recoverable 阈值（3）计数。任何失败连续达到阈值即进入全局冷却，
+/// 由后台探活（先密后稀阶梯）或真实成功恢复。
+pub(crate) fn apply_v3_internal_provider_failure_policy(
+    mut action: V3ProviderFailureAction,
+    source_stage: &str,
+    status: u16,
+    code: &str,
+) -> V3ProviderFailureAction {
+    let _ = (source_stage, code);
+    if let Some(policy) = build_v3_provider_global_failure_policy(status) {
+        action.failure_threshold = policy.failure_threshold;
+        action.cooldown_ms = policy.cooldown_ms;
+        action.scope = V3ProviderHealthScope::GlobalProviderKey;
+        return action;
+    }
+    if action.failure_threshold == 0 {
+        action.failure_threshold = match action.recovery {
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 2,
+            V3ProviderRecoveryKind::RecoverableCounted => 3,
+            _ => 0,
+        };
+    }
+    action
 }
 
 pub(crate) use crate::provider_failure_runtime_helpers::{
@@ -554,18 +581,22 @@ impl V3ProviderFailureRuntimeHealth {
             },
         );
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        let request_local_provider_error =
-            status == 400 || error_type == Some("invalid_request_error");
-        if !request_local_provider_error {
-            self.record_provider_key_failure_action(
-                provider_id,
-                auth_alias,
-                model_id,
-                &action,
-                now_ms,
-            )?;
-        }
+        // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
+        // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
+        // 全局冷却，由后台探活或真实成功恢复，不再按状态码豁免。
+        let action = apply_v3_internal_provider_failure_policy(
+            build_v3_provider_failure_action_from_v3_error_02(&classified),
+            source_stage,
+            status,
+            error_type.unwrap_or("provider_failure"),
+        );
+        self.record_provider_key_failure_action(
+            provider_id,
+            auth_alias,
+            model_id,
+            &action,
+            now_ms,
+        )?;
         self.record_provider_failure_in_session_without_health_cooldown(
             failure_session_scope,
             provider_id,

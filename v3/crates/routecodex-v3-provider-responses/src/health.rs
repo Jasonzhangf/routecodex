@@ -1092,10 +1092,12 @@ impl V3ProviderHealthStore {
         }
         history.success_streak = 0;
         history.failure_streak = match action.recovery {
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => action.failure_threshold.max(1),
             V3ProviderRecoveryKind::RecoverableCounted
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
+                history.failure_streak.saturating_add(1)
+            }
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
                 history.failure_streak.saturating_add(1)
             }
             _ => history.failure_streak,
@@ -1110,9 +1112,12 @@ impl V3ProviderHealthStore {
             history.score_generation = history.score_generation.saturating_add(1);
             // The first probe is always the fixed 30s ladder step; adaptive
             // history (attempts/failures/EWMA above) stays diagnostic and
-            // never reschedules the cadence.
+            // never reschedules the cadence. 阻塞条件：自适应分数归零，或
+            // 连击达到盖章阈值（全局策略表 429/5xx=3、401/403=2、默认 3）。
             let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
-            let should_block = history.score_milli == 0;
+            let should_block = history.score_milli == 0
+                || (action.failure_threshold > 0
+                    && history.failure_streak >= action.failure_threshold);
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
                     &mut state,
@@ -1142,16 +1147,40 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        let history = state.adaptive_history.entry(key.clone()).or_default();
-        record_health_delta(history, 1);
-        history.failure_streak = 0;
-        history.success_streak = history.success_streak.saturating_add(1);
-        history.last_success_at_ms = Some(now_ms);
-        history.score_generation = history.score_generation.saturating_add(1);
-        if !state.provider_cooldown_probes.contains_key(&key) {
+        // 全局复活（bug 61863a0）：冷却中的 key 收到真实成功调用时立即解除
+        // 全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
+        // （complete_probe_success）仍是无人成功调用时的恢复路径。
+        let completion = state
+            .provider_cooldown_probes
+            .remove(&key)
+            .map(|probe_state| probe_state.completion);
+        if completion.is_some() {
+            if let Some(history) = state.adaptive_history.get_mut(&key) {
+                history.failure_streak = 0;
+                history.success_streak = history.success_streak.saturating_add(1);
+                history.score_milli = history.configured_priority.clamp(0, 150) as u32;
+                history.last_success_at_ms = Some(now_ms);
+                history.recent_deltas_milli.clear();
+                history.probe_failure_count = 0;
+                history.score_generation = history.score_generation.saturating_add(1);
+            }
+            state.auth_key_cooldowns.remove(&key);
+            state.auth_key_consecutive_failures.remove(&key);
+        } else {
+            let history = state.adaptive_history.entry(key.clone()).or_default();
+            record_health_delta(history, 1);
+            history.failure_streak = 0;
+            history.success_streak = history.success_streak.saturating_add(1);
+            history.last_success_at_ms = Some(now_ms);
+            history.score_generation = history.score_generation.saturating_add(1);
             state.auth_key_consecutive_failures.remove(&key);
         }
-        Ok(key_health_projection(&state, &key, now_ms))
+        if let Some(completion) = completion {
+            let _ = completion.send_replace(true);
+        }
+        let projection = key_health_projection(&state, &key, now_ms);
+        persist_cooldown_state(state);
+        Ok(projection)
     }
 
     pub fn complete_probe_success(

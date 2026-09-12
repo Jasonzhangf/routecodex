@@ -559,7 +559,7 @@
       "output_path": "repo/docs/architecture/manifests/v3.protocol_request_field_projection.yml",
       "source_path": "docs/architecture/manifests/v3.protocol_request_field_projection.yml",
       "source_commit": "caf14d830cefeeb6c14dab61961d70eaf190c4e1",
-      "sha256": "2f3436ea0534da78ddbc2931c3168837875ed33f47911f5f1ee011140e2831f6"
+      "sha256": "4dfe50b40766138ce1a7e41e14e7576427d1cf9e4d1b251bd711c009e6b291ee"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.provider_action_gate.mainline.yml",
@@ -757,7 +757,7 @@
       "output_path": "repo/docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml",
       "source_path": "docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml",
       "source_commit": "e3b3f24d803f03abeb69deb98a615da0d970ec76",
-      "sha256": "6d69f0e15c91a1e36f5f6c5242a5e4a1613954bce33651e5904c137628ed55a6"
+      "sha256": "8202cbedfdd884183b774dc33903c3a444e000fc67d64370076f29df2276f18a"
     },
     {
       "output_path": "repo/docs/architecture/reviews/v3-protocol-semantic-matrix-review.md",
@@ -804,7 +804,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "12db5993521bffd84e94b95de8dcc5e6512c758eea076d4bab550054131d538e"
     },
     {
@@ -816,26 +816,26 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "a8f45e5f0a4e71bf7d24d9183425af724d479ea2a66ff4576986620d6cb9d37a"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "64209cca53b053d21aa77a861436bbfdb0769362a8f9e4ef0bfdd7f2f88b70a7"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
-      "source_commit": "34e9368f283b944a419b0773327060ccb28fea95",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "2c3e841271c1f33bfd491e5fa537df1a2f43edbcc18b0d73c0ee8a8a79d43132"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
-      "sha256": "6e49b150471a2e3edcc43b2a0850564c9078a66d9c751f63738ac46d3821398d"
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
+      "sha256": "dc68e9015a893b1f0668ef3ed7be7574d8e7d9a170675183da4e72d1cd015418"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1020,7 +1020,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "ed72f114d57e1eab6a35005b854e1ae9789e1a3bde54a7395a24198a0429874c"
     },
     {
@@ -1045,7 +1045,7 @@
       "output_path": "repo/docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html",
       "source_path": "docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html",
       "source_commit": "01294387dd7749f3d030253c38d860a58159756b",
-      "sha256": "72a6a06357479a55acdda09cd7114aa2251fc3287d9d94188ffbdfb44f6c5c2b"
+      "sha256": "cf9854abc9fa2a55d4ce262db4349869969c3d15192b092a5015fdaa6158f382"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-provider-directory-config.html",
@@ -1284,7 +1284,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "d58e0ee2be98ab255b16885dbe16924144979330",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "6a2f6a7594153f89e3e52ed498b61f5cbe760c75656a55769718427492683b71"
     },
     {
@@ -1536,14 +1536,14 @@
     {
       "output_path": "repo/docs/design/v3-memory-raw-capture.md",
       "source_path": "docs/design/v3-memory-raw-capture.md",
-      "source_commit": "3fa86061a8077cbb517cd572b460cbdc3357b924",
+      "source_commit": "c234829b9a26432b4722aafc6835e4e1b8c7492d",
       "sha256": "6f4d66fcc6e9f09d9fc8a109dc21ed9c8296dfc6f076bbb92fd6e710ecb9ec84"
     },
     {
       "output_path": "repo/docs/design/v3-protocol-request-field-projection.md",
       "source_path": "docs/design/v3-protocol-request-field-projection.md",
       "source_commit": "caf14d830cefeeb6c14dab61961d70eaf190c4e1",
-      "sha256": "d004c017c9f9f3b4fce7daac0c4091071d383bb6ccd26ec9f2ea88982fb63fca"
+      "sha256": "eefa0e8df3647e0b1734552ed876871a0aa319a2da493963cc9ef92d93126a49"
     },
     {
       "output_path": "repo/docs/design/v3-provider-directory-config.md",
@@ -1598,6 +1598,12 @@
       "source_path": "docs/design/v3-system-definition.md",
       "source_commit": "358abe78e6b6c5b12b72467842e8c6639f9e50ad",
       "sha256": "90cca3ebb5405a8b4c45f92966dee4a8c10983472f416c18e69bbb092ae130e3"
+    },
+    {
+      "output_path": "repo/docs/design/virtual-router-risk-audit.md",
+      "source_path": "docs/design/virtual-router-risk-audit.md",
+      "source_commit": "d876adea1d5c57a73cf643f5c8d89b56bd3d42c4",
+      "sha256": "425d1162a794992f3a13a90a27a99889faed252d0fcf3619420901448ed98faf"
     },
     {
       "output_path": "repo/docs/design/virtual-router-simplification-design.md",
@@ -2120,6 +2126,12 @@
       "source_path": "docs/goals/v3-console-request-count-visibility-test-design.md",
       "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
       "sha256": "b3dec7829279b4cdc038f4744f29d022dcfb60c4449ac9d07ded35c6a1564f66"
+    },
+    {
+      "output_path": "repo/docs/goals/v3-content-required-400-incident.md",
+      "source_path": "docs/goals/v3-content-required-400-incident.md",
+      "source_commit": "7ede4caf9eb6f98d60896ef05e8b647c8b1052f5",
+      "sha256": "823634e906a856986c727b990e4b588284ade9249bf0ab7fc438bc45c54efbce"
     },
     {
       "output_path": "repo/docs/goals/v3-debug-error-foundation-plan.md",
@@ -3013,8 +3025,8 @@
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
       "source_commit": "814a1b8aa6073a52ab34e99aaedf1fa5cec3b625",
-      "sha256": "102e679b9ef91aaaf8e49fad9aaa42d32f328c0b85dcc3f2fbf027b2776dd9f8"
+      "sha256": "076ba40989d6f682b67e20991a95ee53918c8842a47f0fdbbe077e240b735122"
     }
   ],
-  "manifest_digest": "cd6d8334916a4d2b842fe9616a9e8b781e17b965caebc4e6ed48415e9bddb894"
+  "manifest_digest": "a07dba8d02223083bf71b100987533d41b64c399209e25d3da164f5673c3f6c3"
 }

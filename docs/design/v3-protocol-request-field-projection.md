@@ -152,7 +152,7 @@ protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
 | `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | unmapped |
-| `reasoning_context_policy` | rename to `reasoning.context` | unmapped | unmapped | unmapped |
+| `reasoning_context_policy` | rename to `reasoning.context` | consumed before wire (source-roundtrip only) | unmapped | unmapped |
 | `reasoning_mode` | rename to `reasoning.mode` | unmapped | unmapped | unmapped |
 | `reasoning_include_thoughts` | unmapped | unmapped | unmapped | rename to `includeThoughts` |
 | `reasoning_display_policy` | unmapped | unmapped | rename to `thinking.display` | unmapped |
@@ -202,7 +202,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `prompt_cache_options.*` / `prompt_cache_retention` | cache-options extension | preserve independently from `prompt_cache_key`; no provider-health/cache mutation | exact Responses only | target-specific exact field or unmapped | unmapped |
 | `reasoning.effort` | `request.reasoning_effort` | validate non-empty string; preserve until concrete target selection; keep separate from budget/summary/mode | registered OpenAI-domain compatibility (`max -> xhigh`, unknown -> `medium`) | registered provider-domain compatibility; DeepSeek lower/unknown -> `high`, `xhigh/max -> max` | registered Anthropic-domain compatibility (`none/minimal -> low`, unknown -> `medium`); MiniMax Anthropic uses `thinking.type=adaptive` and no `output_config.effort` |
 | `reasoning.summary` / `generate_summary` | `request.reasoning_summary_policy` | aliases must agree; policy is not response reasoning text | exact Responses | registered static compatibility: `auto/concise/detailed -> medium/low/high`, merged with explicit effort by the higher level | registered many-to-one static compatibility preserves complete Anthropic native thinking as Responses reasoning summary for all valid policy values |
-| `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | unmapped | unmapped |
+| `reasoning.context` | `request.reasoning_context_policy` | validate scope/value; no history reconstruction outside Chat Process | exact Responses | consumed before wire (source-roundtrip only) | unmapped |
 | `reasoning.mode` | `request.reasoning_mode` | preserve mode independently from effort/context | exact Responses | unmapped | unmapped |
 | `safety_identifier` | safety identifier payload extension | validate string; never map to `user` or metadata | exact | exact `safety_identifier` if target schema supports | unmapped |
 | `service_tier` | service-tier request semantic | validate enum; no routing fallback | exact | conditional exact same enum | target-specific exact field only; otherwise unmapped |
@@ -377,7 +377,9 @@ These are separate semantics and are not mutually reconstructible:
   `auto/concise/detailed -> reasoning_effort medium/low/high` and retains the
   higher level when an explicit effort is also present.
 - `reasoning.context` round-trips through
-  `request.reasoning_context_policy` only to Responses.
+  `request.reasoning_context_policy` to Responses; OpenAI Chat consumes valid
+  values as source-roundtrip-only before wire because it has no equivalent
+  request policy field.
 - `reasoning.mode` round-trips through `request.reasoning_mode` only to
   Responses.
 - Gemini `includeThoughts` round-trips through

@@ -461,7 +461,46 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
     is_v3_provider_sse_keepalive_text(data)
         || serde_json::from_str::<Value>(data.trim())
             .ok()
-            .is_some_and(|value| value.is_null())
+            .is_some_and(|value| {
+                value.is_null() || is_v3_provider_sse_transport_keepalive_event(None, &value)
+            })
+}
+
+/// SSE `event:` 名是否为传输层保活语义（与具体协议无关）。
+pub(crate) fn is_v3_provider_sse_transport_keepalive_event_type(event_type: &str) -> bool {
+    matches!(
+        event_type.trim().to_ascii_lowercase().as_str(),
+        "ping" | "pong" | "keepalive" | "keep-alive" | "heartbeat"
+    )
+}
+
+/// JSON 事件体是否为传输层保活：event 名保活，或 `type` 字段保活。
+pub(crate) fn is_v3_provider_sse_transport_keepalive_event(
+    event_name: Option<&str>,
+    event: &Value,
+) -> bool {
+    event_name.is_some_and(|name| is_v3_provider_sse_transport_keepalive_event_type(name))
+        || event
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(is_v3_provider_sse_transport_keepalive_event_type)
+}
+
+pub(crate) fn is_v3_provider_sse_transport_keepalive_frame(fields: &[SseField]) -> bool {
+    let data = collect_v3_provider_sse_json_data(fields);
+    if is_v3_provider_sse_transport_keepalive_data(&data) {
+        return true;
+    }
+    let Some(event_name) = fields.iter().find_map(|field| match field {
+        SseField::Named { name, value } if name == "event" => Some(value.as_str()),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Ok(event) = serde_json::from_str::<Value>(data.trim()) else {
+        return false;
+    };
+    is_v3_provider_sse_transport_keepalive_event(Some(event_name), &event)
 }
 
 pub(super) fn response_message_part_has_client_output(part: &Value) -> Result<bool, String> {

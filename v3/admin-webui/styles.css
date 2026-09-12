@@ -863,3 +863,25 @@ input:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   .route-picker, .route-group-tab, .route-add-member { transition-duration: 0.01ms !important; }
 }
+
+/* Requests statistics: three panels (port, provider, errors) stay aligned and
+ * remain usable on narrow viewports without reordering data awkwardly. */
+.stats-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.4fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.stats-grid .panel { padding: 4px 0; }
+.stats-grid table { font-size: 12px; }
+.stats-grid th,
+.stats-grid td { padding: 8px 12px; }
+@media (max-width: 1280px) { .stats-grid { grid-template-columns: 1fr 1fr; } .stats-grid > .panel:nth-child(3) { grid-column: 1 / -1; } }
+@media (max-width: 880px)  { .stats-grid { grid-template-columns: 1fr; } .stats-grid > .panel:nth-child(3) { grid-column: auto; } }
+
+.summary-drill { cursor: pointer; transition: border-color var(--transition-fast) var(--ease-state), transform var(--transition-fast) var(--ease-state); }
+.summary-drill:hover { border-color: var(--accent); }
+.summary-drill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Avoid oversized status pills on a quick-action card. */
+#errors-table tr { cursor: pointer; }
+#errors-table td:nth-child(2) { font-family: var(--mono); }

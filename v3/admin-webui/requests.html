@@ -34,9 +34,10 @@
       <div class="panel chart-panel">
         <div id="usage-chart" class="bar-chart" role="img" aria-label="Requests and token usage over selected range"></div>
       </div>
-      <div class="layout">
+      <div class="stats-grid">
         <div class="panel"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
-        <div class="panel"><table id="errors-table"><thead><tr><th>Status code</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="2" class="loading">no errors</td></tr></tbody></table></div>
+        <div class="panel"><table id="providers-table"><thead><tr><th>Provider</th><th class="num">Total</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed</th><th class="num">Tokens</th></tr></thead><tbody><tr><td colspan="6" class="loading">loading…</td></tr></tbody></table></div>
+        <div class="panel"><table id="errors-table"><thead><tr><th>Status</th><th>Category</th><th class="num">Count</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
       </div>
     </div>
 
@@ -266,8 +267,10 @@
       entriesGroup: "pool",
       stats: {},
       timeseries: [],
-      facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+      facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {}, error_categories: {} },
       errorStatusCode: null,
+      errorCategory: null,
+      providerId: null,
       selected: null,
       tableWidths: { entries: null, attempts: null, errors: null },
       loading: false,
@@ -478,6 +481,7 @@
         if (port !== "all") params.set("port", port);
         const provider = document.getElementById("provider-filter").value;
         if (provider !== "all") params.set("provider", provider);
+        if (state.providerId) params.set("provider_id", state.providerId);
         const model = document.getElementById("model-filter").value;
         if (model !== "all") params.set("model", model);
         const endpoint = document.getElementById("endpoint-filter").value;
@@ -491,6 +495,7 @@
         const search = document.getElementById("search-filter").value.trim();
         if (search) params.set("search", search);
         if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
+        if (state.errorCategory) params.set("error_category", state.errorCategory);
         const response = await api(`/api/observability/records?${params}`);
         state.records = response.records || [];
         state.total = response.total || 0;
@@ -581,30 +586,56 @@
         emptyRow.appendChild(cell);
         portBody.replaceChildren(emptyRow);
       }
-      const errorBody = document.querySelector("#errors-table tbody");
-      // Group errors by raw numeric status; semantic error details stay in the drawer.
-      const errorMap = new Map();
-      for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
-        errorMap.set(code, { terminal: count });
-      }
-      const statusCodes = [...errorMap.entries()]
-        .sort(([left], [right]) => Number(left) - Number(right));
-      errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
-        const row = el("tr", "status-error");
+      const providerBody = document.querySelector("#providers-table tbody");
+      const providers = Object.entries(stats.by_provider || {})
+        .sort(([, left], [, right]) => Number(right.total || 0) - Number(left.total || 0));
+      providerBody.replaceChildren(...providers.map(([provider, item]) => {
+        const row = el("tr", item.provider_failures > 0 || item.error > 0 ? "status-error" : "status-success");
         row.style.cursor = "pointer";
-        row.title = `Filter requests by status code "${statusCode}"`;
+        row.title = `Filter requests by provider ${provider}`;
         row.addEventListener("click", () => {
           state.page = 1;
-          document.getElementById("status-filter").value = "error";
-          state.errorStatusCode = statusCode;
+          state.providerId = provider === "unknown" ? null : provider;
+          state.errorStatusCode = null;
+          state.errorCategory = null;
+          document.getElementById("provider-filter").value = "all";
           loadRecords();
         });
-        row.append(el("td", null, statusCode), numberCell(entry.terminal));
+        row.append(el("td", "mono", provider), numberCell(item.total), numberCell(item.success), numberCell(item.error), numberCell(item.provider_failures), numberCell(item.total_tokens));
         return row;
       }));
-      if (!statusCodes.length) {
+      if (!providers.length) {
         const cell = document.createElement("td");
-        cell.colSpan = 2;
+        cell.colSpan = 6;
+        const emptyRow = document.createElement("tr");
+        emptyRow.appendChild(cell);
+        providerBody.replaceChildren(emptyRow);
+      }
+      const errorBody = document.querySelector("#errors-table tbody");
+      const errorRows = [];
+      for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
+        errorRows.push({ status: code, category: "—", count, key: `status:${code}` });
+      }
+      for (const [category, count] of Object.entries(state.facets.error_categories || {})) {
+        errorRows.push({ status: "—", category, count, key: `category:${category}` });
+      }
+      errorRows.sort((left, right) => Number(right.count) - Number(left.count) || left.key.localeCompare(right.key));
+      errorBody.replaceChildren(...errorRows.map((item) => {
+        const row = el("tr", "status-error");
+        row.style.cursor = "pointer";
+        row.title = item.status !== "—"
+          ? `Filter requests by status code "${item.status}"`
+          : `Filter requests by error category "${item.category}"`;
+        row.addEventListener("click", () => {
+          if (item.status !== "—") drilldownErrorStatus(item.status);
+          else drilldownErrorCategory(item.category);
+        });
+        row.append(el("td", null, item.status), el("td", "mono", item.category), numberCell(item.count));
+        return row;
+      }));
+      if (!errorRows.length) {
+        const cell = document.createElement("td");
+        cell.colSpan = 3;
         const emptyRow = document.createElement("tr");
         emptyRow.appendChild(cell);
         errorBody.replaceChildren(emptyRow);
@@ -716,6 +747,18 @@
       state.page = 1;
       document.getElementById("status-filter").value = "error";
       state.errorStatusCode = code;
+      state.errorCategory = null;
+      state.providerId = null;
+      state.tab = "entries";
+      loadRecords();
+    }
+
+    function drilldownErrorCategory(category) {
+      state.page = 1;
+      document.getElementById("status-filter").value = "error";
+      state.errorStatusCode = null;
+      state.errorCategory = category;
+      state.providerId = null;
       state.tab = "entries";
       loadRecords();
     }
@@ -785,11 +828,18 @@
       // Single-action return-to-errors banner: keeps the prior status_code
       // context visible and offers one click to clear it.
       const fragments = [];
-      if (state.errorStatusCode) {
-        const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
+      if (state.errorStatusCode || state.errorCategory || state.providerId) {
+        const active = [
+          state.errorStatusCode && `status ${state.errorStatusCode}`,
+          state.errorCategory && `category ${state.errorCategory}`,
+          state.providerId && `provider ${state.providerId}`,
+        ].filter(Boolean).join(" · ");
+        const banner = el("div", "status-bar info", `Filtered by ${active}. `);
         const clear = el("button", "btn", "Clear filter");
         clear.addEventListener("click", () => {
           state.errorStatusCode = null;
+          state.errorCategory = null;
+          state.providerId = null;
           state.page = 1;
           loadRecords();
         });
@@ -998,6 +1048,28 @@
         const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}${tone ? ` ${tone}` : ""}`);
         card.appendChild(el("div", "label", label));
         card.appendChild(el("div", `value${tone ? ` ${tone}` : ""}`, String(value)));
+        if (label === "Errors" && Number(value) > 0) {
+          card.classList.add("summary-drill");
+          card.title = "View error breakdown";
+          card.addEventListener("click", () => {
+            state.tab = "errors";
+            renderAll();
+            document.getElementById("requests-tab-bar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
+        if (label === "Provider fails" && Number(value) > 0) {
+          card.classList.add("summary-drill");
+          card.title = "View provider failures";
+          card.addEventListener("click", () => {
+            state.providerId = null;
+            state.errorStatusCode = null;
+            state.errorCategory = null;
+            document.getElementById("status-filter").value = "error";
+            state.tab = "entries";
+            state.page = 1;
+            loadRecords();
+          });
+        }
         cards.appendChild(card);
       }
     }
@@ -1112,11 +1184,13 @@
       let timer = null;
       input.addEventListener("input", () => {
         clearTimeout(timer);
-        if (id === "status-filter") state.errorStatusCode = null;
+        if (id === "status-filter") { state.errorStatusCode = null; state.errorCategory = null; }
+        if (id === "provider-filter") state.providerId = null;
         timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
       });
       if (input.tagName === "SELECT") input.addEventListener("change", () => {
-        if (id === "status-filter") state.errorStatusCode = null;
+        if (id === "status-filter") { state.errorStatusCode = null; state.errorCategory = null; }
+        if (id === "provider-filter") state.providerId = null;
         state.page = 1;
         loadRecords();
       });
