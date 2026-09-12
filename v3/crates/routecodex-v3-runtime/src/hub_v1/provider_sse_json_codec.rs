@@ -291,7 +291,7 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_event_type(event_type: &str
     )
 }
 
-pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_event(
+pub(crate) fn is_v3_provider_sse_transport_keepalive_event(
     event_name: Option<&str>,
     event: &Value,
 ) -> bool {
@@ -484,26 +484,6 @@ pub(crate) fn is_v3_provider_sse_transport_keepalive_data(data: &str) -> bool {
             })
 }
 
-/// SSE `event:` 名是否为传输层保活语义（与具体协议无关）。
-pub(crate) fn is_v3_provider_sse_transport_keepalive_event_type(event_type: &str) -> bool {
-    matches!(
-        event_type.trim().to_ascii_lowercase().as_str(),
-        "ping" | "pong" | "keepalive" | "keep-alive" | "heartbeat"
-    )
-}
-
-/// JSON 事件体是否为传输层保活：event 名保活，或 `type` 字段保活。
-pub(crate) fn is_v3_provider_sse_transport_keepalive_event(
-    event_name: Option<&str>,
-    event: &Value,
-) -> bool {
-    event_name.is_some_and(|name| is_v3_provider_sse_transport_keepalive_event_type(name))
-        || event
-            .get("type")
-            .and_then(Value::as_str)
-            .is_some_and(is_v3_provider_sse_transport_keepalive_event_type)
-}
-
 pub(crate) fn is_v3_provider_sse_transport_keepalive_frame(fields: &[SseField]) -> bool {
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_transport_keepalive_data(&data) {
@@ -531,7 +511,7 @@ pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[S
     }
     let data = collect_v3_provider_sse_json_data(fields);
     if is_v3_provider_sse_transport_keepalive_data(&data)
-        || is_v3_provider_responses_sse_transport_keepalive_event(
+        || is_v3_provider_sse_transport_keepalive_event(
             None,
             &serde_json::from_str::<Value>(data.trim()).unwrap_or(Value::Null),
         )
@@ -541,9 +521,7 @@ pub(crate) fn is_v3_provider_responses_sse_transport_keepalive_frame(fields: &[S
     event_name.is_some_and(|name| {
         serde_json::from_str::<Value>(data.trim())
             .ok()
-            .is_some_and(|event| {
-                is_v3_provider_responses_sse_transport_keepalive_event(Some(name), &event)
-            })
+            .is_some_and(|event| is_v3_provider_sse_transport_keepalive_event(Some(name), &event))
     })
 }
 
