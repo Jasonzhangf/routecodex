@@ -10,6 +10,7 @@ pub struct V3HubReqInbound02Normalized {
     pub(crate) previous: V3HubReqInbound01ClientRaw,
     pub(crate) semantic_protocol: V3HubRequestSemanticProtocol,
     pub(crate) canonicalized_from_responses: bool,
+    pub(crate) memory_raw_capture_guidance_injected: bool,
 }
 
 pub fn build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
@@ -45,6 +46,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: true,
+            memory_raw_capture_guidance_injected: false,
         });
     }
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
@@ -106,6 +108,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: true,
+            memory_raw_capture_guidance_injected: false,
         });
     }
     if let Some(payload) = Arc::get_mut(&mut input.payload.0) {
@@ -119,6 +122,7 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
         previous: input,
         semantic_protocol: V3HubRequestSemanticProtocol::Chat,
         canonicalized_from_responses: false,
+        memory_raw_capture_guidance_injected: false,
     })
 }
 
@@ -141,6 +145,7 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
             previous: input,
             semantic_protocol: V3HubRequestSemanticProtocol::Chat,
             canonicalized_from_responses: false,
+            memory_raw_capture_guidance_injected: false,
         });
     }
     let mut input = input;
@@ -153,6 +158,7 @@ pub fn build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbo
         previous: input,
         semantic_protocol: V3HubRequestSemanticProtocol::Chat,
         canonicalized_from_responses: true,
+        memory_raw_capture_guidance_injected: false,
     })
 }
 

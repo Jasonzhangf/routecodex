@@ -181,10 +181,12 @@ pub(crate) fn responses_relay_request_hook_profile(
         // surface is active. Keep the profile enabled so Req04 can inject the
         // shared guidance; response validation remains permissive.
         V3HubServertoolRequestProfile::enabled([]).with_tool_thinking_enabled(true)
+    } else if manifest.memory_raw_capture.enabled {
+        V3HubServertoolRequestProfile::enabled([])
     } else {
         V3HubServertoolRequestProfile::disabled()
     };
-    base
+    base.with_memory_raw_capture_enabled(manifest.memory_raw_capture.enabled)
 }
 
 pub(crate) fn responses_relay_response_hook_profile(
