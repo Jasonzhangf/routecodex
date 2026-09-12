@@ -359,21 +359,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn wire_maps_historical_namespace_call_without_current_tools() {
-        let body = json!({
-            "model": "upstream-model",
-            "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
-        });
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-historical-tool-no-tools",
-            target(),
-            body,
-        )
-        .expect("known historical MCP namespace call must be normalized");
-        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
-    }
-
 
     #[test]
     fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {

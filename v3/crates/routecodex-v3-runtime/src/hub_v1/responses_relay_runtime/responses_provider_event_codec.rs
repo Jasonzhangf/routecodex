@@ -96,8 +96,7 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
             "SSE input is not valid UTF-8".to_string(),
         ));
     }
-    if crate::hub_v1::is_v3_provider_responses_sse_transport_keepalive_frame(frame.frame().fields())
-    {
+    if crate::hub_v1::is_v3_provider_sse_transport_keepalive_frame(frame.frame().fields()) {
         return Ok(None);
     }
     let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(frame);

@@ -16,6 +16,18 @@ include!("provider_action_gate_tests.rs");
 #[path = "classified_global_tests.rs"]
 mod classified_global;
 
+// 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
+fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
+    for target in manifest
+        .route_groups
+        .values_mut()
+        .flat_map(|group| group.pools.values_mut())
+        .flat_map(|pool| pool.targets.iter_mut())
+    {
+        target.priority = Some(100);
+    }
+}
+
 fn test_provider_failure_scope(
     server_id: &str,
     routing_group: &str,
@@ -597,14 +609,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
-    // 归一化优先级基线，隔离自适应分数阻断，专测阈值语义。
-    for group in manifest.route_groups.values_mut() {
-        for pool in group.pools.values_mut() {
-            for target in &mut pool.targets {
-                target.priority = Some(100);
-            }
-        }
-    }
+    normalize_global_pool_priorities(&mut manifest);
     let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -649,8 +654,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // 统一错误模型：400/请求形失败同样计入全局健康，单次仍可用，
-    // 连续 3 次进入全局冷却，由探活/真实成功恢复。
+    // 统一错误模型：400/请求形失败同样计入全局健康，连续 3 次进入全局冷却。
     for attempt in 0..3 {
         health
             .record_provider_failure_record_with_policy(
@@ -679,17 +683,11 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 20_000 + attempt as u64,
             )
             .available;
-        if attempt < 2 {
-            assert!(
-                available,
-                "a single/second request-shaped failure must not block the key yet"
-            );
-        } else {
-            assert!(
-                !available,
-                "three consecutive request-shaped failures must block the key"
-            );
-        }
+        assert_eq!(
+            available,
+            attempt < 2,
+            "attempt {attempt} availability must match the 3-strike threshold"
+        );
     }
 }
 
