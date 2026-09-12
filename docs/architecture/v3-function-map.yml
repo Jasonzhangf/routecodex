@@ -4277,7 +4277,8 @@ features:
   entry_symbols:
   - V3ProviderActionGate
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
-  - provider_failure_runtime_policy::tests::post_commit_sse_failures_never_cool_provider_or_block_fresh_session
+  - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
+  - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
   - V3ProviderActionAdmission::take_permit
   - V3ProviderActionPermit::drop
   - V3ProviderActionGate::abandon_admission

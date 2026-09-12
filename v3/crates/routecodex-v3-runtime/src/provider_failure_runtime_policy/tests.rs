@@ -911,6 +911,71 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
 }
 
 #[test]
+fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
+    // 统一错误模型回归：瞬态型 post-commit 流失败（无状态码）不允许
+    // health-neutral 旁路——3 次连续失败必须进入全局冷却，新 session 不可用。
+    let manifest = target_resolution_manifest("post_commit_transient_counted");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_transient_counted",
+        "post_commit_transient_counted",
+        "transient-session",
+    )
+    .expect("transient session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider.sse_decode",
+        "Responses SSE event was not decodable JSON",
+    );
+
+    for offset in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit transient stream failure must update key health");
+    }
+
+    let fresh_session = test_provider_failure_scope(
+        "post_commit_transient_counted",
+        "post_commit_transient_counted",
+        "fresh-observer-session",
+    )
+    .expect("fresh session scope");
+    let projection =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert_eq!(projection.score_milli, 0);
+    assert!(
+        !projection.available,
+        "three transient post-commit failures must cool the key down globally"
+    );
+    let fresh_projection = health.store().availability_for_session(
+        &fresh_session,
+        "primary",
+        Some("key1"),
+        Some("gpt-test"),
+        v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+    );
+    assert!(
+        !fresh_projection.available,
+        "global cooldown must be visible to a fresh session"
+    );
+}
+
+#[test]
 fn incomplete_key_identity_fails_before_provider_cooldown_write() {
     let manifest = target_resolution_manifest("incomplete_key_identity");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);

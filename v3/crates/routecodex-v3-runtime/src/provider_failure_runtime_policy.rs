@@ -792,7 +792,13 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<(), String> {
         // Post-commit SSE failures are provider-health events. They share the
         // same recoverable score/cooldown policy as pre-commit SSE failures.
-        let action = V3ProviderFailureAction::recoverable(_error_family);
+        // 统一错误模型：无状态码上下文时按默认 recoverable 阈值（3）盖章。
+        let action = apply_v3_internal_provider_failure_policy(
+            V3ProviderFailureAction::recoverable(_error_family),
+            "",
+            0,
+            _error_family,
+        );
         self.record_provider_failure_record_with_action(
             failure_session_scope,
             provider_id,
@@ -821,17 +827,28 @@ impl V3ProviderFailureRuntimeHealth {
         source: &V3Error01SourceRaised,
     ) -> Result<(), String> {
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
-        let action = build_v3_provider_failure_action_from_v3_error_02(&classified);
-        if action.recovery == V3ProviderRecoveryKind::HealthNeutralTransient {
-            return self.record_post_commit_provider_stream_failure(
-                failure_session_scope,
-                provider_id,
-                auth_alias,
-                model_id,
-                &source.code,
-                &source.message,
-            );
+        // 统一错误模型：post-commit 流失败同样经 internal 全局策略表盖章。
+        // 旧瞬态分类（HealthNeutralTransient/NotProviderHealth）显式转换为
+        // recoverable counted，不允许 health-neutral 旁路绕过冷却/探活。
+        let status = source
+            .external_error
+            .as_ref()
+            .and_then(|error| error.status)
+            .unwrap_or(0);
+        let mut action = build_v3_provider_failure_action_from_v3_error_02(&classified);
+        if matches!(
+            action.recovery,
+            V3ProviderRecoveryKind::HealthNeutralTransient
+                | V3ProviderRecoveryKind::NotProviderHealth
+        ) {
+            action = V3ProviderFailureAction::recoverable(&source.code);
         }
+        let action = apply_v3_internal_provider_failure_policy(
+            action,
+            source.source_stage,
+            status,
+            &source.code,
+        );
         let now_ms = v3_relay_provider_policy_now_epoch_ms()?;
         self.record_provider_failure_record_with_action(
             failure_session_scope,
