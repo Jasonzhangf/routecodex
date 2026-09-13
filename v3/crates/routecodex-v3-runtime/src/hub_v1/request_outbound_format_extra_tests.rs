@@ -1014,6 +1014,24 @@ fn tool_search_chat_extensions_round_trip_to_responses_fields() {
 }
 
 #[test]
+fn tool_search_output_promotes_mcpx_namespace_for_provider_projection() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "tool",
+            "tool_call_id": "call_search",
+            "content": "[{\"type\":\"namespace\",\"name\":\"mcp__mcpx\",\"tools\":[{\"type\":\"function\",\"name\":\"workspace\",\"parameters\":{\"type\":\"object\"}}]}]",
+            "routecodex_chat_extension": {"responses_tool_output_type": "tool_search_output"}
+        }]
+    }))
+    .expect("tool search output must register provider tools");
+    let tools = request["tools"].as_array().expect("provider tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "function");
+    assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",
