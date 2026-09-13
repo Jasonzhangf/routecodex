@@ -14,6 +14,20 @@ export const v3TempDir = resolve(v3Root, 'build-control', 'temp');
 const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 const KILL_GRACE_MS = 5_000;
 
+export class EnvironmentUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'EnvironmentUnavailableError';
+  }
+}
+
+export class GateFailureError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GateFailureError';
+  }
+}
+
 function killProcessGroup(pid, signal) {
   try {
     process.kill(-pid, signal);
@@ -54,15 +68,15 @@ export async function run(command, args, options = {}) {
     if (outcome.signal) {
       setTimeout(() => killProcessGroup(child.pid, 'SIGKILL'), KILL_GRACE_MS);
     }
-    throw new Error(
+    throw new GateFailureError(
       `${label} timed out after ${timeoutMs}ms and was killed (gate fail-fast: never hang)`,
     );
   }
   if (outcome.error) {
-    throw new Error(`${label} failed: ${outcome.error.message}`);
+    throw new EnvironmentUnavailableError(`${label} unavailable: ${outcome.error.message}`);
   }
   if (outcome.code !== 0) {
-    throw new Error(`${label} failed: exit ${outcome.code}`);
+    throw new GateFailureError(`${label} failed: exit ${outcome.code}`);
   }
   return outcome;
 }
