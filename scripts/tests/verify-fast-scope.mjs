@@ -96,11 +96,9 @@ const independentGateScopes = {
   'File line-limit gate (<500)': 'v3',
   'V3 provider action gate': 'v3_provider',
   'V3 provider action architecture gate': 'v3_provider',
-  'V3 provider action red fixtures': 'v3_provider',
   'V3 5520 duplicate response tool identity': 'v3_tool',
   'V3 debug side-channel contract': 'v3_debug',
   'V3 debug payload budget': 'v3_debug',
-  'V3 debug payload budget red fixtures': 'v3_debug',
   'V3 route-classifier semantic gate': 'v3_router',
   'Servertool Rust-only gate': 'v3_tool',
 };

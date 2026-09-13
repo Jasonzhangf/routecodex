@@ -8,6 +8,7 @@ const MANIFEST = 'docs/architecture/manifests/v3.stage_protocol_shape_contract.y
 const DESIGN = 'docs/design/v3-stage-protocol-shape-contract.md';
 const PACKAGE = 'package.json';
 const UMBRELLA = 'scripts/architecture/verify-v3-architecture-ci.mjs';
+const RED_FIXTURE_OWNER = 'scripts/verify-red.mjs';
 const MAINLINE = 'docs/architecture/v3-mainline-call-map.yml';
 const SERVER_OUTCOME = 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs';
 const DIRECT_RUNTIME_SOURCE_ROOTS = [
@@ -165,7 +166,7 @@ function validateStageSignature(root, stage) {
 
 export function verifyV3StageProtocolShapes(root = process.cwd()) {
   const failures = [];
-  for (const relative of [MANIFEST, DESIGN, PACKAGE, UMBRELLA, MAINLINE, SERVER_OUTCOME]) {
+  for (const relative of [MANIFEST, DESIGN, PACKAGE, UMBRELLA, RED_FIXTURE_OWNER, MAINLINE, SERVER_OUTCOME]) {
     if (!fs.existsSync(projectPath(root, relative))) failures.push(`missing ${relative}`);
   }
   if (failures.length > 0) return failures;
@@ -253,8 +254,10 @@ export function verifyV3StageProtocolShapes(root = process.cwd()) {
   if (!packageJson.scripts?.['verify:v3-architecture-ci']?.includes('verify-v3-architecture-ci.mjs')) failures.push(`${PACKAGE}: V3 architecture umbrella missing`);
   if (!packageJson.scripts?.['build:v3-cli']?.startsWith('npm run verify:v3-architecture-ci')) failures.push(`${PACKAGE}: build:v3-cli must run architecture CI before Cargo`);
   const umbrella = read(root, UMBRELLA);
-  for (const gate of ['verify:v3-stage-protocol-shapes', 'test:v3-stage-protocol-shapes-red-fixtures']) {
-    if (!umbrella.includes(gate)) failures.push(`${UMBRELLA}: missing ${gate}`);
+  if (!umbrella.includes('verify:v3-stage-protocol-shapes')) failures.push(`${UMBRELLA}: missing verify:v3-stage-protocol-shapes`);
+  const redFixtureOwner = read(root, RED_FIXTURE_OWNER);
+  if (!redFixtureOwner.includes('v3-stage-protocol-shapes-red-fixtures')) {
+    failures.push(`${RED_FIXTURE_OWNER}: missing v3-stage-protocol-shapes-red-fixtures`);
   }
   return failures;
 }

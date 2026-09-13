@@ -112,9 +112,6 @@ jobs:
       - name: V3 provider action architecture gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run verify:v3-provider-action-gate
-      - name: V3 provider action red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
-        run: npm run test:v3-provider-action-gate-red-fixtures
       - name: V3 5520 duplicate response tool identity
         if: ${{ !cancelled() && needs.scope.outputs.v3_tool == 'true' }}
         run: npm run test:v3-5520-duplicate-tool-identity
@@ -124,9 +121,6 @@ jobs:
       - name: V3 debug payload budget
         if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run verify:v3-debug-payload-budget
-      - name: V3 debug payload budget red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
-        run: npm run test:v3-debug-payload-budget-red-fixtures
       - name: V3 canonical verification stack
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm --prefix v3 run verify:ci

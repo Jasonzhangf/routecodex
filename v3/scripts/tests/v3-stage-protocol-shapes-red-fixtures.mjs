@@ -80,6 +80,7 @@ for (const mutation of mutations) {
 	      'docs/architecture/v3-mainline-call-map.yml',
 	      'package.json',
 	      'v3/scripts/architecture/verify-v3-architecture-ci.mjs',
+	      'v3/scripts/verify-red.mjs',
 	      'v3/crates/routecodex-v3-runtime/src/hub_v1',
 	      'v3/crates/routecodex-v3-runtime/src/kernel.rs',
 	      'v3/crates/routecodex-v3-runtime/src/kernel',
