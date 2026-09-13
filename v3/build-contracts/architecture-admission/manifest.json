@@ -19,7 +19,7 @@
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "72ca7afd81377e478f4bf26941416dfdb9519a9e",
-      "sha256": "de19a4902639772560678a9bfef23d5fd4a5642701f7c090257ca30f23f5b597"
+      "sha256": "7b89e5d8ffaa96e5826f033cbb24932efa062fe7f0b29e088b409ad27f68493f"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -474,7 +474,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml",
-      "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "9dbaefc50509d708d7b7a924cc36f14b8586d3725063baf4949bf54e3ccfa59c"
     },
     {
@@ -756,7 +756,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "72ca7afd81377e478f4bf26941416dfdb9519a9e",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "18ccea3d5d28818f5818cbbb9fe3fe7f4bd97afbd862b0be9e3d453be0d5cd52"
     },
     {
@@ -786,7 +786,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "28b9c4c0e39df6534bd74b91c4114ee0580b96b3",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "3ead087bc7aec8a3e55152e35c8cf2622c5b796d0174d84b6eee7728bd18124c"
     },
     {
@@ -834,7 +834,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/error-mainline-call-graph.md",
       "source_path": "docs/architecture/wiki/error-mainline-call-graph.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "e17a234386f94d7b1a857e503480333e94e0c19923f030f7f76a533975d901c5"
     },
     {
@@ -858,7 +858,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/error-mainline-call-graph.html",
       "source_path": "docs/architecture/wiki/html/error-mainline-call-graph.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "df135a3318db018378ec7e3d9221db78c05cd6a88d99ace8361ccdd7b0bcf70a"
     },
     {
@@ -894,13 +894,13 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/request-mainline-call-graph.html",
       "source_path": "docs/architecture/wiki/html/request-mainline-call-graph.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "ec59f7934b411ecb20c8e88571270492ddae661775e64dcc601fe8c09882fcd4"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/response-mainline-call-graph.html",
       "source_path": "docs/architecture/wiki/html/response-mainline-call-graph.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "b8c62b236dae03068db3edde6c37a837bc40ab9777637651db0858bac3cfaa9a"
     },
     {
@@ -912,7 +912,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/runtime-lifecycle-call-graph.html",
       "source_path": "docs/architecture/wiki/html/runtime-lifecycle-call-graph.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "4876ba4af293fd4268ac43d97afeea0106cf9a4989b5a22070397317b449883e"
     },
     {
@@ -1068,13 +1068,13 @@
     {
       "output_path": "repo/docs/architecture/wiki/request-mainline-call-graph.md",
       "source_path": "docs/architecture/wiki/request-mainline-call-graph.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "e4de9e73153d88d9367b4c1d533eda6bf44853f571c26fd628c4e589db5efc47"
     },
     {
       "output_path": "repo/docs/architecture/wiki/response-mainline-call-graph.md",
       "source_path": "docs/architecture/wiki/response-mainline-call-graph.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "a36f2c0f663cbfc10d65df894b5aafa443b1347c5584d435ba4a8045ad7e48c8"
     },
     {
@@ -1092,7 +1092,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/runtime-lifecycle-call-graph.md",
       "source_path": "docs/architecture/wiki/runtime-lifecycle-call-graph.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "d07fc13ed7edbb94167ae907fc0910cd7931da7f1368ba906f48dba4491feaa8"
     },
     {
@@ -2478,7 +2478,7 @@
     {
       "output_path": "repo/docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md",
       "source_path": "docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md",
-      "source_commit": "61d8cafd47713808803cd986b72f5acd52b62c2d",
+      "source_commit": "5aa45669f26da6c81630441da72006d394cda181",
       "sha256": "9e80fab2a34fe7e49a20e61ab0d4cc70e1305f33bb0274ec4133a2ea7773900e"
     },
     {
@@ -2872,5 +2872,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "570ec9816dd0726dc77200699ba007cf5867c2bb61e8adac911cda4d07e8f5b0"
+  "manifest_digest": "268390da5b61c006d946089eda55a16784592873712960f90b6eb28923c54a08"
 }

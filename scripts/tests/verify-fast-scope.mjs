@@ -7,10 +7,15 @@ import { join } from 'node:path';
 
 const repo = process.cwd();
 const verifier = join(repo, 'scripts', 'verify-fast.mjs');
-const cases = ['docs/design/gate.md', 'docs/goals/gate.md', 'docs/schemas/gate.yml', '.agents/skills/gate/SKILL.md'];
+const cases = [
+  { relative: 'docs/design/gate.md', v3: true },
+  { relative: 'docs/goals/gate.md', v3: true },
+  { relative: 'docs/schemas/gate.yml', v3: true },
+  { relative: '.agents/skills/gate/SKILL.md', v3: false },
+];
 const failures = [];
 
-for (const relative of cases) {
+for (const { relative, v3 } of cases) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-verify-fast-scope-'));
   const target = join(root, relative);
   mkdirSync(join(target, '..'), { recursive: true });
@@ -30,8 +35,8 @@ for (const relative of cases) {
   });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
   const scope = readFileSync(outputPath, 'utf8');
-  if (result.status !== 0 || !scope.includes('v3=true\n')) {
-    failures.push(`${relative}: expected v3=true, got status=${result.status}\n${output}`);
+  if (result.status !== 0 || !scope.includes(`v3=${v3}\n`)) {
+    failures.push(`${relative}: expected v3=${v3}, got status=${result.status}\n${output}`);
   }
 }
 
@@ -41,4 +46,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`[test:verify-fast-scope] ok (${cases.length} V3 admission input roots select v3=true)`);
+console.log(`[test:verify-fast-scope] ok (${cases.length - 1} V3 roots select v3=true; skill-only changes stay outside broad V3 scope)`);

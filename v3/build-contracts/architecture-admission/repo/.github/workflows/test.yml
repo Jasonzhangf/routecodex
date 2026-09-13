@@ -38,6 +38,8 @@ jobs:
           ROUTECODEX_GATE_REMOTE_NAME: origin
         run: |
           ROUTECODEX_GATE_SCOPE_OUTPUT="$GITHUB_OUTPUT" npm run --silent verify:fast
+      - name: Scope classifier regression
+        run: npm run test:verify-fast-scope
       - name: Scope decision
         run: |
           echo "[verify:scope] false scope outputs are SKIPPED_OUT_OF_SCOPE, never PASS"
