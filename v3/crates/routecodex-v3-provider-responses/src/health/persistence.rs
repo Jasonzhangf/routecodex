@@ -2,6 +2,8 @@ use super::{V3ProviderHealthState, V3ProviderHealthStore};
 use crate::global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
 };
+use routecodex_v3_config::V3Config05ManifestPublished;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
@@ -146,16 +148,63 @@ pub(super) fn start_provider_health_persistence(
     coordinator.map(V3ProviderHealthPersistenceWriter::start)
 }
 
-pub(super) fn provider_cooldown_state_path() -> PathBuf {
+pub(super) fn provider_cooldown_state_path_for_manifest(
+    manifest: &V3Config05ManifestPublished,
+) -> PathBuf {
     if let Ok(path) = std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") {
         return PathBuf::from(path);
     }
+    let scope = enabled_listener_scope_digest(manifest);
+    default_provider_cooldown_state_path()
+        .with_file_name(format!("provider-cooldowns-{scope}.json"))
+}
+
+fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
+    let mut hasher = Sha256::new();
+    for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
+        hasher.update((server_id.len() as u64).to_le_bytes());
+        hasher.update(server_id.as_bytes());
+        hasher.update((server.bind.len() as u64).to_le_bytes());
+        hasher.update(server.bind.as_bytes());
+        hasher.update(server.port.to_le_bytes());
+    }
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub(super) fn default_provider_cooldown_state_path() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".rcc")
         .join("state")
         .join("provider-cooldowns.json")
+}
+
+pub(super) fn migrate_legacy_provider_cooldown_state_if_needed(
+    scoped_path: &std::path::Path,
+    legacy_path: &std::path::Path,
+) {
+    if !legacy_path.is_file() {
+        return;
+    }
+    if scoped_path.exists() {
+        return;
+    }
+    if let Some(parent) = scoped_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+                panic!("provider cooldown persistence migration parent create failed: {error}")
+            });
+        }
+    }
+    std::fs::copy(legacy_path, scoped_path).unwrap_or_else(|error| {
+        panic!("provider cooldown persistence migration copy failed: {error}")
+    });
 }
 
 fn provider_cooldown_persistence_entries(
@@ -224,7 +273,108 @@ fn set_persistence_alarm(alarm: &RwLock<Option<String>>, message: String) {
 mod tests {
     use super::*;
     use crate::health::V3ProviderAvailabilityReader;
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use std::sync::{Arc, RwLock};
+
+    #[test]
+    fn provider_cooldown_state_path_is_scoped_to_enabled_listener_scope() {
+        let primary = manifest("primary", "127.0.0.1", 1);
+        let secondary = manifest("secondary", "127.0.0.1", 1);
+        let primary_other_bind = manifest("primary", "127.0.0.2", 1);
+        let primary_other_port = manifest("primary", "127.0.0.1", 2);
+        let underscore_id = manifest("a_b", "127.0.0.1", 1);
+        let two_ids = manifest_with_servers(&[("a", "127.0.0.1", 1), ("b", "127.0.0.2", 2)]);
+
+        let primary_path = provider_cooldown_state_path_for_manifest(&primary);
+        let secondary_path = provider_cooldown_state_path_for_manifest(&secondary);
+        let primary_other_bind_path =
+            provider_cooldown_state_path_for_manifest(&primary_other_bind);
+        let primary_other_port_path =
+            provider_cooldown_state_path_for_manifest(&primary_other_port);
+        let underscore_id_path = provider_cooldown_state_path_for_manifest(&underscore_id);
+        let two_ids_path = provider_cooldown_state_path_for_manifest(&two_ids);
+
+        assert_ne!(
+            primary_path, secondary_path,
+            "different listener scopes must not share one cooldown persistence file"
+        );
+        assert_ne!(
+            primary_path, primary_other_bind_path,
+            "same server id on a different bind must not share one cooldown persistence file"
+        );
+        assert_ne!(
+            primary_path, primary_other_port_path,
+            "same server id on a different port must not share one cooldown persistence file"
+        );
+        assert_ne!(
+            underscore_id_path, two_ids_path,
+            "a_b and two ids a+b must not share one cooldown persistence file"
+        );
+        assert!(primary_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with("provider-cooldowns-")
+                    && name.ends_with(".json")
+                    && name.len() > "provider-cooldowns-.json".len()
+            }));
+    }
+
+    #[test]
+    fn legacy_provider_cooldown_state_is_copied_to_scoped_file_once() {
+        let root = tempfile::tempdir().expect("create isolated migration directory");
+        let legacy = root.path().join("provider-cooldowns.json");
+        let scoped = root.path().join("provider-cooldowns-scope.json");
+        std::fs::write(&legacy, "legacy-entry").expect("write legacy state");
+
+        migrate_legacy_provider_cooldown_state_if_needed(&scoped, &legacy);
+        assert_eq!(
+            std::fs::read_to_string(&scoped).expect("read scoped state"),
+            "legacy-entry"
+        );
+
+        std::fs::write(&scoped, "scoped-entry").expect("write scoped state");
+        migrate_legacy_provider_cooldown_state_if_needed(&scoped, &legacy);
+        assert_eq!(
+            std::fs::read_to_string(&scoped).expect("read scoped state after second migration"),
+            "scoped-entry",
+            "migration must not overwrite an existing scoped file"
+        );
+    }
+
+    fn manifest(server_id: &str, bind: &str, port: u16) -> V3Config05ManifestPublished {
+        manifest_with_servers(&[(server_id, bind, port)])
+    }
+
+    fn manifest_with_servers(servers: &[(&str, &str, u16)]) -> V3Config05ManifestPublished {
+        let server_blocks = servers
+            .iter()
+            .map(|(server_id, bind, port)| {
+                format!(
+                    "[servers.{server_id}]\nbind = \"{bind}\"\nport = {port}\nrouting_group = \"g\""
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(&format!(
+                r#"
+version = 3
+{server_blocks}
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = {{ type = "api_key", entries = [{{ alias = "k", env = "KEY" }}] }}
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }}]
+"#
+            ))
+            .expect("test authoring must parse"),
+        )
+        .expect("test manifest must compile")
+    }
 
     #[test]
     fn health_persistence_isolation_flushes_latest_snapshot_in_order() {
