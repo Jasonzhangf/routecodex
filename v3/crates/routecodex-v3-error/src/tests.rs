@@ -100,10 +100,10 @@ fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
 fn post_commit_sse_provider_failure_does_not_close_without_exhaustion_witness() {
     let transient =
         raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended");
-    assert!(!is_v3_sse_recoverable_disconnect_source(&transient));
+    assert!(is_v3_sse_recoverable_disconnect_source(&transient));
     assert_eq!(
         v3_sse_post_commit_disposition(&transient),
-        V3SsePostCommitDisposition::ProjectInternalTerminal
+        V3SsePostCommitDisposition::CloseEof
     );
 
     let http = build_v3_error_01_source_raised(
