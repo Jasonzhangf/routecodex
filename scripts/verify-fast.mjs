@@ -65,7 +65,11 @@ function writeChangedScopeOutputs(paths) {
   if (!outputPath) return;
 
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
-  const v3Architecture = has(/^(?:v3\/scripts\/architecture\/|v3\/tests\/scripts\/|scripts\/architecture\/|docs\/architecture\/)/u)
+  const hasToken = (tokens) => paths.some((relative) => new RegExp(
+    `(?:^|[/_.-])(?:${tokens.join('|')})(?=$|[/_.-])`,
+    'iu',
+  ).test(relative));
+  const v3Architecture = has(/^(?:v3\/scripts\/architecture\/|v3\/tests\/scripts\/|scripts\/|\.github\/workflows\/|docs\/architecture\/)/u)
     || has(/^package(?:-lock)?\.json$/u);
   const v3Runtime = has(/^v3\/(?!scripts\/architecture\/|tests\/scripts\/)/u);
   const values = {
@@ -74,14 +78,14 @@ function writeChangedScopeOutputs(paths) {
     v3_architecture: v3Architecture,
     v3_runtime: v3Runtime,
     v3_build: v3Runtime,
-    v3_provider: has(/(?:provider|health|action|anthropic|openai|gemini|relay|sse|responses)/iu),
-    v3_compaction: has(/compaction/iu),
-    v3_session: has(/(?:session|admission|continuation)/iu),
-    v3_timing: has(/(?:timing|timeout)/iu),
-    v3_debug: has(/debug/iu),
-    v3_console: has(/console/iu),
-    v3_router: has(/(?:route|router|target)/iu),
-    v3_tool: has(/(?:tool|servertool)/iu),
+    v3_provider: hasToken(['provider', 'health', 'action', 'anthropic', 'openai', 'gemini', 'relay', 'sse', 'responses']),
+    v3_compaction: hasToken(['compaction']),
+    v3_session: hasToken(['session', 'admission', 'continuation']),
+    v3_timing: hasToken(['timing', 'timeout']),
+    v3_debug: hasToken(['debug']),
+    v3_console: hasToken(['console']),
+    v3_router: hasToken(['route', 'router', 'route-classifier', 'virtual-router']),
+    v3_tool: hasToken(['tool', 'servertool']),
     v4: has(/^v4\//u),
   };
 
