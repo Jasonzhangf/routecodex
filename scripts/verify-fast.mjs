@@ -117,6 +117,66 @@ function classifyWorkflowScope(entries) {
   return { v3, v4 };
 }
 
+function isV3RootScript(relative) {
+  const v3ArchitectureScripts = new Set([
+    'scripts/architecture/architecture-wiki-lib.mjs',
+    'scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs',
+    'scripts/architecture/audit-function-map-canonical-builder-spread.mjs',
+    'scripts/architecture/audit-resource-global-coverage.mjs',
+    'scripts/architecture/compile-v3-build-admission.mjs',
+    'scripts/architecture/custom-payload-carrier-owner-queryability-lib.mjs',
+    'scripts/architecture/generate-mainline-chain-manifests.mjs',
+    'scripts/architecture/mainline-call-map-lib.mjs',
+    'scripts/architecture/render-architecture-wiki-html.mjs',
+    'scripts/architecture/render-architecture-wiki-pages.mjs',
+    'scripts/architecture/render-mainline-manifests.mjs',
+    'scripts/architecture/render-mainline-mermaid.mjs',
+    'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
+    'scripts/architecture/v3-provider-compat-module-boundary-lib.mjs',
+    'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
+    'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
+    'scripts/architecture/verify-architecture-fallback-denylist.mjs',
+    'scripts/architecture/verify-architecture-mainline-call-map.mjs',
+    'scripts/architecture/verify-architecture-mainline-manifest-sync.mjs',
+    'scripts/architecture/verify-architecture-wiki-html-sync.mjs',
+    'scripts/architecture/verify-build-script-tiering.mjs',
+    'scripts/architecture/verify-direct-semantic-classification-design.mjs',
+    'scripts/architecture/verify-error-pipeline-contract.mjs',
+    'scripts/architecture/verify-function-map-compile-gate.mjs',
+    'scripts/architecture/verify-install-release-contract.mjs',
+    'scripts/architecture/verify-internal-error-numbering.mjs',
+    'scripts/architecture/verify-internal-policy-hardcode.mjs',
+    'scripts/architecture/verify-mainline-call-map-binding-state.mjs',
+    'scripts/architecture/verify-no-fallback-diff.mjs',
+    'scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs',
+    'scripts/architecture/verify-repository-filesystem-governance.mjs',
+    'scripts/architecture/verify-responses-continuation-immutable-boundary.mjs',
+    'scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs',
+    'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs',
+    'scripts/architecture/verify-runtime-responses-provider-compat.mjs',
+    'scripts/architecture/verify-server-function-map-boundary.mjs',
+    'scripts/architecture/verify-sse-architecture-boundary.mjs',
+    'scripts/architecture/verify-v3-dependency-projection.mjs',
+    'scripts/architecture/verify-v3-provider-compat-module-boundary.mjs',
+    'scripts/architecture/verify-v3-responses-continuation-disabled.mjs',
+    'scripts/architecture/verify-v3-simplified-user-config.mjs',
+    'scripts/architecture/wiki-html-lib.mjs',
+  ]);
+  return /^scripts\/(?:run-v3-|verify-v3-)/u.test(relative)
+    || /^(?:scripts\/verify-fast|scripts\/verify-servertool-rust-only)\.mjs$/u.test(relative)
+    || v3ArchitectureScripts.has(relative)
+    || relative === 'scripts/ci/check-file-line-limit.mjs'
+    || relative === 'scripts/ci/repo-sanity.mjs'
+    || relative === 'scripts/ci/mempalace-scan-artifact-audit.mjs'
+    || relative === 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs'
+    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim)\.mjs$/u.test(relative)
+    || /^scripts\/tests\/v3-/u.test(relative)
+    || /^tests\/scripts\/(?:v3-cli-distribution|install-v3-cli-target-cleanup)\.spec\.mjs$/u.test(relative)
+    || /^scripts\/install-(?:global|release)\.sh$/u.test(relative)
+    || relative === '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md'
+    || relative === 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
+}
+
 function writeChangedScopeOutputs(entries) {
   const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
   if (!outputPath) return;
@@ -124,8 +184,11 @@ function writeChangedScopeOutputs(entries) {
   const paths = [...new Set(entries.map(({ path }) => path))];
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
   const workflowScope = classifyWorkflowScope(entries);
-  const v3Scope = workflowScope.v3 || has(/^(?:v3\/|scripts\/|docs\/(?:architecture|design|goals|schemas)\/)/u)
-    || has(/^package(?:-lock)?\.json$/u);
+  const rootPackageChanged = has(/^package(?:-lock)?\.json$/u);
+  const v3Scope = workflowScope.v3 || has(/^v3\//u)
+    || paths.some((relative) => isV3RootScript(relative))
+    || has(/^docs\/(?:architecture|design|goals|schemas)\//u)
+    || rootPackageChanged;
   const values = {
     changed: paths.length > 0,
     v3: v3Scope,
@@ -140,7 +203,7 @@ function writeChangedScopeOutputs(entries) {
     v3_console: v3Scope,
     v3_router: v3Scope,
     v3_tool: v3Scope,
-    v4: workflowScope.v4 || has(/^v4\//u),
+    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged,
   };
 
   appendFileSync(
