@@ -433,7 +433,7 @@ fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
 
 pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     status: u16,
-    node_trace: &[&str],
+    _node_trace: &[&str],
     error_chain: &[&str],
     body: &Value,
 ) -> bool {
@@ -448,15 +448,9 @@ pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     // still exist and the request must remain a normal SSE error.
     code == "network_error"
         && message == "network error"
-        && (node_trace
+        && error_chain
             .iter()
             .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion"))
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
