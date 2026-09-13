@@ -4,6 +4,7 @@ import {
   CLOSURE_GATE_ID,
   manifestProjection,
   RUNTIME_FEATURE_ID,
+  sourceInputsEqual,
 } from '../architecture/produce-v4-feature-layer-evidence.mjs';
 import { isClosureDecisionAlias } from '../architecture/lib/feature-layer-batch-evidence.mjs';
 
@@ -55,4 +56,30 @@ test('no-gap projection closes R002 and leaves H without source claims', () => {
     gate_id: CLOSURE_GATE_ID,
     path: 'docs/evidence/feature-completion/M1/V4-RUNTIME-002/not-needed-decision-current.json',
   }]);
+});
+
+test('source inputs remain reusable across evidence-only commits', () => {
+  const sourcePaths = ['crates/runtime/src/lib.rs', 'crates/runtime/tests/l2.rs'];
+  const firstCommit = 'a'.repeat(40);
+  const secondCommit = 'b'.repeat(40);
+  const sourceBytes = new Map([
+    [firstCommit, new Map(sourcePaths.map((sourcePath) => [sourcePath, `stable:${sourcePath}`]))],
+    [secondCommit, new Map(sourcePaths.map((sourcePath) => [sourcePath, `stable:${sourcePath}`]))],
+  ]);
+  const truth = {
+    blobIdentity(commit, sourcePath) {
+      const bytes = sourceBytes.get(commit)?.get(sourcePath);
+      if (!bytes) return null;
+      return {
+        path: sourcePath,
+        mode: '100644',
+        git_oid: `oid:${bytes}`,
+        sha256: `sha256:${bytes}`,
+      };
+    },
+  };
+  assert.equal(sourceInputsEqual(truth, firstCommit, secondCommit, sourcePaths), true);
+
+  sourceBytes.get(secondCommit).set(sourcePaths[1], 'changed');
+  assert.equal(sourceInputsEqual(truth, firstCommit, secondCommit, sourcePaths), false);
 });

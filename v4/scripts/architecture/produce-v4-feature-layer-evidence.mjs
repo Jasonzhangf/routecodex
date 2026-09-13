@@ -67,6 +67,15 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function readOptionalJson(file) {
+  if (!fs.existsSync(file)) return null;
+  try {
+    return readJson(file);
+  } catch {
+    return null;
+  }
+}
+
 function writeExclusive(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
@@ -87,6 +96,14 @@ function sourceScope(truth, sourceCommit, featureId, moduleId, sourcePaths) {
       inputs,
     })),
   };
+}
+
+export function sourceInputsEqual(truth, leftCommit, rightCommit, sourcePaths) {
+  return sourcePaths.every((sourcePath) => {
+    const left = truth.blobIdentity(leftCommit, sourcePath);
+    const right = truth.blobIdentity(rightCommit, sourcePath);
+    return left !== null && right !== null && canonicalJson(left) === canonicalJson(right);
+  });
 }
 
 function evidenceRecord({
@@ -263,17 +280,68 @@ export function produceFeatureLayerEvidence({
   if (baselineCommit !== baseline.resolved_commit) throw new Error('BASELINE_COMMIT_UNRESOLVED');
   const baselineGate = gateById(verificationMap, BASELINE_GATE_ID);
   const closureGate = gateById(verificationMap, CLOSURE_GATE_ID);
-  const runtimeScope = sourceScope(truth, head, RUNTIME_FEATURE_ID, RUNTIME_MODULE_ID, RUNTIME_SOURCE_PATHS);
   const baselineScope = sourceScope(truth, baselineCommit, BASELINE_FEATURE_ID, RUNTIME_MODULE_ID, BASELINE_SOURCE_PATHS);
   const createdAt = new Date(now).toISOString();
+  const producer = { adapter: 'cargo', identity: closureGate.producer.identity };
+  const prerequisite = manifest.prerequisites?.find((entry) => entry.feature_id === RUNTIME_FEATURE_ID);
+  const priorAuditCommit = prerequisite?.audit_commit
+    ? resolveCommit(repositoryRoot, prerequisite.audit_commit)
+    : null;
+  let runtimeEvidenceCommit = head;
+  if (priorAuditCommit
+      && priorAuditCommit !== head
+      && truth.isAncestor(priorAuditCommit, head)
+      && sourceInputsEqual(truth, priorAuditCommit, head, RUNTIME_SOURCE_PATHS)) {
+    const priorClosureEvidenceId = `closure-audit-${priorAuditCommit.slice(0, 12)}`;
+    const priorDecisionEvidenceId = `not-needed-decision-${priorAuditCommit.slice(0, 12)}`;
+    const priorClosureEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${priorClosureEvidenceId}.json`;
+    const priorDecisionEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${priorDecisionEvidenceId}.json`;
+    const priorTask = manifest.batches
+      ?.find((batch) => batch.batch_id === 'H')
+      ?.tasks?.find((task) => task.task_id === RUNTIME_FEATURE_ID);
+    const refsMatch = prerequisite.evidence_refs?.length === 1
+      && prerequisite.evidence_refs[0].path === priorClosureEvidencePath
+      && priorTask?.evidence_refs?.length === 1
+      && priorTask.evidence_refs[0].path === priorDecisionEvidencePath;
+    const priorClosureExpected = evidenceRecord({
+      evidenceId: priorClosureEvidenceId,
+      issueId: RUNTIME_FEATURE_ID,
+      experimentId: `v4-runtime-002-epoch-lifecycle-${priorAuditCommit.slice(0, 12)}`,
+      sourceCommit: priorAuditCommit,
+      featureId: RUNTIME_FEATURE_ID,
+      moduleId: RUNTIME_MODULE_ID,
+      producer,
+      commandArgv: closureGate.argv,
+      sourcePaths: RUNTIME_SOURCE_PATHS,
+      truth,
+      createdAt,
+    });
+    const priorDecisionExpected = evidenceRecord({
+      evidenceId: priorDecisionEvidenceId,
+      issueId: RUNTIME_FEATURE_ID,
+      experimentId: `v4-runtime-002-epoch-lifecycle-${priorAuditCommit.slice(0, 12)}`,
+      sourceCommit: priorAuditCommit,
+      featureId: RUNTIME_FEATURE_ID,
+      moduleId: RUNTIME_MODULE_ID,
+      producer,
+      commandArgv: closureGate.argv,
+      sourcePaths: RUNTIME_SOURCE_PATHS,
+      truth,
+      createdAt,
+    });
+    if (refsMatch
+        && reusableEvidenceRecord(readOptionalJson(path.join(projectRoot, priorClosureEvidencePath)), priorClosureExpected, now)
+        && reusableEvidenceRecord(readOptionalJson(path.join(projectRoot, priorDecisionEvidencePath)), priorDecisionExpected, now)) {
+      runtimeEvidenceCommit = priorAuditCommit;
+    }
+  }
   const baselineEvidenceId = `baseline-replay-${baselineCommit.slice(0, 12)}`;
-  const closureEvidenceId = `closure-audit-${head.slice(0, 12)}`;
-  const decisionEvidenceId = `not-needed-decision-${head.slice(0, 12)}`;
+  const closureEvidenceId = `closure-audit-${runtimeEvidenceCommit.slice(0, 12)}`;
+  const decisionEvidenceId = `not-needed-decision-${runtimeEvidenceCommit.slice(0, 12)}`;
   const baselineEvidencePath = `docs/evidence/feature-completion/M1/${BASELINE_FEATURE_ID}/${baselineEvidenceId}.json`;
   const closureEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${closureEvidenceId}.json`;
   const decisionEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${decisionEvidenceId}.json`;
   const allPaths = [baselineEvidencePath, closureEvidencePath, decisionEvidencePath];
-  const producer = { adapter: 'cargo', identity: closureGate.producer.identity };
   const baselineEvidence = {
     evidence_id: baselineEvidenceId,
     issue_id: BASELINE_FEATURE_ID,
@@ -295,8 +363,8 @@ export function produceFeatureLayerEvidence({
   const closureEvidence = evidenceRecord({
     evidenceId: closureEvidenceId,
     issueId: RUNTIME_FEATURE_ID,
-    experimentId: `v4-runtime-002-epoch-lifecycle-${head.slice(0, 12)}`,
-    sourceCommit: head,
+    experimentId: `v4-runtime-002-epoch-lifecycle-${runtimeEvidenceCommit.slice(0, 12)}`,
+    sourceCommit: runtimeEvidenceCommit,
     featureId: RUNTIME_FEATURE_ID,
     moduleId: RUNTIME_MODULE_ID,
     producer,
@@ -308,8 +376,8 @@ export function produceFeatureLayerEvidence({
   const decisionEvidence = evidenceRecord({
     evidenceId: decisionEvidenceId,
     issueId: RUNTIME_FEATURE_ID,
-    experimentId: `v4-runtime-002-epoch-lifecycle-${head.slice(0, 12)}`,
-    sourceCommit: head,
+    experimentId: `v4-runtime-002-epoch-lifecycle-${runtimeEvidenceCommit.slice(0, 12)}`,
+    sourceCommit: runtimeEvidenceCommit,
     featureId: RUNTIME_FEATURE_ID,
     moduleId: RUNTIME_MODULE_ID,
     producer,
@@ -352,7 +420,7 @@ export function produceFeatureLayerEvidence({
     baselineEvidencePath,
     closureEvidencePath,
     decisionEvidencePath,
-    head,
+    runtimeEvidenceCommit,
   );
   if (!reusable[0]) writeExclusive(path.join(projectRoot, baselineEvidencePath), baselineEvidence);
   if (!reusable[1]) writeExclusive(path.join(projectRoot, closureEvidencePath), closureEvidence);
