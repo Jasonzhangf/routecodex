@@ -107,6 +107,14 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         output.insert("input".to_string(), Value::String(raw));
         return Ok(Value::Object(output));
     }
+    if name == "tool_search" {
+        return Ok(json!({
+            "type": "tool_search_call",
+            "call_id": call_id,
+            "execution": "client",
+            "arguments": input.clone(),
+        }));
+    }
     Ok(json!({
         "type":"function_call",
         "call_id":call_id,
@@ -143,6 +151,30 @@ mod tests {
             "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
         );
         assert!(call.get("model_id").is_none());
+    }
+
+    #[test]
+    fn tool_search_tool_use_projects_to_native_responses_tool_search_call() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "tool_search"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_search",
+                "name": "tool_search",
+                "input": {"query": "mcpx workspace", "limit": 5}
+            }),
+            &context,
+        )
+        .expect("tool_search must remain a native Responses control call");
+
+        assert_eq!(call["type"], "tool_search_call");
+        assert_eq!(call["execution"], "client");
+        assert_eq!(call["arguments"]["query"], "mcpx workspace");
+        assert_eq!(call["arguments"]["limit"], 5);
+        assert!(call.get("name").is_none());
     }
 
     #[test]
