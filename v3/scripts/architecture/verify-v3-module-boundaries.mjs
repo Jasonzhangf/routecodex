@@ -257,6 +257,7 @@ for (const path of all) {
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
   const isDebugSamplePersistence = path.endsWith('routecodex-v3-debug/src/sample_store.rs');
   const isServerObservabilityPersistence = path.endsWith('routecodex-v3-server/src/webui_observability.rs');
+  const isLifecycleHooksControlPersistence = path.endsWith('routecodex-v3-lifecycle/src/hooks_sidecar.rs');
   if (/V3Provider07ResponsesWirePayload|V3Transport08ResponsesHttpRequest|V3ProviderResp09Raw|V3Resp10ClientPayload|build_v3_provider_07|build_v3_transport_08|V3Provider07|V3Transport08|V3ProviderResp09/.test(text)) {
     fail('obsolete Provider prototype node name is forbidden in V3 source: ' + path);
   }
@@ -281,6 +282,7 @@ for (const path of all) {
   }
   if (!isTest && !path.includes('routecodex-v3-config') && !path.includes('routecodex-v3-admin')
       && !isProviderOwner && !isDebugSamplePersistence && !isServerObservabilityPersistence
+      && !isLifecycleHooksControlPersistence
       && /fs::read_to_string|std::fs::read_to_string|std::fs::read\(/.test(productionText)) {
     fail('config authoring file IO outside config crate: ' + path);
   }

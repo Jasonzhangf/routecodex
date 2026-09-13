@@ -1027,10 +1027,14 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             &message,
         )
     });
-    let configured_same_candidate_retries = configured_retry_budget_for_failure(
-        matched_policy,
-        context.retry_policy.same_candidate_retries,
-    );
+    let configured_same_candidate_retries = if matched_policy_directive.is_some() {
+        0
+    } else {
+        configured_retry_budget_for_failure(
+            matched_policy,
+            context.retry_policy.same_candidate_retries,
+        )
+    };
     let mut transient_admission = if transient && matched_policy.is_none() {
         Some(
             context

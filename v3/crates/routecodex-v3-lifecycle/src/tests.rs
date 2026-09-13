@@ -53,9 +53,13 @@ async fn configured_hooks_sidecar_requires_ready_protocol_and_stops_by_explicit_
     let daemon_config = root.path().join("hooksd.json");
     let supervisor_wrapper = root.path().join("supervisor-wrapper");
     let bin_directory = root.path().join("bin");
+    let codexapp_binary = bin_directory.join("rccv3-codexapp");
+    fs::create_dir_all(&bin_directory).unwrap();
+    fs::write(&codexapp_binary, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut codexapp_permissions = fs::metadata(&codexapp_binary).unwrap().permissions();
+    codexapp_permissions.set_mode(0o755);
+    fs::set_permissions(&codexapp_binary, codexapp_permissions).unwrap();
     fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
     fs::write(&daemon_config, "{}").unwrap();
     fs::write(
         &supervisor_wrapper,

@@ -5,6 +5,7 @@ use crate::protocol_tables::{
 use serde_json::{json, Map, Value};
 
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
+use super::request_outbound_builtin_tool_projection::normalize_openai_responses_function_tool_names;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
 use super::request_outbound_metadata::{
@@ -375,6 +376,7 @@ fn apply_outbound_projection_transforms(
         V3OutboundTargetProtocol::OpenAiResponses => {
             project_responses_request_chat_extension_to_openai_responses(projected)?;
             project_openai_responses_custom_tools_to_function_schema(projected)?;
+            normalize_openai_responses_function_tool_names(projected);
             validate_openai_metadata(projected, "responses")?;
             project_openai_responses_reasoning_extensions_to_reasoning(projected)?;
         }

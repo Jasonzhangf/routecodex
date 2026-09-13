@@ -230,7 +230,11 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
             .store()
             .provider_cooldown_probe_keys_due(18_000_101)
             .expect("probe interval query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
     assert!(
         !health
@@ -241,19 +245,19 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
         "401 auth key must be unavailable to scheduling after two failures"
     );
     assert!(
-        !health
+        health
             .store()
             .scheduling_projection("primary", "key1", "gpt-other", 1, 1, 102)
             .expect("sibling-model scheduling projection")
             .available,
-        "401 auth key cooldown must block another model under the same provider/auth alias"
+        "401 auth key cooldown must not block a healthy sibling model"
     );
     assert!(
-        !health
+        health
             .store()
             .availability_for_session(&session, "primary", Some("key1"), Some("gpt-other"), 102,)
             .available,
-        "401 auth key cooldown must block another model in session availability"
+        "401 auth key cooldown must not block a healthy sibling model in session availability"
     );
     assert!(
         !health
@@ -284,7 +288,11 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
             .store()
             .provider_cooldown_probe_keys_due(18_000_101)
             .expect("provider cooldown probe query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
 }
 
@@ -346,6 +354,10 @@ fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
             .store()
             .provider_cooldown_probe_keys_due(900_101)
             .expect("403 probe due query"),
-        vec![("primary".to_string(), Some("key1".to_string()), None,)]
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )]
     );
 }

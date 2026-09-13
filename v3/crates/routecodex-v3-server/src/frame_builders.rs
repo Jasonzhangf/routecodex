@@ -363,7 +363,12 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
-    if frame.content_type == "text/event-stream" && v3_is_sse_target_pool_exhaustion(&frame) {
+    // Provider failures on an accepted client SSE use transport disconnect;
+    // the typed provider error remains in server evidence.  This prevents a
+    // provider HTTP 502/400 or codec failure from leaking as client
+    // response.failed/HTTP error while preserving non-provider request
+    // rejection semantics.
+    if frame.content_type == "text/event-stream" && v3_is_sse_provider_failure(&frame) {
         return v3_sse_transport_disconnect_response();
     }
     let mut builder = Response::builder()
@@ -403,6 +408,39 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
+pub(crate) fn v3_is_sse_provider_failure(frame: &V3Server16HttpFrame) -> bool {
+    let body = match &frame.body {
+        V3Server16Body::Json(value) => value,
+        _ => match frame.error_body.as_ref() {
+            Some(value) => value,
+            None => return false,
+        },
+    };
+    v3_is_sse_provider_failure_parts(frame.status, &frame.node_trace, &frame.error_chain, body)
+}
+
+pub(crate) fn v3_is_sse_provider_failure_parts(
+    _status: u16,
+    node_trace: &[&str],
+    error_chain: &[&str],
+    body: &Value,
+) -> bool {
+    if error_chain.is_empty() {
+        return false;
+    }
+    if node_trace
+        .iter()
+        .any(|node| node.starts_with("V3Provider") || *node == "V3Error04TargetPoolExhaustion")
+    {
+        return true;
+    }
+    let (code, _) = v3_error_body_code_message(body);
+    code == "network_error"
+        || code.starts_with("HTTP_")
+        || code.starts_with("provider_")
+        || code.starts_with("response_stream_")
+}
+
 pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
@@ -413,22 +451,6 @@ pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
             ))
         })))
         .expect("typed SSE transport disconnect response")
-}
-
-fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
-    let body = match &frame.body {
-        V3Server16Body::Json(body) => body,
-        _ => match frame.error_body.as_ref() {
-            Some(body) => body,
-            None => return false,
-        },
-    };
-    v3_is_sse_target_pool_exhaustion_parts(
-        frame.status,
-        &frame.node_trace,
-        &frame.error_chain,
-        body,
-    )
 }
 
 pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
