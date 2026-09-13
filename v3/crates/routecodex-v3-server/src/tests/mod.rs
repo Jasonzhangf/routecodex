@@ -3767,6 +3767,18 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
     };
 
     let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+    assert!(v3_is_sse_target_pool_exhaustion_parts(
+        projected.status,
+        &projected.node_trace,
+        &projected.error_chain,
+        projected
+            .error_body
+            .as_ref()
+            .unwrap_or_else(|| match &projected.body {
+                V3Server16Body::Json(body) => body,
+                _ => panic!("projected network error must retain JSON error body"),
+            }),
+    ));
     assert_eq!(projected.status, 502);
     assert_eq!(projected.content_type, "text/event-stream");
     match projected.body {
