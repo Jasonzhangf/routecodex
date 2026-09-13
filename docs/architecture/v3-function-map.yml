@@ -206,7 +206,7 @@ features:
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-config/src/defaults.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   resource_bindings:
   - v3.config.file_source
   - v3.config.authoring_parsed
@@ -814,7 +814,7 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-target
   - v3/crates/routecodex-v3-config/src/types.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-runtime
@@ -2906,8 +2906,8 @@ features:
   - compile_entry_protocol_bindings
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -2972,7 +2972,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
   - docs/goals/v3-openai-chat-sse-reused-tool-index-test-design.md
   - docs/goals/v3-5520-duplicate-response-tool-identity-not-rerouted-test-design.md
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3076,7 +3076,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -3114,7 +3114,6 @@ features:
     --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
-  - npm run test:v3-config-v2-compat-5555
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server
     responses_relay -- --nocapture
   - npm run test:v3-relay-payload-copy-runtime-probes
@@ -3747,7 +3746,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/provider-compat-core/src/lib.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-runtime/src/hooks.rs

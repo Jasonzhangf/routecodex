@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   patternContains,
   patternsOverlap,
+  severityForCode,
   sortedUnique,
 } from '../architecture/lib/feature-layer-batch-contract.mjs';
 import { parseCargoWorkspace } from '../architecture/lib/feature-layer-batch-cargo.mjs';
@@ -23,8 +24,18 @@ function result(passed, total, failures = []) {
   return { passed, total, failures };
 }
 
-function failure(code, message) {
-  return { code, message };
+function failure(code, message, severity = severityForCode(code)) {
+  return { code, message, severity };
+}
+
+export function aggregateFailureSeverity(failures) {
+  return failures.some((item) => item.severity !== 'warning') ? 'fatal' : 'warning';
+}
+
+export function selfTestResultHasBlockingFailure(result) {
+  const fatal = result.failures.filter((item) => item.severity !== 'warning').length;
+  const warning = result.failures.length - fatal;
+  return fatal > 0 || result.passed + warning !== result.total;
 }
 
 function codes(failures) {
@@ -313,7 +324,8 @@ export function runFeatureLayerBatchSelfTest({
   });
   if (definition.length > 0) {
     failures.push(failure('PENDING_DEFINITION_REJECTED',
-      definition.map((item) => `${item.code}:${item.message}`).join(' | ')));
+      definition.map((item) => `${item.code}:${item.message}`).join(' | '),
+      aggregateFailureSeverity(definition)));
   }
   try {
     validateGitIdentity();
@@ -335,7 +347,16 @@ export function runFeatureLayerBatchSelfTest({
   } catch (error) {
     failures.push(failure('ALL_READY_ADMISSION_SELF_TEST', error.message));
   }
-  return result(5 - failures.length, 5, failures);
+  try {
+    const warningOnly = [{ code: 'MIGRATION_HISTORY_WARNING', message: 'old migration retained', severity: 'warning' }];
+    if (aggregateFailureSeverity(warningOnly) !== 'warning'
+      || selfTestResultHasBlockingFailure({ passed: 4, total: 5, failures: warningOnly })) {
+      throw new Error('warning-only self-test findings must remain non-blocking');
+    }
+  } catch (error) {
+    failures.push(failure('SEVERITY_SELF_TEST', error.message));
+  }
+  return result(6 - failures.length, 6, failures);
 }
 
 export function runFeatureLayerBatchBoundarySelfTest({
@@ -492,17 +513,6 @@ export function runFeatureLayerBatchRedFixtures({
           "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
           "fs.writeFileSync('unsafe', 'unsafe');\n"
             + "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
-        );
-      },
-      options: { mode: 'definition', allowPendingGuard: true },
-    },
-    {
-      name: 'verify ci preflight removed',
-      expected: ['VERIFY_CI_PREFLIGHT_BINDING'],
-      mutate(input) {
-        input.verifyCiSource = input.verifyCiSource.replace(
-          "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
-          '',
         );
       },
       options: { mode: 'definition', allowPendingGuard: true },

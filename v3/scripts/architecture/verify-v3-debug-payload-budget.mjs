@@ -6,10 +6,14 @@
 // key truncation, stream-capture truncation, and media placeholders.
 
 import fs from "node:fs";
-import path from "node:path";
+import path, { dirname, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const root = process.cwd();
+const configuredRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? "").trim();
+const root = configuredRoot
+  ? resolve(configuredRoot)
+  : resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const failures = [];
 
 function readRequired(relative) {
