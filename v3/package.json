@@ -45,6 +45,7 @@
     "verify:v3-module-boundaries": "node scripts/architecture/verify-v3-module-boundaries.mjs",
     "test:v3-user-config-contract": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test user_config_contract -- --nocapture",
     "test:v3-user-config-cli": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test user_config_cli -- --nocapture",
+    "test:v3-compaction-request-routing": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract compiles_hub_v1_declarations_without_request_branch_decisions -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib compaction -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-route-classifier --lib compaction_is_the_highest_priority_route_signal -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-virtual-router --test compaction_routing -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib compact -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib compact_wire_ -- --nocapture",
     "test:v3-source-gate-red-fixtures": "node scripts/tests/v3-source-gate-red-fixtures.mjs",
     "test:v3-compile-fail": "node scripts/tests/v3-compile-fail-boundaries.mjs",
     "verify:v3-p6-freeze": "node scripts/architecture/verify-v3-p6-freeze.mjs",

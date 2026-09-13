@@ -83,6 +83,7 @@
     "verify:v3-anthropic-relay-local-continuation": "npm --prefix v3 run verify:v3-anthropic-relay-local-continuation",
     "test:v3-anthropic-relay-local-continuation": "npm --prefix v3 run test:v3-anthropic-relay-local-continuation",
     "test:v3-anthropic-relay-local-continuation-red-fixtures": "npm --prefix v3 run test:v3-anthropic-relay-local-continuation-red-fixtures",
+    "test:v3-compaction-request-routing": "npm --prefix v3 run test:v3-compaction-request-routing",
     "verify:v3-rust-only": "npm --prefix v3 run verify:v3-rust-only",
     "test:v3-route-classifier-semantics": "npm --prefix v3 run test:v3-route-classifier-semantics",
     "test:route-classifier-semantics": "npm run test:v3-route-classifier-semantics",
