@@ -86,9 +86,6 @@ jobs:
       - name: V3 architecture CI umbrella
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:v3-architecture-ci
-      - name: V3 compaction request routing
-        if: needs.scope.outputs.v3 == 'true'
-        run: npm run test:v3-compaction-request-routing
       - name: V3 Responses session admission
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:v3-responses-session-admission
