@@ -3750,7 +3750,7 @@ async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
 }
 
 #[test]
-fn responses_stream_network_error_without_error04_projects_sse_body() {
+fn responses_stream_network_error_without_error04_does_not_disconnect_transport() {
     let frame = V3Server16HttpFrame {
         status: 502,
         content_type: "application/json".to_string(),
@@ -3767,7 +3767,7 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
     };
 
     let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-    assert!(v3_is_sse_target_pool_exhaustion_parts(
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
         projected.status,
         &projected.node_trace,
         &projected.error_chain,
