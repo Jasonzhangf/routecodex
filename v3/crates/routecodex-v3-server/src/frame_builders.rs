@@ -363,7 +363,12 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
-    if frame.content_type == "text/event-stream" && v3_is_sse_target_pool_exhaustion(&frame) {
+    // Provider failures on an accepted client SSE use transport disconnect;
+    // the typed provider error remains in server evidence.  This prevents a
+    // provider HTTP 502/400 or codec failure from leaking as client
+    // response.failed/HTTP error while preserving non-provider request
+    // rejection semantics.
+    if frame.content_type == "text/event-stream" && v3_is_sse_provider_failure(&frame) {
         return v3_sse_transport_disconnect_response();
     }
     let mut builder = Response::builder()
@@ -403,6 +408,38 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
+pub(crate) fn v3_is_sse_provider_failure(frame: &V3Server16HttpFrame) -> bool {
+    let body = match &frame.body {
+        V3Server16Body::Json(value) => value,
+        _ => match frame.error_body.as_ref() {
+            Some(value) => value,
+            None => return false,
+        },
+    };
+    v3_is_sse_provider_failure_parts(frame.status, &frame.node_trace, &frame.error_chain, body)
+}
+
+pub(crate) fn v3_is_sse_provider_failure_parts(
+    _status: u16,
+    node_trace: &[&str],
+    error_chain: &[&str],
+    body: &Value,
+) -> bool {
+    if error_chain.is_empty() {
+        return false;
+    }
+    // Client SSE EOF is reserved for proven route-pool exhaustion. A provider
+    // failure can be recovered by reselection while another target is live.
+    if node_trace
+        .iter()
+        .any(|node| *node == "V3Error04TargetPoolExhaustion")
+    {
+        return true;
+    }
+    let _ = body;
+    false
+}
+
 pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
@@ -415,48 +452,22 @@ pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
         .expect("typed SSE transport disconnect response")
 }
 
-fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
-    let body = match &frame.body {
-        V3Server16Body::Json(body) => body,
-        _ => match frame.error_body.as_ref() {
-            Some(body) => body,
-            None => return false,
-        },
-    };
-    v3_is_sse_target_pool_exhaustion_parts(
-        frame.status,
-        &frame.node_trace,
-        &frame.error_chain,
-        body,
-    )
-}
-
 pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     status: u16,
     node_trace: &[&str],
     error_chain: &[&str],
     body: &Value,
 ) -> bool {
-    if error_chain.is_empty() || status != 502 {
+    if error_chain.is_empty()
+        || status != 502
+        || !node_trace
+            .iter()
+            .any(|node| *node == "V3Error04TargetPoolExhaustion")
+    {
         return false;
     }
     let (code, message) = v3_error_body_code_message(body);
-    // A terminal provider/network failure must never be serialized as a client
-    // error frame. Runtime retries/reselection happen before this boundary;
-    // Only the caller-owned Error04 exhaustion witness authorizes a transport
-    // disconnect. Error06 alone is insufficient: eligible candidates may
-    // still exist and the request must remain a normal SSE error.
-    code == "network_error"
-        && message == "network error"
-        && (node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion"))
+    code == "network_error" && message == "network error"
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
