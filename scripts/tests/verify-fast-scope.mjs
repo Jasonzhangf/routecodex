@@ -1,17 +1,41 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const repo = process.cwd();
 const verifier = join(repo, 'scripts', 'verify-fast.mjs');
 const cases = [
-  { relative: 'docs/design/gate.md', v3: true, v4: false },
-  { relative: 'docs/goals/gate.md', v3: true, v4: false },
-  { relative: 'docs/schemas/gate.yml', v3: true, v4: false },
+  { relative: 'docs/design/v3-gate.md', v3: true, v4: false },
+  { relative: 'docs/goals/v3-gate.md', v3: true, v4: false },
+  { relative: 'docs/schemas/v3-gate.yml', v3: true, v4: false },
   { relative: '.agents/skills/gate/SKILL.md', v3: false, v4: false },
+  { relative: 'scripts/unrelated-tool.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'scripts/architecture/verify-v3-dependency-projection.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/architecture/architecture-wiki-lib.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-architecture-mainline-call-map.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-runtime-responses-provider-compat.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-sse-architecture-boundary.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-agent-collab-protocol.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'scripts/architecture/verify-agent-p0-payload-control-guard.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'scripts/install-global.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
+  { relative: 'scripts/install-release.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
+  { relative: 'scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/tests/v3-scope-fixture.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
+  { relative: 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json', contents: '{}\n', v3: true, v4: false },
+  { relative: 'scripts/ci/unrelated-check.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'scripts/ci/check-file-line-limit.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/ci/repo-sanity.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/ci/mempalace-scan-artifact-audit.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/tests/agent-collab-protocol-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
+  { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', v3: true, v4: true },
+  { relative: 'scripts/ensure-cli-command-shim.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/install-v3-cli.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'tests/scripts/v3-cli-distribution.spec.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   {
     relative: '.github/workflows/test.yml',
     contents: '  - name: V3 gate\n    run: npm run verify:v3\n',
@@ -90,35 +114,40 @@ for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install 
   }
 }
 
+mkdirSync(join(repo, 'playground'), { recursive: true });
 for (const { relative, contents, diffMode, v3, v4 } of cases) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-verify-fast-scope-'));
-  const target = join(root, relative);
-  mkdirSync(join(target, '..'), { recursive: true });
-  writeFileSync(target, contents ?? 'scope fixture\n');
-  symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir');
-  execFileSync('git', ['init', '-q'], { cwd: root });
-  execFileSync('git', ['add', relative], { cwd: root });
-  const diffEnv = {};
-  if (diffMode === 'new-ref') {
-    execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'scope fixture'], { cwd: root });
-    diffEnv.ROUTECODEX_GATE_DIFF_BASE = '0'.repeat(40);
-    diffEnv.ROUTECODEX_GATE_DIFF_HEAD = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-  }
-  const outputPath = join(root, 'scope-output.txt');
-  const result = spawnSync(process.execPath, [verifier], {
-    cwd: root,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      ...(diffMode === 'new-ref' ? {} : { ROUTECODEX_GATE_DIFF_MODE: 'staged' }),
-      ROUTECODEX_GATE_SCOPE_OUTPUT: outputPath,
-      ...diffEnv,
-    },
-  });
-  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const scope = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '<missing scope output>';
-  if (result.status !== 0 || !scope.includes(`v3=${v3}\n`) || !scope.includes(`v4=${v4}\n`)) {
-    failures.push(`${relative}: expected v3=${v3}, v4=${v4}, got status=${result.status}\n${output}`);
+  const root = mkdtempSync(join(repo, 'playground', '.verify-fast-scope-'));
+  try {
+    const target = join(root, relative);
+    mkdirSync(join(target, '..'), { recursive: true });
+    writeFileSync(target, contents ?? 'scope fixture\n');
+    symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir');
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    execFileSync('git', ['add', relative], { cwd: root });
+    const diffEnv = {};
+    if (diffMode === 'new-ref') {
+      execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'scope fixture'], { cwd: root });
+      diffEnv.ROUTECODEX_GATE_DIFF_BASE = '0'.repeat(40);
+      diffEnv.ROUTECODEX_GATE_DIFF_HEAD = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    }
+    const outputPath = join(root, 'scope-output.txt');
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...(diffMode === 'new-ref' ? {} : { ROUTECODEX_GATE_DIFF_MODE: 'staged' }),
+        ROUTECODEX_GATE_SCOPE_OUTPUT: outputPath,
+        ...diffEnv,
+      },
+    });
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    const scope = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '<missing scope output>';
+    if (result.status !== 0 || !scope.includes(`v3=${v3}\n`) || !scope.includes(`v4=${v4}\n`)) {
+      failures.push(`${relative}: expected v3=${v3}, v4=${v4}, got status=${result.status}\n${output}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
