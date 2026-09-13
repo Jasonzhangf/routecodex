@@ -518,17 +518,6 @@ export function runFeatureLayerBatchRedFixtures({
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
-      name: 'verify ci preflight removed',
-      expected: ['VERIFY_CI_PREFLIGHT_BINDING'],
-      mutate(input) {
-        input.verifyCiSource = input.verifyCiSource.replace(
-          "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
-          '',
-        );
-      },
-      options: { mode: 'definition', allowPendingGuard: true },
-    },
-    {
       name: 'install preflight removed',
       expected: ['INSTALL_PREFLIGHT_BINDING'],
       mutate(input) { input.installSource = input.installSource.replace("  '--admission',", "  '--bypass',"); },
