@@ -40,7 +40,7 @@ export const GENERATED_WIKI_PAGES = [
     path: `${WIKI_ROOT}/runtime-lifecycle-call-graph.md`,
   },
   {
-    kind: 'feature-group',
+    kind: 'v3-servertool-ownership',
     title: 'Servertool Ownership Map',
     path: `${WIKI_ROOT}/servertool-ownership-map.md`,
     heading: 'hub.servertool_*',
@@ -483,9 +483,64 @@ function renderFeatureGroupMarkdown(root, page) {
   return `${lines.join('\n').trimEnd()}\n`;
 }
 
-export function renderGeneratedWikiPages(root) {
+function renderV3ServertoolOwnershipMarkdown(root, page) {
+  const parsed = YAML.parse(readText(root, 'docs/architecture/v3-function-map.yml'));
+  const feature = (parsed?.features ?? []).find(
+    (row) => row?.feature_id === 'v3.servertool_center_skeleton'
+  );
+  if (!feature) {
+    throw new Error('missing v3.servertool_center_skeleton in docs/architecture/v3-function-map.yml');
+  }
+  const owner =
+    feature.owner_crate ?? feature.owner_module ?? feature.owner_files?.join(', ') ?? 'unbound';
+
+  const lines = [
+    '<!-- AUTO-GENERATED: do not edit by hand. Rebuild with `node scripts/architecture/render-architecture-wiki-pages.mjs`. -->',
+    `# ${page.title}`,
+    '',
+    'This page is the current V3 review surface for ordinary registered servertools and `web_search`.',
+    'The V3 servertool contract has no server-side followup/reentry branch and no Stopless owner.',
+    '',
+    'Source of truth:',
+    '- `docs/architecture/v3-function-map.yml` defines the active V3 owner and gates',
+    '- `docs/architecture/v3-resource-operation-map.yml` defines typed resource boundaries',
+    '- `docs/architecture/v3-mainline-call-map.yml` defines caller edges',
+    '- `docs/architecture/v3-verification-map.yml` defines required verification',
+    '- `docs/design/v3-servertool-center-skeleton.md` defines the active servertool skeleton',
+    '- `docs/design/servertool-cli-lifecycle.md` defines the client-exec CLI loop',
+    '',
+    `Feature scope: \`${page.heading}\``,
+    '',
+    '| feature_id | summary | owner crate | status | required gates |',
+    '| --- | --- | --- | --- | --- |',
+    `| \`${feature.feature_id}\` | ${feature.owner_scope ?? feature.feature_id} | \`${owner}\` | \`${feature.status ?? ''}\` | ${(feature.required_gates ?? []).map((gate) => `\`${gate}\``).join('<br/>')} |`,
+    '',
+    '## Active owner boundary',
+    '',
+    `- Owner source: \`${owner}\``,
+    `- Owner scope: ${feature.owner_scope ?? ''}`,
+    '- Req04 owns request-side registered-tool governance; Resp03 owns response-side client-exec projection.',
+    '- The CLI validates a registered tool and emits a projection descriptor; Codex executes the projected command through the normal tool loop.',
+    '- The next request validates the ordinary tool-result pairing. RouteCodex does not re-enter a private servertool pipeline.',
+    '',
+    '## Retired boundaries',
+    '',
+    '- `ServertoolResp03RuntimeAction`, `ServertoolReq04FollowupBuilt`, server-side reentry, and the old followup result chain are historical audit terms, not active V3 owners.',
+    '- `routecodex hook run`, Stopless, `reasoningStop`, `stop_message_auto`, and stop-response interception are retired and must not be restored under another name.',
+    '- Official Stop, timer, and future memory hooks belong to the independent `codex-hooks` daemon/CodexApp framework; their wake-up messages do not enter V3 servertool orchestration.',
+    '',
+    '## Review rule',
+    '',
+    'Any new servertool behavior must bind to the V3 maps and the fixed Req04/Resp03 hooks. It must not add a second execution owner, private response exit, payload-carried control state, or server-side followup/reentry path.',
+  ];
+
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+export function renderGeneratedWikiPages(root, { onlyPath = null } = {}) {
   const outputs = new Map();
   for (const page of GENERATED_WIKI_PAGES) {
+    if (onlyPath && page.path !== onlyPath) continue;
     let content = '';
     if (page.kind === 'mainline-index') {
       content = renderMainlineCallGraphMarkdown(root);
@@ -493,6 +548,8 @@ export function renderGeneratedWikiPages(root) {
       content = renderMainlineChainMarkdown(root, page.chainId, { title: page.title });
     } else if (page.kind === 'feature-group') {
       content = renderFeatureGroupMarkdown(root, page);
+    } else if (page.kind === 'v3-servertool-ownership') {
+      content = renderV3ServertoolOwnershipMarkdown(root, page);
     } else {
       throw new Error(`unknown wiki page kind: ${page.kind}`);
     }

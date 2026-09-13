@@ -769,7 +769,7 @@
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
       "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
-      "sha256": "d9238be569ffff14eb58490c093b95cffae228043820d79d3e244012b9465027"
+      "sha256": "56eb5c978cfc6c65cdbddf9d3cbebfeac18e230cf5dd768c10b9e8dfcdef7902"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -937,13 +937,13 @@
       "output_path": "repo/docs/architecture/wiki/html/servertool-followup-call-graph.html",
       "source_path": "docs/architecture/wiki/html/servertool-followup-call-graph.html",
       "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "aff849c25086806f7a2f15fd26176a37e0305b65b2fc71e82f24ed90179f1209"
+      "sha256": "57981ed9ecfa94498e4fce032f8f6a743de3a6fc50d730dafdd1d4a920816682"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/servertool-ownership-map.html",
       "source_path": "docs/architecture/wiki/html/servertool-ownership-map.html",
       "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "ba3b8dd911cb747f7dd4706c08629a2fefac6fd9a8eef793cadd72446189a4ba"
+      "sha256": "4a0ed6636bd302ffad4f128e5bbba52a185d51c8b2173c762800c4c0146a02b9"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/topology-residual-node-review.html",
@@ -1117,13 +1117,13 @@
       "output_path": "repo/docs/architecture/wiki/servertool-followup-call-graph.md",
       "source_path": "docs/architecture/wiki/servertool-followup-call-graph.md",
       "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "126c20173536f8f98b4c764287a088ca7ef4b357fd88fe2cbbf3391c55995b91"
+      "sha256": "ad1ac7948a944001ae2886e5bc932ac99865982a1e503c9084e769594a415270"
     },
     {
       "output_path": "repo/docs/architecture/wiki/servertool-ownership-map.md",
       "source_path": "docs/architecture/wiki/servertool-ownership-map.md",
       "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "427738181b2add582e5594ee115267b8883e0b5847ea76e1ba89a76a8d5ef089"
+      "sha256": "fdf3bcf73ceaec78893533b0f267f0c58c55a75f3054a2a07c127f978b3ebccd"
     },
     {
       "output_path": "repo/docs/architecture/wiki/topology-residual-node-review.md",
@@ -1441,7 +1441,7 @@
       "output_path": "repo/docs/design/servertool-cli-lifecycle.md",
       "source_path": "docs/design/servertool-cli-lifecycle.md",
       "source_commit": "58335325600d29a10ca4fbe3ffbd6eadaa0441c8",
-      "sha256": "62d0f6ce1fd730017cb23a8b6c8058231729de349aeee7d56c6e68a68348e1da"
+      "sha256": "a50938d923a9845d94d30e0017cc6dcf76cc5d87754fd8d8f640c6f9a0379c30"
     },
     {
       "output_path": "repo/docs/design/servertool-cli-projection-migration.md",
@@ -1453,13 +1453,13 @@
       "output_path": "repo/docs/design/servertool-rust-only-architecture.md",
       "source_path": "docs/design/servertool-rust-only-architecture.md",
       "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
-      "sha256": "180ec32b898bc4c2c2ea2048fcdea4f867f12a50f433d616f0e27cde0e1fe34c"
+      "sha256": "515c8a889abd8662551eb49e2c755313e1886276d4b01fbf021b2984e9410e17"
     },
     {
       "output_path": "repo/docs/design/servertool-stopmessage-lifecycle.md",
       "source_path": "docs/design/servertool-stopmessage-lifecycle.md",
       "source_commit": "16860bdb38baba9ed4e9d9949cc132149c1b6e6e",
-      "sha256": "0a58e095c7d0c11c1f2013c442650cda3a9866c6c573d5d6f236681b68f740a4"
+      "sha256": "fb9c3c0980ae2aebfd69a1c7a5fe239472929ce6980b0dcc3ed99a638975e15e"
     },
     {
       "output_path": "repo/docs/design/v3-existing-hub-provider-path-audit.md",
@@ -1525,7 +1525,7 @@
       "output_path": "repo/docs/design/v3-servertool-center-skeleton.md",
       "source_path": "docs/design/v3-servertool-center-skeleton.md",
       "source_commit": "b9ca11efafc64014a2aa93d904744d0fe441f1c4",
-      "sha256": "7aa9acff62d311e84cbccb328c70fc48498ded243123e819f4ec42dd0efa4b92"
+      "sha256": "8c9fce5bfda41695dad998cf347b6732be777efc22249ee4ed81d5cbb26c6234"
     },
     {
       "output_path": "repo/docs/design/v3-stage-protocol-shape-contract.md",
@@ -2851,7 +2851,7 @@
       "output_path": "repo/scripts/architecture/architecture-wiki-lib.mjs",
       "source_path": "scripts/architecture/architecture-wiki-lib.mjs",
       "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "32f181b170b3b8e4ad5fa566a3e42b4135f846cf76c81769b25d7aad0489aabd"
+      "sha256": "5ebd07f8b2f337e1b88b3a5fc1508d43112dc2a45674acd73293176130a1189c"
     },
     {
       "output_path": "repo/scripts/architecture/mainline-call-map-lib.mjs",
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "743e234525c9dd164f0b92eac886d65d5b746d59e8fe0b2d938b0230dc91ac08"
+  "manifest_digest": "bbcd1f5b93a32189f5a58655fb5bb7d588b9386e48c6cd171c23415b2643cb6c"
 }
