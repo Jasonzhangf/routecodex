@@ -1,5 +1,6 @@
 mod persistence;
 
+use crate::global_cooldown::V3ProviderCooldownFailureClass;
 use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
@@ -10,7 +11,6 @@ use crate::provider_cooldown_probe::{
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
-    default_provider_cooldown_state_path, migrate_legacy_provider_cooldown_state_if_needed,
     persist_cooldown_state, provider_cooldown_state_path_for_manifest,
     start_provider_health_persistence, V3ProviderHealthPersistenceWriter,
 };
@@ -307,12 +307,6 @@ impl V3ProviderHealthStore {
 
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         let persistence_path = provider_cooldown_state_path_for_manifest(manifest);
-        if std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_err() {
-            migrate_legacy_provider_cooldown_state_if_needed(
-                &persistence_path,
-                &default_provider_cooldown_state_path(),
-            );
-        }
         Self::from_manifest_with_persistence_path(manifest, persistence_path)
     }
 
@@ -386,7 +380,38 @@ impl V3ProviderHealthStore {
             };
             state.adaptive_history.entry(key).or_insert(history);
         }
-        state.persistence = start_provider_health_persistence(persistence_path);
+        if let Some((writer, persisted_entries)) =
+            start_provider_health_persistence(persistence_path)
+        {
+            for (key, blocked_until_ms, next_probe_at_ms) in persisted_entries {
+                if key.failure_class != V3ProviderCooldownFailureClass::Semantic {
+                    continue;
+                }
+                let probe_key = provider_cooldown_probe_key(
+                    &key.provider_id,
+                    key.auth_alias.as_deref(),
+                    key.model_id.as_deref(),
+                );
+                state.provider_cooldown_probes.insert(
+                    probe_key.clone(),
+                    V3ProviderCooldownProbeState {
+                        blocked_until_ms: Some(blocked_until_ms),
+                        next_probe_at_ms: Some(next_probe_at_ms),
+                        probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                        probe_failure_count: 0,
+                        observed_attempts: 0,
+                        observed_failures: 0,
+                        recovery_ewma_ms: None,
+                        cooldown_started_at_ms: blocked_until_ms,
+                        probe_in_flight: false,
+                        probe_model_id: probe_key.model_id.clone(),
+                        rescue_probe_attempted: false,
+                        completion: tokio::sync::watch::channel(false).0,
+                    },
+                );
+            }
+            state.persistence = Some(writer);
+        }
         Self {
             state: Arc::new(RwLock::new(state)),
         }
