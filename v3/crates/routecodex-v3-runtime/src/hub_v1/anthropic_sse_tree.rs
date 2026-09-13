@@ -300,6 +300,32 @@ impl V3AnthropicSseReducerState {
         {
             return Ok(());
         }
+        if !self.blocks.contains_key(&index) {
+            let kind = match event.pointer("/delta/type").and_then(Value::as_str) {
+                Some("thinking_delta") => Some(V3AnthropicSseBlockKind::Thinking),
+                Some("text_delta") => Some(V3AnthropicSseBlockKind::Text),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                self.blocks.insert(
+                    index,
+                    V3AnthropicSseBlock {
+                        index,
+                        kind,
+                        id: None,
+                        name: None,
+                        text: String::new(),
+                        input_json: String::new(),
+                        input: None,
+                        thinking: String::new(),
+                        signature: None,
+                        redacted_data: None,
+                        stopped: false,
+                        extensions: Vec::new(),
+                    },
+                );
+            }
+        }
         let block = self
             .blocks
             .get_mut(&index)
@@ -783,6 +809,29 @@ mod tests {
             }))
             .unwrap();
         assert!(state.blocks.is_empty());
+    }
+
+    #[test]
+    fn text_and_thinking_delta_before_block_start_create_compatibility_block() {
+        let mut state = V3AnthropicSseReducerState::default();
+        state
+            .apply_event(&json!({
+                "type":"message_start",
+                "message":{"id":"m1","role":"assistant","content":[]}
+            }))
+            .unwrap();
+        state
+            .apply_event(&json!({
+                "type":"content_block_delta",
+                "index":0,
+                "delta":{"type":"thinking_delta","thinking":"working"}
+            }))
+            .unwrap();
+        assert_eq!(state.blocks[&0].thinking, "working");
+        assert!(matches!(
+            state.blocks[&0].kind,
+            V3AnthropicSseBlockKind::Thinking
+        ));
     }
     #[test]
     fn lifecycle_and_error_are_explicit() {
