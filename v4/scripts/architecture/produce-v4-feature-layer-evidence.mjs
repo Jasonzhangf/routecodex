@@ -69,11 +69,7 @@ function readJson(file) {
 
 function readOptionalJson(file) {
   if (!fs.existsSync(file)) return null;
-  try {
-    return readJson(file);
-  } catch {
-    return null;
-  }
+  return readJson(file);
 }
 
 function writeExclusive(file, value) {
