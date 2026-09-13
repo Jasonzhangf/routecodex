@@ -156,15 +156,9 @@ for (const [owner, text, phrases] of [
     'Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return Err(())',
   ]],
   [testPath, tests, [
-    'json_two_turn_remote_continuation_commits_loads_and_uses_exact_pin_without_router_reentry',
-    'sse_two_turn_remote_continuation_commits_and_finishes_on_the_same_exact_pin',
-    'http_only_sse_terminal_response_streams_without_remote_continuation_commit',
-    'http_only_json_function_call_uses_v2_direct_http_continuation_without_remote_capability',
-    'http_only_sse_function_call_uses_v2_direct_http_continuation_without_remote_capability',
-    'missing_locator_scope_mismatch_and_expiry_fail_before_router_or_provider_send',
-    'capability_auth_and_provider_availability_drift_fail_at_req06_without_router_or_send',
-    'pinned_terminal_provider_failure_uses_error01_06_without_reselection',
-    'transport = "websocket_v2"',
+    'malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_remains_independent',
+    'failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06',
+    'terminal_sse_success_seals_replay_without_blocking_a_fresh_request',
   ]],
   [configTestPath, configTests, [
     'continuation_labels_do_not_block_http_responses_config',

@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-responses-direct-remote-continuation.mjs');
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-responses-direct-remote-continuation.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/kernel.rs';
 const continuationOwner = 'v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs';
 const runtimeCommit = 'v3/crates/routecodex-v3-runtime/src/kernel/direct_continuation_commit.rs';

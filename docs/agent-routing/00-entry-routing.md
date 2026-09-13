@@ -14,7 +14,7 @@
 1. 总纲/闭环合同 → `05-foundation-contract.md`
 2. 架构/语义真源边界 → `10-runtime-ssot-routing.md`
 3. 构建/测试/发布 → `20-build-test-release-routing.md`
-4. servertool 生命周期（stopless/followup） → `30-servertool-lifecycle-routing.md`
+4. servertool 生命周期（servertool/followup） → `30-servertool-lifecycle-routing.md`
 5. BD/记忆/任务轨迹 → `40-task-memory-routing.md`
 6. 用户纠偏（全局） → `~/.codex/docs/agent-routing/10-alignment-and-profile.md`
 
