@@ -305,6 +305,23 @@ fn responses_semantic_event_projection_preserves_event_envelope() {
 }
 
 #[test]
+fn responses_completed_projection_completes_partial_usage_record() {
+    let input = json!({
+        "type":"response.completed",
+        "response": {
+            "id":"resp_partial_usage",
+            "status":"completed",
+            "usage": {"input_tokens": 11, "output_tokens": 4}
+        }
+    });
+    let semantic = classify_v3_responses_sse_event(&input).unwrap();
+    let projected = project_v3_responses_sse_event_json(&semantic);
+    assert_eq!(projected["response"]["usage"]["input_tokens"], 11);
+    assert_eq!(projected["response"]["usage"]["output_tokens"], 4);
+    assert_eq!(projected["response"]["usage"]["total_tokens"], 15);
+}
+
+#[test]
 fn responses_created_accepts_nullable_envelope_fields() {
     let input = json!({
         "type":"response.created",

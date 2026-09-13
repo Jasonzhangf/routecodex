@@ -59,7 +59,35 @@ pub fn project_v3_responses_sse_item_sse(
 }
 
 pub fn project_v3_responses_sse_event_json(semantic: &V3ResponsesSseSemanticObject) -> Value {
-    semantic.to_normalized_value()
+    let mut value = semantic.to_normalized_value();
+    let terminal = matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("response.completed" | "response.incomplete")
+    );
+    if terminal {
+        if let Some(usage) = value
+            .pointer_mut("/response/usage")
+            .and_then(Value::as_object_mut)
+        {
+            // Codex's ResponsesCompleted decoder treats usage as a complete
+            // record. Providers may omit total_tokens; derive only the
+            // protocol-required aggregate from the values already present.
+            let input = usage
+                .get("input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.entry("input_tokens").or_insert(Value::from(input));
+            usage.entry("output_tokens").or_insert(Value::from(output));
+            usage
+                .entry("total_tokens")
+                .or_insert(Value::from(input.saturating_add(output)));
+        }
+    }
+    value
 }
 
 pub fn project_v3_responses_sse_event_sse(
