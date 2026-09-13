@@ -133,6 +133,7 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     // Re-running it here would reapply public metadata limits to the provider
     // compatible slot. Client metadata is already consumed as local context.
     let mut normalized = payload.clone();
+    promote_responses_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     flatten_responses_namespace_tools(&mut normalized)?;
     let instructions = normalized
         .as_object_mut()
@@ -150,6 +151,40 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     normalize_responses_input_content_parts(&mut normalized);
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
     Ok(normalized)
+}
+
+fn promote_responses_tool_search_output_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let discovered = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
+        .filter_map(|item| item.get("tools"))
+        .try_fold(Vec::new(), |mut all, tools| {
+            let tools = tools.as_array().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].tools: expected array"
+                    .to_string()
+            })?;
+            all.extend(tools.iter().cloned());
+            Ok::<_, String>(all)
+        })?;
+    if discovered.is_empty() {
+        return Ok(());
+    }
+    let top_level = payload
+        .as_object_mut()
+        .ok_or_else(|| "MalformedOutboundField target_protocol=responses path=$: expected object".to_string())?;
+    let tools = top_level
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.tools: expected array".to_string()
+    })?;
+    tools.extend(discovered);
+    Ok(())
 }
 
 fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> {
