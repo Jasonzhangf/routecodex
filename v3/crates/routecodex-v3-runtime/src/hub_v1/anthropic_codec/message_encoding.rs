@@ -74,7 +74,11 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                            let name = part.get("name").cloned().unwrap_or(Value::Null);
+                            let item_type = (name.as_str() == Some("tool_search"))
+                                .then_some("tool_search_call")
+                                .unwrap_or("function_call");
+                            encoded.push(json!({"type":item_type,"call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":name,"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
                         }
                         Some("tool_result") => {
                             push_responses_message_content(
@@ -146,6 +150,33 @@ pub(super) fn system_as_responses_instructions(value: &Value) -> Option<String> 
         }
         Value::Object(_) => anthropic_text_block_text(value),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anthropic_tool_search_use_keeps_native_responses_control_shape() {
+        let messages = vec![json!({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use",
+                "id": "call_search",
+                "name": "tool_search",
+                "input": {"query": "mcpx workspace", "limit": 5}
+            }]
+        })];
+        let encoded = encode_anthropic_messages_as_responses_semantic(&messages)
+            .expect("tool_search message must encode");
+        assert_eq!(encoded[0]["type"], "tool_search_call");
+        assert_eq!(encoded[0]["call_id"], "call_search");
+        assert_eq!(encoded[0]["name"], "tool_search");
+        let arguments: Value = serde_json::from_str(encoded[0]["arguments"].as_str().unwrap())
+            .expect("tool_search arguments must remain JSON");
+        assert_eq!(arguments["query"], "mcpx workspace");
+        assert_eq!(arguments["limit"], 5);
     }
 }
 
