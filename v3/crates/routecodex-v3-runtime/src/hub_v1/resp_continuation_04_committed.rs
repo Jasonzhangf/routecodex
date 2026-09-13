@@ -446,16 +446,10 @@ fn local_continuation_context_ids(
     response_id: Option<&str>,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
-    let mut context_ids = Vec::new();
     if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
-        context_ids.push(response_id.to_string());
+        return Ok(vec![response_id.to_string()]);
     }
-    for id in &call_ids {
-        if !context_ids.iter().any(|existing| existing == id) {
-            context_ids.push(id.clone());
-        }
-    }
-    Ok(context_ids)
+    Ok(call_ids)
 }
 
 pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(

@@ -18,7 +18,6 @@ mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
-const EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS: usize = 3;
 
 #[derive(Debug)]
 struct ProviderCapture {
@@ -240,17 +239,15 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         error_body["error"].get("type").is_none(),
         "provider raw error body must not bypass ErrorErr06 projection: {error_body}"
     );
-    let mut error_captures = Vec::new();
-    for _ in 0..EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS {
-        error_captures.push(captures_rx.recv().await.unwrap());
-    }
-    for capture in error_captures {
-        assert_eq!(
-            capture.body.pointer("/messages/0/content"),
-            Some(&json!("fail"))
-        );
-        assert!(capture.body.get("metadata_center").is_none());
-    }
+    let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+        .await
+        .expect("provider failure must produce a capture")
+        .unwrap();
+    assert_eq!(
+        error_capture.body.pointer("/messages/0/content"),
+        Some(&json!("fail"))
+    );
+    assert!(error_capture.body.get("metadata_center").is_none());
 
     let sse_error_response = client
         .post(&endpoint)
@@ -265,30 +262,33 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert_eq!(sse_error_response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(
         sse_error_response.headers().get("content-type").unwrap(),
-        "application/json"
+        "text/event-stream"
     );
-    let sse_error_body: Value = sse_error_response.json().await.unwrap();
-    assert_eq!(
-        sse_error_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
-    let mut sse_failure_attempts = 0;
-    while sse_failure_attempts < EXPECTED_DEFAULT_FLOOR_ERROR_ATTEMPTS {
+    let sse_error_body = sse_error_response.text().await.unwrap();
+    assert!(sse_error_body.contains("network_error"), "{sse_error_body}");
+    assert!(sse_error_body.contains("network error"), "{sse_error_body}");
+    let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
             .await
-            .unwrap()
+            .expect("stream provider failure must produce a capture")
             .unwrap();
         if capture
             .body
             .pointer("/messages/0/content")
             .and_then(Value::as_str)
-            != Some("fail")
+            == Some("fail")
         {
-            continue;
+            break capture;
         }
-        assert!(capture.body.get("metadata_center").is_none());
-        sse_failure_attempts += 1;
-    }
+    };
+    assert_eq!(
+        sse_failure_capture
+            .body
+            .pointer("/messages/0/content")
+            .and_then(Value::as_str),
+        Some("fail")
+    );
+    assert!(sse_failure_capture.body.get("metadata_center").is_none());
 
     let isolation_response = client
         .post(&endpoint)

@@ -110,6 +110,10 @@ features:
   - explicit_listener_pids_for_ports
   - occupied_listener_ports
   - send_release_ports_control
+  - reap_inactive_runtime_files
+  - hooks_sidecar_process_group_is_alive
+  - shutdown_managed_runtime
+  - restart_managed_runtime_in_place
   - start_configured_hooks_sidecar
   - V3HooksSidecarProcess::stop
   allowed_paths:

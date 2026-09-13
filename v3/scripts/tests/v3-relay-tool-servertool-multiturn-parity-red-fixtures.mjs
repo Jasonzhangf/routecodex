@@ -227,7 +227,7 @@ const failures = [];
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-relay-tool-parity-red-'));
   try {
-    symlinkSync(resolve(repo, '../../node_modules'), resolve(root, 'node_modules'), 'dir');
+    symlinkSync(resolve(repo, 'v3/node_modules'), resolve(root, 'node_modules'), 'dir');
     for (const relative of copyPaths) {
       const destination = resolve(root, relative);
       mkdirSync(dirname(destination), { recursive: true });

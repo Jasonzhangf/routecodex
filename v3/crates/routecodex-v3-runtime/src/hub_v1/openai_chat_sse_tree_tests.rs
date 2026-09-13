@@ -370,7 +370,7 @@ fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
     let output = reducer.materialize_completion().unwrap();
     assert_eq!(
         output["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
-        "{\"stopreason\":2}"
+        "{\"cmd\":\"pwd\"}"
     );
     assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
 }

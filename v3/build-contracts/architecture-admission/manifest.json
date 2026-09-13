@@ -768,8 +768,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "ec51c3ad7a184cb767774e9475e721a01fe6740b",
-      "sha256": "59ed7792f6859964e3dc92109c1e95734d6d02861a989cdb988b39bddb5963db"
+      "source_commit": "a3b8edc0124f0f0b1358b05d3c57a42028ffd60b",
+      "sha256": "d9238be569ffff14eb58490c093b95cffae228043820d79d3e244012b9465027"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -780,14 +780,14 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "ed181b1d5aa2398436a2567d27c9d7c7232dc7bec74d691a2be2720fea6adf97"
+      "source_commit": "e273a07018bb785361a9476f5dd57eb1d78efd08",
+      "sha256": "d78bd799f08b4e42666d26d66064e043a645f61d1de78c511f1c3f01b1782d59"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "eac8e172fe306ee7f7be7eb8d1183431cc9d5ff788cad5a18a4477e523c63dac"
+      "source_commit": "e273a07018bb785361a9476f5dd57eb1d78efd08",
+      "sha256": "0a205e94e28010ffa5e760bd9cb0b61ea57cc93a932317fc848dfbc1c8c18b61"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -798,8 +798,8 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "d0a40180be5d20acf4114caef5ab628499cfda9a",
-      "sha256": "af3a07330fe91f256c8c15b9c0fc409aa4dc7aeda0add5b2faf6a36f42400409"
+      "source_commit": "a77cdd4b1c543be1d98fcbf31b4cce6b0a5f46f4",
+      "sha256": "d290ded639c287f315ef3412031e4d81ae15d747a939345243535190375625bc"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -979,7 +979,7 @@
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "121b8aac64e0e942388c8a2a55d3f00cebe7ec3c9f6190ac209986364771948e"
+      "sha256": "39b840182bab6ec706b8277e1ef31dac978dc0a3c7d120fb96d26b2a1aa5dc1e"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1231,7 +1231,7 @@
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
-      "sha256": "75780a0ac31972673dc797722847bff9963765fa51887c3de9cb390044a73f01"
+      "sha256": "ef994c2aeef6e5737fa17725b8abad4e9b872fd7c721a79c39b1e14d70616d92"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -2281,7 +2281,7 @@
       "output_path": "repo/docs/goals/v3-managed-server-lifecycle-test-design.md",
       "source_path": "docs/goals/v3-managed-server-lifecycle-test-design.md",
       "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
-      "sha256": "fa8e02099376a92e085a23d4754072753e216d482e2bbfafe987e5655506b9ba"
+      "sha256": "f81afc1332eeb80a1fa022c27533e1061607ebcc1080df13877627433b74cf01"
     },
     {
       "output_path": "repo/docs/goals/v3-merge-local-dirty-and-commit-plan.md",
@@ -2886,9 +2886,9 @@
     {
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
-      "source_commit": "06ed2d95f61e5e0662ef4b58198bc82773f912e5",
-      "sha256": "ee8e29e3c7cab1e34fcebb13fab429fc675363f90ff8a0bfe0051653584831c4"
+      "source_commit": "340d5fde6c6cc9bca8c4565596433c8d42bd627f",
+      "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "15d9ac0b7d40f2b23424a7bc5558874586fa0d0d7cabeccaa0ff03d73e9f56d4"
+  "manifest_digest": "7c6da49857b9f9ffce44fdf78b79ffb4404403ee7f9fbb1829f6806e20baf340"
 }

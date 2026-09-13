@@ -381,7 +381,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
                 &mut standardized.body,
                 current_payload_start,
-                false,
+                enabled,
             )
             .map_err(|error| {
                 build_v3_error_01_source_raised_internal(
@@ -558,7 +558,7 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
             crate::hub_v1::compile_v3_tool_thinking_turn_context_at_req04(
                 &mut standardized.body,
                 current_payload_start,
-                false,
+                enabled,
             )
             .map_err(|error| {
                 build_v3_error_01_source_raised_internal(

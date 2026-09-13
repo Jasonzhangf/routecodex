@@ -811,24 +811,61 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
 }
 
 fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
-    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for item in input {
-        let kind = item.get("type").and_then(Value::as_str);
-        if !matches!(
-            kind,
-            Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-        ) {
-            continue;
+    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            let kind = item.get("type").and_then(Value::as_str);
+            if !matches!(
+                kind,
+                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
+            ) {
+                continue;
+            }
+            let Some(name) = item.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if let Some(mapped) = map_known_namespace_qualified_call_name(name)
+                .or_else(|| map_known_internal_qualified_call_name(name))
+            {
+                item["name"] = Value::String(mapped);
+            }
         }
-        let Some(name) = item.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(mapped) = map_known_namespace_qualified_call_name(name) else {
-            continue;
-        };
-        item["name"] = Value::String(mapped);
+    }
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for tool_call in tool_calls {
+                if tool_call.get("type").and_then(Value::as_str) != Some("function") {
+                    continue;
+                }
+                if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut)
+                {
+                    let Some(name) = function.get("name").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if let Some(mapped) = map_known_internal_qualified_call_name(name) {
+                        function.insert("name".to_string(), Value::String(mapped));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {
+    let (namespace, child) = name.split_once('.')?;
+    if child.is_empty()
+        || child.contains('.')
+        || !is_namespace_component(namespace)
+        || !is_namespace_component(child)
+    {
+        return None;
+    }
+    match namespace {
+        "servertool" | "mcp" | "native" => Some(format!("{namespace}__{child}")),
+        _ => None,
     }
 }
 

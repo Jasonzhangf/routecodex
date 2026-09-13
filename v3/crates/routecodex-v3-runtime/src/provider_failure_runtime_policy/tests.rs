@@ -76,6 +76,50 @@ targets = [
     .expect("target-resolution manifest")
 }
 
+fn codec_failure_manifest(scope: &str) -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }
+]
+[error]
+provider_error_default_path = [
+  { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
+  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+[[error.provider_error_action_policy]]
+policy_id = "provider_response_event_codec_failure_reselect"
+match = { provider_code = "provider_response_event_codec_failure" }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
+  { step = "project", status = 502, reason_code = "provider_response_event_codec_failure", message_mode = "code_only" },
+]
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("codec-failure authoring"),
+    )
+    .expect("codec-failure manifest")
+}
+
 #[tokio::test]
 async fn cancelled_scheduled_probe_releases_single_flight_permit() {
     let manifest = global_pool_alive_manifest("cancelled_scheduled_probe");
@@ -1256,7 +1300,7 @@ message_mode = "code_only"
 }
 
 #[tokio::test]
-async fn matched_response_policy_identity_drives_terminal_projection_without_message_rematch() {
+async fn matched_response_policy_identity_drives_retry_without_message_rematch() {
     let scope = "response_policy_identity";
     let source = r#"
 version = 3
@@ -1356,12 +1400,65 @@ targets = [
     .await
     .expect("exact matched policy must drive Error05");
 
-    assert_eq!(result.event.action, "terminal_default_floor_exhausted");
-    assert!(result.retry_selected.is_none());
-    assert_eq!(same_candidate_retries.values().copied().next(), Some(0));
-    let projection = result
-        .terminal_projection
-        .expect("captured response policy must drive terminal projection");
-    assert_eq!(projection.status, 502);
-    assert_eq!(projection.body["error"]["code"], "network_error");
+    assert_eq!(result.event.action, "policy_retry_same");
+    assert_eq!(result.event.wait_ms, Some(7000));
+    assert!(result.retry_selected.is_some());
+    assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
+}
+
+#[tokio::test]
+async fn provider_response_event_codec_failure_never_retries_same_candidate() {
+    let scope = "codec_failure_no_retry";
+    let manifest = codec_failure_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-codec")
+            .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::from_manifest(&manifest),
+        deterministic_sample: 0,
+    };
+    assert!(
+        context.retry_policy.same_candidate_retries > 0,
+        "default path must expose a same-candidate retry budget for this regression"
+    );
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        502,
+        Some("provider_response_event_codec_failure".to_string()),
+        "provider response event codec failed: Anthropic codec malformed reasoning content"
+            .to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("codec failure must resolve through the matched no-same-retry policy");
+
+    assert_ne!(
+        result.event.action, "policy_retry_same",
+        "codec failure must never spend the same-candidate retry budget"
+    );
+    assert!(
+        same_candidate_retries.values().all(|retries| *retries == 0),
+        "codec failure must not increment the same-candidate retry counter: {same_candidate_retries:?}"
+    );
+    assert!(
+        !trace.contains(&"V3TargetPolicyRetriedSame"),
+        "codec failure trace must not contain V3TargetPolicyRetriedSame: {trace:?}"
+    );
 }
