@@ -201,6 +201,14 @@ fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> 
     };
     let mut flattened = Vec::with_capacity(tools.len());
     for (index, tool) in tools.iter().enumerate() {
+        if !deferred_mcp_loaded
+            && tool
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("mcp__"))
+        {
+            continue;
+        }
         if tool.get("type").and_then(Value::as_str) != Some("namespace") {
             flattened.push(tool.clone());
             continue;
