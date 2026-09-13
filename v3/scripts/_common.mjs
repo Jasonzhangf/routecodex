@@ -80,3 +80,21 @@ export async function run(command, args, options = {}) {
   }
   return outcome;
 }
+
+export async function runAll(entries) {
+  const failures = [];
+  const warnings = [];
+  for (const entry of entries) {
+    const label = entry.label ?? `${entry.command} ${(entry.args ?? []).join(' ')}`;
+    try {
+      await run(entry.command, entry.args ?? [], entry);
+    } catch (error) {
+      if (error instanceof EnvironmentUnavailableError) {
+        warnings.push(`${label}: ${error.message}`);
+      } else {
+        failures.push(`${label}: ${error.message}`);
+      }
+    }
+  }
+  return { failures, warnings };
+}
