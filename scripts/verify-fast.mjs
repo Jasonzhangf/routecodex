@@ -62,7 +62,21 @@ function deletedFiles() {
   return git(['--name-only'], 'D').split('\n').map((file) => file.trim()).filter(Boolean);
 }
 
-function changedWorkflowLines(relative) {
+function changedWorkflowLines(relative, commit = null) {
+  if (commit) {
+    try {
+      return execFileSync(
+        'git',
+        ['diff-tree', '--root', '--unified=0', '--no-commit-id', '-r', '-m', '--no-renames', '-p', commit, '--', relative],
+        { cwd: root, encoding: 'utf8' },
+      )
+        .split('\n')
+        .filter((line) => /^[+-](?![+-])/u.test(line))
+        .map((line) => line.slice(1));
+    } catch {
+      return [];
+    }
+  }
   if (newRef) return [];
   try {
     return execFileSync('git', gitArgs(['--unified=0', '--', relative]), { cwd: root, encoding: 'utf8' })
@@ -74,13 +88,13 @@ function changedWorkflowLines(relative) {
   }
 }
 
-function classifyWorkflowScope(paths) {
+function classifyWorkflowScope(entries) {
   let v3 = false;
   let v4 = false;
   const v3Marker = /\bV3\b|needs\.scope\.outputs\.v3|(?:^|[\s"'`/:])v3(?:[-_/.:]|[\s"'`]|$)/u;
   const v4Marker = /\bV4\b|needs\.scope\.outputs\.v4|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
 
-  for (const relative of paths.filter((file) => /^\.github\/workflows\//u.test(file))) {
+  for (const { commit, path: relative } of entries.filter(({ path }) => /^\.github\/workflows\//u.test(path))) {
     if (relative === '.github/workflows/release.yml') {
       v3 = true;
       continue;
@@ -90,7 +104,7 @@ function classifyWorkflowScope(paths) {
       v4 = true;
       continue;
     }
-    const changedLines = changedWorkflowLines(relative);
+    const changedLines = changedWorkflowLines(relative, commit);
     const touchesV3 = changedLines.some((line) => v3Marker.test(line));
     const touchesV4 = changedLines.some((line) => v4Marker.test(line));
     if (touchesV3 && !touchesV4) v3 = true;
@@ -103,12 +117,13 @@ function classifyWorkflowScope(paths) {
   return { v3, v4 };
 }
 
-function writeChangedScopeOutputs(paths) {
+function writeChangedScopeOutputs(entries) {
   const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
   if (!outputPath) return;
 
+  const paths = [...new Set(entries.map(({ path }) => path))];
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
-  const workflowScope = classifyWorkflowScope(paths);
+  const workflowScope = classifyWorkflowScope(entries);
   const v3Scope = workflowScope.v3 || has(/^(?:v3\/|scripts\/|docs\/(?:architecture|design|goals|schemas)\/)/u)
     || has(/^package(?:-lock)?\.json$/u);
   const values = {
@@ -220,7 +235,10 @@ const skippedFullCi = '[verify:ci] SKIPPED_FOR_REPAIR (not run)';
 if (process.env.ROUTECODEX_GATE_SCOPE_OUTPUT && !staged && (!base || !head)) {
   fail('changed-scope base/head is missing; refusing empty CI scope');
 }
-writeChangedScopeOutputs([...new Set([...entries.map(({ path }) => path), ...deleted])]);
+writeChangedScopeOutputs([
+  ...entries,
+  ...deleted.map((path) => ({ commit: null, path })),
+]);
 if (entries.length === 0 && deleted.length === 0) {
   process.stdout.write(`[verify:fast] PASS no changed files; ${skippedFullCi}\n`);
   process.exit(0);

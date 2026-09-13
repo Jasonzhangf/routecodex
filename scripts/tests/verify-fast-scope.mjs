@@ -30,10 +30,17 @@ const cases = [
     v3: true,
     v4: true,
   },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V4 gate\n    run: npm --prefix v4 run verify:ci\n',
+    diffMode: 'new-ref',
+    v3: false,
+    v4: true,
+  },
 ];
 const failures = [];
 
-for (const { relative, contents, v3, v4 } of cases) {
+for (const { relative, contents, diffMode, v3, v4 } of cases) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-verify-fast-scope-'));
   const target = join(root, relative);
   mkdirSync(join(target, '..'), { recursive: true });
@@ -41,14 +48,21 @@ for (const { relative, contents, v3, v4 } of cases) {
   symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['add', relative], { cwd: root });
+  const diffEnv = {};
+  if (diffMode === 'new-ref') {
+    execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'scope fixture'], { cwd: root });
+    diffEnv.ROUTECODEX_GATE_DIFF_BASE = '0'.repeat(40);
+    diffEnv.ROUTECODEX_GATE_DIFF_HEAD = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  }
   const outputPath = join(root, 'scope-output.txt');
   const result = spawnSync(process.execPath, [verifier], {
     cwd: root,
     encoding: 'utf8',
     env: {
       ...process.env,
-      ROUTECODEX_GATE_DIFF_MODE: 'staged',
+      ...(diffMode === 'new-ref' ? {} : { ROUTECODEX_GATE_DIFF_MODE: 'staged' }),
       ROUTECODEX_GATE_SCOPE_OUTPUT: outputPath,
+      ...diffEnv,
     },
   });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
