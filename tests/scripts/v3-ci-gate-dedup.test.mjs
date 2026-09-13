@@ -83,3 +83,8 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs \+stable --workspace -- --nocapture/);
   assert.ok(workflow.indexOf('npm --prefix v3 run verify:ci') < workflow.indexOf('run: npm run build:min'));
 });
+
+test('V3 Clippy keeps ordinary lints non-blocking while compile failures remain errors', () => {
+  assert.doesNotMatch(v3Package.scripts['verify:v3-clippy'], /-D warnings/);
+  assert.match(verify, /command: 'npm',[\s\S]*args: \['run', 'verify:v3-clippy'\]/);
+});

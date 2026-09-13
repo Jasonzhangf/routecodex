@@ -8,8 +8,8 @@ const { failures, warnings } = await runAll([
   { label: 'rustfmt', command: 'cargo', args: ['fmt', '--all', '--', '--check'] },
   {
     label: 'clippy',
-    command: 'cargo',
-    args: ['clippy', '--locked', '--workspace', '--all-targets'],
+    command: 'npm',
+    args: ['run', 'verify:v3-clippy'],
     env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
   },
   { label: 'isolation', command: 'node', args: ['scripts/verify-isolation.mjs'] },
