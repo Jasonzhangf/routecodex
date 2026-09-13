@@ -117,9 +117,6 @@ fn parse_authoring_for_store(
     path: &Path,
     raw_toml: &str,
 ) -> Result<V3Config02AuthoringResolved, V3ConfigError> {
-    if let Some(resolved) = crate::try_compile_v2_config_02_authoring_from_file(path, raw_toml)? {
-        return Ok(resolved);
-    }
     let authoring = parse_v3_config_02_authoring(raw_toml)?;
     crate::provider_directory::resolve_v3_provider_directory_from_authoring(path, authoring)
 }

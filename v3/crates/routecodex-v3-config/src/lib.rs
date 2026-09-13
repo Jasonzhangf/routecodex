@@ -2,13 +2,13 @@ mod attempt_store;
 mod defaults;
 mod entry_protocol_validation;
 mod memory_raw_capture;
+mod provider_config;
 mod provider_directory;
 mod store;
 mod types;
 mod user_config;
-mod v2_compat;
 pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
-pub use v2_compat::{
+pub use provider_config::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
     V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
@@ -60,13 +60,6 @@ pub(crate) fn read_v3_config_01_file_source(
 
 pub fn parse_v3_config_02_authoring(raw: &str) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
     Ok(toml::from_str(raw)?)
-}
-
-pub(crate) fn try_compile_v2_config_02_authoring_from_file(
-    config_path: impl AsRef<Path>,
-    raw: &str,
-) -> Result<Option<provider_directory::V3Config02AuthoringResolved>, V3ConfigError> {
-    v2_compat::compile_v2_config_02_authoring_from_file(config_path.as_ref(), raw)
 }
 
 pub fn validate_v3_config_03_schema_from_v3_config_02(

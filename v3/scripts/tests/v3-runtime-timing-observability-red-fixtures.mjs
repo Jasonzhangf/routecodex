@@ -336,7 +336,7 @@ const cases = [
     path: ".github/workflows/test.yml",
     mutate: (source) =>
       source.replace(
-        "      - name: V3 Runtime timing observability\n        run: npm run verify:v3-runtime-timing-observability\n",
+        "      - name: V3 Runtime timing observability\n        if: needs.scope.outputs.v3 == 'true'\n        run: npm run verify:v3-runtime-timing-observability\n",
         "",
       ),
     diagnostic: /CI must dispatch the Runtime timing observability gate/u,

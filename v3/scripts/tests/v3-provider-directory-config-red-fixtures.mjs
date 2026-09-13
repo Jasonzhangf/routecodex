@@ -10,7 +10,7 @@ const copied = [
   verifier,
   'v3/package.json',
   'v3/crates/routecodex-v3-config/src/provider_directory.rs',
-  'v3/crates/routecodex-v3-config/src/v2_compat.rs',
+  'v3/crates/routecodex-v3-config/src/provider_config.rs',
   'v3/crates/routecodex-v3-config/tests/provider_directory_config_contract.rs',
   'docs/architecture/v3-function-map.yml',
   'docs/architecture/v3-resource-operation-map.yml',
@@ -25,7 +25,7 @@ const copied = [
 const cases = [
   {
     name: 'provider codec adds home fallback',
-    path: 'v3/crates/routecodex-v3-config/src/v2_compat.rs',
+    path: 'v3/crates/routecodex-v3-config/src/provider_config.rs',
     mutate: (source) => source.replace('let path = config_dir', 'let _home = std::env::var_os("HOME");\n        let path = config_dir'),
     diagnostic: /provider source must resolve exact sibling path/u,
   },

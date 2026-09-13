@@ -68,7 +68,7 @@ relay/direct 装配：
 - `v3-verification-map.yml`：红测/绿测 gate 落位
 
 ### 4.3 Config 编译（step 3）
-`v3/crates/routecodex-v3-config/src/types.rs`：`V3WebSearchExecutionMode` 语义化（`native_remote_search_tool_mix` / `metadata_center_local_search` / `none`），编译 exactly one backend binding（provider 池 binding，如 search provider），`v2_compat.rs` 映射不动。
+`v3/crates/routecodex-v3-config/src/types.rs`：`V3WebSearchExecutionMode` 语义化（`native_remote_search_tool_mix` / `metadata_center_local_search` / `none`），编译 exactly one backend binding（provider 池 binding，如 search provider），provider directory codec `provider_config.rs` 只负责 provider authoring 解析。
 
 ### 4.4 Req04 工具面决策（step 4）
 `servertool_hooks.rs`（或 `req_chat_process_04_governed.rs`）：post-route GPT 资格判定（消费编译期 typed fact，禁 provider 前缀）→ 保留标准 `web_search`（Mode A）或替换为本地 `websearch` function tool（Mode B，`request_outbound_builtin_tool_projection.rs::build_local_web_search_function_tool` 复用）+ ServerToolCenter[websearch].LocalToolSurfaceActive。
