@@ -966,7 +966,10 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-protocol-parity-red-'));
   try {
     for (const file of files) copyFileInto(root, file);
-    const nodeModules = resolve(repo, 'v3/node_modules');
+    const localNodeModules = resolve(repo, 'v3/node_modules');
+    const nodeModules = existsSync(localNodeModules)
+      ? localNodeModules
+      : resolve(repo, 'node_modules');
     if (existsSync(nodeModules)) symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
