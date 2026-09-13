@@ -1353,6 +1353,20 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
         usage
             .entry("output_tokens")
             .or_insert_with(|| Value::from(0u64));
+        if !usage.contains_key("total_tokens") {
+            let input_tokens = usage
+                .get("input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output_tokens = usage
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.insert(
+                "total_tokens".to_string(),
+                Value::from(input_tokens.saturating_add(output_tokens)),
+            );
+        }
     }
     projected
 }
@@ -1371,6 +1385,17 @@ mod completed_response_projection_tests {
             "output": []
         }));
         assert_eq!(projected["usage"]["output_tokens"], 0);
+    }
+
+    #[test]
+    fn missing_total_tokens_is_derived_on_completed_response() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_2",
+            "status": "completed",
+            "usage": {"input_tokens": 12, "output_tokens": 3},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["total_tokens"], 15);
     }
 }
 
