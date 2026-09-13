@@ -437,16 +437,26 @@ pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     error_chain: &[&str],
     body: &Value,
 ) -> bool {
-    if error_chain.is_empty()
-        || status != 502
-        || !node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-    {
+    if error_chain.is_empty() || status != 502 {
         return false;
     }
     let (code, message) = v3_error_body_code_message(body);
-    code == "network_error" && message == "network error"
+    // A terminal provider/network failure must never be serialized as a client
+    // error frame. Runtime retries/reselection happen before this boundary;
+    // anything that reaches the client SSE projector is represented as a
+    // transport disconnect. Error04 remains an observability witness when
+    // present, but direct paths may legitimately carry only the typed chain.
+    code == "network_error"
+        && message == "network error"
+        && (node_trace
+            .iter()
+            .any(|node| *node == "V3Error04TargetPoolExhaustion")
+            || error_chain
+                .iter()
+                .any(|node| *node == "V3Error04TargetPoolExhaustion")
+            || error_chain
+                .iter()
+                .any(|node| *node == "V3Error06ClientProjected"))
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
