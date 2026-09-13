@@ -144,6 +144,7 @@ for (const { relative, contents, diffMode, fine, v3, v4 } of cases) {
       env: {
         ...process.env,
         ...(diffMode === 'new-ref' ? {} : { ROUTECODEX_GATE_DIFF_MODE: 'staged' }),
+        ROUTECODEX_GATE_SCOPE_ONLY: '1',
         ROUTECODEX_GATE_SCOPE_OUTPUT: outputPath,
         ...diffEnv,
       },
@@ -158,6 +159,27 @@ for (const { relative, contents, diffMode, fine, v3, v4 } of cases) {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+const missingRustOwnerRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-rust-owner-'));
+try {
+  const rustPath = join(missingRustOwnerRoot, 'v3', 'crates', 'missing-owner', 'src', 'lib.rs');
+  mkdirSync(join(rustPath, '..'), { recursive: true });
+  writeFileSync(rustPath, 'pub const OWNER_FIXTURE: bool = true;\n');
+  symlinkSync(join(repo, 'node_modules'), join(missingRustOwnerRoot, 'node_modules'), 'dir');
+  execFileSync('git', ['init', '-q'], { cwd: missingRustOwnerRoot });
+  execFileSync('git', ['add', 'v3/crates/missing-owner/src/lib.rs'], { cwd: missingRustOwnerRoot });
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: missingRustOwnerRoot,
+    encoding: 'utf8',
+    env: { ...process.env, ROUTECODEX_GATE_DIFF_MODE: 'staged' },
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  if (result.status === 0 || !output.includes('required V3 Rust owner evidence unavailable')) {
+    failures.push(`missing Rust owner evidence must fail fast, got status=${result.status}\n${output}`);
+  }
+} finally {
+  rmSync(missingRustOwnerRoot, { recursive: true, force: true });
 }
 
 if (failures.length > 0) {

@@ -285,10 +285,7 @@ function affectedCargoPackages(rustFiles) {
       ),
     );
   } catch (error) {
-    process.stderr.write(
-      `[verify:fast] WARN cargo metadata unavailable; skipped affected Rust compile check: ${error.message}\n`,
-    );
-    return [];
+    fail(`required V3 Rust owner evidence unavailable; cargo metadata is required for affected compile checks: ${error.message}`);
   }
   const packages = (metadata.packages ?? []).map((pkg) => ({
     name: pkg.name,
@@ -309,7 +306,7 @@ function affectedCargoPackages(rustFiles) {
     else unmatched.push(file);
   }
   if (unmatched.length > 0) {
-    process.stderr.write(`[verify:fast] WARN Rust file(s) not owned by a v3 Cargo package: ${unmatched.join(', ')}\n`);
+    fail(`required V3 Rust owner evidence unavailable; file(s) are not owned by a V3 Cargo package: ${unmatched.join(', ')}`);
   }
   return [...affected].sort();
 }
