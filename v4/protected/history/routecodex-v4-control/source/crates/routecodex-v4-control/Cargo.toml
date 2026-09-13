@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+red-fixtures = []
+
 [lib]
 path = "src/lib.rs"
 

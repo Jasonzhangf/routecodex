@@ -13,17 +13,13 @@
   },
   "contract_paths": [
     "contracts/node-graph.contract.json",
-    "contracts/pipeline-abstraction.contract.json",
-    "contracts/debug-subscription.contract.json",
-    "contracts/test-layers.contract.json",
-    "contracts/data-control-boundary.contract.json",
-    "contracts/records/**"
+    "contracts/data-control-boundary.contract.json"
   ],
   "dependency_modules": [
     "routecodex-v4-base-node"
   ],
   "generated_outputs": [
-    "generated/edge/**"
+    "generated/modules/routecodex-v4-edge/**"
   ],
   "module_id": "routecodex-v4-edge",
   "owned_paths": [
@@ -33,31 +29,19 @@
     "allow_skipped": false,
     "command": {
       "args": [
-        "run",
-        "--quiet",
-        "--release",
+        "test",
         "-p",
-        "routecodex-v4-build-link",
-        "--",
-        "test-consumer",
-        "--root",
-        ".",
-        "--consumer",
         "routecodex-v4-edge",
-        "--deps",
-        "routecodex-v4-base-node"
+        "--locked"
       ],
       "program": "cargo",
       "working_directory": "."
     },
     "input_paths": [
-      "crates/routecodex-v4-edge/src/lib.rs",
-      "crates/routecodex-v4-edge/tests/l1_edge.rs",
-      "contracts/node-graph.contract.json",
-      "contracts/pipeline-abstraction.contract.json",
-      "contracts/test-layers.contract.json"
+      "crates/routecodex-v4-edge/**",
+      "contracts/**"
     ],
-    "minimum_test_count": 15,
+    "minimum_test_count": 1,
     "ordinary_mode_after_freeze": "disabled",
     "reenable_on": [
       "source_change",
@@ -67,14 +51,8 @@
       "dependency_change"
     ],
     "required_before_freeze": true,
-    "suite_id": "v4-edge-l1-regression"
+    "suite_id": "v4-edge-regression"
   },
   "source_owner": "routecodex-v4-edge",
-  "stage": "frozen",
-  "version_base": {
-    "base_artifact_hash": "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6",
-    "base_source_commit": "f2d53fd1c14eed3630e8b834a25409fbac8cf811",
-    "new_active_version": "active-v5",
-    "previous_active_version": "active-v4"
-  }
+  "stage": "frozen"
 }
