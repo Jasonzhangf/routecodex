@@ -3,6 +3,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import ts from 'typescript';
 
 const root = process.cwd();
 const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
@@ -103,6 +104,16 @@ function fail(message) {
   process.exit(1);
 }
 
+const jsoncFiles = new Set(['tsconfig.json']);
+function parseJsonFile(relativePath, content) {
+  if (!jsoncFiles.has(relativePath)) return JSON.parse(content);
+  const result = ts.parseConfigFileTextToJson(relativePath, content);
+  if (result.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(result.error.messageText, '\n'));
+  }
+  return result.config;
+}
+
 function affectedCargoPackages(rustFiles) {
   let metadata;
   try {
@@ -200,7 +211,7 @@ for (const { commit, path: relative } of entries) {
 
   if (/\.json$/u.test(relative)) {
     try {
-      JSON.parse(content);
+      parseJsonFile(relative, content);
     } catch (error) {
       fail(`${relative} JSON parse failed: ${error.message}`);
     }
