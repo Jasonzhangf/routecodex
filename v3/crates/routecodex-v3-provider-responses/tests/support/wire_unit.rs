@@ -359,6 +359,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_by_convention() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-js", "type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "arguments": "{}"
+                }}
+            ]}]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-qualified-chat-convention", chat_target, body)
+                .expect("convention namespace call names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__node_repl__js"
+        );
+    }
+
 
     #[test]
     fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {

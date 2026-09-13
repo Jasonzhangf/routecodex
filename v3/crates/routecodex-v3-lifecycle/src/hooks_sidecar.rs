@@ -1073,6 +1073,7 @@ fn codexapp_binary_from_record(
     record: &Value,
     record_path: &Path,
 ) -> Result<std::path::PathBuf, V3LifecycleError> {
+    let install_root = required_record_path(record, "install_root", record_path)?;
     let bin_directory = record
         .get("bin_directory")
         .and_then(Value::as_str)
@@ -1082,15 +1083,41 @@ fn codexapp_binary_from_record(
                 record_path.display()
             ))
         })?;
-    let candidate = std::path::Path::new(bin_directory).join("rccv3-codexapp");
-    if !candidate.is_file() {
+    let bin_directory = std::path::Path::new(bin_directory);
+    if !bin_directory.is_absolute() {
+        return Err(V3LifecycleError::Validation(format!(
+            "hooks install record bin_directory must be absolute"
+        )));
+    }
+    let canonical_root = fs::canonicalize(&install_root)?;
+    let canonical_bin_directory = fs::canonicalize(bin_directory).map_err(|error| {
+        V3LifecycleError::Validation(format!(
+            "hooks install record bin_directory {} cannot be resolved: {error}",
+            bin_directory.display()
+        ))
+    })?;
+    if !canonical_bin_directory.starts_with(&canonical_root) {
+        return Err(V3LifecycleError::Validation(format!(
+            "hooks install record bin_directory is outside install root: {}",
+            bin_directory.display()
+        )));
+    }
+    let candidate = canonical_bin_directory.join("rccv3-codexapp");
+    let canonical_candidate = fs::canonicalize(&candidate).map_err(|error| {
+        V3LifecycleError::Validation(format!(
+            "hooks install record {} requires installed internal codexapp binary at {}: {error}",
+            record_path.display(),
+            candidate.display()
+        ))
+    })?;
+    if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
         return Err(V3LifecycleError::Validation(format!(
             "hooks install record {} requires installed internal codexapp binary at {}",
             record_path.display(),
-            candidate.display()
+            canonical_candidate.display()
         )));
     }
-    Ok(candidate)
+    Ok(canonical_candidate)
 }
 
 // d7cb31f：sidecar stderr 落到实例目录诊断文件，退出原因可追溯。
@@ -1201,6 +1228,39 @@ mod tests {
 
         drop(replacement);
         assert!(!socket_path.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn codexapp_binary_from_record_rejects_relative_and_outside_bin_directories() {
+        let root = TempDir::new_in("/tmp").unwrap();
+        let install_root = root.path().join("install");
+        let inside_bin = install_root.join("bin");
+        let outside_bin = root.path().join("outside-bin");
+        fs::create_dir_all(&inside_bin).unwrap();
+        fs::create_dir_all(&outside_bin).unwrap();
+        fs::write(inside_bin.join("rccv3-codexapp"), "").unwrap();
+        fs::write(outside_bin.join("rccv3-codexapp"), "").unwrap();
+        let record_path = root.path().join("install.json");
+        let install_root_value = serde_json::json!(install_root);
+
+        let relative = serde_json::json!({
+            "install_root": install_root_value,
+            "bin_directory": "install/bin"
+        });
+        let relative_error = codexapp_binary_from_record(&relative, &record_path)
+            .expect_err("relative bin directory must be rejected");
+        assert!(relative_error
+            .to_string()
+            .contains("bin_directory must be absolute"));
+
+        let outside = serde_json::json!({
+            "install_root": install_root,
+            "bin_directory": outside_bin
+        });
+        let outside_error = codexapp_binary_from_record(&outside, &record_path)
+            .expect_err("bin directory outside install root must be rejected");
+        assert!(outside_error.to_string().contains("outside install root"));
     }
 
     #[test]
