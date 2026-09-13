@@ -107,13 +107,37 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         output.insert("input".to_string(), Value::String(raw));
         return Ok(Value::Object(output));
     }
-    Ok(json!({
-        "type":"function_call",
-        "call_id":call_id,
-        "name":name,
-        "arguments":serde_json::to_string(input)
-            .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use.input" })?
-    }))
+    if name == "tool_search" {
+        return Ok(json!({
+            "type": "tool_search_call",
+            "call_id": call_id,
+            "execution": "client",
+            "arguments": input.clone(),
+        }));
+    }
+    let mut output = Map::from_iter([
+        ("type".to_string(), Value::String("function_call".to_string())),
+        ("call_id".to_string(), Value::String(call_id.to_owned())),
+        ("arguments".to_string(), Value::String(serde_json::to_string(input).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use.input" })?)),
+    ]);
+    if name.starts_with("mcp__") {
+        if let Some(separator) = name.find("__") {
+            if separator == 3 {
+                if let Some(tool_offset) = name[separator + 2..].find("__") {
+                    let tool_separator = separator + 2 + tool_offset;
+                    let namespace = &name[..tool_separator];
+                    let tool = &name[tool_separator + 2..];
+                    if !tool.is_empty() {
+                        output.insert("namespace".to_string(), Value::String(namespace.to_owned()));
+                        output.insert("name".to_string(), Value::String(tool.to_owned()));
+                        return Ok(Value::Object(output));
+                    }
+                }
+            }
+        }
+    }
+    output.insert("name".to_string(), Value::String(name.to_owned()));
+    Ok(Value::Object(output))
 }
 
 #[cfg(test)]
@@ -143,6 +167,45 @@ mod tests {
             "{\"patch\":\"*** Begin Patch\\n*** End Patch\"}"
         );
         assert!(call.get("model_id").is_none());
+    }
+
+    #[test]
+    fn tool_search_tool_use_projects_to_native_responses_tool_search_call() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "tool_search"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_search",
+                "name": "tool_search",
+                "input": {"query": "mcpx workspace", "limit": 5}
+            }),
+            &context,
+        )
+        .expect("tool_search must remain a native Responses control call");
+
+        assert_eq!(call["type"], "tool_search_call");
+        assert_eq!(call["execution"], "client");
+        assert_eq!(call["arguments"]["query"], "mcpx workspace");
+        assert_eq!(call["arguments"]["limit"], 5);
+        assert!(call.get("name").is_none());
+    }
+
+    #[test]
+    fn flattened_mcp_tool_use_projects_namespace_for_responses_dispatch() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "mcp__mcpx__workspace"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type":"tool_use","id":"call_mcp","name":"mcp__mcpx__workspace","input":{"path":"."}}),
+            &context,
+        )
+        .expect("MCP tool_use must remain dispatchable");
+        assert_eq!(call["namespace"], "mcp__mcpx");
+        assert_eq!(call["name"], "workspace");
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 
 pub(super) fn responses_system_as_anthropic_system(value: &Value) -> Option<String> {
     match value {
@@ -858,6 +859,28 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
     seen_names: &mut HashSet<String>,
 ) -> Result<(), V3AnthropicCodecError> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            let flattened = flatten_namespace_tool_for_provider("anthropic", tool)
+                .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[]" })?
+                .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
+            for child in flattened {
+                let child_object = child
+                    .as_object()
+                    .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
+                let anthropic_tool = responses_tool_as_anthropic_tool(child_object)?;
+                let name = anthropic_tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "tools[].name",
+                    })?
+                    .to_string();
+                if seen_names.insert(name) {
+                    output.push(anthropic_tool);
+                }
+            }
+            continue;
+        }
         let tool_object = tool
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
@@ -1185,6 +1208,25 @@ pub(super) fn anthropic_usage_as_responses_usage(value: Option<&Value>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anthropic_namespace_tools_expand_to_qualified_children() {
+        let object = json!({
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__mcpx",
+                "tools": [{
+                    "type": "function",
+                    "name": "workspace",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        });
+        let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap()).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+        assert_ne!(tools[0]["name"], "mcp__mcpx");
+    }
 
     #[test]
     fn openai_chat_tool_call_malformed_arguments_project_reversible_anthropic_input() {

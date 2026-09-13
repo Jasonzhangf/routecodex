@@ -1343,9 +1343,112 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {
             *item = project_v3_responses_client_event_output_item_done_item(item);
+            if item.get("type").and_then(Value::as_str) == Some("tool_search_call") {
+                item.as_object_mut()
+                    .expect("Responses tool_search_call must be an object")
+                    .entry("execution")
+                    .or_insert_with(|| Value::String("client".to_string()));
+            }
         }
     }
+    // Providers may omit one or more counters from the terminal usage object.
+    // The Responses client schema requires all three counters; normalize only
+    // the missing derived counters at this projection edge so parsing the
+    // completed event cannot tear down an otherwise valid conversation.
+    let projected_object = projected
+        .as_object_mut()
+        .expect("terminal Responses response must be an object");
+    let usage = projected_object
+        .entry("usage")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("terminal Responses usage must be an object");
+    usage
+        .entry("input_tokens")
+        .or_insert_with(|| Value::from(0u64));
+    usage
+        .entry("output_tokens")
+        .or_insert_with(|| Value::from(0u64));
+    if !usage.contains_key("total_tokens") {
+        let input = usage
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        usage.insert("total_tokens".to_string(), Value::from(input + output));
+    }
     projected
+}
+
+#[cfg(test)]
+mod completed_response_projection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_output_tokens_is_normalized_on_completed_response() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_1",
+            "status": "completed",
+            "usage": {"input_tokens": 12, "total_tokens": 12},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["output_tokens"], 0);
+        assert_eq!(projected["usage"]["total_tokens"], 12);
+    }
+
+    #[test]
+    fn missing_total_tokens_is_derived_for_completed_response() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_2",
+            "status": "completed",
+            "usage": {"input_tokens": 12, "output_tokens": 3},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["total_tokens"], 15);
+    }
+
+    #[test]
+    fn partial_usage_is_completed_schema_safe() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_3",
+            "status": "completed",
+            "usage": {},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["input_tokens"], 0);
+        assert_eq!(projected["usage"]["output_tokens"], 0);
+        assert_eq!(projected["usage"]["total_tokens"], 0);
+    }
+
+    #[test]
+    fn absent_usage_is_completed_schema_safe() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_4",
+            "status": "completed",
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["input_tokens"], 0);
+        assert_eq!(projected["usage"]["output_tokens"], 0);
+        assert_eq!(projected["usage"]["total_tokens"], 0);
+    }
+
+    #[test]
+    fn completed_tool_search_call_defaults_to_client_execution() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_tool_search",
+            "status": "requires_action",
+            "output": [{
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "arguments": {"query": "mcpx workspace"}
+            }]
+        }));
+        assert_eq!(projected["output"][0]["execution"], "client");
+    }
 }
 
 pub(crate) fn provider_target(

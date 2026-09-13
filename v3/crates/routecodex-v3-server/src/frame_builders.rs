@@ -237,7 +237,7 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     let (code, message) = v3_error_body_code_message(&body);
     if frame.status == 502 && code == "network_error" && message == "network error" {
         if frame
-            .node_trace
+            .error_chain
             .iter()
             .any(|node| *node == "V3Error04TargetPoolExhaustion")
         {
@@ -433,7 +433,7 @@ fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
 
 pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     status: u16,
-    node_trace: &[&str],
+    _node_trace: &[&str],
     error_chain: &[&str],
     body: &Value,
 ) -> bool {
@@ -443,20 +443,14 @@ pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
     let (code, message) = v3_error_body_code_message(body);
     // A terminal provider/network failure must never be serialized as a client
     // error frame. Runtime retries/reselection happen before this boundary;
-    // anything that reaches the client SSE projector is represented as a
-    // transport disconnect. Error04 remains an observability witness when
-    // present, but direct paths may legitimately carry only the typed chain.
+    // Only the caller-owned Error04 exhaustion witness authorizes a transport
+    // disconnect. Error06 alone is insufficient: eligible candidates may
+    // still exist and the request must remain a normal SSE error.
     code == "network_error"
         && message == "network error"
-        && (node_trace
+        && error_chain
             .iter()
             .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error06ClientProjected"))
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(

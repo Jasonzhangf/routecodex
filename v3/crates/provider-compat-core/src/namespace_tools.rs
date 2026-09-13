@@ -81,6 +81,7 @@ pub fn flatten_namespace_tool_for_provider(
         )?;
         flattened.push(build_provider_function_tool(
             protocol,
+            namespace_name,
             child_name,
             description,
             parameters,
@@ -113,13 +114,20 @@ fn read_optional_namespace_child_field(
 
 fn build_provider_function_tool(
     protocol: &str,
+    namespace_name: &str,
     name: &str,
     description: Option<Value>,
     parameters: Option<Value>,
     strict: Option<Value>,
 ) -> Value {
     let mut function = Map::new();
-    function.insert("name".to_string(), Value::String(name.to_string()));
+    let qualified_name =
+        if name == namespace_name || name.starts_with(&format!("{namespace_name}__")) {
+            name.to_string()
+        } else {
+            format!("{namespace_name}__{name}")
+        };
+    function.insert("name".to_string(), Value::String(qualified_name));
     if let Some(description) = description {
         function.insert("description".to_string(), description);
     }
@@ -162,9 +170,34 @@ mod tests {
         .unwrap();
         assert_eq!(flattened.len(), 2);
         assert_eq!(flattened[0]["type"], "function");
-        assert_eq!(flattened[0]["function"]["name"], "spawn_agent");
+        assert_eq!(
+            flattened[0]["function"]["name"],
+            "multi_agent_v1__spawn_agent"
+        );
         assert_eq!(flattened[0]["function"]["strict"], false);
-        assert_eq!(flattened[1]["function"]["name"], "wait_agent");
+        assert_eq!(
+            flattened[1]["function"]["name"],
+            "multi_agent_v1__wait_agent"
+        );
+    }
+
+    #[test]
+    fn qualifies_mcpx_namespace_children_without_parent_function() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "openai-chat",
+            &json!({
+                "type":"namespace",
+                "name":"mcp__mcpx",
+                "tools":[{"type":"function","name":"workspace","parameters":{"type":"object"}}]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened.len(), 1);
+        assert_eq!(flattened[0]["function"]["name"], "mcp__mcpx__workspace");
+        assert!(flattened
+            .iter()
+            .all(|tool| tool["function"]["name"] != "mcp__mcpx"));
     }
 
     #[test]

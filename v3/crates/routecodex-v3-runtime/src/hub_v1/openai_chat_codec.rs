@@ -440,6 +440,16 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .and_then(Value::as_object)
             .ok_or_else(|| "Anthropic content_block_delta is missing delta".to_string())?;
         let delta_type = delta.get("type").and_then(Value::as_str);
+        if !self.active_blocks.contains_key(&index) {
+            let kind = match delta_type {
+                Some("text_delta") => Some("text"),
+                Some("thinking_delta") => Some("thinking"),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                self.active_blocks.insert(index, kind.to_string());
+            }
+        }
         if !self.active_blocks.contains_key(&index) && delta_type == Some("signature_delta") {
             return Ok(Vec::new());
         }
@@ -1210,5 +1220,41 @@ mod openai_chat_responses_sse_transducer_tests {
                 "unexpected error: {error}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod openai_chat_anthropic_sse_transducer_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pre_start_text_and_thinking_delta_are_projected() {
+        let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+        transducer
+            .push_event(json!({
+                "type": "message_start",
+                "message": {"id": "msg_1", "model": "glm-5.3"}
+            }))
+            .expect("message_start");
+        let thinking = transducer
+            .push_event(json!({
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "working"}
+            }))
+            .expect("pre-start thinking delta");
+        let text = transducer
+            .push_event(json!({
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "text_delta", "text": "done"}
+            }))
+            .expect("pre-start text delta");
+        assert_eq!(
+            thinking[0]["choices"][0]["delta"]["reasoning_content"],
+            "working"
+        );
+        assert_eq!(text[0]["choices"][0]["delta"]["content"], "done");
     }
 }

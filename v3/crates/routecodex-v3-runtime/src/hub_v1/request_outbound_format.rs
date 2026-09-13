@@ -12,6 +12,7 @@ use super::request_outbound_metadata::{
     project_openai_client_metadata_to_metadata, validate_openai_metadata,
 };
 use super::request_outbound_tool_id::compact_tool_id;
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use std::collections::BTreeSet;
 
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
@@ -65,10 +66,11 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
                 .to_string(),
         );
     }
-    let projected_source = project_outbound_payload_for_target_protocol(
+    let mut projected_source = project_outbound_payload_for_target_protocol(
         payload,
         V3OutboundTargetProtocol::OpenAiResponses,
     )?;
+    promote_tool_search_output_tools_to_provider_tools(&mut projected_source)?;
     let messages = projected_source
         .get("messages")
         .and_then(Value::as_array)
@@ -131,6 +133,8 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     // Re-running it here would reapply public metadata limits to the provider
     // compatible slot. Client metadata is already consumed as local context.
     let mut normalized = payload.clone();
+    promote_responses_tool_search_output_tools_to_provider_tools(&mut normalized)?;
+    flatten_responses_namespace_tools(&mut normalized)?;
     let instructions = normalized
         .as_object_mut()
         .and_then(|row| row.remove("instructions"))
@@ -147,6 +151,124 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     normalize_responses_input_content_parts(&mut normalized);
     normalize_responses_target_token_and_logprob_fields(&mut normalized);
     Ok(normalized)
+}
+
+fn promote_responses_tool_search_output_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let discovered = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
+        .filter_map(|item| item.get("tools"))
+        .try_fold(Vec::new(), |mut all, tools| {
+            let tools = tools.as_array().ok_or_else(|| {
+                "MalformedOutboundField target_protocol=responses path=$.input[].tools: expected array"
+                    .to_string()
+            })?;
+            all.extend(tools.iter().cloned());
+            Ok::<_, String>(all)
+        })?;
+    if discovered.is_empty() {
+        return Ok(());
+    }
+    let top_level = payload.as_object_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$: expected object".to_string()
+    })?;
+    let tools = top_level
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.tools: expected array".to_string()
+    })?;
+    tools.extend(discovered);
+    Ok(())
+}
+
+fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> {
+    let deferred_mcp_loaded = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
+        });
+    let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let mut flattened = Vec::with_capacity(tools.len());
+    for (index, tool) in tools.iter().enumerate() {
+        if !deferred_mcp_loaded
+            && tool
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("mcp__"))
+        {
+            continue;
+        }
+        if tool.get("type").and_then(Value::as_str) != Some("namespace") {
+            flattened.push(tool.clone());
+            continue;
+        }
+        // MCP namespaces are deferred client tools. Before the client has
+        // returned a tool_search_output registry, exposing their children to
+        // the provider lets it call a tool the client has not registered yet,
+        // producing `unsupported call` on the next turn. Keep the control
+        // plane represented only by tool_search until discovery completes.
+        if !deferred_mcp_loaded
+            && tool
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("mcp__"))
+        {
+            continue;
+        }
+        let children = flatten_namespace_tool_for_provider("responses", tool)
+            .map_err(|error| format!("MalformedOutboundField target_protocol=responses paths=$.tools[{index}]: {error}"))?
+            .ok_or_else(|| format!("MalformedOutboundField target_protocol=responses paths=$.tools[{index}]"))?;
+        for child in children {
+            let function = child
+                .get("function")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    format!(
+                        "MalformedOutboundField target_protocol=responses paths=$.tools[{index}]"
+                    )
+                })?;
+            let mut direct = Map::from_iter([
+                ("type".to_string(), Value::String("function".to_string())),
+                (
+                    "name".to_string(),
+                    function.get("name").cloned().unwrap_or(Value::Null),
+                ),
+            ]);
+            for key in ["description", "parameters", "strict"] {
+                if let Some(value) = function.get(key) {
+                    direct.insert(key.to_string(), value.clone());
+                }
+            }
+            flattened.push(Value::Object(direct));
+        }
+    }
+    let mut deduped = Vec::with_capacity(flattened.len());
+    for tool in flattened {
+        let duplicate = tool
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                deduped.iter().any(|existing: &Value| {
+                    existing.get("name").and_then(Value::as_str) == Some(name)
+                })
+            });
+        if !duplicate {
+            deduped.push(tool);
+        }
+    }
+    *tools = deduped;
+    Ok(())
 }
 
 fn normalize_responses_input_content_parts(payload: &mut Value) {
@@ -1011,6 +1133,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
     let Some(name) = name else {
         return Ok(None);
     };
+    let name = provider_function_name(&name);
     let arguments = function
         .and_then(|entry| entry.get("arguments"))
         .or_else(|| row.get("arguments"))
@@ -1067,6 +1190,22 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
     ]))))
+}
+
+/// Provider function names are a transport shape.  Codex/MCP clients may
+/// return the legacy dotted namespace form (`mcp__server.tool`) in a prior
+/// tool call; normalize that one form at the provider outbound boundary so it
+/// cannot reach a provider name validator.  Namespace tools already flattened
+/// with `__` are preserved byte-for-byte.
+fn provider_function_name(name: &str) -> String {
+    if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
+        let dot = dot + "mcp__".len();
+        let mut normalized = name.to_owned();
+        normalized.replace_range(dot..=dot, "__");
+        normalized
+    } else {
+        name.to_owned()
+    }
 }
 
 fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {
@@ -1185,6 +1324,68 @@ fn project_responses_item_extension_fields(
     }
 }
 
+/// Promote the client-side `tool_search_output` registry into the provider
+/// tool declaration. The registry stays in Responses input history; only its
+/// callable schemas are copied to the top-level provider tools field.
+fn promote_tool_search_output_tools_to_provider_tools(payload: &mut Value) -> Result<(), String> {
+    let Some(messages) = payload.get("messages").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let mut discovered = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        let Some(row) = message.as_object() else {
+            continue;
+        };
+        let output_type = row
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get("responses_tool_output_type"))
+            .and_then(Value::as_str);
+        if row.get("role").and_then(Value::as_str) != Some("tool")
+            || output_type != Some("tool_search_output")
+        {
+            continue;
+        }
+        let content = row.get("content").ok_or_else(|| {
+            format!(
+                "MalformedOutboundField target_protocol=responses path=$.messages[{index}].content"
+            )
+        })?;
+        let tools = match content {
+            Value::String(text) => serde_json::from_str::<Value>(text).map_err(|error| {
+                format!(
+                    "MalformedOutboundField target_protocol=responses path=$.messages[{index}].content: {error}"
+                )
+            })?,
+            value => value.clone(),
+        };
+        let Some(tools) = tools.as_array() else {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=responses path=$.messages[{index}].content"
+            ));
+        };
+        discovered.extend(tools.iter().cloned());
+    }
+    if discovered.is_empty() {
+        return Ok(());
+    }
+    let tools = payload
+        .as_object_mut()
+        .expect("responses canonical payload must be an object")
+        .entry("tools")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let existing = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$.tools".to_string()
+    })?;
+    for tool in discovered {
+        let duplicate = existing.iter().any(|candidate| candidate == &tool);
+        if !duplicate {
+            existing.push(tool);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn build_responses_input_from_chat_messages(
     messages: &[Value],
 ) -> Result<Value, String> {
@@ -1298,6 +1499,7 @@ fn normalize_openai_chat_messages_payload(
         payload,
         V3OutboundTargetProtocol::OpenAiChat,
     )?;
+    promote_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     if let Some(row) = normalized.as_object_mut() {
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())

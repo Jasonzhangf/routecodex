@@ -1014,6 +1014,81 @@ fn tool_search_chat_extensions_round_trip_to_responses_fields() {
 }
 
 #[test]
+fn tool_search_output_promotes_mcpx_namespace_for_provider_projection() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "tool",
+            "tool_call_id": "call_search",
+            "content": "[{\"type\":\"namespace\",\"name\":\"mcp__mcpx\",\"tools\":[{\"type\":\"function\",\"name\":\"workspace\",\"parameters\":{\"type\":\"object\"}}]}]",
+            "routecodex_chat_extension": {"responses_tool_output_type": "tool_search_output"}
+        }]
+    }))
+    .expect("tool search output must register provider tools");
+    let tools = request["tools"].as_array().expect("provider tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "function");
+    assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
+fn responses_direct_tool_search_output_promotes_mcpx_namespace_for_provider_projection() {
+    let request = normalize_responses_payload_for_provider_standard(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [{
+            "type": "tool_search_output",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__mcpx",
+                "tools": [{
+                    "type": "function",
+                    "name": "workspace",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        }]
+    }))
+    .expect("Responses direct tool search output must register provider tools");
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
+fn deferred_mcpx_namespace_is_not_exposed_before_tool_search_output() {
+    let request = normalize_responses_payload_for_provider_standard(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"find tools"}]}],
+        "tools": [
+            {"type":"tool_search","execution":"client","parameters":{"type":"object","properties":{"query":{"type":"string"}}}},
+            {"type":"namespace","name":"mcp__mcpx","tools":[{"type":"function","name":"workspace","parameters":{"type":"object"}}]}
+        ]
+    })).expect("deferred MCP namespace must remain valid");
+    let tools = request["tools"].as_array().expect("provider tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "tool_search");
+}
+
+#[test]
+fn chat_mcp_dotted_tool_call_name_is_normalized_at_provider_boundary() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_workspace",
+                "type": "function",
+                "function": {
+                    "name": "mcp__mcpx.workspace",
+                    "arguments": "{}"
+                }
+            }]
+        }]
+    }))
+    .expect("dotted MCP tool call must remain projectable");
+    assert_eq!(request["input"][0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",

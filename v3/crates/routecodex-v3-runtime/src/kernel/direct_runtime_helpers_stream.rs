@@ -249,7 +249,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     mut stream: V3SseAttemptStream,
-    _provider_protocol: V3HubProviderWireProtocol,
+    provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
@@ -275,7 +275,11 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
                 "Direct SSE projected a continuation frame after semantic terminal",
             ));
         }
-        let frame = frame.bytes;
+        let frame = if provider_protocol == V3HubProviderWireProtocol::Responses {
+            normalize_direct_responses_terminal_usage(&frame.bytes)
+        } else {
+            frame.bytes
+        };
         committed.push(frame).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -355,6 +359,55 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         "provider_response_sse_stream",
         "provider SSE ended without a protocol terminal",
     ))
+}
+
+/// Keep the client Responses terminal contract complete even when a provider
+/// omits usage counters. This is a projection-only repair at the single
+/// direct SSE closeout owner; provider payload semantics remain unchanged.
+fn normalize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
+    rewrite_direct_sse_frame(frame, |mut event| {
+        let event_type = event.get("type").and_then(serde_json::Value::as_str);
+        if !matches!(
+            event_type,
+            Some("response.completed" | "response.done" | "response.incomplete")
+        ) {
+            return event;
+        }
+        let response = if event.get("response").is_some() {
+            event
+                .get_mut("response")
+                .and_then(serde_json::Value::as_object_mut)
+                .expect("Responses response must be an object")
+        } else {
+            event.as_object_mut().expect("SSE event must be an object")
+        };
+        let usage = response
+            .entry("usage")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()))
+            .as_object_mut()
+            .expect("Responses usage must be an object");
+        usage
+            .entry("input_tokens")
+            .or_insert_with(|| serde_json::Value::from(0u64));
+        usage
+            .entry("output_tokens")
+            .or_insert_with(|| serde_json::Value::from(0u64));
+        if !usage.contains_key("total_tokens") {
+            let input = usage
+                .get("input_tokens")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            usage.insert(
+                "total_tokens".to_owned(),
+                serde_json::Value::from(input.saturating_add(output)),
+            );
+        }
+        event
+    })
 }
 
 fn rewrite_direct_sse_memory(
@@ -1213,7 +1266,12 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
 ) -> usize {
+    // Availability is time-dependent (session cooldowns and global probe
+    // windows).  The caller's monotonic epoch is part of the decision; using
+    // a sentinel such as zero makes every future cooldown look active and can
+    // falsely prove whole-pool exhaustion.
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
         failed_candidates,
@@ -1226,7 +1284,7 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
-                    0,
+                    now_epoch_ms,
                 )
                 .available
         })
@@ -1237,6 +1295,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
 ) -> Option<String> {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
@@ -1250,7 +1309,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
-                    0,
+                    now_epoch_ms,
                 )
                 .available
         })
@@ -1307,4 +1366,22 @@ fn validate_initial_direct_plan(
         return Err("preselected direct target requires an initial protocol execution decision");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod direct_responses_terminal_usage_tests {
+    use super::normalize_direct_responses_terminal_usage;
+
+    #[test]
+    fn missing_total_tokens_is_repaired_before_client_closeout() {
+        let frame = br#"event: response.completed
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":7}}}
+
+"#;
+        let projected = normalize_direct_responses_terminal_usage(frame);
+        let text = std::str::from_utf8(&projected).expect("projected SSE must be UTF-8");
+        assert!(text.contains(r#""input_tokens":7"#), "{text}");
+        assert!(text.contains(r#""output_tokens":0"#), "{text}");
+        assert!(text.contains(r#""total_tokens":7"#), "{text}");
+    }
 }

@@ -328,7 +328,7 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
 }
 
 #[test]
-fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
+fn success_in_any_session_recovers_provider_cooldown_immediately() {
     let store = V3ProviderHealthStore::default();
     store
         .record_provider_cooldown_failure(
@@ -340,7 +340,7 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
             10,
         )
         .unwrap();
-    // 未到期的 provider cooldown 不得由业务成功清除。
+    // 任一 session 的真实成功都应立即恢复同一 provider:key:model。
     store
         .record_provider_success_in_session(
             &session("session-a"),
@@ -351,7 +351,7 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
         )
         .unwrap();
     assert!(
-        !store
+        store
             .availability_for_session(
                 &session("session-a"),
                 "provider-a",
@@ -360,13 +360,8 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
                 105,
             )
             .available,
-        "a real success must not recover provider cooldown without probe success"
+        "a real success must recover provider cooldown immediately"
     );
-
-    store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
-        .unwrap()
-        .expect("pending provider cooldown must acquire a probe");
     store
         .complete_provider_cooldown_probe_success_at(
             "provider-a",

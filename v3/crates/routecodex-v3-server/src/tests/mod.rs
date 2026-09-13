@@ -511,7 +511,7 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect() {
+async fn direct_live_sse_provider_failure_projects_explicit_terminal() {
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -539,10 +539,10 @@ async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect()
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
-    assert!(!text.contains("event: response.failed"), "{text}");
-    assert!(!text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.contains("event: response.failed"), "{text}");
+    assert!(text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(text.contains("data: [DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -3391,6 +3391,35 @@ fn stream_projection_requires_typed_error_chain() {
 }
 
 #[test]
+fn stream_projection_ignores_diagnostic_exhaustion_trace_without_typed_witness() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        observability: None,
+        stream_observation: None,
+        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
+    };
+
+    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+    assert_eq!(projected.content_type, "text/event-stream");
+    match projected.body {
+        V3Server16Body::Bytes(bytes) => {
+            let text = std::str::from_utf8(&bytes).unwrap();
+            assert!(text.starts_with("event: response.failed\n"), "{text}");
+            assert!(text.contains("network_error"), "{text}");
+        }
+        other => panic!("diagnostic-only exhaustion must not authorize transport body: {other:?}"),
+    }
+}
+
+#[test]
 fn direct_stream_error_projection_response_uses_error_channel() {
     let frame = V3Server16HttpFrame {
         status: 502,
@@ -3750,7 +3779,7 @@ async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
 }
 
 #[test]
-fn responses_stream_network_error_without_error04_projects_sse_body() {
+fn responses_stream_network_error_without_error04_does_not_disconnect_transport() {
     let frame = V3Server16HttpFrame {
         status: 502,
         content_type: "application/json".to_string(),
@@ -3767,7 +3796,7 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
     };
 
     let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-    assert!(v3_is_sse_target_pool_exhaustion_parts(
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
         projected.status,
         &projected.node_trace,
         &projected.error_chain,
@@ -3792,6 +3821,17 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
         }
         other => panic!("network error must project SSE bytes, got {other:?}"),
     }
+}
+
+#[test]
+fn responses_stream_network_error_with_diagnostic_only_error04_does_not_disconnect() {
+    let body = json!({"error": {"code": "network_error", "message": "network error"}});
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
+        502,
+        &["V3Error04TargetPoolExhaustion"],
+        &["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        &body,
+    ));
 }
 
 #[test]

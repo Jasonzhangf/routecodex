@@ -192,6 +192,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
+            context.now_epoch_ms,
         )
     });
     let mut next_provider_key = expanded_candidates.and_then(|expanded_candidates| {
@@ -199,6 +200,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             expanded_candidates,
             context.availability,
             &failed_with_current,
+            context.now_epoch_ms,
         )
     });
     if remaining == 0 {
@@ -416,13 +418,19 @@ async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>
     let mut failed_with_current = state.failed_candidates.clone();
     failed_with_current.insert(failed_key.clone());
     let mut remaining = expanded_candidates.map_or(0, |candidates| {
-        remaining_available_candidates(candidates, context.availability, &failed_with_current)
+        remaining_available_candidates(
+            candidates,
+            context.availability,
+            &failed_with_current,
+            context.now_epoch_ms,
+        )
     });
     let mut next_provider_key = expanded_candidates.and_then(|candidates| {
         first_remaining_available_candidate_key(
             candidates,
             context.availability,
             &failed_with_current,
+            context.now_epoch_ms,
         )
     });
     if remaining == 0 {
