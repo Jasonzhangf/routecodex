@@ -19,7 +19,7 @@
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
       "source_commit": "f50f40343d0ab0f6e39d730c9827cf6f83d1d505",
-      "sha256": "5aad4e11a8a1d06f22f33cf352b64810a2a2d875d7f8efe6f472881a05fa9aab"
+      "sha256": "809339dfe59505c3b9efb83e8b7389d2f2b4c8d1f552e536cace8c890c1f3a4b"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -72,7 +72,7 @@
     {
       "output_path": "repo/docs/architecture/internal-policy-hardcode-rules.json",
       "source_path": "docs/architecture/internal-policy-hardcode-rules.json",
-      "source_commit": "28b9c4c0e39df6534bd74b91c4114ee0580b96b3",
+      "source_commit": "81738dad09e3e0f684667086d645a1410112952c",
       "sha256": "8f928094d5c00478888ee31ac424ea3e3a5e3a3f261868e7a0c8cbe865b26984"
     },
     {
@@ -2872,5 +2872,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "b663d8eb4f7bfd522a7887a6ce76127c56ea228b7152dd734069c2e7f2f38ff2"
+  "manifest_digest": "3edb807a9045756ffe0feb3cbb7cc620f95d0d137105cc8b65fe889c8e72b900"
 }

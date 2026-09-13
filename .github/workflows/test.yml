@@ -79,6 +79,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch Rust dependencies for V3 checks
+        run: cargo fetch --locked --manifest-path v3/Cargo.toml
       - name: Fallback and internal policy hardcode gate
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:fallback-hardcode
@@ -145,9 +147,6 @@ jobs:
       - name: Servertool Rust-only gate
         if: needs.scope.outputs.v3 == 'true'
         run: node scripts/verify-servertool-rust-only.mjs
-      - name: Fetch Rust dependencies for offline builds
-        if: needs.scope.outputs.v3 == 'true'
-        run: cargo fetch --manifest-path v3/Cargo.toml
       - name: Build (release)
         if: needs.scope.outputs.v3 == 'true'
         env:
