@@ -30,14 +30,13 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install scope dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Fetch Rust dependencies for scope compile
-        run: cargo fetch --locked --manifest-path v3/Cargo.toml
       - name: Changed-path fast gate and scope classification
         id: changed
         env:
           ROUTECODEX_GATE_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           ROUTECODEX_GATE_DIFF_HEAD: ${{ github.sha }}
           ROUTECODEX_GATE_REMOTE_NAME: origin
+          ROUTECODEX_GATE_SCOPE_ONLY: '1'
         run: |
           ROUTECODEX_GATE_SCOPE_OUTPUT="$GITHUB_OUTPUT" npm run --silent verify:fast
       - name: Scope classifier regression

@@ -10,6 +10,7 @@ const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
 const base = process.env.ROUTECODEX_GATE_DIFF_BASE;
 const head = process.env.ROUTECODEX_GATE_DIFF_HEAD;
 const remoteName = process.env.ROUTECODEX_GATE_REMOTE_NAME;
+const scopeOnly = process.env.ROUTECODEX_GATE_SCOPE_ONLY === '1';
 const zeroSha = /^0{40}$/u;
 const newRef = base && head && zeroSha.test(base);
 
@@ -230,7 +231,7 @@ const changedRustFiles = [
     ...deleted.filter((path) => path.endsWith('.rs')),
   ]),
 ];
-if (changedRustFiles.length > 0) {
+if (!scopeOnly && changedRustFiles.length > 0) {
   const affectedPackages = affectedCargoPackages(changedRustFiles);
   if (affectedPackages.length > 0) {
     const cargoArgs = [
@@ -252,4 +253,7 @@ if (changedRustFiles.length > 0) {
   }
 }
 
-process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; affected Rust compile checked\n`);
+const compileEvidence = scopeOnly
+  ? 'affected Rust compile deferred to scoped V3 test job'
+  : 'affected Rust compile checked';
+process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; ${compileEvidence}\n`);
