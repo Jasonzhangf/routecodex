@@ -1349,24 +1349,30 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     // The Responses client schema requires all three counters; normalize only
     // the missing derived counters at this projection edge so parsing the
     // completed event cannot tear down an otherwise valid conversation.
-    if let Some(usage) = projected.get_mut("usage").and_then(Value::as_object_mut) {
-        usage
-            .entry("input_tokens")
-            .or_insert_with(|| Value::from(0u64));
-        usage
-            .entry("output_tokens")
-            .or_insert_with(|| Value::from(0u64));
-        if !usage.contains_key("total_tokens") {
-            let input = usage
-                .get("input_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let output = usage
-                .get("output_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            usage.insert("total_tokens".to_string(), Value::from(input + output));
-        }
+    let projected_object = projected
+        .as_object_mut()
+        .expect("terminal Responses response must be an object");
+    let usage = projected_object
+        .entry("usage")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("terminal Responses usage must be an object");
+    usage
+        .entry("input_tokens")
+        .or_insert_with(|| Value::from(0u64));
+    usage
+        .entry("output_tokens")
+        .or_insert_with(|| Value::from(0u64));
+    if !usage.contains_key("total_tokens") {
+        let input = usage
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        usage.insert("total_tokens".to_string(), Value::from(input + output));
     }
     projected
 }
@@ -1405,6 +1411,18 @@ mod completed_response_projection_tests {
             "id": "resp_3",
             "status": "completed",
             "usage": {},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["input_tokens"], 0);
+        assert_eq!(projected["usage"]["output_tokens"], 0);
+        assert_eq!(projected["usage"]["total_tokens"], 0);
+    }
+
+    #[test]
+    fn absent_usage_is_completed_schema_safe() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_4",
+            "status": "completed",
             "output": []
         }));
         assert_eq!(projected["usage"]["input_tokens"], 0);
