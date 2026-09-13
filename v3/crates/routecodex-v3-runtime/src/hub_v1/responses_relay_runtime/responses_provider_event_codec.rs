@@ -314,6 +314,16 @@ fn build_typed_responses_terminal_response(
         }
     }
     object.insert("output".to_owned(), Value::Array(output));
+    if let Some(usage) = object.get_mut("usage").and_then(Value::as_object_mut) {
+        if !usage.contains_key("total_tokens") {
+            if let (Some(input), Some(output)) = (
+                usage.get("input_tokens").and_then(Value::as_u64),
+                usage.get("output_tokens").and_then(Value::as_u64),
+            ) {
+                usage.insert("total_tokens".to_owned(), Value::from(input + output));
+            }
+        }
+    }
     if !reducer.output_text.trim().is_empty() {
         object.insert(
             "output_text".to_owned(),
@@ -700,5 +710,24 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
         ));
         assert!(is_supported_typed_responses_event("response.completed"));
         assert!(!is_supported_typed_responses_event("response.unknown"));
+    }
+
+    #[test]
+    fn response_completed_derives_missing_total_tokens_for_client_contract() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_missing_total",
+                    "status": "completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5}
+                }
+            }),
+            &mut reducer,
+        )
+        .expect("response.completed must remain terminal when total_tokens is omitted")
+        .expect("response.completed must produce terminal response");
+        assert_eq!(terminal["usage"]["total_tokens"], json!(15));
     }
 }
