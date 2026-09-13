@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = process.cwd();
@@ -60,6 +60,37 @@ function deletedFiles() {
   return git(['--name-only'], 'D').split('\n').map((file) => file.trim()).filter(Boolean);
 }
 
+function writeChangedScopeOutputs(paths) {
+  const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
+  if (!outputPath) return;
+
+  const has = (pattern) => paths.some((relative) => pattern.test(relative));
+  const v3Architecture = has(/^(?:v3\/scripts\/architecture\/|v3\/tests\/scripts\/|scripts\/architecture\/|docs\/architecture\/)/u)
+    || has(/^package(?:-lock)?\.json$/u);
+  const v3Runtime = has(/^v3\/(?!scripts\/architecture\/|tests\/scripts\/)/u);
+  const values = {
+    changed: paths.length > 0,
+    v3: v3Architecture || v3Runtime,
+    v3_architecture: v3Architecture,
+    v3_runtime: v3Runtime,
+    v3_build: v3Runtime,
+    v3_provider: has(/(?:provider|health|action|anthropic|openai|gemini|relay|sse|responses)/iu),
+    v3_compaction: has(/compaction/iu),
+    v3_session: has(/(?:session|admission|continuation)/iu),
+    v3_timing: has(/(?:timing|timeout)/iu),
+    v3_debug: has(/debug/iu),
+    v3_console: has(/console/iu),
+    v3_router: has(/(?:route|router|target)/iu),
+    v3_tool: has(/(?:tool|servertool)/iu),
+    v4: has(/^v4\//u),
+  };
+
+  appendFileSync(
+    outputPath,
+    Object.entries(values).map(([key, value]) => `${key}=${value ? 'true' : 'false'}\n`).join(''),
+  );
+}
+
 function contentFor(relative, commit) {
   if (commit) return execFileSync('git', ['show', `${commit}:${relative}`], { cwd: root, encoding: 'utf8' });
   if (staged) return execFileSync('git', ['show', `:${relative}`], { cwd: root, encoding: 'utf8' });
@@ -89,6 +120,7 @@ try {
 const entries = changedEntries();
 const deleted = deletedFiles();
 const skippedFullCi = '[verify:ci] SKIPPED_FOR_REPAIR (not run)';
+writeChangedScopeOutputs([...new Set([...entries.map(({ path }) => path), ...deleted])]);
 if (entries.length === 0 && deleted.length === 0) {
   process.stdout.write(`[verify:fast] PASS no changed files; ${skippedFullCi}\n`);
   process.exit(0);
