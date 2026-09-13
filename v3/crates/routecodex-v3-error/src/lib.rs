@@ -814,8 +814,7 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     );
     let retry_eligible = provider_failure && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
-    let health_affecting = provider_failure
-        && !matches!(scope, V3ErrorActionScope::None);
+    let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
         "target_local_reselect"
     } else if client_disconnect {
@@ -853,24 +852,23 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
-    let target_exhausted = (provider_failure
-        && route_pool_remaining_after_exclusion == 0
-        && !default_pool_available)
-        || matches!(
-            local_action.classified.source.source_kind,
-            V3ErrorSourceKind::PendingEndpoint
-                | V3ErrorSourceKind::InvalidRequest
-                | V3ErrorSourceKind::RequestConflict
-                | V3ErrorSourceKind::UnsupportedMediaType
-                | V3ErrorSourceKind::PayloadTooLarge
-                | V3ErrorSourceKind::MethodNotAllowed
-                | V3ErrorSourceKind::PathNotFound
-                | V3ErrorSourceKind::ModelNotFound
-                | V3ErrorSourceKind::TargetPoolExhausted
-                | V3ErrorSourceKind::RuntimeFailure
-                | V3ErrorSourceKind::ClientDisconnect
-                | V3ErrorSourceKind::SuccessControl
-        );
+    let target_exhausted =
+        (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available)
+            || matches!(
+                local_action.classified.source.source_kind,
+                V3ErrorSourceKind::PendingEndpoint
+                    | V3ErrorSourceKind::InvalidRequest
+                    | V3ErrorSourceKind::RequestConflict
+                    | V3ErrorSourceKind::UnsupportedMediaType
+                    | V3ErrorSourceKind::PayloadTooLarge
+                    | V3ErrorSourceKind::MethodNotAllowed
+                    | V3ErrorSourceKind::PathNotFound
+                    | V3ErrorSourceKind::ModelNotFound
+                    | V3ErrorSourceKind::TargetPoolExhausted
+                    | V3ErrorSourceKind::RuntimeFailure
+                    | V3ErrorSourceKind::ClientDisconnect
+                    | V3ErrorSourceKind::SuccessControl
+            );
     V3Error04TargetExhaustionDecision {
         local_action,
         route_pool_remaining_after_exclusion,

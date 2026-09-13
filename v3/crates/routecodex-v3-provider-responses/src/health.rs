@@ -300,10 +300,7 @@ pub enum V3ProviderHealthError {
 
 impl V3ProviderHealthStore {
     fn publish_availability_change(&self) {
-        let next = self
-            .availability_generation
-            .borrow()
-            .wrapping_add(1);
+        let next = self.availability_generation.borrow().wrapping_add(1);
         self.availability_generation.send_replace(next);
     }
 
