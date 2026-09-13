@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -29,6 +30,14 @@ async function startChild(stateDirectory, socketPath, graphHash = 'graph-a') {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       await fs.access(socketPath);
+      await new Promise((resolve, reject) => {
+        const probe = net.createConnection(socketPath);
+        probe.once('connect', () => {
+          probe.destroy();
+          resolve();
+        });
+        probe.once('error', reject);
+      });
       return processChild;
     } catch {
       if (processChild.exitCode !== null) break;
