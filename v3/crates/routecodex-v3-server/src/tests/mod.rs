@@ -3795,6 +3795,17 @@ fn responses_stream_network_error_without_error04_does_not_disconnect_transport(
 }
 
 #[test]
+fn responses_stream_network_error_with_diagnostic_only_error04_does_not_disconnect() {
+    let body = json!({"error": {"code": "network_error", "message": "network error"}});
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
+        502,
+        &["V3Error04TargetPoolExhaustion"],
+        &["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        &body,
+    ));
+}
+
+#[test]
 fn relay_chat_sse_json_projection_has_explicit_terminal_marker() {
     let frame = build_v3_openai_chat_relay_json_sse_frame(&json!({
         "id": "chatcmpl_test",
