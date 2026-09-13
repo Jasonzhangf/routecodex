@@ -75,7 +75,7 @@
       "status": "pass",
       "gap_detected": false,
       "epoch_closure_lane_status": "not_needed_by_evidence",
-      "audit_commit": "082a23b924fed77d81d53a1788ce3c853d8ee1de",
+      "audit_commit": "2c2dce50a5de59f31c1bdcbfba5ee279e8665d90",
       "source_paths": [
         "crates/routecodex-v4-node-container/src/lib.rs",
         "crates/routecodex-v4-node-container/tests/l2_epoch.rs"
@@ -84,7 +84,7 @@
         {
           "role": "closure_audit",
           "gate_id": "v4_node_container_epoch_closure_audit",
-          "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit-082a23b924fe.json"
+          "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure-audit-2c2dce50a5de.json"
         }
       ]
     }
@@ -449,7 +449,7 @@
             {
               "role": "not_needed_decision",
               "gate_id": "v4_node_container_epoch_closure_audit",
-              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-002/not-needed-decision-082a23b924fe.json"
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-002/not-needed-decision-2c2dce50a5de.json"
             }
           ]
         }

@@ -1,0 +1,35 @@
+{
+  "evidence_id": "not-needed-decision-2c2dce50a5de",
+  "issue_id": "V4-RUNTIME-002",
+  "experiment_id": "v4-runtime-002-epoch-lifecycle-2c2dce50a5de",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "source_commit": "2c2dce50a5de59f31c1bdcbfba5ee279e8665d90",
+  "execution_surface": "development_whitebox",
+  "scope": {
+    "feature_id": "V4-RUNTIME-002",
+    "module_id": "routecodex-v4-runtime"
+  },
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4_node_container_epoch_closure_audit"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "-p",
+    "routecodex-v4-node-container",
+    "--manifest-path",
+    "Cargo.toml",
+    "--locked"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-09-13T06:12:59.267Z",
+  "expires_at": "2026-09-20T06:12:59.267Z",
+  "input_hashes": [
+    "sha256:6fa49b93d686c64e7307e1f2f5e98bb17cd581a9a7969223a602d358c1ff8df8",
+    "sha256:cb520cda7c983c27645810b8ef5306fc1e1df672678d96ae3457ef8271939ec1"
+  ],
+  "scope_hash": "sha256:e4eedc580ce5dab865cedd00c808c354b713fb7eb5fbfff5a5cff85e34bbb71b"
+}
