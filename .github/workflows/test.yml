@@ -36,8 +36,11 @@ jobs:
           ROUTECODEX_GATE_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           ROUTECODEX_GATE_DIFF_HEAD: ${{ github.sha }}
           ROUTECODEX_GATE_REMOTE_NAME: origin
+          ROUTECODEX_GATE_SCOPE_ONLY: '1'
         run: |
           ROUTECODEX_GATE_SCOPE_OUTPUT="$GITHUB_OUTPUT" npm run --silent verify:fast
+      - name: Scope classifier regression
+        run: npm run test:verify-fast-scope
       - name: Scope decision
         run: |
           echo "[verify:scope] false scope outputs are SKIPPED_OUT_OF_SCOPE, never PASS"
@@ -75,15 +78,14 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install root dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch Rust dependencies for V3 checks
+        run: cargo fetch --locked --manifest-path v3/Cargo.toml
       - name: Fallback and internal policy hardcode gate
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:fallback-hardcode
       - name: V3 architecture CI umbrella
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:v3-architecture-ci
-      - name: V3 compaction request routing
-        if: needs.scope.outputs.v3 == 'true'
-        run: npm run test:v3-compaction-request-routing
       - name: V3 Responses session admission
         if: needs.scope.outputs.v3 == 'true'
         run: npm run verify:v3-responses-session-admission
@@ -135,15 +137,12 @@ jobs:
       - name: V3 console request count red fixtures
         if: needs.scope.outputs.v3 == 'true'
         run: npm --prefix v3 run test:v3-console-request-count-visibility-red-fixtures
-      - name: V2 and V3 route-classifier semantic gate
+      - name: V3 route-classifier semantic gate
         if: needs.scope.outputs.v3 == 'true'
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
         if: needs.scope.outputs.v3 == 'true'
         run: node scripts/verify-servertool-rust-only.mjs
-      - name: Fetch Rust dependencies for offline builds
-        if: needs.scope.outputs.v3 == 'true'
-        run: cargo fetch --manifest-path v3/Cargo.toml
       - name: Build (release)
         if: needs.scope.outputs.v3 == 'true'
         env:

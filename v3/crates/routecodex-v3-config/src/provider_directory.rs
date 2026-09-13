@@ -44,7 +44,7 @@ pub(crate) fn resolve_v3_provider_directory_from_authoring(
         ))
     })?;
     let (providers, provider_sources) =
-        crate::v2_compat::compile_v2_provider_directory(config_dir, &referenced_models)?;
+        crate::provider_config::compile_provider_directory(config_dir, &referenced_models)?;
     authoring.providers = providers;
     Ok(V3Config02AuthoringResolved {
         authoring,
