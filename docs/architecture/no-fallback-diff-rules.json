@@ -90,6 +90,11 @@
       "textContains": "AvailabilityState::Degraded"
     },
     {
+      "ruleId": "degrade-keyword",
+      "pathContains": "v3/crates/routecodex-v3-lifecycle/src/tests.rs",
+      "textContains": "degraded-instance"
+    },
+    {
       "ruleId": "fallback-keyword",
       "pathContains": "v3/crates/routecodex-v3-provider-responses/src/transport.rs",
       "textContains": "fallback-credit-2026-06-01"

@@ -2,8 +2,26 @@
 set -eu
 
 z40="0000000000000000000000000000000000000000"
+remote_name="${1:-origin}"
+
+verify_pushed_blob() {
+  commit="$1"
+  path="$2"
+  expected="$(git rev-parse --verify "$commit:$path" 2>/dev/null)" || {
+    echo "RouteCodex governance: pushed verifier file is missing: $path" >&2
+    exit 1
+  }
+  actual="$(git hash-object -- "$path" 2>/dev/null)" || {
+    echo "RouteCodex governance: working-tree verifier file is missing: $path" >&2
+    exit 1
+  }
+  if [ "$expected" != "$actual" ]; then
+    echo "RouteCodex governance: working-tree verifier drifted from pushed file: $path" >&2
+    exit 1
+  fi
+}
+
 while read -r local_ref local_sha remote_ref remote_sha; do
-  [ "$local_sha" = "$z40" ] && continue
   case "$remote_ref" in
     refs/heads/main|refs/heads/master)
       echo "RouteCodex governance: updates to $remote_ref are disabled. Use a clean owner worktree and a review integration path." >&2
@@ -12,11 +30,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     *)
       ;;
   esac
+  [ "$local_sha" = "$z40" ] && continue
+  if command -v npm >/dev/null 2>&1 && test -f package.json; then
+    verify_pushed_blob "$local_sha" .githooks/pre-push
+    verify_pushed_blob "$local_sha" package.json
+    verify_pushed_blob "$local_sha" scripts/verify-fast.mjs
+    ROUTECODEX_GATE_DIFF_MODE= ROUTECODEX_GATE_REMOTE_NAME="$remote_name" ROUTECODEX_GATE_DIFF_BASE="$remote_sha" ROUTECODEX_GATE_DIFF_HEAD="$local_sha" npm run --silent verify:fast
+  else
+    echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
+    exit 1
+  fi
 done
-
-if command -v npm >/dev/null 2>&1 && test -f package.json; then
-  npm run --silent verify:ci
-else
-  echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
-  exit 1
-fi

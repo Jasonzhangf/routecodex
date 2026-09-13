@@ -28,7 +28,10 @@ const mainline = readYaml('docs/architecture/v3-mainline-call-map.yml');
 const resources = readYaml('docs/architecture/v3-resource-operation-map.yml').resources ?? [];
 const resourceById = new Map(resources.map((resource) => [resource.resource_id, resource]));
 const chain = mainline.chains?.find(({ chain_id }) => chain_id === 'v3.provider_key_health_model_granularity');
-const edges = Object.groupBy(chain?.edges ?? [], ({ step_id }) => step_id);
+const edges = (chain?.edges ?? []).reduce((groups, edge) => {
+  (groups[edge.step_id] ??= []).push(edge);
+  return groups;
+}, Object.create(null));
 
 for (const stepId of [
   'v3-provider-key-health-model-01',
