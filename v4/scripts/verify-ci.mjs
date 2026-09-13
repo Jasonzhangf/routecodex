@@ -9,6 +9,10 @@ import { run } from './_common.mjs';
 
 run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
 // V4-LAYER-PREFLIGHT-END
+if (process.env.RCCV4_LOCAL_GATE === '1') {
+  console.log('[v4 verify:local] OK source/build guard');
+  process.exit(0);
+}
 // Clean-checkout CI verifies the runtime admission contract. Deployed probes
 // remain in the explicit `verify`/release entrypoint after installation.
 process.env.RCCV4_REAL_RUNTIME_ADMISSION_MODE = 'contract';

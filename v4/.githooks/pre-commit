@@ -8,4 +8,5 @@ esac
 git_local_env=$(git rev-parse --local-env-vars)
 unset $git_local_env
 cd -- "$(dirname -- "$0")/.."
+export RCCV4_LOCAL_GATE=1
 exec npm run verify:local --silent
