@@ -39,7 +39,7 @@ export function selfTestResultHasBlockingFailure(result) {
 }
 
 function codes(failures) {
-  return sortedUnique(failures.map((item) => item.code));
+  return sortedUnique(failures.filter((item) => item.severity !== 'warning').map((item) => item.code));
 }
 
 function sameCodes(actual, expected) {
