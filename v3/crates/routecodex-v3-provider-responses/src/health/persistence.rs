@@ -4,6 +4,7 @@ use crate::global_cooldown::{
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
@@ -13,7 +14,10 @@ type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64
 
 #[derive(Debug)]
 enum V3ProviderHealthPersistenceCommand {
-    Replace(V3ProviderCooldownPersistenceEntries),
+    Replace {
+        failure_class: V3ProviderCooldownFailureClass,
+        entries: V3ProviderCooldownPersistenceEntries,
+    },
     Flush(mpsc::Sender<Result<(), String>>),
 }
 
@@ -50,16 +54,28 @@ impl V3ProviderHealthPersistenceWriter {
         std::thread::Builder::new()
             .name("v3-provider-health-persistence".to_string())
             .spawn(move || {
-                let mut persisted_entries = Vec::new();
+                let mut persisted_entries = coordinator.persisted_entries();
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        V3ProviderHealthPersistenceCommand::Replace(entries) => {
-                            if entries == persisted_entries {
+                        V3ProviderHealthPersistenceCommand::Replace {
+                            failure_class,
+                            entries,
+                        } => {
+                            let replaced_classes = BTreeSet::from([failure_class]);
+                            let mut merged_entries = persisted_entries
+                                .iter()
+                                .filter(|(key, _, _)| {
+                                    !replaced_classes.contains(&key.failure_class)
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            merged_entries.extend(entries);
+                            if merged_entries == persisted_entries {
                                 continue;
                             }
-                            match coordinator.replace_entries(entries.clone()) {
+                            match coordinator.replace_entries(merged_entries.clone()) {
                                 Ok(()) => {
-                                    persisted_entries = entries;
+                                    persisted_entries = merged_entries;
                                     if let Ok(mut alarm) = writer_alarm.write() {
                                         *alarm = None;
                                     }
@@ -96,7 +112,10 @@ impl V3ProviderHealthPersistenceWriter {
     fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
         if let Err(error) = self
             .sender
-            .try_send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .try_send(V3ProviderHealthPersistenceCommand::Replace {
+                failure_class: V3ProviderCooldownFailureClass::Semantic,
+                entries,
+            })
         {
             set_persistence_alarm(
                 &self.alarm,
@@ -107,7 +126,10 @@ impl V3ProviderHealthPersistenceWriter {
 
     fn flush_snapshot(&self, entries: V3ProviderCooldownPersistenceEntries) -> Result<(), String> {
         self.sender
-            .send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .send(V3ProviderHealthPersistenceCommand::Replace {
+                failure_class: V3ProviderCooldownFailureClass::Semantic,
+                entries,
+            })
             .map_err(|error| format!("provider health persistence writer unavailable: {error}"))?;
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         self.sender
@@ -136,20 +158,19 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
-    let coordinator = persistence_path.map(|path| {
+    let mut coordinator = persistence_path.map(|path| {
         V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000)
             .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
     });
-    coordinator.map(|coordinator| {
-        let mut coordinator = coordinator;
-        let entries = coordinator.persisted_entries();
+    coordinator.as_mut().map(|coordinator| {
         coordinator
             .reset_probe_schedule_for_startup()
             .unwrap_or_else(|error| {
                 panic!("provider cooldown startup probe reset failed: {error}")
             });
+        let entries = coordinator.persisted_entries();
         (
-            V3ProviderHealthPersistenceWriter::start(coordinator),
+            V3ProviderHealthPersistenceWriter::start(coordinator.clone()),
             entries,
         )
     })
@@ -429,9 +450,62 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         assert_eq!(entries[0].0.provider_id, "provider-a");
         assert_eq!(entries[0].0.auth_alias.as_deref(), Some("key-a"));
         assert_eq!(entries[0].0.model_id.as_deref(), Some("model-a"));
+        assert_eq!(
+            entries[0].0.failure_class,
+            V3ProviderCooldownFailureClass::Semantic
+        );
         assert_eq!(entries[0].1, 120_200);
         assert_eq!(entries[0].2, 30_200);
         assert_eq!(store.persistence_alarm(), None);
+    }
+
+    #[test]
+    fn health_persistence_preserves_other_failure_classes() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+        coordinator
+            .record_failure(
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                V3ProviderCooldownFailureClass::Auth,
+                100,
+                crate::global_cooldown::V3ProviderCooldownObservation::default(),
+            )
+            .expect("seed auth cooldown");
+        let writer = V3ProviderHealthPersistenceWriter::start(coordinator);
+        let store = V3ProviderHealthStore {
+            state: Arc::new(RwLock::new(V3ProviderHealthState {
+                persistence: Some(writer),
+                ..V3ProviderHealthState::default()
+            })),
+        };
+
+        store
+            .record_provider_cooldown_failure(
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                "semantic provider failure",
+                200,
+                120_000,
+            )
+            .expect("record semantic cooldown");
+        store
+            .flush_persistence()
+            .expect("flush mixed failure classes");
+
+        let restored = V3ProviderCooldownCoordinator::load(path, 60_000)
+            .expect("load mixed provider cooldown state");
+        let entries = restored.persisted_entries();
+        assert_eq!(entries.len(), 2);
+        assert!(entries
+            .iter()
+            .any(|(key, _, _)| { key.failure_class == V3ProviderCooldownFailureClass::Auth }));
+        assert!(entries
+            .iter()
+            .any(|(key, _, _)| { key.failure_class == V3ProviderCooldownFailureClass::Semantic }));
     }
 
     #[test]

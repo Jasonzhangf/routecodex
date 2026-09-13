@@ -12,14 +12,14 @@
     {
       "output_path": "repo/.github/workflows/release.yml",
       "source_path": ".github/workflows/release.yml",
-      "source_commit": "bf50eb89472997c507b3b844651edef47576466a",
-      "sha256": "2aa39b981acc5e33495274129a2095761686b96caa1650d483b17eb6060daf2b"
+      "source_commit": "7f7af8dea0bd54ccfe06da7128a0ba6bf9ae3f01",
+      "sha256": "a0ae5bca3d9597bd159fc5cc15f1842545bbfa7b7910cbfe4629644cad69f751"
     },
     {
       "output_path": "repo/.github/workflows/test.yml",
       "source_path": ".github/workflows/test.yml",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
-      "sha256": "aa4c64b1b0c4fe081291898eb5de610b1c4a6075bdec41d255864b517246fb24"
+      "source_commit": "8e6e4be3f5e0f20a803d878f47158945401ad15d",
+      "sha256": "8c4d568cf243af30cfd184a3eb47f57d9830d39d0845dd3a6c965e8a4c4d52e6"
     },
     {
       "output_path": "repo/docs/architecture/README.md",
@@ -768,7 +768,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "56eb5c978cfc6c65cdbddf9d3cbebfeac18e230cf5dd768c10b9e8dfcdef7902"
     },
     {
@@ -936,13 +936,13 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/servertool-followup-call-graph.html",
       "source_path": "docs/architecture/wiki/html/servertool-followup-call-graph.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "57981ed9ecfa94498e4fce032f8f6a743de3a6fc50d730dafdd1d4a920816682"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/servertool-ownership-map.html",
       "source_path": "docs/architecture/wiki/html/servertool-ownership-map.html",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "4a0ed6636bd302ffad4f128e5bbba52a185d51c8b2173c762800c4c0146a02b9"
     },
     {
@@ -1116,13 +1116,13 @@
     {
       "output_path": "repo/docs/architecture/wiki/servertool-followup-call-graph.md",
       "source_path": "docs/architecture/wiki/servertool-followup-call-graph.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "ad1ac7948a944001ae2886e5bc932ac99865982a1e503c9084e769594a415270"
     },
     {
       "output_path": "repo/docs/architecture/wiki/servertool-ownership-map.md",
       "source_path": "docs/architecture/wiki/servertool-ownership-map.md",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "fdf3bcf73ceaec78893533b0f267f0c58c55a75f3054a2a07c127f978b3ebccd"
     },
     {
@@ -1440,7 +1440,7 @@
     {
       "output_path": "repo/docs/design/servertool-cli-lifecycle.md",
       "source_path": "docs/design/servertool-cli-lifecycle.md",
-      "source_commit": "58335325600d29a10ca4fbe3ffbd6eadaa0441c8",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "a50938d923a9845d94d30e0017cc6dcf76cc5d87754fd8d8f640c6f9a0379c30"
     },
     {
@@ -1452,13 +1452,13 @@
     {
       "output_path": "repo/docs/design/servertool-rust-only-architecture.md",
       "source_path": "docs/design/servertool-rust-only-architecture.md",
-      "source_commit": "3cb6b0be2dc022d46e5680898eb1ce33d6e5f798",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "515c8a889abd8662551eb49e2c755313e1886276d4b01fbf021b2984e9410e17"
     },
     {
       "output_path": "repo/docs/design/servertool-stopmessage-lifecycle.md",
       "source_path": "docs/design/servertool-stopmessage-lifecycle.md",
-      "source_commit": "16860bdb38baba9ed4e9d9949cc132149c1b6e6e",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "fb9c3c0980ae2aebfd69a1c7a5fe239472929ce6980b0dcc3ed99a638975e15e"
     },
     {
@@ -1524,7 +1524,7 @@
     {
       "output_path": "repo/docs/design/v3-servertool-center-skeleton.md",
       "source_path": "docs/design/v3-servertool-center-skeleton.md",
-      "source_commit": "b9ca11efafc64014a2aa93d904744d0fe441f1c4",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "8c9fce5bfda41695dad998cf347b6732be777efc22249ee4ed81d5cbb26c6234"
     },
     {
@@ -2850,7 +2850,7 @@
     {
       "output_path": "repo/scripts/architecture/architecture-wiki-lib.mjs",
       "source_path": "scripts/architecture/architecture-wiki-lib.mjs",
-      "source_commit": "d6998f18e4581cb2232c1d9c2cd9fbfc0dd13b1a",
+      "source_commit": "bf6be4f6d3150a372b3aae0826e95ca3b6f895d6",
       "sha256": "5ebd07f8b2f337e1b88b3a5fc1508d43112dc2a45674acd73293176130a1189c"
     },
     {
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "e9ef19e04e48ba8b00c8e0f92d91a9614b5b29e12391650eb7f955b0a2323eb3"
+  "manifest_digest": "c78e1bcc02ea48df6237b46c3690458f44feba197ab11e70401a8e3d6a674b06"
 }
