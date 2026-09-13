@@ -119,6 +119,7 @@ function classifyWorkflowScope(entries) {
 
 function isV3RootScript(relative) {
   const v3ArchitectureScripts = new Set([
+    'scripts/architecture/verify-v3-resource-map.mjs',
     'scripts/architecture/architecture-wiki-lib.mjs',
     'scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs',
     'scripts/architecture/audit-function-map-canonical-builder-spread.mjs',
@@ -177,6 +178,44 @@ function isV3RootScript(relative) {
     || relative === 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
 }
 
+function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
+  const scopes = new Set();
+  const add = (...names) => names.forEach((name) => scopes.add(name));
+  const sharedRootChanged = rootPackageChanged || paths.includes('scripts/verify-fast.mjs');
+  if (sharedRootChanged || workflowScope.v3 && workflowScope.v4) {
+    add(...[
+      'v3_architecture',
+      'v3_build',
+      'v3_provider',
+      'v3_session',
+      'v3_debug',
+      'v3_router',
+      'v3_tool',
+    ]);
+    return scopes;
+  }
+
+  if (workflowScope.v3 && paths.some((path) => /^\.github\/workflows\//u.test(path))) {
+    add('v3_architecture');
+  }
+
+  for (const path of paths) {
+    const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
+    if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
+        || isV3RootScript(path)) add('v3_architecture');
+    if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
+        || /^v3\/crates\//u.test(path)
+        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
+        || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
+    if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');
+    if (isV3Path && /(?:^|[\/_-])session(?:[\/_-]|$)|continuation/iu.test(path)) add('v3_session');
+    if (isV3Path && /(?:^|[\/_-])debug(?:[\/_-]|$)/iu.test(path)) add('v3_debug');
+    if (isV3Path && /(?:^|[\/_-])router(?:[\/_-]|$)|route-classifier/iu.test(path)) add('v3_router');
+    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)|servertool/iu.test(path)) add('v3_tool');
+  }
+  return scopes;
+}
+
 function writeChangedScopeOutputs(entries) {
   const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
   if (!outputPath) return;
@@ -185,25 +224,22 @@ function writeChangedScopeOutputs(entries) {
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
   const workflowScope = classifyWorkflowScope(entries);
   const rootPackageChanged = has(/^package(?:-lock)?\.json$/u);
-  const v3Scope = workflowScope.v3 || has(/^v3\//u)
+  const fineScopes = classifyV3FineScopes(paths, { rootPackageChanged, workflowScope });
+  const v3Scope = fineScopes.size > 0 || workflowScope.v3 || has(/^v3\//u)
     || paths.some((relative) => isV3RootScript(relative))
     || has(/^docs\/(?:architecture|design|goals|schemas)\//u)
     || rootPackageChanged;
   const values = {
     changed: paths.length > 0,
     v3: v3Scope,
-    v3_architecture: v3Scope,
-    v3_runtime: v3Scope,
-    v3_build: v3Scope,
-    v3_provider: v3Scope,
-    v3_compaction: v3Scope,
-    v3_session: v3Scope,
-    v3_timing: v3Scope,
-    v3_debug: v3Scope,
-    v3_console: v3Scope,
-    v3_router: v3Scope,
-    v3_tool: v3Scope,
-    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged,
+    v3_architecture: fineScopes.has('v3_architecture'),
+    v3_build: fineScopes.has('v3_build'),
+    v3_provider: fineScopes.has('v3_provider'),
+    v3_session: fineScopes.has('v3_session'),
+    v3_debug: fineScopes.has('v3_debug'),
+    v3_router: fineScopes.has('v3_router'),
+    v3_tool: fineScopes.has('v3_tool'),
+    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged || paths.includes('scripts/verify-fast.mjs'),
   };
 
   appendFileSync(
