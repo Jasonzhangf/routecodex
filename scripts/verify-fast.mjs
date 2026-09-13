@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 const root = process.cwd();
 const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
@@ -60,6 +60,37 @@ function deletedFiles() {
   return git(['--name-only'], 'D').split('\n').map((file) => file.trim()).filter(Boolean);
 }
 
+function writeChangedScopeOutputs(paths) {
+  const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
+  if (!outputPath) return;
+
+  const has = (pattern) => paths.some((relative) => pattern.test(relative));
+  const ciControl = has(/^\.github\/workflows\//u);
+  const v3Scope = ciControl || has(/^(?:v3\/|scripts\/|docs\/architecture\/)/u)
+    || has(/^package(?:-lock)?\.json$/u);
+  const values = {
+    changed: paths.length > 0,
+    v3: v3Scope,
+    v3_architecture: v3Scope,
+    v3_runtime: v3Scope,
+    v3_build: v3Scope,
+    v3_provider: v3Scope,
+    v3_compaction: v3Scope,
+    v3_session: v3Scope,
+    v3_timing: v3Scope,
+    v3_debug: v3Scope,
+    v3_console: v3Scope,
+    v3_router: v3Scope,
+    v3_tool: v3Scope,
+    v4: has(/^v4\//u) || ciControl,
+  };
+
+  appendFileSync(
+    outputPath,
+    Object.entries(values).map(([key, value]) => `${key}=${value ? 'true' : 'false'}\n`).join(''),
+  );
+}
+
 function contentFor(relative, commit) {
   if (commit) return execFileSync('git', ['show', `${commit}:${relative}`], { cwd: root, encoding: 'utf8' });
   if (staged) return execFileSync('git', ['show', `:${relative}`], { cwd: root, encoding: 'utf8' });
@@ -70,6 +101,50 @@ function contentFor(relative, commit) {
 function fail(message) {
   process.stderr.write(`[verify:fast] FAIL ${message}\n`);
   process.exit(1);
+}
+
+function affectedCargoPackages(rustFiles) {
+  let metadata;
+  try {
+    metadata = JSON.parse(
+      execFileSync(
+        'cargo',
+        ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
+        },
+      ),
+    );
+  } catch (error) {
+    process.stderr.write(
+      `[verify:fast] WARN cargo metadata unavailable; skipped affected Rust compile check: ${error.message}\n`,
+    );
+    return [];
+  }
+  const packages = (metadata.packages ?? []).map((pkg) => ({
+    name: pkg.name,
+    dir: dirname(resolve(pkg.manifest_path)),
+  }));
+  const affected = new Set();
+  const unmatched = [];
+  for (const file of rustFiles) {
+    const absolute = resolve(root, file);
+    let best = null;
+    for (const pkg of packages) {
+      const path = relative(pkg.dir, absolute);
+      if (path === '' || (!path.startsWith('..') && !isAbsolute(path))) {
+        if (!best || pkg.dir.length > best.dir.length) best = pkg;
+      }
+    }
+    if (best) affected.add(best.name);
+    else unmatched.push(file);
+  }
+  if (unmatched.length > 0) {
+    process.stderr.write(`[verify:fast] WARN Rust file(s) not owned by a v3 Cargo package: ${unmatched.join(', ')}\n`);
+  }
+  return [...affected].sort();
 }
 
 try {
@@ -89,6 +164,10 @@ try {
 const entries = changedEntries();
 const deleted = deletedFiles();
 const skippedFullCi = '[verify:ci] SKIPPED_FOR_REPAIR (not run)';
+if (process.env.ROUTECODEX_GATE_SCOPE_OUTPUT && !staged && (!base || !head)) {
+  fail('changed-scope base/head is missing; refusing empty CI scope');
+}
+writeChangedScopeOutputs([...new Set([...entries.map(({ path }) => path), ...deleted])]);
 if (entries.length === 0 && deleted.length === 0) {
   process.stdout.write(`[verify:fast] PASS no changed files; ${skippedFullCi}\n`);
   process.exit(0);
@@ -134,4 +213,32 @@ for (const { commit, path: relative } of entries) {
   }
 }
 
-process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; affected Rust compile remains in build/affected-test scope\n`);
+const changedRustFiles = [
+  ...new Set([
+    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
+    ...deleted.filter((path) => path.endsWith('.rs')),
+  ]),
+];
+if (changedRustFiles.length > 0) {
+  const affectedPackages = affectedCargoPackages(changedRustFiles);
+  if (affectedPackages.length > 0) {
+    const cargoArgs = [
+      'check',
+      '--locked',
+      ...affectedPackages.flatMap((name) => ['-p', name]),
+      '--manifest-path',
+      'v3/Cargo.toml',
+    ];
+    try {
+      execFileSync('cargo', cargoArgs, {
+        cwd: root,
+        env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
+        stdio: 'inherit',
+      });
+    } catch (error) {
+      fail(`affected cargo check failed (${affectedPackages.join(', ')}): ${error.status ?? error.message}`);
+    }
+  }
+}
+
+process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; affected Rust compile checked\n`);

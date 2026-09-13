@@ -1,92 +1,66 @@
-# Servertool CLI Lifecycle
+# ServerTool CLI Lifecycle
 
 ## Scope
 
-`servertool CLI` is the client-visible execution path for RouteCodex servertools that should run through the normal client tool loop. `apply_patch` is excluded and remains native/freeform client tooling.
+This contract covers ordinary RouteCodex servertools that are projected to
+the client and executed through the normal tool loop. `apply_patch` remains a
+native/freeform client tool and is excluded. Stopless, `reasoningStop`, and
+`stop_message_auto` are retired and are not CLI tools in this lifecycle.
 
-## State Machine
+## State machine
 
 ```text
 model response
-  |
-  v
-[S0 candidate]
-  - resp_chatprocess detects servertool tool_call or stopless auto hook
-  |
-  v
-[S1 projected]
-  - response is projected to assistant tool_call:
-    tool: exec_command
-    cmd: routecodex hook run <toolName> --input-json '<json>'
-  - reasoning carries the full stop/servertool summary
-  - content remains empty
-  |
-  v
-[S2 client executed]
-  - Codex client executes exec_command normally
-  - routecodex CLI prints one JSON object to stdout
-  |
-  v
-[S3 tool result returned]
-  - client sends stdout back as ordinary exec_command tool result
-  - RouteCodex does not rename, restore, or ticket-match the result
-  |
-  v
-[S4 next model turn]
-  - model consumes normal tool result
-  - stopless CLI result must not trigger another stop_message_auto projection in the same lifecycle
+  -> Resp03 identifies a registered client-exec servertool
+  -> response projects an assistant exec_command tool call
+  -> Codex client executes the public RouteCodex CLI
+  -> one JSON result returns as the ordinary tool result
+  -> the next model turn consumes that result
 ```
 
-## CLI Input Contract
+The projection preserves the original tool call id. RouteCodex does not
+re-enter the pipeline, rename the result, or create a servertool-specific
+response exit. The normal request/response Chat Process and continuation
+boundaries remain the only owners of history and control state.
 
-Command:
+## CLI input contract
 
 ```text
-routecodex hook run <toolName> --input-json '<json-object>'
+routecodex servertool run <toolName> --input-json '<json-object>'
 ```
 
-Common fields:
+The input must be a JSON object containing only the registered tool's
+business fields. Hidden tickets, session lookups, prompt text, RouteCodex
+control state, and implicit fallback metadata are forbidden.
 
-- `flowId`: servertool flow id when invoked from an auto flow.
-- Tool-specific fields are passed as JSON object fields; no ticket, hidden handle, or metadata lookup is allowed.
-- Only protocol-independent continuation may be persisted outside the current request/tool roundtrip. Ordinary stopless CLI projection must not introduce writeback files or sessionDir identity coupling.
+## CLI output contract
 
-`stop_message_auto` fields:
+CLI stdout is one JSON object describing the validated client-exec projection
+and its public command. It is not the business operation's execution result.
+It must not contain internal runtime carriers, provider/auth/routing state, or
+unregistered control fields. The client returns this projection output
+unchanged as the normal tool result; request-side governance validates the
+registered call/result pair before the next provider turn.
 
-- `flowId`: must be `stop_message_flow`.
-- `repeatCount`: current consecutive stop count after this projection is consumed.
-- `maxRepeats`: active stopless repeat cap.
-- `continuationPrompt`, `stdoutPreview`, schema guidance, and full internal input are forbidden in client-visible CLI input.
+## Guards and ownership
 
-## CLI Output Contract
-
-CLI stdout is a single JSON object:
-
-```json
-{
-  "ok": true,
-  "kind": "stop_message_auto",
-  "tool": "stop_message_auto",
-  "summary": "stopless continuation ready",
-  "repeatCount": 1,
-  "maxRepeats": 3
-}
-```
-
-The stdout object is intentionally ordinary `exec_command` output. It is not remapped to private servertool metadata and must not echo prompt text, schema guidance, preview text, or full input.
-
-## Guards
-
-- If current request history already contains a `stop_message_auto` CLI tool result, stopless must not project another `stop_message_auto` call for that same lifecycle.
-- The guard only scans tool-result-like records (`function_call_output`, `tool_result`, `tool_message`, or `role=tool`) and must not trigger on tool declarations or ordinary JSON fields.
-- Unsupported CLI tool names fail fast.
-- CLI input must be a JSON object.
-- Request-side injection owns the heuristic continuation prompt based on state; CLI projection only carries status.
+- Unsupported tool names and non-object input fail explicitly.
+- Servertool request hooks own call/result pairing and registered input
+  governance at Req04.
+- Servertool response hooks own registered response projection at Resp03.
+- SSE remains framing/backpressure/closeout transport and owns no servertool
+  semantics.
+- Hook failures remain observable and must not be converted to a successful
+  response or used to block RouteCodex startup when the independent hooks
+  sidecar is unavailable.
 
 ## Verification
 
-- Projection contract: `tests/servertool/execution-stage-shell.spec.ts`
-- CLI command contract: `tests/cli/servertool-command.spec.ts`
-- Rust-only executor gate: `npm run verify:servertool-rust-only`
-- Lifecycle blackbox: `tests/server/handlers/responses-handler.servertool-cli-projection.blackbox.spec.ts`
-- Old restoration removal: `tests/servertool/servertool-cli-result-restore.spec.ts`
+- focused servertool request/response governance tests;
+- CLI input/output contract tests;
+- Rust-only servertool owner and fixed-hook placement gates;
+- controlled JSON/SSE tool-loop replay through the normal response exit.
+
+The independent `codex-hooks` framework owns the official Stop hook, timer
+hooks, and future memory hooks. Those hooks use the CodexApp input interface
+for wake-up and are not implemented by this RouteCodex servertool CLI.
