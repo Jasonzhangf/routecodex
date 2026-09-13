@@ -169,7 +169,6 @@ for (const [owner, text, phrases] of [
   [configTestPath, configTests, [
     'continuation_labels_do_not_block_http_responses_config',
     'gpt_responses_models_do_not_publish_continuation_as_implicit_capability',
-    'v2_compat_projects_responses_websocket_v2_transport_without_implicit_continuation_capabilities',
     'HTTP transport cannot declare websocket_v2_url',
     'websocket_v2_url is required',
   ]],

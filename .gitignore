@@ -175,3 +175,4 @@ __ROUTECODEX_NO_SESSION_DIR_OVERRIDE__/
 
 # playground is a local experiment workspace (never versioned)
 /playground/
+node_modules

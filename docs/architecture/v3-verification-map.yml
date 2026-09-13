@@ -100,7 +100,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-config-mgmt
   - v3/crates/routecodex-v3-admin
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-cli/src/init.rs
   design:
