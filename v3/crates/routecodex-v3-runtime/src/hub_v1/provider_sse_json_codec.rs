@@ -139,6 +139,34 @@ fn normalize_v3_responses_function_call_arguments_for_event(
         if object.get("type").and_then(Value::as_str) != Some("function_call") {
             return Ok(());
         }
+        // Providers using a Chat-compatible Responses endpoint may return the
+        // client-side MCP discovery call as a generic function_call. Restore
+        // the native Responses control item before the client router sees it;
+        // otherwise Codex dispatches ToolPayload::Function to the tool_search
+        // handler, which rejects it as an unsupported payload. Only the
+        // reserved name is converted, and only when arguments are a complete
+        // JSON object; partial added events remain function_call until done.
+        if object.get("name").and_then(Value::as_str) == Some("tool_search") {
+            let arguments = object.get("arguments").cloned();
+            let parsed = match arguments {
+                Some(Value::Object(arguments)) => Some(Value::Object(arguments)),
+                Some(Value::String(text)) if !text.trim().is_empty() => {
+                    serde_json::from_str::<Value>(&text).ok()
+                }
+                _ => None,
+            };
+            if let Some(Value::Object(arguments)) = parsed {
+                object.insert(
+                    "type".to_owned(),
+                    Value::String("tool_search_call".to_owned()),
+                );
+                object.insert("arguments".to_owned(), Value::Object(arguments));
+                object.insert("execution".to_owned(), Value::String("client".to_owned()));
+                object.remove("name");
+                normalized = true;
+                return Ok(());
+            }
+        }
         let Some(arguments) = object.get_mut("arguments") else {
             if partial_function_call {
                 object.insert("arguments".to_owned(), Value::String(String::new()));
@@ -1673,6 +1701,24 @@ mod provider_sse_json_codec_tests {
             value["response"]["metadata"]["shadow"]["arguments"],
             serde_json::json!({"keep":"object"})
         );
+    }
+
+    #[test]
+    fn responses_tool_search_function_call_is_restored_to_native_client_item() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"search_1","name":"tool_search","arguments":"{\"query\":\"mcpx workspace\",\"limit\":5}"}]}}"#,
+            Some("response.completed"),
+        )
+        .expect("tool_search function call must normalize");
+        let value: Value = serde_json::from_str(&data).expect("normalized JSON");
+        let item = &value["response"]["output"][0];
+        assert_eq!(item["type"], "tool_search_call");
+        assert_eq!(item["execution"], "client");
+        assert_eq!(item["call_id"], "search_1");
+        assert_eq!(item["arguments"]["query"], "mcpx workspace");
+        assert_eq!(item["arguments"]["limit"], 5);
+        assert!(item.get("name").is_none());
     }
 
     #[test]
