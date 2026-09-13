@@ -30,6 +30,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install scope dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Fetch Rust dependencies for scope compile
+        run: cargo fetch --locked --manifest-path v3/Cargo.toml
       - name: Changed-path fast gate and scope classification
         id: changed
         env:
