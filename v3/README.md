@@ -33,8 +33,8 @@ ROUTECODEX_SKIP_AUTO_BUMP=1 npm run build:base
 - `v3/` is active production source.
 - V2 retired source is not present in this repository and must not be restored
   as an active runtime, build, package, or default test surface.
-- V3-owned compatibility readers such as `v2_compat.rs` and support for
-  `config.v2.toml` remain active inside V3. They translate legacy config input
-  into V3 contracts and must not be moved into the archive.
+- V3-owned provider config codec `provider_config.rs` supports the current
+  `provider/<id>/config.v2.toml` directory format. The retired V2 root
+  config compiler and V2 runtime are not supported.
 - Do not add new top-level `src/v2`, `tests/v2`, `scripts/v2-consistency`, or
   `docs/v2-architecture` trees.

@@ -11,14 +11,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const repo = process.cwd();
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const verifier = resolve(
   repo,
-  "scripts/architecture/verify-v3-debug-payload-budget.mjs",
+  "v3/scripts/architecture/verify-v3-debug-payload-budget.mjs",
 );
 const copied = [
   "package.json",
@@ -155,6 +156,7 @@ for (const testCase of cases) {
     writeFileSync(target, mutated);
     const result = spawnSync(process.execPath, [verifier], {
       cwd: root,
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
       encoding: "utf8",
     });
     const output = `${result.stdout || ""}\n${result.stderr || ""}`;

@@ -100,7 +100,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-config-mgmt
   - v3/crates/routecodex-v3-admin
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-cli/src/init.rs
   design:
@@ -2062,7 +2062,6 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration -- --test-threads=1 --nocapture
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
-  - npm run test:v3-config-v2-compat-5555
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay -- --nocapture
   - npm run test:v3-relay-payload-copy-runtime-probes
   - npm run verify:v3-relay-payload-copy-budget

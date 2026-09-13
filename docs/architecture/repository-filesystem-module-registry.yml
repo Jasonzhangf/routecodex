@@ -109,7 +109,7 @@ modules:
   - v3/crates/routecodex-v3-config/tests/user_config_contract.rs
   - v3/crates/routecodex-v3-config/src/internal.toml
   - v3/crates/routecodex-v3-config/src/internal.rs
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-config/src/store.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-cli/src/main.rs
