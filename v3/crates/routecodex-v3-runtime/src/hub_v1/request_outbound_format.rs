@@ -224,7 +224,21 @@ fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> 
             flattened.push(Value::Object(direct));
         }
     }
-    *tools = flattened;
+    let mut deduped = Vec::with_capacity(flattened.len());
+    for tool in flattened {
+        let duplicate = tool
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(|name| {
+                deduped.iter().any(|existing: &Value| {
+                    existing.get("name").and_then(Value::as_str) == Some(name)
+                })
+            });
+        if !duplicate {
+            deduped.push(tool);
+        }
+    }
+    *tools = deduped;
     Ok(())
 }
 
