@@ -125,6 +125,38 @@ function evidenceRecord({
   };
 }
 
+const REUSABLE_EVIDENCE_FIELDS = [
+  'evidence_id',
+  'issue_id',
+  'experiment_id',
+  'phase',
+  'kind',
+  'source_commit',
+  'execution_surface',
+  'scope',
+  'producer',
+  'command_argv',
+  'exit_status',
+  'result',
+  'input_hashes',
+  'scope_hash',
+];
+
+function reusableEvidenceRecord(existing, expected, now) {
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) return false;
+  const identityMatches = REUSABLE_EVIDENCE_FIELDS.every((field) =>
+    canonicalJson(existing[field]) === canonicalJson(expected[field]));
+  if (!identityMatches) return false;
+  const createdAt = Date.parse(existing.created_at ?? '');
+  const expiresAt = Date.parse(existing.expires_at ?? '');
+  return Number.isFinite(createdAt)
+    && Number.isFinite(expiresAt)
+    && createdAt <= now
+    && createdAt <= expiresAt
+    && expiresAt - createdAt <= MAX_EVIDENCE_TTL_MS
+    && now <= expiresAt;
+}
+
 function extractCommit(repo, commit) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-baseline-replay-'));
   const archive = spawnSync('git', ['archive', commit, '--', 'v4'], {
@@ -241,25 +273,6 @@ export function produceFeatureLayerEvidence({
   const closureEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${closureEvidenceId}.json`;
   const decisionEvidencePath = `docs/evidence/feature-completion/M1/${RUNTIME_FEATURE_ID}/${decisionEvidenceId}.json`;
   const allPaths = [baselineEvidencePath, closureEvidencePath, decisionEvidencePath];
-  for (const relativePath of allPaths) {
-    if (fs.existsSync(path.join(projectRoot, relativePath))) {
-      throw new Error(`EVIDENCE_RECORD_EXISTS:${relativePath}`);
-    }
-  }
-
-  const baselineWorkspace = extractCommit(repositoryRoot, baselineCommit);
-  try {
-    command(baselineGate.argv[0], baselineGate.argv.slice(1), baselineWorkspace.root, {
-      env: { CARGO_TARGET_DIR: path.join(baselineWorkspace.directory, 'target') },
-    });
-  } finally {
-    fs.rmSync(baselineWorkspace.directory, { recursive: true, force: true });
-  }
-  const closureReceipt = truth.runGate(closureGate.argv);
-  if (closureReceipt.status !== 0) {
-    throw new Error(`CLOSURE_GATE_FAILED:${closureReceipt.status}\n${closureReceipt.stderr}${closureReceipt.stdout}`);
-  }
-
   const producer = { adapter: 'cargo', identity: closureGate.producer.identity };
   const baselineEvidence = {
     evidence_id: baselineEvidenceId,
@@ -305,6 +318,35 @@ export function produceFeatureLayerEvidence({
     truth,
     createdAt,
   });
+  const expectedEvidence = [baselineEvidence, closureEvidence, decisionEvidence];
+  const reusable = expectedEvidence.map((expected, index) => {
+    const relativePath = allPaths[index];
+    const file = path.join(projectRoot, relativePath);
+    if (!fs.existsSync(file)) return false;
+    const existing = readJson(file);
+    if (!reusableEvidenceRecord(existing, expected, now)) {
+      throw new Error(`EVIDENCE_RECORD_EXISTS:${relativePath}`);
+    }
+    return true;
+  });
+
+  if (!reusable[0]) {
+    const baselineWorkspace = extractCommit(repositoryRoot, baselineCommit);
+    try {
+      command(baselineGate.argv[0], baselineGate.argv.slice(1), baselineWorkspace.root, {
+        env: { CARGO_TARGET_DIR: path.join(baselineWorkspace.directory, 'target') },
+      });
+    } finally {
+      fs.rmSync(baselineWorkspace.directory, { recursive: true, force: true });
+    }
+  }
+  let closureReceipt = null;
+  if (!reusable[1] || !reusable[2]) {
+    closureReceipt = truth.runGate(closureGate.argv);
+    if (closureReceipt.status !== 0) {
+      throw new Error(`CLOSURE_GATE_FAILED:${closureReceipt.status}\n${closureReceipt.stderr}${closureReceipt.stdout}`);
+    }
+  }
   const nextManifest = manifestProjection(
     manifest,
     baselineEvidencePath,
@@ -312,9 +354,9 @@ export function produceFeatureLayerEvidence({
     decisionEvidencePath,
     head,
   );
-  writeExclusive(path.join(projectRoot, baselineEvidencePath), baselineEvidence);
-  writeExclusive(path.join(projectRoot, closureEvidencePath), closureEvidence);
-  writeExclusive(path.join(projectRoot, decisionEvidencePath), decisionEvidence);
+  if (!reusable[0]) writeExclusive(path.join(projectRoot, baselineEvidencePath), baselineEvidence);
+  if (!reusable[1]) writeExclusive(path.join(projectRoot, closureEvidencePath), closureEvidence);
+  if (!reusable[2]) writeExclusive(path.join(projectRoot, decisionEvidencePath), decisionEvidence);
   writeExclusive(`${manifestPath}.next`, nextManifest);
   fs.renameSync(`${manifestPath}.next`, manifestPath);
   return {
@@ -322,12 +364,15 @@ export function produceFeatureLayerEvidence({
     source_commit: head,
     baseline_commit: baselineCommit,
     evidence_paths: allPaths,
-    closure_receipt: sha256(canonicalJson({
-      argv: closureReceipt.status === 0 ? closureGate.argv : [],
-      status: closureReceipt.status,
-      stdout: closureReceipt.stdout,
-      stderr: closureReceipt.stderr,
-    })),
+    closure_receipt: closureReceipt
+      ? sha256(canonicalJson({
+        argv: closureGate.argv,
+        status: closureReceipt.status,
+        stdout: closureReceipt.stdout,
+        stderr: closureReceipt.stderr,
+      }))
+      : null,
+    reused_evidence_paths: allPaths.filter((_, index) => reusable[index]),
   };
 }
 
