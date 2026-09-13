@@ -6,25 +6,35 @@
  * 1. function map feature v3.servertool_center_skeleton exists with the
  *    servertool.state_machine_control resource and the 6 skeleton mainline edges.
  * 2. Servertool hooks are called only from fixed governance nodes:
- *    request hooks (apply_v3_stopless_request_hook_at_req04,
- *    apply_v3_web_search_request_hook_at_req04) only from relay_request.rs
- *    (Req04) and the direct kernel; response hooks
- *    (apply_v3_tool_call_servertool_hook_at_resp03,
- *    apply_v3_stop_servertool_hook_at_resp03) only from
+ *    request hooks (apply_v3_web_search_request_hook_at_req04) only from
+ *    relay_request.rs (Req04) and the direct kernel; response hooks
+ *    (apply_v3_tool_call_servertool_hook_at_resp03) only from
  *    resp_chat_process_03_governed.rs (Resp03) and the direct kernel.
  * 3. SSE stays transport-only: the SSE crate must not reference servertool or
- *    stopless control symbols, and no SSE stream wrapper may parse control
- *    frames (wrap_direct_sse_stopless_control_stream must not reappear).
+ *    control symbols, and no SSE stream wrapper may parse control frames.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = process.cwd();
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const admissionRoot = path.resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const sourceRoot = process.env.ROUTECODEX_V3_SOURCE_ROOT;
+const admissionWorkspace = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1';
+const root = sourceRoot
+  ? path.resolve(sourceRoot)
+  : admissionWorkspace
+    ? path.dirname(v3Root)
+    : admissionRoot;
+const rewriteRel = (rel) => {
+  if (rel.startsWith('v3/')) return path.join(v3Root, rel.slice('v3/'.length));
+  return path.join(root, rel);
+};
 const failures = [];
 const read = (file) => {
   try {
-    return fs.readFileSync(path.join(root, file), 'utf8');
+    return fs.readFileSync(rewriteRel(file), 'utf8');
   } catch (error) {
     failures.push(`${file}: cannot read: ${error.message}`);
     return '';
@@ -74,10 +84,10 @@ if (!resource) {
   failures.push(`resource map: ${resourceId} binding_status must be design or anchored`);
 }
 
-const requestHooks = ['apply_v3_stopless_request_hook_at_req04', 'apply_v3_web_search_request_hook_at_req04'];
-const responseHooks = ['apply_v3_tool_call_servertool_hook_at_resp03', 'apply_v3_stop_servertool_hook_at_resp03'];
-const fixedRequestCallers = ['relay_request.rs', 'kernel/direct_stopless.rs', 'kernel.rs'];
-const fixedResponseCallers = ['resp_chat_process_03_governed.rs', 'kernel/direct_stopless.rs', 'kernel.rs'];
+const requestHooks = ['apply_v3_web_search_request_hook_at_req04'];
+const responseHooks = ['apply_v3_tool_call_servertool_hook_at_resp03'];
+const fixedRequestCallers = ['relay_request.rs', 'kernel/direct_web_search.rs', 'kernel.rs'];
+const fixedResponseCallers = ['resp_chat_process_03_governed.rs', 'kernel/direct_web_search.rs', 'kernel.rs'];
 
 for (const hook of requestHooks) {
   const hookText = read('v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs');
@@ -92,20 +102,20 @@ for (const hook of responseHooks) {
   }
 }
 
-const allRuntime = fs.readdirSync(path.join(root, 'v3/crates/routecodex-v3-runtime/src'), { recursive: true })
+const runtimeRoot = rewriteRel('v3/crates/routecodex-v3-runtime/src');
+const allRuntime = fs.readdirSync(runtimeRoot, { recursive: true })
   .filter((file) => file.endsWith('.rs'))
-  .map((file) => path.join(root, 'v3/crates/routecodex-v3-runtime/src', file));
-const runtimeRoot = path.join(root, 'v3/crates/routecodex-v3-runtime/src');
+  .map((file) => path.join(runtimeRoot, file));
 for (const file of allRuntime) {
   const rel = path.relative(root, file);
   // Test submodules (e.g. servertool_hooks_tests.rs, hub_v1/tests.rs) invoke the
   // hook under test via `use super::*`; they are not production call edges.
   if (rel.endsWith('_tests.rs') || rel.endsWith('/tests.rs')) continue;
   const content = fs.readFileSync(file, 'utf8');
-  if (rel === 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs') continue;
+  if (file === rewriteRel('v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs')) continue;
   for (const hook of [...requestHooks, ...responseHooks]) {
     if (!content.includes(hook)) continue;
-    const allowed = hook.startsWith('apply_v3_stopless_request') || hook.startsWith('apply_v3_web_search_request')
+    const allowed = hook.startsWith('apply_v3_web_search_request')
       ? fixedRequestCallers
       : fixedResponseCallers;
     if (!allowed.some((caller) => rel.includes(caller))) {
@@ -114,12 +124,12 @@ for (const file of allRuntime) {
   }
 }
 
-const sseDir = path.join(root, 'v3/crates/routecodex-v3-sse');
+const sseDir = rewriteRel('v3/crates/routecodex-v3-sse');
 if (fs.existsSync(sseDir)) {
   const sseFiles = fs.readdirSync(sseDir, { recursive: true }).filter((f) => f.endsWith('.rs'));
   for (const file of sseFiles) {
     const content = fs.readFileSync(path.join(sseDir, file), 'utf8');
-    for (const controlSymbol of ['stopless', 'servertool', 'reasoningStop', 'wrap_direct_sse_stopless']) {
+    for (const controlSymbol of ['servertool']) {
       if (content.toLowerCase().includes(controlSymbol.toLowerCase())) {
         failures.push(`sse crate ${file}: SSE must stay transport-only, found control symbol ${controlSymbol}`);
       }
@@ -128,10 +138,6 @@ if (fs.existsSync(sseDir)) {
 }
 
 const helpers = read('v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs');
-if (helpers.includes('wrap_direct_sse_stopless_control_stream')) {
-  failures.push('direct_runtime_helpers.rs: SSE stopless stream wrapper must not reappear');
-}
-
 if (failures.length) {
   console.error('[verify:v3-servertool-center-skeleton] failed');
   for (const failure of failures) console.error(`- ${failure}`);

@@ -139,7 +139,7 @@ semantic_registry:
     type: enum_auto_current_turn_all_turns
     projections:
       responses: reasoning.context
-      openai_chat: unmapped
+      openai_chat: consumed_source_roundtrip_only_no_wire
       anthropic: unmapped
       gemini: unmapped
   - semantic_id: request.reasoning_mode

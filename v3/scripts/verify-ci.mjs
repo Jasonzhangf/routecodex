@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { run } from './_common.mjs';
 
-run('node', ['scripts/verify.mjs']);
-run('node', ['scripts/verify-red.mjs']);
-run('node', ['scripts/test.mjs']);
-run('node', ['scripts/build.mjs']);
+await run('node', ['scripts/verify.mjs'], { timeoutMs: 15 * 60_000 });
+await run('node', ['scripts/verify-red.mjs'], { timeoutMs: 15 * 60_000 });
+await run('node', ['scripts/test.mjs'], { timeoutMs: 45 * 60_000 });
+await run('node', ['scripts/build.mjs'], { timeoutMs: 25 * 60_000 });
 process.stdout.write('[v3 verify:ci] PASS\n');

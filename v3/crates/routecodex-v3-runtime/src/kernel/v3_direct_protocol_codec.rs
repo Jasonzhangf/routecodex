@@ -7,7 +7,7 @@
 //! - 路由事实（`router_facts`）
 //! - direct 策略（`Policy` / `run_route`）
 //! - 出站 wire 与 transport（`run_request_projection` / `run_provider_transport`）
-//! - 协议控制面（续接/stopless 等，responses 实现，chat 等默认无）
+//! - 协议控制面（续接与 web search 等，responses 实现，chat 等默认无）
 //! 骨架执行流程（路由 -> 选择 -> 决策 -> 策略 -> wire -> transport -> 发送 ->
 //! 响应投影 -> 客户端帧 + 失败策略循环）在 `crate::kernel::execute_v3_direct_runtime_kernel_core`
 //! 中只实现一份。
@@ -148,7 +148,7 @@ pub trait V3DirectProtocolCodec {
         Ok(None)
     }
 
-    /// 协议控制面：发送前的控制准备（responses 的 stopless/websearch；
+    /// 协议控制面：发送前的控制准备（responses 的 web search；
     /// chat 等默认无）。返回 false 表示骨架应跳过控制准备。
     fn prepare_before_send(
         control: &mut Self::Control,
@@ -339,6 +339,20 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         _trace: &mut Vec<&'static str>,
     ) -> Result<bool, V3Error01SourceRaised> {
         let enabled = crate::hub_v1::v3_tool_thinking_enabled_for_server(manifest, server_id);
+        let memory_enabled = manifest.memory_raw_capture.enabled;
+        if memory_enabled && !standardized.memory_raw_capture_guidance_injected {
+            routecodex_v3_agent_memory::inject_memory_raw_capture_guidance(&mut standardized.body)
+                .map_err(|error| {
+                    build_v3_error_01_source_raised_internal(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3Req04StandardizedResponses",
+                        "direct_memory_raw_capture_guidance_injection_failed",
+                        error,
+                        V3InternalErrorCode::V3Req04StandardizedResponses,
+                    )
+                })?;
+            standardized.memory_raw_capture_guidance_injected = true;
+        }
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
         }
@@ -378,7 +392,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
                     V3InternalErrorCode::V3Req04StandardizedResponses,
                 )
             })?;
-        Ok(enabled)
+        Ok(enabled || memory_enabled)
     }
 
     fn run_error(

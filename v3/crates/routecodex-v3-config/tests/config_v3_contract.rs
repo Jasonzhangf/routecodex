@@ -212,13 +212,7 @@ fn parses_full_config_v3_without_interpreting_targets() {
     let manifest = compile_v3_config_05_manifest(authoring).unwrap();
 
     assert_eq!(manifest.version, 3);
-    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
     assert_eq!(manifest.features.get("tool_thinking"), Some(&false));
-    assert_eq!(
-        manifest.features.get("responses_direct_stopless_center"),
-        None,
-        "Relay StoplessCenter default must not enable Direct stopless"
-    );
     assert_eq!(manifest.servers.len(), 2);
     assert_eq!(manifest.servers["primary"].port, 4444);
     assert_eq!(manifest.servers["secondary"].port, 4445);
@@ -633,44 +627,6 @@ fn omitted_snapshot_direct_preserves_config_compatibility() {
 }
 
 #[test]
-fn stopless_center_compiled_default_preserves_global_and_server_overrides() {
-    let explicit_global_false =
-        FULL_CONFIG.replace("[features]\n", "[features]\nstopless_center = false\n");
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&explicit_global_false).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
-
-    let server_false = FULL_CONFIG.replace(
-        "[servers.primary]\n",
-        "[servers.primary]\nfeatures = { stopless_center = false }\n",
-    );
-    let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&server_false).unwrap())
-            .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&true));
-    assert_eq!(
-        manifest.servers["primary"].features.get("stopless_center"),
-        Some(&false)
-    );
-
-    let server_true_over_global_false = explicit_global_false.replace(
-        "[servers.primary]\n",
-        "[servers.primary]\nfeatures = { stopless_center = true }\n",
-    );
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(&server_true_over_global_false).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest.features.get("stopless_center"), Some(&false));
-    assert_eq!(
-        manifest.servers["primary"].features.get("stopless_center"),
-        Some(&true)
-    );
-}
-
-#[test]
 fn tool_thinking_compiled_feature_preserves_explicit_global_toggle() {
     let enabled = FULL_CONFIG.replace("[features]\n", "[features]\ntool_thinking = true\n");
     let manifest =
@@ -831,6 +787,48 @@ fn published_manifest_is_declaration_only_and_deterministic() {
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(first.servers.len(), 2);
+}
+
+#[test]
+fn memory_raw_capture_is_disabled_by_default_and_validated_when_enabled() {
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+    assert!(!manifest.memory_raw_capture.enabled);
+    assert_eq!(
+        manifest.memory_raw_capture.output_contract,
+        "responses.output_text"
+    );
+
+    let enabled = format!(
+        r#"
+{FULL_CONFIG}
+[memory_raw_capture]
+enabled = true
+project_root = "/tmp/routecodex-memory"
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&enabled).unwrap()).unwrap();
+    assert!(manifest.memory_raw_capture.enabled);
+    assert_eq!(
+        manifest.memory_raw_capture.project_root,
+        std::path::PathBuf::from("/tmp/routecodex-memory")
+    );
+
+    let relative = enabled.replace(
+        "project_root = \"/tmp/routecodex-memory\"",
+        "project_root = \"./relative\"",
+    );
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&relative).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("absolute path"));
+
+    let bad_contract = enabled.replace("output_contract", "output_contract_placeholder");
+    let bad_contract = bad_contract.replace("output_contract_placeholder = \"placeholder\"\n", "");
+    let bad_contract = format!("{bad_contract}\noutput_contract = \"chat.text\"\n");
+    let error = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&bad_contract).unwrap())
+        .unwrap_err();
+    assert!(error.to_string().contains("responses.output_text"));
 }
 
 #[test]

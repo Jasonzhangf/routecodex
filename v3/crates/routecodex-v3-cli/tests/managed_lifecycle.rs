@@ -235,6 +235,27 @@ fn run_with_pid(binary: &str, state_root: &Path, config: &Path, command: &str) -
     (pid, output)
 }
 
+fn run_with_hooks_record(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+) -> Output {
+    managed_test_command(binary)
+        .args(["server", command, "--config"])
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
 fn run_with_timeout(
     binary: &str,
     state_root: &Path,
@@ -716,6 +737,67 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
     assert!(String::from_utf8_lossy(&already_stopped.stderr).contains("NotRunning"));
 
     scan_instance_files_for_secret(&instance_dir);
+}
+
+#[test]
+fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let daemon_config = hooks_root.join("hooksd.json");
+    let supervisor_wrapper = hooks_root.join("supervisor-wrapper");
+    let record_path = hooks_root.join("install.json");
+    fs::create_dir_all(&bin_directory).unwrap();
+    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
+    fs::write(&daemon_config, "{}").unwrap();
+    fs::write(&supervisor_wrapper, "#!/bin/sh\nexit 17\n").unwrap();
+    fs::set_permissions(&supervisor_wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "supervisor_wrapper": supervisor_wrapper,
+            "daemon_config": daemon_config,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    let status = run_with_hooks_record(binary, &state_root, &config, "status", &record_path);
+    assert!(status.status.success());
+    let status_json = last_json(&status);
+    assert_eq!(status_json["state"], "running");
+    let detail = status_json["detail"].as_str().unwrap();
+    assert!(detail.contains("hooks sidecar unavailable:"));
+    assert!(detail.contains("hooks sidecar exited before readiness"));
+    let instance_dir = single_instance_dir(&state_root);
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
 }
 
 #[test]

@@ -36,7 +36,7 @@ IDs are invalid.
 
 ## 2. Rule compiler
 
-`appsdk guide compile <project>`:
+`appsdk guide compile [project]`:
 
 1. reads the project contract;
 2. reads only declared rule sources;
@@ -55,11 +55,11 @@ worktree.
 Read-only commands:
 
 ```text
-appsdk guide init <project> --task <id> --mode <domain> [--module <id>]
-appsdk guide status <project> [--task <id>]
-appsdk guide <domain> <project> [--task <id>] [--module <id>]
-appsdk guide next <project> --task <id>
-appsdk guide close <project> --task <id>
+appsdk guide init [project] --task <id> --mode <domain> [--module <id>]
+appsdk guide status [project] [--task <id>]
+appsdk guide <domain> [project] [--task <id>] [--module <id>]
+appsdk guide next [project] --task <id>
+appsdk guide close [project] --task <id>
 ```
 
 Supported domains are `bootstrap`, `migration`, `governance-preflight`,
@@ -112,13 +112,15 @@ resources, and prints the bootstrap intake command instead of directing the
 user to compile an undeclared rule set. `guide status` returns
 `GUIDANCE_SETUP_REQUIRED`.
 
-Before initial compile, `guide init --mode bootstrap` is a special read-only
-project setup intake. It discovers only root `AGENTS.md`, the bundled AppSDK
-Skill, and direct Skill children under `skills/`, `.agents/skills/`, and
-`.codex/skills/`. Existing declared sources are included first. Symlinked,
-missing, nested, and unrelated files are not ingested. Every discovered path is
-a candidate until user approval and explicit declaration in the project
-contract.
+`guide init --mode bootstrap` is a special read-only project setup and upgrade
+intake. It works both before initial compile and after Guidance is configured.
+It discovers only root `AGENTS.md`, the installed versioned standard template,
+the bundled AppSDK Skill, and direct Skill children under `skills/`,
+`.agents/skills/`, and `.codex/skills/`. Existing declared sources are included
+first. Symlinked, missing, nested, and unrelated files are not ingested. Every
+project source remains a candidate until user approval and explicit declaration
+in the project contract. The standard template is advisory comparison material
+and is never an active rule source.
 
 Bootstrap output includes existing project/module state, candidate source paths
 and digests, Skill invocation suggestions, unresolved workflow/command/rule
@@ -130,6 +132,17 @@ explicit approval, the Agent edits project-owned AGENTS, local Skills, machine
 contracts, and the source declaration in a clean owner worktree; only then does
 `guide compile` create committed rule context.
 
+Repeated `appsdk init` refreshes `.appsdk/templates/minimal/AGENTS.md` from the
+current Bundle without overwriting the project-owned root `AGENTS.md`. A
+configured project may then request bootstrap with task `guidance-upgrade`.
+The output uses `setup_kind=template_upgrade_review`, binds the reference path,
+version, and digest, and asks the Agent to read current rules first. The
+proposal separates recommended changes, retained project rules, and declined
+template items. It writes no project, lifecycle, or task state before approval.
+The advisory reference is outside the strict SDK resource-integrity set, so its
+absence cannot block ordinary verification or unrelated delivery. `init`
+restores it on demand.
+
 `GuidanceSetupProposal` is project-level. `PlanProposal` remains task-level and
 cannot automatically modify AGENTS, Skills, machine contracts, or memory.
 
@@ -138,7 +151,7 @@ cannot automatically modify AGENTS, Skills, machine contracts, or memory.
 The agent writes JSON and submits it with:
 
 ```text
-appsdk guide plan <project> --task <id> --input <file>
+appsdk guide plan [project] --task <id> --input <file>
 ```
 
 Required proposal fields:
@@ -192,7 +205,7 @@ Scope, owner, source, manifest, or forbidden-rule drift cannot be auto-admitted.
 ## 6. Execution event ledger
 
 ```text
-appsdk guide update <project> --task <id> --input <file>
+appsdk guide update [project] --task <id> --input <file>
 ```
 
 Input:

@@ -1,0 +1,69 @@
+{
+  "task": "v3-goaichat400-client-isolation-0906",
+  "authoritative_dispatch": "m1788713589206-23",
+  "scope": "fixture/contract only in exclusive tree ./playground/g400-iso-0906. routecodex-5 integrates. Do not edit cool-0906 or cooldown owner files from this tree.",
+  "first_divergence": {
+    "relay_http_502": "cc-sol live health.enabled=false. record_provider_failure_in_session_with_policy returns health_disabled/failure_count=0/cooldown_until_ms=null before unified scoring. Request still switch_provider to goaichat and client stays 200. unavailable request_local_provider_failure is per-request failed-candidate exclusion, not request_local_compat. Every later request re-attempts cc-sol (priority 100), pays wait_ms 1s/3s/5s, then switches again.",
+    "direct_server_error": "093047022-52660-4398 is Direct (process=direct). SSE server_error overload takes V3DirectTransientRetrySame; event has failure_count=1, health_state=transient_exhausted, cooldown_until_ms still null; same provider then 201; client 200. Distinct from Relay HTTP 502."
+  },
+  "not_first_divergence": [
+    "Client HTTP 502/400 projection: all four samples client status=200.",
+    "Payload rewrite: not evidenced; do not guess content.",
+    "request_local_provider_compat: these 502s are health_disabled or transient_exhausted, not invalid_request 400 compat."
+  ],
+  "delivery_goal": {
+    "must": [
+      "After provider HTTP 502, keep 502 on internal observability/error chain only and immediately switch to an available provider. Client must never receive HTTP 502 or a wrapped 400.",
+      "When health tracking is enabled, HTTP 502 must enter unified recovery: failure_count>=1 and cooldown_until_ms set on the exact provider.key.model until ProbeSuccess.",
+      "Direct server_error retry-same may succeed on the same provider; client still 200. Do not project the internal 502."
+    ],
+    "must_not": [
+      "Treat live health.enabled=false short-circuit as proof that unified recovery is implemented.",
+      "Rewrite payload to avoid 502.",
+      "Make cooldown the reason to skip an available sibling that would keep the client at 200."
+    ]
+  },
+  "owner_binding_for_r5": {
+    "client_isolation": "v3.hub_relay_runtime_closeout",
+    "scoring_cooldown": ["v3.provider_key_health_scoring", "v3.provider_action_gate"],
+    "source_anchors": [
+      "v3/crates/routecodex-v3-provider-responses/src/health.rs record_provider_failure_in_session_with_policy health_disabled short-circuit",
+      "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs excluded -> request_local_provider_failure",
+      "v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs V3DirectTransientRetrySame"
+    ],
+    "suggested_gates": [
+      "cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test goaichat_glm_400_client_isolation -- --nocapture",
+      "npm run verify:v3-provider-action-gate",
+      "npm run test:v3-provider-session-cooldown-red-fixtures"
+    ]
+  },
+  "suggested_test_interfaces": {
+    "whitebox_relay_http_502": {
+      "entry": "execute_v3_responses_relay_runtime",
+      "shape": "cc-sol HTTP 502 then goaichat 200, health.enabled=true in the test manifest",
+      "assert": {
+        "output.status": "200, never 502",
+        "output.error_chain": "None",
+        "event.status": 502,
+        "event.action": "switch_provider",
+        "event.failure_count": ">=1",
+        "event.cooldown_until_ms": "Some",
+        "event.health_state": "not health_disabled"
+      }
+    },
+    "whitebox_direct_server_error": {
+      "entry": "execute_v3_responses_direct_runtime_kernel",
+      "shape": "cc-sol SSE server_error then same-provider 201",
+      "assert": {
+        "output.status": 200,
+        "node_trace": "contains V3DirectTransientRetrySame",
+        "client": "no HTTP 502"
+      }
+    },
+    "blackbox": {
+      "same_entry_replay": "node scripts/replay-codex-sample.mjs --sample /Volumes/extension/.rcc/codex-samples/openai-responses/ports/4444/openai-responses-router-gpt-5.5-20260906T094706938-52699-4437/request.json --dry-run provider-request --base http://127.0.0.1:4444",
+      "live_c": "exact client request through same 4444 entry. Client status must stay 200. Internal 502 must remain on observability only."
+    }
+  },
+  "r5_integration_warning": "Live cc-sol health.enabled=false will keep producing failure_count=0 even after a correct cooldown implementation unless tests enable health or the short-circuit is changed. Do not copy these live samples as a green cooldown proof."
+}

@@ -291,7 +291,7 @@ function validateRuntimeIsolationSource() {
   const appendStart = webui.indexOf('pub(crate) fn append_persisted_row(', recordStart);
   const recordObserved = webui.slice(recordStart, appendStart);
   requireValue(webui.includes('mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY)'), `${webuiObservabilityRel}: bounded single observability writer missing`);
-  requireValue(webui.includes('v3_webui_observability_read_rows_bounded(') && webui.includes('V3_WEBUI_RECENT_REQUEST_CAPACITY'), `${webuiObservabilityRel}: bounded startup load missing`);
+  requireValue(webui.includes('v3_webui_observability_read_rows_bounded_lenient(') && webui.includes('V3_WEBUI_RECENT_REQUEST_CAPACITY'), `${webuiObservabilityRel}: bounded startup load missing`);
   requireValue(recordObserved.indexOf('drop(inner);') >= 0 && recordObserved.indexOf('drop(inner);') < recordObserved.indexOf('writer.enqueue(row);'), `${webuiObservabilityRel}: observability persistence must enqueue after releasing request mutex`);
   requireValue(!recordObserved.includes('append_persisted_row(') && !recordObserved.includes('v3_webui_observability_append_row('), `${webuiObservabilityRel}: request hot path performs synchronous observability disk IO`);
   requireValue(observabilityStore.includes('pub fn v3_webui_observability_append_row(') && observabilityStore.includes('pub fn v3_webui_observability_read_rows_bounded('), `${observabilityStoreRel}: observability storage owner is incomplete`);

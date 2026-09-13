@@ -71,22 +71,23 @@ function renderSummary(data) {
   const runtime = data.runtime.managed_instance;
   const runtimeState = runtime && runtime.state ? runtime.state : "unknown";
   const healthyPorts = data.runtime.ports.filter((port) => port.healthy).length;
+  // Ablation pass: dropped the redundant "Persisted received" card and the
+  // duplicated hints; color is reserved for error states only.
   const cardsData = [
-    ["Runtime", runtimeState, runtime ? runtime.instance_id : "no instance", runtimeState === "running" ? "ok" : runtimeState === "unknown" ? "warn" : "bad"],
-    ["Ports", `${healthyPorts} / ${data.runtime.ports.length}`, "healthy / total", healthyPorts === data.runtime.ports.length ? "ok" : "warn"],
-    ["Providers", data.providers.total, `${data.providers.enabled} enabled · ${data.providers.disabled} disabled`, "ok"],
-    ["Requests (total)", data.traffic.total_requests.toLocaleString(), `daily ${data.traffic.daily_requests.toLocaleString()}`, "ok"],
-    ["Persisted received", data.traffic.persisted_received.toLocaleString(), "request records store", "ok"],
-    ["Provider errors", data.traffic.persisted_provider_errors.toLocaleString(), "request records store", data.traffic.persisted_provider_errors > 0 ? "bad" : "ok"],
-    ["Revisions", data.revisions.length, "latest 10", "ok"],
+    ["Runtime", runtimeState, runtime ? runtime.instance_id : "no instance", ""],
+    ["Ports", `${healthyPorts} / ${data.runtime.ports.length}`, "healthy / total", ""],
+    ["Providers", data.providers.total, `${data.providers.enabled} enabled · ${data.providers.disabled} disabled`, ""],
+    ["Requests (total)", data.traffic.total_requests.toLocaleString(), `daily ${data.traffic.daily_requests.toLocaleString()}`, ""],
+    ["Provider errors", data.traffic.persisted_provider_errors.toLocaleString(), data.traffic.persisted_provider_errors > 0 ? "" : "", data.traffic.persisted_provider_errors > 0 ? "bad" : ""],
+    ["Revisions", data.revisions.length, "", ""],
   ];
   for (const [label, value, hint, kind] of cardsData) {
-    const card = el("div", "card");
+    const card = el("button", "card");
+    card.setAttribute("aria-haspopup", "dialog");
+    card.setAttribute("aria-label", `${label} details`);
     card.appendChild(el("div", "label", label));
-    const valueNode = el("div", `value ${kind}`, value);
-    card.appendChild(valueNode);
-    card.appendChild(el("div", "hint", hint));
-    card.style.cursor = "pointer";
+    card.appendChild(el("div", kind ? `value ${kind}` : "value", value));
+    if (hint) card.appendChild(el("div", "hint", hint));
     card.addEventListener("click", () => openDashboardDetail(label, data));
     cards.appendChild(card);
   }

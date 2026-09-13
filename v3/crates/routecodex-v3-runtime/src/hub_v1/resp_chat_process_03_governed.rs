@@ -755,7 +755,6 @@ impl V3HubRespChatProcess03Governed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
-    control_transition: Option<V3StoplessCenterState>,
     web_search_transition: Option<V3WebSearchCenterState>,
 }
 
@@ -764,14 +763,9 @@ impl V3HubRespChatProcess03Outcome {
         self,
     ) -> (
         V3HubRespChatProcess03Governed,
-        Option<V3StoplessCenterState>,
         Option<V3WebSearchCenterState>,
     ) {
-        (
-            self.data,
-            self.control_transition,
-            self.web_search_transition,
-        )
+        (self.data, self.web_search_transition)
     }
 
     pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
@@ -792,10 +786,6 @@ pub struct V3HubRelayResponseHookProfile {
     servertool_names: BTreeSet<String>,
     web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
     web_search_center_state: Option<V3WebSearchCenterState>,
-    stopless_reasoning_stop: bool,
-    stopless_center_state: Option<V3StoplessCenterState>,
-    stopless_transition_request_id: Option<String>,
-    stopless_transition_updated_at: Option<u64>,
     /// 请求侧 VR 路由决策时算好的"该请求是否保留响应密文"标记：仅当目标是 gpt 模型
     /// **且该模型只有单一 provider 候选**时，响应里的 `encrypted_content` 才原样透传给
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
@@ -823,10 +813,6 @@ impl V3HubRelayResponseHookProfile {
                 .collect(),
             web_search_execution_mode: None,
             web_search_center_state: None,
-            stopless_reasoning_stop: false,
-            stopless_center_state: None,
-            stopless_transition_request_id: None,
-            stopless_transition_updated_at: None,
             retain_response_cipher: false,
             tool_thinking: false,
             toolreason_client_projection: true,
@@ -963,48 +949,6 @@ impl V3HubRelayResponseHookProfile {
             .as_ref()
             .is_some_and(|state| state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive)
     }
-
-    pub fn with_stopless_reasoning_stop(mut self) -> Self {
-        self.stopless_reasoning_stop = true;
-        self
-    }
-
-    pub fn with_stopless_center_state(mut self, state: V3StoplessCenterState) -> Self {
-        self.stopless_center_state = Some(state);
-        self
-    }
-
-    pub fn with_stopless_transition_context(
-        mut self,
-        request_id: impl Into<String>,
-        updated_at: u64,
-    ) -> Self {
-        self.stopless_transition_request_id = Some(request_id.into());
-        self.stopless_transition_updated_at = Some(updated_at);
-        self
-    }
-
-    pub fn stopless_reasoning_stop_enabled(&self) -> bool {
-        self.stopless_reasoning_stop
-    }
-
-    pub fn stopless_center_state(&self) -> Option<&V3StoplessCenterState> {
-        self.stopless_center_state.as_ref()
-    }
-
-    pub fn stopless_schema_guidance_active(&self) -> bool {
-        self.stopless_center_state.as_ref().is_some_and(|state| {
-            state.schema_guidance_active_for(self.stopless_transition_request_id())
-        })
-    }
-
-    pub fn stopless_transition_request_id(&self) -> Option<&str> {
-        self.stopless_transition_request_id.as_deref()
-    }
-
-    pub fn stopless_transition_updated_at(&self) -> Option<u64> {
-        self.stopless_transition_updated_at
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -1036,8 +980,6 @@ pub enum V3HubRelayResponseError {
     },
     #[error("provider response compat failed: {reason}")]
     ProviderCompatFailed { reason: String },
-    #[error("stopless response hook projection failed: {reason}")]
-    StoplessProjectionFailed { reason: &'static str },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1164,12 +1106,10 @@ fn govern_v3_hub_relay_response(
     );
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
-    let mut stopless_center_state = None;
     let mut web_search_center_state = None;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
             let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
-            stopless_center_state = tool_call_hook.center_state;
             web_search_center_state = tool_call_hook.web_search_state;
             let mut input = if tool_call_hook.intercepted {
                 tool_call_hook.input
@@ -1180,48 +1120,25 @@ fn govern_v3_hub_relay_response(
                 &mut input,
                 profile.tool_thinking_original_custom_tool_names(),
             );
-            let mut governed_input = input;
-            if profile.stopless_schema_guidance_active() {
-                // Client projection consumes the provider-side Stopless control
-                // text at the response owner; it must not leak into client data.
-                let mut visible = governed_input.provider_payload().as_ref().clone();
-                super::servertool_hooks::strip_v3_stopless_control_echoes(&mut visible);
-                *governed_input.provider_payload_mut() = Arc::new(visible);
-            }
-            let governance = build_v3_resp03_protocol_governance(&governed_input)?;
-            (governed_input, governance)
-        }
-        V3Resp03FinishReasonBranch::Stop => {
-            let stop_hook = apply_v3_stop_servertool_hook_at_resp03(input, profile)?;
-            stopless_center_state = stop_hook.center_state;
-            let governance = build_v3_resp03_protocol_governance(&stop_hook.input)?;
-            (stop_hook.input, governance)
-        }
-        V3Resp03FinishReasonBranch::Other => {
-            let mut input = input;
-            if profile.stopless_schema_guidance_active() {
-                // Client projection consumes the provider-side Stopless control
-                // text at the response owner; it must not leak into client data.
-                let mut visible = input.provider_payload().as_ref().clone();
-                super::servertool_hooks::strip_v3_stopless_control_echoes(&mut visible);
-                *input.provider_payload_mut() = Arc::new(visible);
-            }
+            let governance = build_v3_resp03_protocol_governance(&input)?;
             (input, governance)
         }
+        V3Resp03FinishReasonBranch::Stop => {
+            let governance = build_v3_resp03_protocol_governance(&input)?;
+            (input, governance)
+        }
+        V3Resp03FinishReasonBranch::Other => (input, governance),
     };
     let servertool_tool_call_followup = governance
         .tool_calls
         .iter()
         .any(|tool_call| profile.is_servertool_name(&tool_call.name));
-    let stopless_control_followup = stopless_center_state
-        .as_ref()
-        .is_some_and(V3StoplessCenterState::need_continue);
-    let servertool_action = if servertool_tool_call_followup || stopless_control_followup {
+    let servertool_action = if servertool_tool_call_followup {
         V3HubServertoolResponseAction::FollowupRequired
     } else {
         V3HubServertoolResponseAction::None
     };
-    let terminality = if governance.tool_calls.is_empty() && !stopless_control_followup {
+    let terminality = if governance.tool_calls.is_empty() {
         governance.status_terminality
     } else {
         V3HubResponseTerminality::NonTerminal
@@ -1233,7 +1150,6 @@ fn govern_v3_hub_relay_response(
             tool_calls: governance.tool_calls,
             servertool_action,
         },
-        control_transition: stopless_center_state,
         web_search_transition: web_search_center_state,
     })
 }

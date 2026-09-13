@@ -1,7 +1,7 @@
 use super::{
-    has_non_empty_string, response_message_part_has_client_output,
-    response_output_item_has_client_output, response_terminal_has_client_output,
-    V3ProviderResponsesJsonFrameOutcome,
+    has_non_empty_string, is_v3_provider_sse_transport_keepalive_event_type,
+    response_message_part_has_client_output, response_output_item_has_client_output,
+    response_terminal_has_client_output, V3ProviderResponsesJsonFrameOutcome,
 };
 use serde_json::Value;
 
@@ -14,6 +14,13 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "provider Responses JSON event requires a non-empty type".to_string())?;
+
+    // Provider keepalive frames are transport-only. They are consumed here
+    // before the protocol event registry so an upstream `event: keepalive`
+    // frame cannot be misclassified as an unknown business event.
+    if is_v3_provider_sse_transport_keepalive_event_type(event_type) {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering);
+    }
 
     if matches!(event_type, "error" | "response.error") {
         let error = event
@@ -207,4 +214,23 @@ pub(crate) fn classify_v3_provider_responses_json_event(
     Err(format!(
         "provider Responses SSE event type {event_type:?} is not registered"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transport_keepalive_is_not_rejected_as_unknown_event() {
+        for event_type in ["ping", "pong", "keepalive", "keep-alive", "heartbeat"] {
+            let outcome = classify_v3_provider_responses_json_event(
+                &serde_json::json!({"type": event_type, "heartbeat": true}),
+            )
+            .expect("transport keepalive must be accepted");
+            assert_eq!(
+                outcome,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+            );
+        }
+    }
 }

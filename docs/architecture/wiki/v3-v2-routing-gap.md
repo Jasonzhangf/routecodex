@@ -71,8 +71,8 @@ keeps the route as `thinking`.
 ### 5. `routeHint` / `webSearch.force` semantics
 
 - V2 sometimes read `routeHint` as a sticky override; V3 reads `routeHint` from
-  `MetaRoute03RouteCarrier` (`engine/route.rs::resolve_route_hint`) and **discards it** for
-  stopless followups (`serverToolFollowup && source == servertool.stop_message`).
+  `MetaRoute03RouteCarrier` (`engine/route.rs::resolve_route_hint`) only for the current
+  typed route decision; no retired automatic-continuation branch consumes it.
 - `webSearch.force` is still config-level (`engine/core.rs::web_search_force`); it only
   forces the `web_search` capability, never the route reason.
 
@@ -111,7 +111,7 @@ keeps the route as `thinking`.
 
 - Do not reintroduce `web_search` as a route name; it stays a Target capability.
 - Do not re-introduce payload image scanning for `multimodal`; metadata is the only source.
-- Do not allow `routeHint` to leak into stopless followup semantics.
+- Do not allow `routeHint` to leak into retired automatic-continuation semantics.
 - Do not override `longcontext` with a hard-coded threshold; it must follow
   `routing.longcontext.match.min_input_tokens` (or V2's
   `virtualrouter.classifier.longContextThresholdTokens` after `v2_compat`).

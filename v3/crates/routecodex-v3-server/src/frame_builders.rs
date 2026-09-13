@@ -236,8 +236,18 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     };
     let (code, message) = v3_error_body_code_message(&body);
     if frame.status == 502 && code == "network_error" && message == "network error" {
-        frame.body = V3Server16Body::Json(body);
-        return frame;
+        if frame
+            .node_trace
+            .iter()
+            .any(|node| *node == "V3Error04TargetPoolExhaustion")
+        {
+            frame.error_body = Some(body);
+            frame.content_type = "text/event-stream".to_string();
+            frame.body = V3Server16Body::Json(json!({
+                "error": {"code": "network_error", "message": "network error"}
+            }));
+            return frame;
+        }
     }
     let (code, message) = if code.starts_with("provider_response_") {
         (
@@ -353,6 +363,9 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
+    if frame.content_type == "text/event-stream" && v3_is_sse_target_pool_exhaustion(&frame) {
+        return v3_sse_transport_disconnect_response();
+    }
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type);
@@ -388,6 +401,52 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
         }
     };
     builder.body(Body::from(body)).expect("typed response")
+}
+
+pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(futures_util::stream::once(async {
+            Err::<Vec<u8>, std::io::Error>(std::io::Error::other(
+                "provider pool exhausted; SSE transport unavailable",
+            ))
+        })))
+        .expect("typed SSE transport disconnect response")
+}
+
+fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
+    let body = match &frame.body {
+        V3Server16Body::Json(body) => body,
+        _ => match frame.error_body.as_ref() {
+            Some(body) => body,
+            None => return false,
+        },
+    };
+    v3_is_sse_target_pool_exhaustion_parts(
+        frame.status,
+        &frame.node_trace,
+        &frame.error_chain,
+        body,
+    )
+}
+
+pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
+    status: u16,
+    node_trace: &[&str],
+    error_chain: &[&str],
+    body: &Value,
+) -> bool {
+    if error_chain.is_empty()
+        || status != 502
+        || !node_trace
+            .iter()
+            .any(|node| *node == "V3Error04TargetPoolExhaustion")
+    {
+        return false;
+    }
+    let (code, message) = v3_error_body_code_message(body);
+    code == "network_error" && message == "network error"
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
@@ -504,12 +563,39 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // The typed stream error has already gone to the runtime Error chain and
-    // console owner. Keep provider/internal diagnostics off the client frame;
-    // the protocol-specific client terminal is emitted at this boundary.
-    let stream: V3IoSseStream = Box::pin(stream.map(|item| {
-        item.map_err(|_| io::Error::other("response stream terminated before completion"))
-    }));
+    // Provider unavailability and client disconnect already entered the typed
+    // Error chain. Close those streams as recoverable EOF so the caller can
+    // replay the same entry. Internal response failures remain explicit 599
+    // terminals at the shared SSE transport boundary.
+    let stream: V3IoSseStream = Box::pin(stream::unfold(
+        (stream, false),
+        move |(mut stream, done)| async move {
+            if done {
+                return None;
+            }
+            match stream.next().await {
+                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
+                Some(Err(source)) => {
+                    match routecodex_v3_error::v3_sse_post_commit_disposition(&source) {
+                        routecodex_v3_error::V3SsePostCommitDisposition::CloseEof => None,
+                        routecodex_v3_error::V3SsePostCommitDisposition::ProjectInternalTerminal => {
+                        Some((
+                            Ok(v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "internal_response_stream_error",
+                                "internal response stream failed",
+                                599,
+                                protocol,
+                            )),
+                            (stream, true),
+                        ))
+                        }
+                    }
+                }
+                None => None,
+            }
+        },
+    ));
     v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
 }
 

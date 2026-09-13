@@ -1,9 +1,35 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderHealthScope,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorSourceKind,
+    V3ProviderHealthScope,
 };
 use serde_json::json;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Notify;
+
+#[path = "tests/terminal_projection.rs"]
+mod terminal_projection;
+include!("provider_action_gate_tests.rs");
+
+#[path = "classified_global_tests.rs"]
+mod classified_global;
+
+#[path = "auth_key_policy_tests.rs"]
+mod auth_key_policy;
+
+// 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
+fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
+    for target in manifest
+        .route_groups
+        .values_mut()
+        .flat_map(|group| group.pools.values_mut())
+        .flat_map(|pool| pool.targets.iter_mut())
+    {
+        target.priority = Some(100);
+    }
+}
 
 fn test_provider_failure_scope(
     server_id: &str,
@@ -50,6 +76,95 @@ targets = [
     .expect("target-resolution manifest")
 }
 
+fn codec_failure_manifest(scope: &str) -> V3Config05ManifestPublished {
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "__SCOPE__"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }
+]
+[error]
+provider_error_default_path = [
+  { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
+  { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+[[error.provider_error_action_policy]]
+policy_id = "provider_response_event_codec_failure_reselect"
+match = { provider_code = "provider_response_event_codec_failure" }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
+  { step = "project", status = 502, reason_code = "provider_response_event_codec_failure", message_mode = "code_only" },
+]
+"#
+    .replace("__SCOPE__", scope);
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&source).expect("codec-failure authoring"),
+    )
+    .expect("codec-failure manifest")
+}
+
+#[tokio::test]
+async fn cancelled_scheduled_probe_releases_single_flight_permit() {
+    let manifest = global_pool_alive_manifest("cancelled_scheduled_probe");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            "pending provider probe",
+            0,
+            1,
+        )
+        .expect("provider cooldown setup");
+    let started = Arc::new(Notify::new());
+    let running = {
+        let health = health.clone();
+        let started = started.clone();
+        tokio::spawn(async move {
+            health
+                .run_due_provider_health_probes(u64::MAX, false, move |_, _, _| {
+                    let started = started.clone();
+                    async move {
+                        started.notify_one();
+                        futures_util::future::pending::<Result<(), String>>().await
+                    }
+                })
+                .await
+        })
+    };
+    started.notified().await;
+    running.abort();
+    let _ = running.await;
+
+    assert!(
+        health
+            .store
+            .acquire_provider_cooldown_probe("first", Some("key1"), Some("gpt-test"))
+            .expect("probe permit acquisition after cancellation")
+            .is_some(),
+        "dropping the scheduled probe must release its single-flight permit"
+    );
+}
+
 fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
     let source = r#"
 version = 3
@@ -93,156 +208,6 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("global-pool-alive authoring"),
     )
     .expect("global-pool-alive manifest")
-}
-
-fn account_threshold_manifest() -> V3Config05ManifestPublished {
-    let source = r#"
-version = 3
-
-[[error.provider_error_action_policy]]
-policy_id = "account_http_401_two_errors"
-[error.provider_error_action_policy.match]
-http_status = 401
-[[error.provider_error_action_policy.path]]
-step = "wait_retry"
-retry_mode = "reselect_before_client_projection"
-max_attempts = 2
-backoff_ms = 1000
-[[error.provider_error_action_policy.path]]
-step = "cooldown"
-scope = "auth_key"
-duration_ms = 900000
-[[error.provider_error_action_policy.path]]
-step = "project"
-status = 502
-reason_code = "provider_account_http_401"
-message_mode = "code_only"
-
-[[error.provider_error_action_policy]]
-policy_id = "account_http_403_two_errors"
-[error.provider_error_action_policy.match]
-http_status = 403
-[[error.provider_error_action_policy.path]]
-step = "wait_retry"
-retry_mode = "reselect_before_client_projection"
-max_attempts = 2
-backoff_ms = 1000
-[[error.provider_error_action_policy.path]]
-step = "cooldown"
-scope = "auth_key"
-duration_ms = 900000
-[[error.provider_error_action_policy.path]]
-step = "project"
-status = 502
-reason_code = "provider_account_http_403"
-message_mode = "code_only"
-
-[servers.account_threshold]
-bind = "127.0.0.1"
-port = 5555
-routing_group = "account_threshold"
-endpoints = ["responses"]
-[providers.primary]
-type = "responses"
-base_url = "http://primary.invalid/v1"
-default_model = "gpt-test"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "PRIMARY_KEY" }] }
-[providers.primary.models.gpt-test]
-wire_name = "gpt-test"
-capabilities = ["text"]
-[route_groups.account_threshold.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }]
-"#;
-    compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(source).expect("account threshold authoring"),
-    )
-    .expect("account threshold manifest")
-}
-
-#[test]
-fn provider_failure_policy_uses_key_health_score_instead_of_session_threshold() {
-    let manifest = account_threshold_manifest();
-    for status in [401, 403] {
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let session = test_provider_failure_scope(
-            "account_threshold",
-            "account_threshold",
-            &format!("account-threshold-{status}"),
-        )
-        .unwrap();
-        health
-            .store()
-            .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 99)
-            .expect("initial health projection");
-        for index in 0..5 {
-            let record = health
-                .record_provider_failure_record_with_policy(
-                    None,
-                    &manifest,
-                    &session,
-                    "primary",
-                    Some("responses"),
-                    Some("key1"),
-                    Some("gpt-test"),
-                    Some("account failure"),
-                    "V3ProviderRespInbound01Raw",
-                    status,
-                    Some("provider_http_error"),
-                    "account failure",
-                    100 + index,
-                )
-                .unwrap();
-            assert_eq!(record.failure_count, (index + 1) as u32);
-            assert_eq!(record.state, "healthy");
-        }
-        assert!(
-            !health
-                .store()
-                .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 200)
-                .expect("health projection")
-                .available
-        );
-    }
-
-    let other_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let session = test_provider_failure_scope(
-        "account_threshold",
-        "account_threshold",
-        "ordinary-threshold-session",
-    )
-    .unwrap();
-    other_health
-        .store()
-        .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 199)
-        .expect("initial health projection");
-    for index in 0..20 {
-        let record = other_health
-            .record_provider_failure_record_with_policy(
-                None,
-                &manifest,
-                &session,
-                "primary",
-                Some("responses"),
-                Some("key1"),
-                Some("gpt-test"),
-                Some("ordinary failure"),
-                "V3ProviderRespInbound01Raw",
-                500,
-                Some("provider_http_error"),
-                "ordinary failure",
-                200 + index,
-            )
-            .unwrap();
-        assert_eq!(record.state, "healthy");
-    }
-    assert!(
-        !other_health
-            .store()
-            .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 300)
-            .expect("health projection")
-            .available
-    );
 }
 
 fn resolve_target(
@@ -341,15 +306,9 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 
 #[test]
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
-    let manifest = global_pool_alive_manifest("global_status_policy");
-    let cases = [
-        (401, 5),
-        (403, 5),
-        (429, 20),
-        (500, 20),
-        (502, 20),
-        (599, 20),
-    ];
+    let mut manifest = global_pool_alive_manifest("global_status_policy");
+    normalize_global_pool_priorities(&mut manifest);
+    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -393,29 +352,41 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    health
-        .record_provider_failure_record_with_policy(
-            None,
-            &manifest,
-            &scope,
-            "first",
-            Some("responses"),
-            Some("key1"),
-            Some("gpt-test"),
-            Some("request-shaped failure"),
-            "V3ProviderReqOutbound09TransportRequest",
-            400,
-            Some("provider_http_error"),
-            "request rejected",
-            20_000,
-        )
-        .expect("request-shaped failure should remain session-scoped");
-    assert!(
+    // 统一错误模型：400/请求形失败同样计入全局健康，连续 3 次进入全局冷却。
+    for attempt in 0..3 {
         health
+            .record_provider_failure_record_with_policy(
+                None,
+                &manifest,
+                &scope,
+                "first",
+                Some("responses"),
+                Some("key1"),
+                Some("gpt-test"),
+                Some("request-shaped failure"),
+                "V3ProviderReqOutbound09TransportRequest",
+                400,
+                Some("provider_http_error"),
+                "request rejected",
+                20_000 + attempt as u64,
+            )
+            .expect("request-shaped failure should record into global health");
+        let available = health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
-            .available
-    );
+            .availability_for_session(
+                &scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                20_000 + attempt as u64,
+            )
+            .available;
+        assert_eq!(
+            available,
+            attempt < 2,
+            "attempt {attempt} availability must match the 3-strike threshold"
+        );
+    }
 }
 
 #[test]
@@ -633,6 +604,71 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
         );
     assert_eq!(projection.score_milli, 0);
     assert!(!projection.available);
+}
+
+#[test]
+fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
+    // 统一错误模型回归：瞬态型 post-commit 流失败（无状态码）不允许
+    // health-neutral 旁路——3 次连续失败必须进入全局冷却，新 session 不可用。
+    let manifest = target_resolution_manifest("post_commit_transient_counted");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_transient_counted",
+        "post_commit_transient_counted",
+        "transient-session",
+    )
+    .expect("transient session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider.sse_decode",
+        "Responses SSE event was not decodable JSON",
+    );
+
+    for offset in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit transient stream failure must update key health");
+    }
+
+    let fresh_session = test_provider_failure_scope(
+        "post_commit_transient_counted",
+        "post_commit_transient_counted",
+        "fresh-observer-session",
+    )
+    .expect("fresh session scope");
+    let projection =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert_eq!(projection.score_milli, 0);
+    assert!(
+        !projection.available,
+        "three transient post-commit failures must cool the key down globally"
+    );
+    let fresh_projection = health.store().availability_for_session(
+        &fresh_session,
+        "primary",
+        Some("key1"),
+        Some("gpt-test"),
+        v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+    );
+    assert!(
+        !fresh_projection.available,
+        "global cooldown must be visible to a fresh session"
+    );
 }
 
 #[test]
@@ -1341,14 +1377,20 @@ targets = [
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
+    let matched_policy = manifest
+        .error
+        .provider_error_action_policy
+        .iter()
+        .find(|policy| policy.policy_id == "exact_response_policy")
+        .expect("response-policy fixture must expose its captured policy");
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
         "V3ProviderRespInbound01Raw",
         200,
-        Some("wrapped_provider_error".to_string()),
+        Some("provider_embedded_error".to_string()),
         "compressed message no longer contains configured keyword".to_string(),
-        None,
+        Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
@@ -1362,4 +1404,61 @@ targets = [
     assert_eq!(result.event.wait_ms, Some(7000));
     assert!(result.retry_selected.is_some());
     assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
+}
+
+#[tokio::test]
+async fn provider_response_event_codec_failure_never_retries_same_candidate() {
+    let scope = "codec_failure_no_retry";
+    let manifest = codec_failure_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-codec")
+            .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::from_manifest(&manifest),
+        deterministic_sample: 0,
+    };
+    assert!(
+        context.retry_policy.same_candidate_retries > 0,
+        "default path must expose a same-candidate retry budget for this regression"
+    );
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        502,
+        Some("provider_response_event_codec_failure".to_string()),
+        "provider response event codec failed: Anthropic codec malformed reasoning content"
+            .to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("codec failure must resolve through the matched no-same-retry policy");
+
+    assert_ne!(
+        result.event.action, "policy_retry_same",
+        "codec failure must never spend the same-candidate retry budget"
+    );
+    assert!(
+        same_candidate_retries.values().all(|retries| *retries == 0),
+        "codec failure must not increment the same-candidate retry counter: {same_candidate_retries:?}"
+    );
+    assert!(
+        !trace.contains(&"V3TargetPolicyRetriedSame"),
+        "codec failure trace must not contain V3TargetPolicyRetriedSame: {trace:?}"
+    );
 }

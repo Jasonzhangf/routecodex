@@ -96,6 +96,9 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
             "SSE input is not valid UTF-8".to_string(),
         ));
     }
+    if crate::hub_v1::is_v3_provider_sse_transport_keepalive_frame(frame.frame().fields()) {
+        return Ok(None);
+    }
     let object = crate::sse_object_pipeline::SseObjectFrame::from_frame(frame);
     if object.is_done() || !object.has_data() {
         return Ok(None);
@@ -520,6 +523,49 @@ data: {"type":"response.output_item.done","output_index":0,"item":{"type":"funct
             &mut reducer,
         )
         .expect("terminal response output must accept structured function_call arguments");
+    }
+
+    #[test]
+    fn relay_consumes_transport_keepalive_objects_before_semantic_reducer() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        for chunk in [
+            b"data: {\"type\":\"keepalive\"}\n\n".as_slice(),
+            b"event: keepalive\ndata: {\"heartbeat\":true}\n\n".as_slice(),
+            b"event: keepalive\ndata: not-json\n\n".as_slice(),
+            b"event: keepalive\n\n".as_slice(),
+        ] {
+            let result = observe_v3_runtime_responses_sse_transport_chunk_typed(
+                chunk,
+                &mut decoder,
+                &observation,
+                &mut reducer,
+            )
+            .expect("transport keepalive must not abort relay projection");
+            assert!(result.is_none(), "keepalive must not be terminal");
+        }
+        assert!(reducer.output_text.is_empty());
+        assert!(reducer.items.is_empty());
+    }
+
+    #[test]
+    fn relay_keepalive_object_before_completed_still_reaches_terminal() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let chunk = b"data: {\"type\":\"keepalive\"}\n\n\
+data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\",\"status\":\"completed\",\"output\":[]}}\n\n";
+        let result = observe_v3_runtime_responses_sse_transport_chunk_typed(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("keepalive then completed must project terminal");
+        let terminal = result.expect("response.completed must be terminal");
+        assert_eq!(terminal["id"], json!("resp_keepalive_1"));
+        assert_eq!(terminal["status"], json!("completed"));
     }
 
     #[test]

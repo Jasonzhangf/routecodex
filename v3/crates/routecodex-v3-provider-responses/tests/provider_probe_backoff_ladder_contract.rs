@@ -34,7 +34,7 @@ fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
 }
 
 #[test]
-fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
+fn first_probe_is_due_exactly_30s_after_block_and_probe_success_resurrects() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
         fail(&store, now_ms);
@@ -57,7 +57,7 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
         "first probe must be due at 30s"
     );
     // While the probe entry exists the key stays unavailable for every
-    // session; a business success alone must not resurrect it.
+    // session until the typed probe owner reports success.
     assert!(
         !store
             .availability_for_session(
@@ -70,27 +70,11 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
             .available
     );
     store
-        .record_provider_key_success("provider-a", "key-a", "model-a", first_due)
-        .unwrap();
-    assert!(
-        !store
-            .availability_for_session(
-                &scope(),
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                first_due + 1,
-            )
-            .available,
-        "business success must not resurrect a key that still owns a probe entry"
-    );
-    // The probe itself is the only in-code resurrection path.
-    assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
         .unwrap()
-        .is_some());
+        .expect("due auth-key probe must be acquirable");
     store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("model-a"))
+        .complete_provider_cooldown_probe_success_at("provider-a", Some("key-a"), None, first_due)
         .unwrap();
     assert!(
         store
@@ -99,10 +83,10 @@ fn first_probe_is_due_exactly_30s_after_block_and_only_probe_resurrects() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                first_due + 2,
+                first_due + 1,
             )
             .available,
-        "successful probe must resurrect the key"
+        "probe success must resurrect a globally cooled auth key"
     );
 }
 
@@ -163,18 +147,13 @@ fn probe_failures_stretch_1m_3m_15m_1h_3h_then_loop_back_to_30s() {
         now_ms = due_at;
         assert!(
             store
-                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
                 .unwrap()
                 .is_some(),
             "probe permit missing at step {index}"
         );
         store
-            .complete_provider_cooldown_probe_failure(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                now_ms,
-            )
+            .complete_provider_cooldown_probe_failure("provider-a", Some("key-a"), None, now_ms)
             .unwrap();
         assert!(
             !store

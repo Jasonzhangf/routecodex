@@ -118,9 +118,9 @@ const cases = [
   {
     name: 'responses relay SSE skips response hooks before client projection',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    marker: '                    mut finalized_provider_value,\n                    response_stopless_state,',
-    mutation: '                    mut forbidden_finalized_provider_value,\n                    response_stopless_state,',
-    diagnostic: /expected 2 occurrences of let \(\n                    action,\n                    mut finalized_provider_value,/,
+    marker: 'let (action, mut finalized_provider_value, response_web_search_state) =',
+    mutation: 'let (action, mut forbidden_finalized_provider_value, response_web_search_state) =',
+    diagnostic: /expected 2 occurrences of let \(action, mut finalized_provider_value, response_web_search_state\) =/,
   },
   {
     name: 'responses relay SSE resurrects raw pass-through projector',
@@ -167,9 +167,9 @@ const cases = [
   {
     name: 'responses relay tools preservation assertion removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
-    mutation: '',
-    diagnostic: /missing assert_original_tools_preserved/,
+    marker: 'fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools()',
+    mutation: 'fn removed_tool_pair_regression()',
+    diagnostic: /missing json_two_turn_restores_tool_call_pairs_output_and_preserves_tools/,
   },
   {
     name: 'server dispatch runs responses direct before relay',
@@ -202,15 +202,15 @@ const cases = [
   {
     name: 'package gate removed',
     file: 'package.json',
-    marker: '    "verify:v3-hub-relay-runtime-closeout": "node scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs",\n',
-    mutation: '',
+    marker: '"verify:v3-hub-relay-runtime-closeout": "',
+    mutation: '"verify:v3-hub-relay-runtime-closeout_removed": "',
     diagnostic: /missing script verify:v3-hub-relay-runtime-closeout/,
   },
   {
     name: 'focused duplicate identity package gate removed',
     file: 'package.json',
-    marker: '    "test:v3-5520-duplicate-tool-identity": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib terminal_merge -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_relay_runtime_closeout responses_relay_provider_duplicate_tool_identity -- --nocapture && npm run verify:v3-hub-relay-runtime-closeout && npm run test:v3-hub-relay-runtime-closeout-red-fixtures",\n',
-    mutation: '',
+    marker: '"test:v3-5520-duplicate-tool-identity": "',
+    mutation: '"test:v3-5520-duplicate-tool-identity_removed": "',
     diagnostic: /missing script test:v3-5520-duplicate-tool-identity/,
   },
   {
@@ -271,7 +271,6 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',

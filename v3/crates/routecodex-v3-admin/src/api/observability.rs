@@ -186,8 +186,6 @@ pub(crate) struct SourceRow {
     #[serde(default)]
     pub servertool: bool,
     #[serde(default)]
-    pub stopless: bool,
-    #[serde(default)]
     pub tokens_output: Option<u64>,
     #[serde(default)]
     pub raw_artifact_ref: Option<String>,
@@ -203,6 +201,7 @@ pub(crate) struct RecordQuery {
     time_to_ms: Option<u64>,
     port: Option<u16>,
     provider: Option<String>,
+    provider_id: Option<String>,
     model: Option<String>,
     endpoint: Option<String>,
     route: Option<String>,
@@ -238,8 +237,6 @@ struct QueryRow {
     timing_external_ms: Option<u64>,
     #[serde(default)]
     servertool: bool,
-    #[serde(default)]
-    stopless: bool,
     raw_artifact_ref: Option<String>,
 }
 
@@ -347,6 +344,7 @@ impl RecordQuery {
                     )
                 }
                 "provider" => query.provider = Some(value.to_string()),
+                "provider_id" => query.provider_id = Some(value.to_string()),
                 "model" => query.model = Some(value.to_string()),
                 "endpoint" => query.endpoint = Some(value.to_string()),
                 "route" => query.route = Some(value.to_string()),
@@ -406,6 +404,13 @@ impl RecordQuery {
             .provider
             .as_deref()
             .is_some_and(|value| meta_value("provider") != Some(value))
+        {
+            return false;
+        }
+        if self
+            .provider_id
+            .as_deref()
+            .is_some_and(|value| meta_value("provider_id") != Some(value))
         {
             return false;
         }
@@ -699,7 +704,6 @@ fn to_attempt_query_row(row: SourceRow) -> QueryRow {
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
-        stopless: row.stopless,
         raw_artifact_ref: row.raw_artifact_ref,
     }
 }
@@ -936,7 +940,8 @@ async fn records(
         "total_tokens":0u64,
         "cache_hit_rate_percent":0f64,
         "avg_duration_ms":0f64,
-        "provider_failure_count":0u64
+        "provider_failure_count":0u64,
+        "by_provider": {}
     });
     let mut facets = BTreeMap::new();
     let count = filtered.len() as f64;
@@ -986,6 +991,17 @@ async fn records(
         }
         if row.result.as_deref() == Some("failed-attempt") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
+        }
+        if matches!(
+            row.result.as_deref(),
+            Some("error") | Some("failed-attempt")
+        ) {
+            let category = row
+                .meta
+                .get("error_category")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            facet_add(&mut facets, "error_categories", Some(category));
         }
         match row.result.as_deref() {
             Some("success") => {
@@ -1081,6 +1097,72 @@ async fn records(
         }
     }
     stats["by_port"] = json!(by_port);
+    let mut by_provider: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    for row in &filtered {
+        let is_success = usage_is_countable(row.result.as_deref());
+        let provider_key = row
+            .meta
+            .get("provider_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                row.meta
+                    .get("provider")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let item = by_provider.entry(provider_key).or_insert_with(|| {
+            json!({
+                "total": 0u64,
+                "active": 0u64,
+                "success": 0u64,
+                "error": 0u64,
+                "provider_failures": 0u64,
+                "cancelled": 0u64,
+                "input_tokens": 0u64,
+                "output_tokens": 0u64,
+                "total_tokens": 0u64
+            })
+        });
+        item["total"] = json!(item["total"].as_u64().unwrap_or(0) + 1);
+        if is_success {
+            item["input_tokens"] =
+                json!(item["input_tokens"].as_u64().unwrap_or(0) + row_input_value(row));
+            item["output_tokens"] =
+                json!(item["output_tokens"].as_u64().unwrap_or(0) + row_output_value(row));
+            item["total_tokens"] =
+                json!(item["total_tokens"].as_u64().unwrap_or(0) + row_total_value(row));
+        }
+        match row.result.as_deref() {
+            Some("success") => {
+                item["success"] = json!(item["success"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("error") => {
+                item["error"] = json!(item["error"].as_u64().unwrap_or(0) + 1);
+                if !attempt_keys.contains(&row.request_key) && row.failed_attempts > 0 {
+                    item["provider_failures"] =
+                        json!(item["provider_failures"].as_u64().unwrap_or(0) + 1);
+                }
+            }
+            Some("cancelled") => {
+                item["cancelled"] = json!(item["cancelled"].as_u64().unwrap_or(0) + 1);
+            }
+            Some("failed-attempt") => {
+                item["error"] = json!(item["error"].as_u64().unwrap_or(0) + 1);
+                item["provider_failures"] =
+                    json!(item["provider_failures"].as_u64().unwrap_or(0) + 1);
+            }
+            _ => {
+                item["active"] = json!(item["active"].as_u64().unwrap_or(0) + 1);
+            }
+        }
+    }
+    stats["by_provider"] = json!(by_provider);
     stats["input_tokens"] = json!(input);
     stats["output_tokens"] = json!(output);
     stats["cached_tokens"] = json!(cached);
@@ -1210,7 +1292,6 @@ mod tests {
             timing_internal_ms: None,
             timing_external_ms: None,
             servertool: false,
-            stopless: false,
             raw_artifact_ref: None,
         }
     }

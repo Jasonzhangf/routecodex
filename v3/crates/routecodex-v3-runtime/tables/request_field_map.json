@@ -39,6 +39,7 @@
    "presence_penalty",
    "reasoning_effort",
    "reasoning_summary_policy",
+   "reasoning_context_policy",
    "audio",
    "modalities",
    "moderation",

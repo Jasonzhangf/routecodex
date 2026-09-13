@@ -8,8 +8,8 @@ use super::anthropic_request_field_projection::project_chat_store_to_anthropic_w
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
 use super::request_outbound_metadata::{
-    project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
-    validate_openai_metadata,
+    project_openai_chat_reasoning_context_policy, project_openai_chat_reasoning_summary_policy,
+    project_openai_client_metadata_to_metadata, validate_openai_metadata,
 };
 use super::request_outbound_tool_id::compact_tool_id;
 use std::collections::BTreeSet;
@@ -383,6 +383,7 @@ fn apply_outbound_projection_transforms(
             project_openai_client_metadata_to_metadata(projected, "openai_chat")?;
             validate_openai_metadata(projected, "openai_chat")?;
             project_openai_chat_reasoning_summary_policy(projected)?;
+            project_openai_chat_reasoning_context_policy(projected)?;
         }
         V3OutboundTargetProtocol::Anthropic => {
             project_chat_store_to_anthropic_wire(projected)?;
@@ -492,6 +493,9 @@ fn project_responses_request_chat_extension_to_openai_chat(
     }
     if let Some(value) = extension.remove("reasoning_summary_policy") {
         insert_unless_matching(row, "reasoning_summary_policy", value, "openai_chat")?;
+    }
+    if let Some(value) = extension.remove("reasoning_context_policy") {
+        insert_unless_matching(row, "reasoning_context_policy", value, "openai_chat")?;
     }
     if let Some(text) = extension.remove("text") {
         let mut text = text.as_object().cloned().ok_or_else(|| {
@@ -827,11 +831,6 @@ fn is_provider_outbound_control_key(key: &str) -> bool {
             | "resumeMeta"
             | "servertool_state"
             | "servertoolState"
-            | "stopless_state"
-            | "stoplessState"
-            | "stopless_center"
-            | "stoplessCenter"
-            | "__routecodex_stopless_center"
             | "error_chain"
             | "errorChain"
             | "node_trace"

@@ -1,11 +1,13 @@
 mod attempt_store;
 mod defaults;
 mod entry_protocol_validation;
+mod memory_raw_capture;
 mod provider_directory;
 mod store;
 mod types;
 mod user_config;
 mod v2_compat;
+pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 pub use v2_compat::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
@@ -645,6 +647,17 @@ pub fn read_v3_secret_file_key(path: &str, key: &str) -> Result<String, V3Config
     let content = std::fs::read_to_string(path)
         .map_err(|error| validation(format!("secret file {path} is unreadable: {error}")))?;
     resolve_v3_secret_file_key(&content, key).map_err(validation)
+}
+
+pub fn read_v3_daemon_codexapp_socket(path: &Path) -> Result<Option<String>, V3ConfigError> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|error| validation(format!("daemon config is unreadable: {error}")))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| validation(format!("daemon config parse failed: {error}")))?;
+    Ok(value
+        .pointer("/codexapp/socket")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
 }
 
 pub fn resolve_routecodex_package_version_from_executable(_executable: &Path) -> Option<String> {

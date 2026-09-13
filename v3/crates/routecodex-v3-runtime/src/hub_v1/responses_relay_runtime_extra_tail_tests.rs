@@ -19,6 +19,53 @@ async fn responses_provider_sse_codex_rate_limits_extension_does_not_abort_strea
 }
 
 #[tokio::test]
+async fn responses_provider_sse_codex_response_metadata_extension_does_not_abort_stream() {
+    // `codex.response.metadata` is a typed provider extension that mirrors
+    // `response.metadata` for the same provider; it must not turn a valid
+    // 200/201 stream into a provider failure and must not trigger a retry on
+    // the same provider.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(
+            b"event: codex.response.metadata\ndata: {\"type\":\"codex.response.metadata\",\"metadata\":{\"request_id\":\"req_1\"}}\n\n"
+                .to_vec(),
+        ),
+        Ok(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
+                .to_vec(),
+        ),
+        Ok(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_extension\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+                .to_vec(),
+        ),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect("provider extension must not turn a valid stream into a provider failure");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+    let snapshot = observation
+        .snapshot()
+        .expect("runtime stream observation snapshot must remain accessible");
+    assert!(
+        snapshot
+            .typed_object_types
+            .iter()
+            .any(|event_type| event_type == "responses:codex.response.metadata"),
+        "registered codex.response.metadata extension must be observed as a typed provider event: {:?}",
+        snapshot.typed_object_types
+    );
+    assert!(
+        snapshot.post_commit_error.is_none(),
+        "registered provider extension must not surface a post-commit provider failure: {:?}",
+        snapshot.post_commit_error
+    );
+}
+
+#[tokio::test]
 async fn responses_provider_sse_codex_extension_without_terminal_still_fails() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
@@ -46,6 +93,55 @@ async fn anthropic_provider_sse_malformed_tool_json_fails_without_text_downgrade
             Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null}}\n\n".to_vec()),
             Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("input_json_delta is malformed"));
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_live_malformed_tool_json_unquoted_session_id_fails_without_downgrade(
+) {
+    // Live 2026-09-10 17:58 provider stream: goaichat glm-5.3 emitted a
+    // tool-use argument fragment set that concatenates to
+    // {"session_id":584d22,...}; the unquoted alphanumeric token is not valid
+    // JSON. RouteCodex must classify it as a malformed provider codec stream,
+    // never downgrade it to text, and let provider failure policy reselect.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_live\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.3\",\"content\":[]}}\n\n".to_vec()),
+        Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":10,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_live\",\"name\":\"write_stdin\",\"input\":{}}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"chars\\\": \\\"\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\", \\\"goal_alignment_confidence\\\": \"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"0\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\".\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"95\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\", \\\"max_output_tokens\\\": \"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"200\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"0\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\", \\\"reason\\\": \\\"\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"Poll\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\" status\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"es\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\", \\\"session_id\\\": \"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"584\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"d\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"22\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\", \\\"yield_time_ms\\\": \"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"300\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"00\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":10,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"}\"}}\n\n".to_vec()),
+        Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":10}\n\n".to_vec()),
+        Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null}}\n\n".to_vec()),
+        Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+    ]));
     let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
         V3HubProviderWireProtocol::Anthropic,
         provider,

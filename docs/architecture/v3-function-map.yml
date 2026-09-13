@@ -85,6 +85,8 @@ features:
   - v3.lifecycle.control_channel
   - v3.lifecycle.operation_lock
   - v3.lifecycle.restart_plan
+  - v3.lifecycle.hooks_sidecar_declaration
+  - v3.lifecycle.hooks_sidecar_process
   entry_symbols:
   - V3ManagedLifecycle::declaration
   - V3ManagedLifecycle::start
@@ -108,6 +110,12 @@ features:
   - explicit_listener_pids_for_ports
   - occupied_listener_ports
   - send_release_ports_control
+  - reap_inactive_runtime_files
+  - hooks_sidecar_process_group_is_alive
+  - shutdown_managed_runtime
+  - restart_managed_runtime_in_place
+  - start_configured_hooks_sidecar
+  - V3HooksSidecarProcess::stop
   allowed_paths:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-cli
@@ -262,10 +270,6 @@ features:
   - npm run verify:v3-rust-only
   - npm run test:v3-workspace
   - git diff --check
-  notes:
-  - Config04 is the sole owner that materializes omitted global stopless_center as
-    true before Config05 publication; explicit global and per-server values remain
-    authoritative.
   runtime_status: owner_queryability_bound_to_existing_config_contract_source
 - feature_id: v3.simplified_user_config
   status: default_config_toml_source_cutover
@@ -456,6 +460,7 @@ features:
   - v3.provider_error.policy_manifest
   - v3.provider.failure_session_scope
   - v3.provider.health_state
+  - v3.provider.auth_key_cooldown_state
   - v3.provider.availability_projection
   mainline_bindings:
   - v3-de-01
@@ -515,6 +520,7 @@ features:
   - V3ProviderHealthStore::availability_for_session
   - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::cancel_provider_cooldown_probe_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::record_provider_key_success
@@ -1453,7 +1459,6 @@ features:
   - V3HubRelayResponseHookRegistry::govern
   - V3HubRelayResponseHookRegistry::commit
   - V3HubRespChatProcess03Outcome::into_parts
-  - V3HubRespContinuation04Outcome::control_transition
   - V3HubRespContinuation04Outcome::into_data
   - V3HubRespInbound02Normalized::normalized_kind
   - V3HubRespChatProcess03Governed::terminality
@@ -1462,10 +1467,10 @@ features:
   control_boundary:
   - V3HubRespChatProcess03Governed and V3HubRespContinuation04Committed contain response
     data only
-  - StoplessCenter transition leaves Resp03 through V3HubRespChatProcess03Outcome
-    and bypasses Resp04 data
-  - Runtime consumes V3HubRespContinuation04Outcome.control_transition before passing
-    only into_data to Resp05
+  - Web search transition leaves Resp03 through V3HubRespChatProcess03Outcome and
+    remains outside Resp04 response data
+  - Runtime consumes the typed web search transition before passing only into_data
+    to Resp05
   source_nodes:
   - V3ProviderRespInbound01Raw
   - V3HubRespInbound02Normalized
@@ -2433,7 +2438,6 @@ features:
     - v3.hub.provider_protocol@MetaRoute03RouteCarrier
     forbidden:
     - v3.sse.transport_validated_frame_stream@V3SseTransportIn03ValidatedFrameStream
-    - v3.metadata.runtime_control_stopless
     - request.normal_payload.control_state
   canonical_types:
   - V3ProviderRespInbound01Raw
@@ -2556,7 +2560,7 @@ features:
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
     display policy, client metadata, arguments, and other protocol fields remain payload
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, continuation,
-    health, and stopless/servertool control remain in typed control resources/MetadataCenter;
+    health and servertool control remain in typed control resources/MetadataCenter;
     neither side may mirror or reconstruct the other.
   compatibility_exceptions:
   - exception_id: v3.responses_inbound.codex_builtin_integer_schema
@@ -3024,7 +3028,7 @@ features:
   - execute_v3_responses_relay_runtime
   - execute_v3_responses_relay_runtime_with_local_continuation
   - execute_v3_responses_relay_dry_run_runtime
-  - execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control
+  - execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state
   - V3ProviderRequestDryRunNoNetworkTransport
   - V3ResponsesRelayLocalContinuationState
   - V3ResponsesRelayLocalContinuationScope
@@ -3432,7 +3436,7 @@ features:
   change_risk: critical
   owner_kind: rust_project_v3_runtime_chat_process_gate
   owner_scope: Resp03 owns provider-neutral response text harvest, tool-frame repair,
-    finish_reason branch selection, split tool_call/stop servertool hooks, and ordinary
+    finish_reason branch selection, the registered tool_call servertool hook, and ordinary
     tool governance before Resp04 continuation save.
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
@@ -3450,16 +3454,13 @@ features:
   - v3-resp03-tool-governance-02
   - v3-resp03-tool-governance-03
   - v3-resp03-tool-governance-04
-  - v3-resp03-tool-governance-05
   entry_symbols:
   - govern_v3_hub_relay_response
   - complete_or_repair_v3_resp03_tool_frames
   - inspect_v3_resp03_finish_reason
   - apply_v3_tool_call_servertool_hook_at_resp03
-  - apply_v3_stop_servertool_hook_at_resp03
   - project_v3_apply_patch_freeform_calls_at_resp03
   - commit_v3_hub_relay_response
-  - resp03_repairs_tool_call_finish_reason_before_stop_servertool_hook
   - resp04_reuses_resp03_repaired_payload_without_semantic_repair
   - resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable
   allowed_paths:
@@ -3501,223 +3502,11 @@ features:
     runtime: No install, restart, or live replay is claimed by this source slice.
     forbidden_claim: Do not claim live closeout without global install, restart, and
       real sample replay.
-- feature_id: v3.servertool_hook_skeleton_lifecycle
-  status: controlled_runtime_slice_verified
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_chat_process_hook
-  owner_scope: 'V3 Stopless lifecycle inside Rust Chat Process only: Req04 may inject
-    registered transparent guidance/tool/action into the current provider-bound turn
-    and transition the scoped StoplessCenter MetadataCenter state machine; Resp03
-    may strip only the matching current-response internal Stopless action/result before
-    Resp04 continuation commit and emit continuation decisions through typed data/control
-    outcomes. Injection and stripping require exact same-turn request/scope/declaration/call
-    provenance. Historical payload is immutable, and the Resp04-save to next-Req04-restore
-    interval forbids Stopless semantic work. StoplessCenter is a Metadata Center control-signal;
-    its state fields remain side-channel state and never become provider/client normal
-    payload.'
-  owner_files:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_stopless_live_shapes.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_stopless_center_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
-  - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
-  - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
-  - docs/design/v3-stopless-schema-guidance-activation-contract.md
-  resource_bindings:
-  - v3.request.normal_payload
-  - v3.hub.tool_governance_truth
-  - v3.hub.response_semantic
-  - v3.metadata.runtime_control_stopless
-  - v3.continuation.local_context_truth
-  - v3.response.client_payload
-  mainline_bindings:
-  - v3-servertool-stopless-req-01
-  - v3-servertool-stopless-req-02
-  - v3-servertool-stopless-req-03
-  - v3-servertool-stopless-req-04
-  - v3-servertool-stopless-resp-01
-  - v3-servertool-stopless-resp-02
-  - v3-servertool-stopless-resp-03
-  - v3-servertool-stopless-resp-04
-  entry_symbols:
-  - apply_v3_tool_call_servertool_hook_at_resp03
-  - apply_v3_stop_servertool_hook_at_resp03
-  - stopless_schema_guidance_activation_contract
-  - apply_v3_stopless_request_hook_at_req04
-  - active_stopless_cli_output
-  - active_stopless_chat_cli_output
-  - V3StoplessCenterState
-  - V3StoplessCenterSteering
-  - V3HubServertoolRequestProfile::stopless_reasoning_stop
-  - V3HubRelayResponseHookProfile::with_stopless_reasoning_stop
-  - V3HubRelayResponseHookProfile::with_stopless_center_state
-  - V3ResponsesRelayStoplessControlState
-  - V3ResponsesRelayStoplessControlScope
-  - V3ResponsesRelayStoplessControlState::load_for_scope
-  - V3ResponsesRelayStoplessControlState::store_for_scope
-  - V3ResponsesRelayStoplessControlState::clear_for_scope
-  - execute_v3_responses_relay_runtime_with_transport_health_and_stopless_control
-  - apply_v3_responses_relay_stopless_control_request_transition
-  - build_v3_relay_local_continuation_context_at_resp04
-  - merge_v3_relay_restored_local_context_at_req04
-  - req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat
-  - natural_stop_preserves_business_payload_and_emits_typed_control_transition
-  - request_consumes_noop_cli_and_uses_runtime_control_not_stdout
-  - json_stopless_center_persists_without_local_continuation_store
-  - json_stopless_center_missing_client_session_scope_passes_stop_without_control_write
-  - feature_toggle_false_disables_relay_stopless_injection_and_projection
-  - stopless_req04_ignores_restored_history_and_only_observes_current_suffix
-  - verify-v3-stopless-resource-control
-  - verify-v3-normalization-payload-logic-boundary
-  - verify-v3-module-boundaries
-  allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_response_stopless_live_shapes.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-  - v3/crates/routecodex-v3-runtime/tests/hub_relay_stopless_center_semantics.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_relay_stopless_anthropic_provider_wire_integration.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
-  - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-verification-map.yml
-  - docs/architecture/wiki/stopless-session-mainline-source.md
-  - docs/architecture/wiki/html/stopless-session-mainline-source.html
-  - docs/design/v3-stopless-schema-guidance-activation-contract.md
-  - docs/goals/v3-responses-direct-relay-stopless-artifact-cleanup-test-design.md
-  - scripts/architecture/verify-v3-stopless-resource-control.mjs
-  - scripts/tests/v3-stopless-resource-control-red-fixtures.mjs
-  - scripts/architecture/render-v3-stopless-state-machine-docs.mjs
-  - scripts/architecture/verify-v3-stopless-state-machine-docs.mjs
-  - scripts/tests/v3-stopless-state-machine-docs-red-fixtures.mjs
-  - scripts/architecture/verify-v3-normalization-payload-logic-boundary.mjs
-  - scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs
-  - package.json
-  forbidden_paths:
-  - v3/crates/routecodex-v3-server/src
-  - v3/crates/routecodex-v3-provider-responses/src
-  - v3/crates/routecodex-v3-virtual-router/src
-  - v3/crates/routecodex-v3-target/src
-  - src
-  - sharedmodule
-  required_gates:
-  - npm run verify:v3-stopless-state-machine-docs
-  - npm run test:v3-stopless-state-machine-docs-red-fixtures
-  - npm run verify:v3-normalization-payload-logic-boundary
-  - npm run test:v3-normalization-payload-logic-boundary-red-fixtures
-  - npm run verify:v3-stopless-resource-control
-  - npm run test:v3-stopless-resource-control-red-fixtures
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_request_semantics
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_stopless_live_shapes
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_local_continuation_integration
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_stopless_anthropic_provider_wire_integration
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough
-    -- --nocapture
-  - npm run verify:v3-relay-response-semantics
-  - npm run verify:v3-relay-request-semantics
-  - npm run verify:v3-architecture-docs
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-cargo-fmt
-  - git diff --check
-  notes:
-  - Stopless response interception is gated by StoplessCenter MetadataCenter state
-    machine same-turn `schema_guidance_active`. inactive state means pass-through
-    without CLI projection; accepted canonical summary and accepted_stop_schema pass
-    through; inactive state means no StoplessCenter write. Anthropic/provider validation
-    exceptions keep the state inactive instead of forcing illegal guidance.
-  - inactive state means pass-through
-  - V3 StoplessCenter is enabled by default and can be disabled only via `[features].stopless_center
-    = false`; disabled relay does not inject stopless guidance/tool and does not project
-    stopless CLI.
-  - 'Provider-facing guidance is a complete non-persistent current-turn guideline,
-    not a terse `继续。`: Req04 must be transparent to the model by not mentioning no-op/CLI/client
-    bridge/finish_reason/counters/budget/guard; it should continue from restored context,
-    use tools when needed, require evidence before complete/blocked `reasoningStop`,
-    and vary wording by StoplessCenter next_request_policy without exposing internal
-    state.'
-  - Allowed model-originated stop decision sources are only the internal `reasoningStop`
-    tool-call arguments and canonical reasoning `summary` sibling `stop_schema` /
-    `stopSchema` objects inspected at Resp03 after same-turn StoplessCenter schema_guidance_active
-    state. Assistant visible text, fenced JSON, `<rcc_stop_schema>`, visible `next_step`,
-    schemaFeedback, repeatCount/maxRepeats/triggerHint, and CLI stdout JSON are not
-    StoplessCenter state sources.
-  - Natural `finish_reason=stop` / `end_turn` without accepted canonical summary or
-    accepted stop_schema updates StoplessCenter phase/consecutive_stop_count/need_continue
-    policy only when the same provider turn had StoplessCenter schema_guidance_active
-    state; without activation it passes through with no CLI projection and no StoplessCenter
-    write. Before the guard an activated missing-evidence stop projects a no-input
-    no-op `routecodex hook run reasoningStop`; at the guard it stops intercepting
-    without another CLI or synthesized internal-state diagnostic.
-  - Canonical reasoning summary or accepted stop_schema is the completion gate for
-    stop/end_turn. Summary without a canonical stop_schema is accepted evidence and
-    passes through. Summary with `stop_schema.finished=true` passes through without
-    counting; summary with `stop_schema.blocked=true` plus blocked reason appends
-    that reason to canonical summary and passes through; summary with `finished=false`/unfinished
-    uses `nextStep`/`next_step` as a scoped `next_step_prompt` for the next Req04
-    continuation and projects the no-op bridge only if same-turn StoplessCenter active
-    state exists.
-  - The no-op CLI command has no args, no JSON envelope, no scope, and no state. Req04
-    consumes the current stopless call/output as current-turn evidence but never parses
-    CLI stdout/args as StoplessCenter state.
-  - StoplessCenter side-channel state is stored only in MetadataCenter/runtime_control,
-    bound by entry endpoint + session + conversation + port + routing group. `V3ResponsesRelayStoplessControlState`
-    and `V3ResponsesDirectStoplessControlState` are adapter runtime handles under
-    `StoplessCenterMetadataControl`, not the semantic owner. Local continuation context/store
-    must never carry stopless control fields.
-  - 'Data/control lock: provider-bound current-turn payload may carry registered Stopless
-    protocol artifacts injected by Req04, and Resp03 may strip their exact same-turn
-    response counterparts. StoplessCenter state remains control_signal; CLI-carried
-    scope/state, normal-payload control fields, continuation-context control state,
-    debug/snapshot truth restore, history mutation, and undeclared cross-SOP access
-    are forbidden.'
-  - Central aggregation may call StoplessCenter only through the declared v3.servertool_hook_skeleton_lifecycle
-    and v3.direct_stopless_metadata_center SOP nodes. Generic Hub closeout, server
-    entry/output aggregate edges, provider-direct, provider runtime, SSE, debug, and
-    continuation stores cannot claim StoplessCenter read/write ownership.
-  - 'Tool injection preserves the original declaration surface: top-level `tools`
-    stays top-level, Responses `input[].type=additional_tools.tools` stays embedded,
-    and stopless only appends exactly one internal `reasoningStop` declaration.'
-  - Responses protocol direct remains zero Relay StoplessCenter writes. Direct may
-    write only Direct-scoped StoplessCenter control state through `V3ResponsesDirectStoplessControlState`
-    after SameProtocolDirect decision; no-op projection may commit a Direct remote
-    locator for the provider-native response id. Inactive/missing scope and `[features].stopless_center=false`
-    pass through without Direct control write. Provider-direct and non-Responses direct
-    remain zero stopless.
-  - Stopless lifecycle docs are generated from `docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml`;
-    `docs/architecture/wiki/stopless-session-mainline-source.md` and `docs/architecture/wiki/html/stopless-session-mainline-source.html`
-    must contain both the hook edge flowchart and StoplessCenter state transition
-    diagram.
-  runtime_status: controlled_runtime_slice_only
 - feature_id: v3.servertool_center_skeleton
   status: design_locked_docs_and_maps
   change_risk: critical
   owner_kind: rust_project_v3_runtime_servertool_metadata_center
-  owner_scope: '统一 ServertoolCenter（MetadataCenter）：管理 stopless / web_search / servertool
+  owner_scope: '统一 ServertoolCenter（MetadataCenter）：管理 web_search / servertool
     CLI 的工具识别（当前是哪一个）、状态注册与状态机整体推进；hook 只在 Req04 请求治理与 Resp03
     响应治理固定挂载点调用；数据面（SSE/payload）零控制逻辑。三段式：识别 -> 状态判断 -> 操作。'
   owner_files:
@@ -3728,7 +3517,6 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   resource_bindings:
   - v3.servertool.state_machine_control
-  - v3.metadata.runtime_control_stopless
   - v3.web_search.execution_mode
   - v3.web_search.backend_binding
   mainline_bindings:
@@ -3752,7 +3540,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-  - v3/crates/routecodex-v3-runtime/src/kernel/direct_stopless.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_web_search.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - docs/design/v3-servertool-center-skeleton.md
   - docs/architecture/v3-mainline-call-map.yml
@@ -3772,109 +3560,6 @@ features:
   - npm run verify:v3-servertool-center-skeleton
   - npm run test:v3-servertool-center-skeleton-red-fixtures
   runtime_status: design_locked_docs_and_maps
-- feature_id: v3.direct_stopless_metadata_center
-  status: controlled_runtime_slice_verified
-  change_risk: critical
-  owner_kind: rust_project_v3_runtime_direct_stopless_control
-  owner_scope: V3 Direct-scoped StoplessCenter MetadataCenter lifecycle for same-protocol
-    /v1/responses Direct only. After SameProtocolDirect decision, Direct loads/writes
-    its own Direct StoplessCenter adapter handle, reuses Rust stopless request/response
-    hooks, projects no-input no-op CLI when activated missing-evidence stop occurs,
-    and may commit a Direct remote locator for provider-native response ids so next
-    previous_response_id stays Direct. Direct never writes Relay StoplessCenter, never
-    re-enters Relay Chat Process, and never stores StoplessCenter in provider/client
-    body, CLI args/stdout, debug snapshot, or continuation payload/history.
-  owner_files:
-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
-  - v3/crates/routecodex-v3-runtime/src/lib.rs
-  - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
-  - docs/goals/v3-direct-stopless-metadata-center-plan.md
-  - docs/design/v3-stopless-schema-guidance-activation-contract.md
-  resource_bindings:
-  - v3.request.normal_payload
-  - v3.response.client_payload
-  - v3.metadata.runtime_control_stopless
-  - v3.continuation.remote_binding
-  mainline_bindings:
-  - v3-direct-stopless-req-01
-  - v3-direct-stopless-req-02
-  - v3-direct-stopless-req-03
-  - v3-direct-stopless-resp-01
-  - v3-direct-stopless-resp-02
-  - v3-direct-stopless-resp-03
-  entry_symbols:
-  - V3ResponsesDirectStoplessControlScope
-  - V3ResponsesDirectStoplessControlState
-  - V3ResponsesDirectStoplessControlState::load_for_scope
-  - V3ResponsesDirectStoplessControlState::store_for_scope
-  - V3ResponsesDirectStoplessControlState::clear_for_scope
-  - prepare_v3_responses_direct_stopless_control_request
-  - apply_v3_responses_direct_stopless_control_request_transition
-  - apply_v3_responses_direct_stopless_json_response_control
-  - apply_v3_responses_direct_stopless_control_response_transition
-  - execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control
-  - direct_json_stopless_metadata_center_projects_noop_and_continues_on_remote_direct_locator
-  - direct_sse_stopless_metadata_center_projects_terminal_frames_without_sse_owning_semantics
-  - verify-v3-stopless-resource-control
-  allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/kernel.rs
-  - v3/crates/routecodex-v3-runtime/src/lib.rs
-  - v3/crates/routecodex-v3-server/src/lib.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs
-  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
-  - docs/goals/v3-direct-stopless-metadata-center-plan.md
-  - docs/architecture/v3-resource-operation-map.yml
-  - docs/architecture/v3-mainline-call-map.yml
-  - docs/architecture/v3-function-map.yml
-  - docs/architecture/v3-verification-map.yml
-  - docs/architecture/manifests/v3.servertool_hook_skeleton_lifecycle.mainline.yml
-  - docs/design/v3-stopless-schema-guidance-activation-contract.md
-  - scripts/architecture/verify-v3-stopless-resource-control.mjs
-  - scripts/tests/v3-stopless-resource-control-red-fixtures.mjs
-  - .agents/skills/rcc-dev-skills/references/95-v3-stopless-sop.md
-  - package.json
-  forbidden_paths:
-  - v3/crates/routecodex-v3-provider-responses/src
-  - v3/crates/routecodex-v3-virtual-router/src
-  - v3/crates/routecodex-v3-target/src
-  - src
-  - sharedmodule
-  required_gates:
-  - npm run verify:v3-stopless-resource-control
-  - npm run test:v3-stopless-resource-control-red-fixtures
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_remote_continuation_integration
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_direct_tool_passthrough
-    -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_stopless_center_semantics
-    -- --nocapture
-  - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-resource-map
-  - npm run verify:v3-module-boundaries
-  - npm run verify:v3-rust-only
-  - npm run verify:v3-architecture-docs
-  - npm run verify:v3-cargo-fmt
-  - git diff --check
-  notes:
-  - Semantic owner remains StoplessCenterMetadataControl under MetadataCenter; Direct
-    and Relay are separate adapter handles.
-  - Direct stopless request control starts only after SameProtocolDirect decision
-    so routing/capability selection is not polluted by injected reasoningStop.
-  - Direct writes only V3ResponsesDirectStoplessControlState; zero Relay StoplessCenter
-    write and zero Relay Chat Process re-entry for stopless.
-  - Direct no-op CLI projection may commit a Direct remote locator for the provider-native
-    response id so next previous_response_id remains Direct-owned.
-  - SSE is transport only and never parses or rewrites stopless control frames; the
-    legacy direct SSE stopless stream wrapper was physically removed.
-  - StoplessCenter state never enters provider body, client body, CLI args/stdout,
-    debug snapshot, or continuation payload/history; this does not prohibit registered
-    Req04 current-turn Stopless protocol injection or matching Resp03 current-response
-    stripping.
-  - Data/control lock and inactive/missing-scope pass-through remain explicit contracts,
-    not fallback success wrapping.
-  runtime_status: controlled_runtime_slice_only
 - feature_id: v3.protocol_normalization_tool_governance_boundary
   status: source_controlled_runtime_boundary_verified
   change_risk: critical
@@ -3971,7 +3656,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_response_semantics
     -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test hub_relay_tool_servertool_multiturn_parity
-    stopless_hook_blackbox -- --nocapture
+    -- --nocapture
   - npm run verify:v3-architecture-docs
   - npm run verify:function-map-compile-gate
   - npm run verify:architecture-mainline-manifest-sync
@@ -4596,7 +4281,8 @@ features:
   entry_symbols:
   - V3ProviderActionGate
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
-  - provider_failure_runtime_policy::tests::post_commit_sse_failures_never_cool_provider_or_block_fresh_session
+  - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
+  - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
   - V3ProviderActionAdmission::take_permit
   - V3ProviderActionPermit::drop
   - V3ProviderActionGate::abandon_admission
@@ -4995,6 +4681,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.provider.global_subscription_health
+  - v3.provider.auth_key_cooldown_state
   - v3.config.published_manifest
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
@@ -5004,6 +4691,8 @@ features:
   - build_v3_provider_global_failure_policy
   - V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
+  - V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
+  - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
@@ -5034,7 +4723,6 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime configured_semantic_global_failure_keeps_manifest_cooldown_policy -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map
@@ -5069,6 +4757,7 @@ features:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
   - v3.provider.health_state
+  - v3.provider.auth_key_cooldown_state
   - v3.continuation.local_context_truth
   mainline_bindings:
   - v3-hub-relay-response-failure-01
@@ -5985,4 +5674,67 @@ features:
   - retention compaction validates all existing rows and preserves raw lifecycle rows within the configured retention window
   - config publishes path/policy but does not own runtime append execution
   - npm run verify:v3-execution-control-payload-architecture
+  - git diff --check
+
+- feature_id: v3.memory_raw_capture
+  status: active
+  change_risk: high
+  owner_kind: rust_v3_responses_memory_raw_capture
+  owner_scope: Optional Responses-only schema guidance, declared output-unit parsing, complete client stripping, and atomic new AppSDK-compatible L3 Markdown publication after protocol-equivalent end_turn.
+  owner_crates:
+  - routecodex-v3-agent-memory
+  - routecodex-v3-config
+  - routecodex-v3-runtime
+  owner_files:
+  - v3/crates/routecodex-v3-agent-memory/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  resource_bindings:
+  - v3.memory.raw_capture_config
+  - v3.memory.schema_guidance
+  - v3.memory.response_capture
+  - v3.memory.l3_publication
+  entry_symbols:
+  - inject_memory_raw_capture_guidance
+  - capture_responses_json
+  - capture_responses_sse_event
+  - V3MemoryL3Publisher::publish
+  allowed_paths:
+  - v3/crates/routecodex-v3-agent-memory
+  - v3/crates/routecodex-v3-config/src/types.rs
+  - v3/crates/routecodex-v3-config/src/validate.rs
+  - v3/crates/routecodex-v3-config/tests
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_request_key_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
+  - v3/crates/routecodex-v3-runtime/tests
+  - docs/architecture
+  - docs/design/v3-memory-raw-capture.md
+  forbidden_paths:
+  - routecodex-v3-provider-responses
+  - routecodex-v3-server
+  - routing
+  - retry
+  - health
+  - continuation
+  - debug
+  - MetadataCenter
+  - memory/Pending
+  - memory/Knowledge
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-agent-memory
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config memory_raw_capture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime memory_raw_capture
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-ci
   - git diff --check

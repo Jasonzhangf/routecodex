@@ -43,7 +43,19 @@ impl ResponsesTransport for CaptureTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+        let body = request.body();
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["input"], "hello");
+        if let Some(tools) = body["tools"].as_array() {
+            assert!(tools[0]["parameters"]["properties"]
+                .as_object()
+                .expect("tool parameters")
+                .contains_key("reason"));
+            assert!(tools[0]["parameters"]["properties"]
+                .as_object()
+                .expect("tool parameters")
+                .contains_key("goal_alignment_confidence"));
+        }
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -65,7 +77,17 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+        let body = request.body();
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["input"], "hello");
+        assert!(body["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .expect("tool parameters")
+            .contains_key("reason"));
+        assert!(body["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .expect("tool parameters")
+            .contains_key("goal_alignment_confidence"));
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -90,7 +112,7 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
 }
 
 #[tokio::test]
-async fn direct_response_hook_uses_server_toolreason_override_when_global_is_disabled() {
+async fn direct_response_hook_injects_tool_thinking_but_keeps_client_projection_disabled() {
     let mut manifest = test_manifest();
     manifest
         .servers
@@ -106,7 +128,19 @@ async fn direct_response_hook_uses_server_toolreason_override_when_global_is_dis
         "test",
         "req-toolreason-override",
         "exec-toolreason-override",
-        json!({"model":"client-model","input":"hello"}),
+        json!({
+            "model": "client-model",
+            "input": "hello",
+            "tools": [{
+                "type": "function",
+                "name": "pwd",
+                "description": "show cwd",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }]
+        }),
     );
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
@@ -123,11 +157,11 @@ async fn direct_response_hook_uses_server_toolreason_override_when_global_is_dis
     let V3ClientBody::Json(body) = output.client_payload.body else {
         panic!("direct JSON response must remain JSON: {output:?}");
     };
-    assert_eq!(body["output"][0]["type"], "reasoning");
-    assert_eq!(
-        body["output"][0]["summary"][0],
-        json!({"type":"summary_text","text":"调用工具 pwd：确认当前工作目录"})
-    );
+    assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(body["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
+    assert!(!body.to_string().contains("调用工具"));
+    assert!(!body.to_string().contains("确认当前工作目录"));
+    assert!(!body.to_string().contains("goal_alignment_confidence"));
 }
 
 #[tokio::test]
@@ -1897,9 +1931,11 @@ async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_relea
         terminal.error_chain.as_deref(),
         Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
     );
+    // 统一错误模型：pinned 目标已进入健康冷却时，不再消耗 isolated/sustained
+    // gate 等待（不给不可用 provider 制造额外延迟），立即以类型化错误链终止。
     assert!(
-        started.elapsed() >= Duration::from_millis(2_000),
-        "pinned health-unavailable path bypassed the configured isolated and sustained gates"
+        started.elapsed() < Duration::from_millis(2_000),
+        "health cooldown must short-circuit the isolated/sustained gate waits"
     );
     assert_eq!(
         continuation_state.len().unwrap(),
@@ -2004,7 +2040,7 @@ targets = [
 async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     let manifest = direct_web_search_mode_b_manifest();
     let continuation_state = V3ResponsesDirectContinuationState::default();
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
     let continuation_scope = V3ResponsesDirectContinuationScope::responses(
         "/v1/responses",
         "session-ws-direct",
@@ -2022,9 +2058,9 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
             "tools": [{"type": "web_search"}]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
         &continuation_state,
-        &stopless_control,
+        &server_tool_state,
         &manifest,
         raw,
         continuation_scope.clone(),
@@ -2063,8 +2099,8 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(paired["call_id"], "call_ws_1");
     assert_eq!(paired["output"], "search result for routecodex");
     // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
-    let state = stopless_control
+    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
+    let state = server_tool_state
         .web_search_load_for_scope(&scope)
         .expect("center load")
         .expect("websearch state present");

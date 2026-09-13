@@ -5,7 +5,9 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { verifyV3StageProtocolShapes } from '../architecture/verify-v3-stage-protocol-shapes.mjs';
 
-const root = process.cwd();
+const root = fs.existsSync(path.join(process.cwd(), 'docs'))
+  ? process.cwd()
+  : path.resolve(process.cwd(), '..');
 const mutations = [
   { name: 'direct-protocol-conversion', mutateManifest: (doc) => { doc.chains[2].stages[1].exit_shape = 'canonical_chat_request'; }, expected: /Direct stage|must be V3Provider12ResponsesWirePayload/ },
   { name: 'relay-source-wire-crosses-chat', mutateManifest: (doc) => { doc.chains[0].stages[2].entry_shape = 'source_request_wire'; }, expected: /must be V3HubReqContinuation03Classified|shape discontinuity/ },
@@ -77,7 +79,7 @@ for (const mutation of mutations) {
 	      'docs/design/v3-stage-protocol-shape-contract.md',
 	      'docs/architecture/v3-mainline-call-map.yml',
 	      'package.json',
-	      'scripts/architecture/verify-v3-architecture-ci.mjs',
+	      'v3/scripts/architecture/verify-v3-architecture-ci.mjs',
 	      'v3/crates/routecodex-v3-runtime/src/hub_v1',
 	      'v3/crates/routecodex-v3-runtime/src/kernel.rs',
 	      'v3/crates/routecodex-v3-runtime/src/kernel',

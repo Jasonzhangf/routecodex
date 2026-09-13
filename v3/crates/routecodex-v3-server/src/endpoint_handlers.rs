@@ -457,7 +457,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 ));
             }
         };
-        let output = match execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control(
+        let output = match execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state(
             &state.manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: state.server.id.clone(),
@@ -466,7 +466,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 payload: payload.clone(),
             },
             &state.responses_relay_local_continuation,
-            &state.responses_relay_stopless_control,
+            &state.responses_relay_server_tool_state,
             continuation_scope,
             now_epoch_ms,
         )
@@ -960,13 +960,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let capture_provider_response = true;
         let mut output = if capture_provider_request || capture_provider_response {
             match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_provider_snapshots_and_initial_target(
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
+                    V3ResponsesRelayLocalServerToolInput::new(
                         &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
+                        &state.responses_relay_server_tool_state,
                         continuation_scope.clone(),
                         now_epoch_ms,
                     )
@@ -993,13 +993,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots(
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_provider_snapshots(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
+                    V3ResponsesRelayLocalServerToolInput::new(
                         &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
+                        &state.responses_relay_server_tool_state,
                         continuation_scope.clone(),
                         now_epoch_ms,
                     )
@@ -1018,13 +1018,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         } else {
             match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input_and_initial_target(
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
+                    V3ResponsesRelayLocalServerToolInput::new(
                         &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
+                        &state.responses_relay_server_tool_state,
                         continuation_scope.clone(),
                         now_epoch_ms,
                     )
@@ -1047,13 +1047,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_input(
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalStoplessControlInput::new(
+                    V3ResponsesRelayLocalServerToolInput::new(
                         &state.responses_relay_local_continuation,
-                        &state.responses_relay_stopless_control,
+                        &state.responses_relay_server_tool_state,
                         continuation_scope,
                         now_epoch_ms,
                     )

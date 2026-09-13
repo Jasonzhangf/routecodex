@@ -2,7 +2,7 @@ use serde_json::{json, Map, Value};
 
 /// Console Go 风格 responses 网关（opencode.ai/zen/go）custom tool 约束：
 /// 上游只接受 `apply_patch` 一个 `type=custom` 工具；`tool_search` 以及其余 custom 工具
-/// （exec_command / web_search / reasoningStop 等）必须以 `type=function`
+/// （exec_command / web_search 等）必须以 `type=function`
 /// 形态声明才会被接受；直接透传 custom 会返回
 /// `Unsupported custom tool: '<name>'. Only 'apply_patch' is supported.`（400）。
 ///

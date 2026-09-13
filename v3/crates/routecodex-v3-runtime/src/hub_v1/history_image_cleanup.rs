@@ -295,7 +295,12 @@ fn normalize_responses_content_parts(item: &mut Value) {
     let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) else {
         return;
     };
-    for part in content.iter_mut() {
+    normalize_responses_image_part_array(content);
+}
+
+fn normalize_responses_image_part_array(parts: &mut [Value]) -> bool {
+    let mut changed = false;
+    for part in parts.iter_mut() {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
@@ -306,32 +311,45 @@ fn normalize_responses_content_parts(item: &mut Value) {
             || row.contains_key("file_id");
         if is_image {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+            changed = true;
         }
     }
+    changed
 }
 
-/// function_call_output 的 `output` 数组（Codex 工具输出图片的实际位置）：
-/// 图片 part（input_image/output_image + image_url/data/file_id）同样替换为占位符，
+/// Responses tool output 的图片 part（数组或 JSON 字符串数组）统一替换为占位符，
 /// 否则历史工具输出图片以 base64 原样进 wire，provider 侧 context 膨胀（400）。
 fn normalize_responses_output_parts(item: &mut Value) {
-    if item.get("type").and_then(Value::as_str) != Some("function_call_output") {
+    if !matches!(
+        item.get("type").and_then(Value::as_str),
+        Some("function_call_output" | "custom_tool_call_output" | "tool_call_output")
+    ) {
         return;
     }
-    let Some(output) = item.get_mut("output").and_then(Value::as_array_mut) else {
+    let Some(output) = item.get_mut("output") else {
         return;
     };
-    for part in output.iter_mut() {
-        let Some(row) = part.as_object_mut() else {
-            continue;
-        };
-        // 与 content[] 一致：有 image_url / data / file_id 即视为图片
-        // （Codex 的 fco.output 图片 part 有时不带 type 字段）。
-        let is_image = row.contains_key("image_url")
-            || row.contains_key("data")
-            || row.contains_key("file_id");
-        if is_image {
-            *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
+
+    if let Some(parts) = output.as_array_mut() {
+        normalize_responses_image_part_array(parts);
+        return;
+    }
+
+    let Some(text) = output.as_str() else {
+        return;
+    };
+    let Ok(mut parsed) = serde_json::from_str::<Value>(text) else {
+        if text.contains("data:image") {
+            *output = Value::String(V3_HISTORY_IMAGE_PLACEHOLDER.to_string());
         }
+        return;
+    };
+    let Some(parts) = parsed.as_array_mut() else {
+        return;
+    };
+    if normalize_responses_image_part_array(parts) {
+        *output =
+            Value::String(serde_json::to_string(&parsed).unwrap_or_else(|_| text.to_string()));
     }
 }
 
@@ -652,6 +670,57 @@ mod tests {
     }
 
     #[test]
+    fn responses_trailing_tool_output_variants_clean_images() {
+        for output_type in [
+            "function_call_output",
+            "custom_tool_call_output",
+            "tool_call_output",
+        ] {
+            let mut body = json!({
+                "input": [
+                    {"type": "message", "role": "user", "content": [
+                        {"type": "input_text", "text": "current turn"}
+                    ]},
+                    {"type": output_type, "call_id": "call_1", "output": [
+                        {"detail": "original", "image_url": "data:image/png;base64,VARIANT"}
+                    ]}
+                ]
+            });
+            normalize_v3_history_image_placeholders(&mut body);
+            assert_eq!(
+                body["input"][1]["output"][0],
+                json!({"type": "input_text", "text": V3_HISTORY_IMAGE_PLACEHOLDER}),
+                "trailing {output_type} image must be cleaned"
+            );
+        }
+    }
+
+    #[test]
+    fn responses_function_call_output_json_string_image_is_cleaned() {
+        let mut body = json!({
+            "input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": "current turn"}
+                ]},
+                {"type": "function_call_output", "call_id": "call_1", "output":
+                    "[{\"detail\":\"original\",\"image_url\":\"data:image/png;base64,STRING\"}]"
+                }
+            ]
+        });
+        normalize_v3_history_image_placeholders(&mut body);
+        let output = body["input"][1]["output"]
+            .as_str()
+            .expect("JSON-string function output must remain a string");
+        assert!(
+            !output.contains("data:image"),
+            "JSON-string function output must not retain image bytes: {output}"
+        );
+        assert!(
+            output.contains(V3_HISTORY_IMAGE_PLACEHOLDER),
+            "JSON-string function output must retain the stable image placeholder: {output}"
+        );
+    }
+
     #[test]
     fn output_images_any_base64_become_identical_placeholder_bytes() {
         // cache 影响确认：历史轮不同 base64 图片（不同请求/不同图片内容）必须归一为

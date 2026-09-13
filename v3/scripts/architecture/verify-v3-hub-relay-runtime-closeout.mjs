@@ -35,7 +35,6 @@ const responsesRuntime = readFileSync(responsesRuntimePath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs', 'utf8')
-  + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_stopless.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs', 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs', 'utf8');
@@ -57,7 +56,8 @@ const server = readFileSync(serverPath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/websocket.rs', 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
-const localContinuationTests = readFileSync(localContinuationTestPath, 'utf8');
+const localContinuationTests = readFileSync(testPath, 'utf8')
+  + '\n' + readFileSync(localContinuationTestPath, 'utf8');
 const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const functionMap = readFileSync(functionMapPath, 'utf8');
 const mainline = readFileSync(mainlinePath, 'utf8');
@@ -238,7 +238,7 @@ for (const phrase of [
   'run_json_response_hooks',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
+  'let (action, mut finalized_provider_value, response_web_search_state) =',
   'commit_or_release_responses_local_continuation(',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
@@ -303,7 +303,7 @@ for (const node of expectedNodes.slice(10)) {
 requireCount(
   responsesRuntime,
   responsesRuntimePath,
-  'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
+  'let (action, mut finalized_provider_value, response_web_search_state) =',
   2,
 );
 requireOrderedSequence(
@@ -312,7 +312,7 @@ requireOrderedSequence(
   [
     'V3ProviderResponseBody::Sse(stream) => {',
     'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-    'let (\n                    action,\n                    mut finalized_provider_value,\n                    response_stopless_state,\n                    response_web_search_state,\n                ) =',
+    'let (action, mut finalized_provider_value, response_web_search_state) =',
     'run_json_response_hooks(',
     'commit_or_release_responses_local_continuation(',
   ],
@@ -395,13 +395,13 @@ for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
   'fn finalize_v3_responses_relay_server_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_stopless_control',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_stopless_control_and_provider_snapshots',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target',
   'responses_relay_local_continuation',
-  'responses_relay_stopless_control',
+  'server_tool_state',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
-  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_stopless_control',
+  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state',
   'wrap_v3_committed_relay_sse_console_stream',
   'V3CommittedSseTerminal::Completed => finalizer.complete_relay_sse()',
   'V3CommittedSseTerminal::Dropped => finalizer.client_disconnected()',
@@ -419,7 +419,7 @@ requireText(
 for (const phrase of [
   'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
   'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'assert_original_tools_preserved(&captures[1], second_tools.as_array().unwrap());',
+  'assert_eq!(captures[1]["input"]',
   '"type":"function_call_output"',
   'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
 ]) requireText(localContinuationTests, localContinuationTestPath, phrase);

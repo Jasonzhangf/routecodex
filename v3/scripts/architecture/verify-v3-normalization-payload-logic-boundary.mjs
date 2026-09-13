@@ -171,11 +171,9 @@ const boundaries = [
 const forbiddenLogic = [
   /\btool_calls?\b/,
   /\bservertool\b/i,
-  /\bstopless\b/i,
   /\bhook\b/i,
   /\bschema\b/i,
   /\bgovern/i,
-  /\breasoningStop\b/,
   /\bapply_patch\b/,
   /\brequired_action\b/,
   /\bfunction_call(?:_output)?\b/,
@@ -241,8 +239,6 @@ requireAll(canonicalControlKeyConst, 'V3 provider wire canonical control-key den
   '"opaqueTarget"',
   '"runtime_control"',
   '"runtimeControl"',
-  '"stopless_center"',
-  '"stoplessCenter"',
 ]);
 forbidAll(canonicalControlKeyConst, 'V3 provider wire canonical control-key denylist', [
   /"metadata"/,

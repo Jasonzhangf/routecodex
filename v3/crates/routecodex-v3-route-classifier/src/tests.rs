@@ -524,7 +524,6 @@ fn route_classifier_input_has_no_control_state_fields() {
         input.reached_long_context,
         input.has_image_attachment,
         input.latest_message_from_user,
-        input.stopless_followup,
         input.has_current_turn_tool_output,
         input.has_current_turn_web_search,
         input.last_assistant_tool_category,
@@ -541,7 +540,6 @@ fn route_classifier_input_has_no_control_state_fields() {
         "reached_long_context",
         "has_image_attachment",
         "latest_message_from_user",
-        "stopless_followup",
         "has_current_turn_tool_output",
         "has_current_turn_web_search",
         "last_assistant_tool_category",
@@ -649,6 +647,44 @@ fn live_responses_history_image_no_current_image_does_not_route_multimodal() {
         !route.reasoning.contains("multimodal:metadata-attachment"),
         "negative case must not log multimodal:metadata-attachment; route={:?}",
         route
+    );
+}
+
+// fbab9d4: Codex view_image returns the screenshot inside a
+// `function_call_output` whose `output` is a stringified JSON array of
+// input_image blocks carrying data: URLs. The current-turn walker must
+// decode that carrier and set has_current_turn_image so the request
+// routes to the configured multimodal pool (which excludes glm-5.3).
+#[test]
+fn codex_view_image_function_call_output_drives_multimodal_route() {
+    use serde_json::json;
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"show me the chart"}
+            ]},
+            {"type":"function_call","call_id":"call_view","name":"view_image","arguments":"{\"path\":\"chart.png\"}"},
+            {"type":"function_call_output","call_id":"call_view","output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,iVBORw0KGgo=\"}]"}
+        ]
+    });
+    let entries = project_v3_current_turn_entries_from_value(&request);
+    let signals = build_v3_current_turn_route_facts(&entries);
+    assert!(
+        signals.has_current_turn_image,
+        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
+    );
+    let route = classify_route(&RouteClassifierInput {
+        latest_message_from_user: signals.latest_message_from_user,
+        has_image_attachment: signals.has_current_turn_image,
+        has_current_turn_tool_output: signals.has_current_turn_tool_output,
+        ..Default::default()
+    });
+    assert_eq!(route.route_name, "multimodal");
+    assert!(
+        route.reasoning.contains("multimodal:metadata-attachment"),
+        "expected multimodal:metadata-attachment reasoning, got {:?}",
+        route.reasoning
     );
 }
 

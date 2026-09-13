@@ -7,15 +7,15 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_default_transport_d
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
+    let server_tool_scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             state,
             continuation_scope,
             now_epoch_ms,
         )
-        .with_stopless_control(&stopless_control, stopless_scope),
+        .with_server_tool_state(&server_tool_state, server_tool_scope),
         manifest,
         raw,
         hook_registry,
@@ -33,14 +33,14 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
     debug: &V3DebugRuntime,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let server_tool_scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             shared_state.continuation_state,
             continuation_scope,
             now_epoch_ms,
         )
-        .with_stopless_control(shared_state.stopless_control, stopless_scope)
+        .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
         .with_provider_health(shared_state.provider_health)
         .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
         .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone()),
@@ -64,14 +64,14 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<V3RequestExecutionControl>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&continuation_scope);
+    let server_tool_scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(
             shared_state.continuation_state,
             continuation_scope,
             now_epoch_ms,
         )
-        .with_stopless_control(shared_state.stopless_control, stopless_scope)
+        .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
         .with_provider_health(shared_state.provider_health)
         .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
         .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
@@ -112,10 +112,10 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: Res
     transport: &T,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_control = V3ResponsesDirectStoplessControlState::default();
-    execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control(
+    let server_tool_state = V3ResponsesDirectServerToolState::default();
+    execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
         state,
-        &stopless_control,
+        &server_tool_state,
         manifest,
         raw,
         scope,
@@ -125,11 +125,11 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation<T: Res
     )
     .await
 }
-pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_stopless_control<
+pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state<
     T: ResponsesTransport,
 >(
     state: &V3ResponsesDirectContinuationState,
-    stopless_control: &V3ResponsesDirectStoplessControlState,
+    server_tool_state: &V3ResponsesDirectServerToolState,
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
     scope: V3ResponsesDirectContinuationScope,
@@ -137,10 +137,10 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_continuation_and_st
     transport: &T,
     now_epoch_ms: u64,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let stopless_scope = V3ResponsesDirectStoplessControlScope::from(&scope);
+    let server_tool_scope = V3ResponsesDirectServerToolScope::from(&scope);
     execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::with_continuation(state, scope, now_epoch_ms)
-            .with_stopless_control(stopless_control, stopless_scope),
+            .with_server_tool_state(server_tool_state, server_tool_scope),
         manifest,
         raw,
         hook_registry,

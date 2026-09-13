@@ -1,5 +1,29 @@
 use super::*;
 
+pub(crate) fn read_live_status_detail(
+    instance_dir: &Path,
+    instance_id: &str,
+) -> Result<Option<String>, V3LifecycleError> {
+    let status_path = instance_dir.join("status.json");
+    if !status_path.exists() {
+        return Ok(None);
+    }
+    let status: V3ManagedStatusRecord = read_json(&status_path)?;
+    if status.instance_id != instance_id {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "status instance id differs from live control identity".to_string(),
+        ));
+    }
+    Ok(status.detail)
+}
+
+pub(crate) fn append_status_detail(base: Option<&str>, update: String) -> String {
+    match base {
+        Some(base) if !base.is_empty() => format!("{base}; {update}"),
+        _ => update,
+    }
+}
+
 pub(crate) fn is_control_client_disconnect(error: &std::io::Error) -> bool {
     matches!(
         error.kind(),
@@ -53,12 +77,47 @@ pub(crate) async fn shutdown_managed_runtime(
     instance_id: &str,
     socket_path: &Path,
     handle: V3ServerAggregateHandle,
+    hooks_sidecar: Option<V3HooksSidecarProcess>,
 ) -> Result<(), V3LifecycleError> {
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopping, None)?;
     handle.shutdown().await;
+    if let Some(sidecar) = hooks_sidecar {
+        if let Err(error) = sidecar.stop().await {
+            let detail = format!("hooks sidecar shutdown failed: {error}");
+            return match write_status(
+                instance_dir,
+                instance_id,
+                V3ManagedRunState::Failed,
+                Some(detail.clone()),
+            ) {
+                Ok(()) => Err(error),
+                Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                    "{detail}; failed to persist lifecycle failure: {status_error}"
+                ))),
+            };
+        }
+    } else if hooks_sidecar_process_group_is_alive(instance_dir)? {
+        let error = V3LifecycleError::Validation(
+            "hooks sidecar process group is still alive without an owned cleanup handle"
+                .to_string(),
+        );
+        let detail = format!("hooks sidecar shutdown failed: {error}");
+        return match write_status(
+            instance_dir,
+            instance_id,
+            V3ManagedRunState::Failed,
+            Some(detail),
+        ) {
+            Ok(()) => Err(error),
+            Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                "hooks sidecar shutdown failed: {error}; failed to persist lifecycle failure: {status_error}"
+            ))),
+        };
+    }
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopped, None)?;
     let _ = fs::remove_file(instance_dir.join("pid.cache"));
     let _ = fs::remove_file(instance_dir.join("control.json"));
+    let _ = fs::remove_file(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE));
     let _ = fs::remove_file(socket_path);
     Ok(())
 }
@@ -67,6 +126,7 @@ pub(crate) async fn restart_managed_runtime_in_place(
     instance_dir: &Path,
     socket_path: &Path,
     handle: V3ServerAggregateHandle,
+    hooks_sidecar: Option<V3HooksSidecarProcess>,
     restart_plan: ControlRestartPlan,
     console: bool,
 ) -> Result<(), V3LifecycleError> {
@@ -77,7 +137,6 @@ pub(crate) async fn restart_managed_runtime_in_place(
         V3ManagedRunState::Starting,
         Some("exec restart accepted".to_string()),
     )?;
-    let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
     let provider_checkpoints =
         routecodex_v3_runtime::default_provider_transport_handoff_checkpoints();
     let checkpoints = handle.prepare_for_exec().await;
@@ -86,6 +145,47 @@ pub(crate) async fn restart_managed_runtime_in_place(
         &instance_dir.join(PROVIDER_HANDOFF_FILE),
         &provider_checkpoints,
     )?;
+    if let Some(sidecar) = hooks_sidecar {
+        if let Err(error) = sidecar.stop().await {
+            let detail = append_status_detail(
+                Some("exec restart accepted"),
+                format!("hooks sidecar shutdown failed: {error}"),
+            );
+            return match write_status(
+                instance_dir,
+                &restart_plan.control_instance_id,
+                V3ManagedRunState::Failed,
+                Some(detail),
+            ) {
+                Ok(()) => Err(error),
+                Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                    "hooks sidecar shutdown failed: {error}; failed to persist lifecycle failure: {status_error}"
+                ))),
+            };
+        }
+    } else if hooks_sidecar_process_group_is_alive(instance_dir)? {
+        let error = V3LifecycleError::Validation(
+            "hooks sidecar process group is still alive without an owned cleanup handle"
+                .to_string(),
+        );
+        let detail = append_status_detail(
+            Some("exec restart accepted"),
+            format!("hooks sidecar shutdown failed: {error}"),
+        );
+        return match write_status(
+            instance_dir,
+            &restart_plan.control_instance_id,
+            V3ManagedRunState::Failed,
+            Some(detail),
+        ) {
+            Ok(()) => Err(error),
+            Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                "hooks sidecar shutdown failed: {error}; failed to persist lifecycle failure: {status_error}"
+            ))),
+        };
+    }
+    let _ = fs::remove_file(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE));
+    let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
     if restart_plan.control_instance_id == declaration.instance_id {
         write_json_atomic(&instance_dir.join("instance.json"), declaration)?;
     }

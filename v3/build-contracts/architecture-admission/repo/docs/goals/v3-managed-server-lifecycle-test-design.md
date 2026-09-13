@@ -35,6 +35,14 @@ Every schema uses `deny_unknown_fields`; every write is temp-file plus rename; s
 owner-only. No resolved secret, provider/client payload, Metadata, Debug snapshot, request ID, session,
 or continuation truth may enter lifecycle state.
 
+The installed hooks supervisor is an optional integration, not a prerequisite for the RouteCodex
+service. When it reaches its typed readiness record, lifecycle shutdown drains hooks before CodexApp.
+If spawn, configuration, readiness, or readiness cleanup fails, lifecycle preserves its already
+published control resources, starts the aggregate RouteCodex server, records the exact failure as a
+degraded `status.json` detail, and does not report hooks as ready. This fail-open boundary applies only
+to the hooks integration; RouteCodex lifecycle and server startup errors still enter the existing
+failed cleanup path.
+
 The instance ID is the stable service identity derived from canonical config path plus config digest.
 `executable_path` is exact launch provenance. Same-binary restart preserves it; explicit
 restart from a new release snapshot publishes a nonce-bound `restart.plan.json` and then execs the
@@ -60,6 +68,11 @@ active state, or any other declaration difference must fail without reaping stat
 - a stopped instance starts from the next release snapshot executable while retaining one stable
   service instance ID and publishing the new canonical executable path;
 - multi-listener instance publishes and closes the complete listener set.
+- configured hooks readiness failure is degraded without deleting `pid.cache`, `control.json`, or the
+  managed control socket; the RouteCodex service remains startable and status retains the failure detail.
+- hooks sidecar stop/restart cleanup failure remains `Failed` with the exact error, retains the lifecycle
+  control resources and persisted process-group identity, and blocks reaping or replacement until the
+  owned group is confirmed absent.
 
 ## Negative white-box matrix
 
@@ -140,3 +153,15 @@ Before and after one managed restart:
 
 Completion requires the live 5555 process to be owned by this managed lifecycle rather than an agent
 exec session. Source tests or temporary-port black-box alone cannot claim the objective complete.
+
+## Candidate validation ledger (2026-09-12)
+
+The current isolated candidate has completed the source and controlled-runtime portion of this
+contract. Exact results: `npm run test:v3-managed-server-lifecycle` passed config identity `1/1`,
+lifecycle `41/41`, and CLI black-box `19/19`; `npm run test:v3-managed-server-lifecycle-red-fixtures`
+passed `69/69`; `npm run verify:v3-managed-server-lifecycle`, `npm run verify:v3-module-boundaries`,
+`npm run verify:v3-resource-map`, `npm run verify:v3-architecture-docs`, and
+`npm run verify:v3-architecture-ci` completed successfully; lifecycle strict Clippy with
+`-D warnings`, Cargo formatting, and `git diff --check` passed. The required install/restart,
+all-listener health, and live JSON/SSE replay remain pending until the candidate is committed and
+installed from its clean source snapshot.

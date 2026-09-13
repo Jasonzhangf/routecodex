@@ -67,7 +67,7 @@ Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply 
 | development/debug | `.agents/skills/rcc-dev-skills/SKILL.md` |
 | runtime owner lookup | `docs/agent-routing/10-runtime-ssot-routing.md` |
 | build/install/restart | `docs/agent-routing/20-build-test-release-routing.md` |
-| servertool/Stopless | `docs/agent-routing/30-servertool-lifecycle-routing.md` |
+| servertool | `docs/agent-routing/30-servertool-lifecycle-routing.md` |
 | task memory | `docs/agent-routing/40-task-memory-routing.md` |
 | AppSDK lifecycle | `.appsdk/skills/appsdk-project-governance/SKILL.md` |
 

@@ -771,6 +771,63 @@ fn openai_chat_wire_rejects_invalid_reasoning_summary_policy() {
 }
 
 #[test]
+fn openai_chat_wire_consumes_reasoning_context_policy_before_wire() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_context_policy": "all_turns"
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("source-roundtrip context policy must be consumed before OpenAI Chat wire");
+
+    assert!(
+        request.get("reasoning_context_policy").is_none(),
+        "{request}"
+    );
+}
+
+#[test]
+fn openai_chat_wire_consumes_extension_reasoning_context_policy() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "reasoning_context_policy": "current_turn"
+            }
+        }
+    });
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses context extension must be consumed before OpenAI Chat wire");
+
+    assert!(
+        request.get("reasoning_context_policy").is_none(),
+        "{request}"
+    );
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "{request}"
+    );
+}
+
+#[test]
+fn openai_chat_wire_rejects_invalid_reasoning_context_policy() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "reasoning_context_policy": "last_turn"
+    });
+
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("invalid context policy must fail before provider send");
+
+    assert!(error.contains("MalformedOutboundField"), "{error}");
+    assert!(error.contains("reasoning_context_policy"), "{error}");
+}
+
+#[test]
 fn openai_chat_wire_consumes_routecodex_chat_extension_before_provider_send() {
     let payload = json!({
         "model": "gpt-test",

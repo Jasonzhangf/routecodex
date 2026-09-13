@@ -211,6 +211,52 @@ mod tests {
     }
 
     #[test]
+    fn wire_rejects_invalid_input_tool_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "function_call", "name": "servertool.exec!"}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
+            .expect_err("invalid tool name must be rejected locally");
+        assert!(error.to_string().contains("input[0].name"));
+    }
+
+    #[test]
+    fn wire_rejects_invalid_nested_tool_use_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": [
+                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+            ]}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
+            .expect_err("invalid nested tool name must be rejected locally");
+        assert!(error.to_string().contains("body.messages[0].content[0].name"));
+    }
+
+    #[test]
+    fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-review", "type": "function", "function": {
+                    "name": "mcp__codex_review.review_start",
+                    "arguments": "{}"
+                }}
+            ]}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-chat-tool-call-name",
+            target(),
+            body,
+        )
+        .expect_err("invalid openai_chat tool call name must be rejected locally");
+        assert!(error
+            .to_string()
+            .contains("body.messages[0].tool_calls[0].function.name"));
+    }
+
+    #[test]
     fn wire_flattens_namespace_tool_children_into_function_tools() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
@@ -258,6 +304,206 @@ mod tests {
             error,
             V3ProviderError::NamespaceToolFlattenFailed { request_id, .. } if request_id == "req-empty-ns"
         ));
+    }
+
+    #[test]
+    fn wire_maps_namespace_qualified_tool_names_consistently_for_calls() {
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "function_call", "call_id": "call-review", "name": "mcp__codex_review.review_start", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call-review", "output": "ok"}
+            ], "tools": [
+                {"type": "namespace", "name": "mcp__codex_review", "tools": [
+                    {"type": "function", "name": "review_start", "parameters": {"type": "object"}}
+                ]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body)
+            .expect("namespace-qualified names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["tools"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
+        assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
+    }
+
+    #[test]
+    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_when_declared() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-js", "type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "arguments": "{}"
+                }}
+            ]}],
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
+                ]}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-qualified-chat", chat_target, body)
+                .expect("declared namespace call names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__node_repl__js"
+        );
+    }
+
+    #[test]
+    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_by_convention() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call-js", "type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "arguments": "{}"
+                }}
+            ]}]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-qualified-chat-convention", chat_target, body)
+                .expect("convention namespace call names must be mapped before provider transport");
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__node_repl__js"
+        );
+    }
+
+
+    #[test]
+    fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {"type": "namespace", "name": "mcp__node_repl", "tools": [
+                    {"type": "function", "name": "js", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function", "function": {
+                    "name": "mcp__node_repl.js",
+                    "description": "an independently declared tool",
+                    "parameters": {"type": "object"}
+                }}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-declaration-name",
+            chat_target,
+            body,
+        )
+        .expect_err("ordinary tool declaration must not be rewritten before validation");
+        assert!(
+            error.to_string().contains("body.tools[1].function.name"),
+            "declaration path must be rejected without mapping: {error}"
+        );
+        assert!(
+            !error.to_string().contains("mcp__node_repl__js"),
+            "declaration names must not be rewritten from call-history aliases: {error}"
+        );
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_without_current_tools() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-no-tools",
+            target(),
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_with_empty_current_tools() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [],
+            "input": [{"type": "custom_tool_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-empty-tools",
+            target(),
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_tool_use_name_in_input() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{"type": "tool_use", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-use-input",
+            target(),
+            body,
+        )
+        .expect("historical MCP tool_use names must be normalized");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [],
+            "input": [{
+                "type": "custom_tool_call",
+                "name": "mcp__codex_review.review_start"
+            }]
+        });
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-empty-tools-openai-chat",
+            chat_target,
+            body,
+        )
+        .expect("known historical MCP namespace call must be normalized");
+
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
+    fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "namespace", "name": "mcp__codex_review", "tools": [
+                {"type": "function", "name": "other"}
+            ]}],
+            "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-historical-tool-incomplete-namespace",
+            target(),
+            body,
+        )
+        .expect("incomplete namespace declarations still require convention mapping");
+        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
     }
 
     #[test]
@@ -396,23 +642,23 @@ mod tests {
     }
 
     #[test]
-    fn opencode_go_deepseek_responses_wire_omits_thinking_stopless_tool_choice() {
+    fn opencode_go_deepseek_responses_wire_omits_thinking_tool_choice() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
         selected.provider_type = "responses".into();
         selected.canonical_model_id = "deepseek-v4-flash".into();
         selected.wire_model = "deepseek-v4-flash".into();
         selected.compatibility_profile = Some("responses:deepseek-console-go".into());
-        let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-stopless", selected, json!({
+        let wire = build_v3_provider_12_responses_wire_payload("req-deepseek-tool", selected, json!({
             "model": "deepseek-v4-flash", "input": "continue",
             "reasoning": {"effort": "high"}, "tool_choice": "required",
-            "tools": [{"type": "function", "name": "reasoningStop", "description": "stopless control"}]
+            "tools": [{"type": "function", "name": "exec_command", "description": "run a command"}]
         }))
-        .expect("DeepSeek Responses wire must not reject Stopless thinking mode");
+        .expect("DeepSeek Responses wire must not reject thinking mode with a tool");
         assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("reasoningStop")
+                tool.get("name").and_then(Value::as_str) == Some("exec_command")
             })
         }));
     }
@@ -434,7 +680,7 @@ mod tests {
                     "input": "continue",
                     "reasoning": {"effort": "high"},
                     "tool_choice": "required",
-                    "tools": [{"type": "function", "name": "reasoningStop"}]
+                    "tools": [{"type": "function", "name": "exec_command"}]
                 }),
             )
             .expect("DeepSeek thinking compat must cover every supported wire protocol");
@@ -459,7 +705,7 @@ mod tests {
                 "model": "deepseek-v4-flash",
                 "input": "continue",
                 "tool_choice": "required",
-                "tools": [{"type": "function", "name": "reasoningStop"}]
+                    "tools": [{"type": "function", "name": "exec_command"}]
             }),
         )
         .expect("non-thinking DeepSeek request must remain valid");

@@ -7,6 +7,7 @@
 use crate::hub_v1::V3HubProviderWireProtocol;
 use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
+use routecodex_v3_config::V3Config05ManifestPublished;
 
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
 /// Both buffered JSON and SSE consumers call this owner; neither transport
@@ -21,6 +22,39 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     }
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(payload);
+    }
+}
+
+pub(crate) fn apply_v3_memory_raw_capture_json_payload(
+    payload: &mut serde_json::Value,
+    manifest: &V3Config05ManifestPublished,
+    request_id: &str,
+) {
+    if !manifest.memory_raw_capture.enabled {
+        return;
+    }
+    let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
+        "{}{}",
+        manifest.memory_raw_capture.host_id_prefix, request_id
+    ));
+    let report =
+        match routecodex_v3_agent_memory::capture_responses_json(payload, &host_id, request_id) {
+            Ok(report) => report,
+            Err(error) => {
+                eprintln!("memory capture diagnostic request_id={request_id}: {error}");
+                return;
+            }
+        };
+    if report.memory_unit_found {
+        routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(payload, &report);
+        for captured in &report.captured {
+            if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
+                &manifest.memory_raw_capture.project_root,
+                captured,
+            ) {
+                eprintln!("memory l3 publication diagnostic request_id={request_id}: {error}");
+            }
+        }
     }
 }
 
@@ -144,6 +178,7 @@ pub fn compile_direct_response_compat_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn compat_plan_uses_configured_profile_and_canonical_model() {
@@ -180,5 +215,30 @@ mod tests {
         })
         .expect_err("responses profile must not attach to Chat direct");
         assert!(error.contains("unsupported direct response compatibility profile"));
+    }
+
+    #[test]
+    fn direct_response_projection_preserves_function_output_cipher_only() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "rsn_reasoning_cipher"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "rsn_opaque_function_output"
+                }
+            ]
+        });
+
+        apply_v3_direct_response_projection_hooks(&mut payload, false, false);
+
+        assert!(payload["output"][0].get("encrypted_content").is_none());
+        assert_eq!(
+            payload["output"][1]["encrypted_content"],
+            "rsn_opaque_function_output"
+        );
     }
 }

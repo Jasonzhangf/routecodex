@@ -72,6 +72,7 @@ function checkRootLayout() {
     '.agents',
     '.beads',
     '.github',
+    '.githooks',
     '.gitattributes',
     '.gitignore',
     'AGENTS.md',

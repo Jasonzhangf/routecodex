@@ -299,7 +299,10 @@ const failures = [];
 for (const fixture of cases) {
   const root = mkdtempSync(path.join(tmpdir(), 'v3-execution-control-arch-red-'));
   try {
-    const nodeModules = path.resolve(repoRoot, '../../node_modules');
+    const localNodeModules = path.resolve(v3Root, 'node_modules');
+    const nodeModules = existsSync(localNodeModules)
+      ? localNodeModules
+      : path.resolve(repoRoot, '../../node_modules');
     if (existsSync(nodeModules)) {
       symlinkSync(nodeModules, path.join(root, 'node_modules'), 'dir');
     }

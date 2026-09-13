@@ -1109,7 +1109,7 @@ async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
             .collect::<Vec<_>>(),
         vec![
             {
-                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool.exec","arguments":"{\"cmd\":\"pwd\"}"})
+                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool__exec","arguments":"{\"cmd\":\"pwd\"}"})
             },
             { json!({"type":"function_call_output","call_id":"call_servertool_1","output":"ok"}) }
         ]
@@ -2419,19 +2419,15 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
         store
             .provider_cooldown_probe_keys_due(903_000)
             .unwrap()
-            .contains(&(
-                "limited".to_string(),
-                Some("key1".to_string()),
-                Some("gpt-5.5".to_string())
-            )),
+            .contains(&("limited".to_string(), Some("key1".to_string()), None)),
         "cooled provider must be probe-due after cooldown expiry"
     );
     assert!(store
-        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .acquire_provider_cooldown_probe("limited", Some("key1"), None)
         .unwrap()
         .is_some());
     store
-        .complete_provider_cooldown_probe_success("limited", Some("key1"), Some("gpt-5.5"))
+        .complete_provider_cooldown_probe_success("limited", Some("key1"), None)
         .unwrap();
     assert!(
         store

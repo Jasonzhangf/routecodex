@@ -1,0 +1,115 @@
+{
+  "source_worktree": "/Users/fanzhang/Documents/github/routecodex/playground/agent-memory-foundation",
+  "source_head": "2c431042c7ed8a6caa3ed6fda4e2492e3f81c1e2",
+  "target_baseline": "3fa86061a8077cbb517cd572b460cbdc3357b924",
+  "second_source": "awaiting_user_identification",
+  "files": [
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/Cargo.toml",
+      "destination": "v3/crates/routecodex-v3-agent-memory/Cargo.toml",
+      "sha256": "225df8d883aa9faaa3d7d04badcd1a71f803aa76386a6385405affdc9976ee38",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/src/lib.rs",
+      "destination": "v3/crates/routecodex-v3-agent-memory/src/lib.rs",
+      "sha256": "13fd42e61c0f026aa25ecf201708e5babea654b376134a042a24262db25f0574",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/src/organization.rs",
+      "destination": "v3/crates/routecodex-v3-agent-memory/src/organization.rs",
+      "sha256": "2f68c91ac9baa3103a5ebf94bf7c22fa6e0b8c43194d1ef8840c4b8c0cf48ba8",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/src/runtime.rs",
+      "destination": "v3/crates/routecodex-v3-agent-memory/src/runtime.rs",
+      "sha256": "ad7bd4ab4e76fdaad216656d534dbb84e1a662b72275191883bc47ea3fab78bd",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/src/skill_index.rs",
+      "destination": "v3/crates/routecodex-v3-agent-memory/src/skill_index.rs",
+      "sha256": "1b62d6915afc81446ad48dbfd035b870e9ac043330eb2faae7b29a3341df5243",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-agent-memory/src/tests.rs",
+      "destination": "v3/crates/routecodex-v3-agent-memory/src/tests.rs",
+      "sha256": "705ab390f9b649720758deee3e8a8b9c6b843f90d9573e702294c06bb2215660",
+      "kind": "isolated_core"
+    },
+    {
+      "source": "docs/design/v3-agent-memory-foundation.md",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/design/v3-agent-memory-foundation.md",
+      "sha256": "73b004679001678a1b717e4df06c047db46cde2684ed3ca652faf627bf43496c",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "docs/design/v3-agent-memory-req04-recall-projection.md",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/design/v3-agent-memory-req04-recall-projection.md",
+      "sha256": "ff1c04f0717e7cad97cf7942dad5edb63465f75b07d19ebf8075c63a8759f403",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-runtime/src/memory_req04.rs",
+      "destination": "docs/audits/memory-takeover-20260906/source/v3/crates/routecodex-v3-runtime/src/memory_req04.rs",
+      "sha256": "86aeff2f9a507b7c5499b33df0fbbab2103f7f57c157b933894ca655d89a9977",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-runtime/src/memory_resp03.rs",
+      "destination": "docs/audits/memory-takeover-20260906/source/v3/crates/routecodex-v3-runtime/src/memory_resp03.rs",
+      "sha256": "b123b620c14f2a247f295b927334693d0b493c7cd647e3971c776383101c31a5",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-runtime/src/kernel/tests/agent_memory_req04.rs",
+      "destination": "docs/audits/memory-takeover-20260906/source/v3/crates/routecodex-v3-runtime/src/kernel/tests/agent_memory_req04.rs",
+      "sha256": "e47e2aa817b0c89fffff5987b583619f33d5f655e343bce614a7bf03d3617446",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_memory_tests.rs",
+      "destination": "docs/audits/memory-takeover-20260906/source/v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_memory_tests.rs",
+      "sha256": "cb1e7e2d11396050565407d35153142ad330d8ed0d039411fb58dadf87cb3f38",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "docs/architecture/v3-function-map.yml",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/architecture/v3-function-map.yml",
+      "sha256": "996fe2321050e15ce466378830af41642fb20659fc5ae270764b9fe63c0ee865",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "docs/architecture/v3-mainline-call-map.yml",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/architecture/v3-mainline-call-map.yml",
+      "sha256": "f0fe84b830735383b850b435d22cc639850b6af31dd3398582f6bec195cef545",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "docs/architecture/v3-resource-operation-map.yml",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/architecture/v3-resource-operation-map.yml",
+      "sha256": "99ba5c6e17a7e629e2b2cf7cfdc4e0d68cfa92567d2056033f49ce4caa412156",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": "docs/architecture/v3-verification-map.yml",
+      "destination": "docs/audits/memory-takeover-20260906/source/docs/architecture/v3-verification-map.yml",
+      "sha256": "f3b4349ed7422291bc884383dc4ac84c0cd63dc16b0cfcfd9dc8b0bf098f3725",
+      "kind": "reference_not_wired"
+    },
+    {
+      "source": ".agent-collab/runs/20260904T-agent-memory-foundation/notes.jsonl",
+      "destination": "docs/audits/memory-takeover-20260906/source/.agent-collab/runs/20260904T-agent-memory-foundation/notes.jsonl",
+      "sha256": "1cb6a5ad18988db226e1a705d6af4bc68acc1fbc28d118c4269a2fec6307ff89",
+      "kind": "reference_not_wired"
+    }
+  ],
+  "mixed_patch": {
+    "path": "mixed-integration-reference.patch",
+    "sha256": "59b3304b6356684371259f111063b493a4a5d69986e31c6598c59a9db6d66cf6",
+    "purpose": "Historical memory-matching file diffs; includes unrelated hunks. Reference only; never apply wholesale."
+  }
+}

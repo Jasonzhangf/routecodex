@@ -966,7 +966,8 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-protocol-parity-red-'));
   try {
     for (const file of files) copyFileInto(root, file);
-    symlinkSync(resolve(repo, 'node_modules'), resolve(root, 'node_modules'), 'dir');
+    const nodeModules = resolve(repo, 'v3/node_modules');
+    if (existsSync(nodeModules)) symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(testCase.from)) throw new Error(`${testCase.name}: mutation source missing`);

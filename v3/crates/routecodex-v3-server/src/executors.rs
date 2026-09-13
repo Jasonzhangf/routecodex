@@ -93,6 +93,19 @@ pub(crate) fn responses_relay_output_response(
     keepalive_interval: Option<Duration>,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3ResponsesRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let successful_sse = output.error_chain.is_none() && output.status < 400;
     let projected_error_frame = if requested_stream && !successful_sse {
         match &output.client_body {
@@ -179,6 +192,19 @@ pub(crate) fn openai_chat_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3OpenAiChatRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -449,6 +475,19 @@ pub(crate) fn gemini_relay_output_response(
     keepalive_interval: Duration,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(
+        &output.client_body,
+        V3GeminiRelayClientBody::Json(body)
+            if v3_is_sse_target_pool_exhaustion_parts(
+                output.status,
+                &output.node_trace,
+                output.error_chain.as_deref().unwrap_or(&[]),
+                body,
+            )
+    );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();
@@ -490,6 +529,16 @@ pub(crate) fn anthropic_relay_output_response(
     output: V3AnthropicRelayRuntimeOutput,
     requested_stream: bool,
 ) -> Response<Body> {
+    let pool_exhausted_disconnect = matches!(&output.client_response, Value::Object(_))
+        && v3_is_sse_target_pool_exhaustion_parts(
+            output.status,
+            &output.node_trace,
+            output.error_chain.as_deref().unwrap_or(&[]),
+            &output.client_response,
+        );
+    if requested_stream && pool_exhausted_disconnect {
+        return v3_sse_transport_disconnect_response();
+    }
     let status = output.status;
     let node_trace = output.node_trace.clone();
     let error_chain = output.error_chain.clone();

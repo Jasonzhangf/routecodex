@@ -30,11 +30,11 @@ impl V3ResponsesDirectContinuationScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ResponsesDirectStoplessControlScope {
+pub struct V3ResponsesDirectServerToolScope {
     key: V3RemoteContinuationScopeKey,
 }
 
-impl V3ResponsesDirectStoplessControlScope {
+impl V3ResponsesDirectServerToolScope {
     pub fn responses(
         endpoint: impl Into<String>,
         session_id: impl Into<String>,
@@ -63,7 +63,7 @@ impl V3ResponsesDirectStoplessControlScope {
     }
 }
 
-impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectStoplessControlScope {
+impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectServerToolScope {
     fn from(scope: &V3ResponsesDirectContinuationScope) -> Self {
         Self {
             key: scope.key.clone(),
@@ -72,75 +72,13 @@ impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectStoplessCont
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct V3ResponsesDirectStoplessControlState {
+pub struct V3ResponsesDirectServerToolState {
     center: V3ServerToolCenter,
 }
 
-impl V3ResponsesDirectStoplessControlState {
-    fn center_key(scope: &V3ResponsesDirectStoplessControlScope) -> V3ServerToolCenterKey {
-        let key = &scope.key;
-        V3ServerToolCenterKey {
-            tool_name: V3ServerToolName::Stopless,
-            scope_key: format!(
-                "{:?}|{}|{}|{}|{}|{}",
-                key.entry_protocol,
-                key.entry_endpoint,
-                key.port,
-                key.routing_group,
-                key.session_id,
-                key.conversation_id
-            ),
-        }
-    }
-
-    pub fn load_for_scope(
-        &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
-    ) -> Result<Option<V3StoplessCenterState>, String> {
-        match self
-            .center
-            .load(&Self::center_key(scope))
-            .map_err(|error| error.to_string())?
-        {
-            Some(V3ServerToolInstanceState::Stopless(state)) => Ok(Some(state)),
-            Some(_) => Err("cross-tool direct stopless load rejected".to_string()),
-            None => Ok(None),
-        }
-    }
-
-    pub fn store_for_scope(
-        &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
-        state: V3StoplessCenterState,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), String> {
-        self.center
-            .store(
-                Self::center_key(scope),
-                V3ServerToolInstanceState::Stopless(state),
-                written_by,
-                reason,
-                request_id,
-            )
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn clear_for_scope(
-        &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), String> {
-        self.center
-            .clear(&Self::center_key(scope), written_by, reason, request_id)
-            .map_err(|error| error.to_string())
-    }
-
+impl V3ResponsesDirectServerToolState {
     fn web_search_center_key(
-        scope: &V3ResponsesDirectStoplessControlScope,
+        scope: &V3ResponsesDirectServerToolScope,
     ) -> V3ServerToolCenterKey {
         let key = &scope.key;
         V3ServerToolCenterKey {
@@ -159,7 +97,7 @@ impl V3ResponsesDirectStoplessControlState {
 
     pub fn web_search_load_for_scope(
         &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
+        scope: &V3ResponsesDirectServerToolScope,
     ) -> Result<Option<V3WebSearchCenterState>, String> {
         match self
             .center
@@ -174,7 +112,7 @@ impl V3ResponsesDirectStoplessControlState {
 
     pub fn web_search_store_for_scope(
         &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
+        scope: &V3ResponsesDirectServerToolScope,
         state: V3WebSearchCenterState,
         written_by: V3ServerToolCenterWriteOrigin,
         reason: Option<&str>,
@@ -193,7 +131,7 @@ impl V3ResponsesDirectStoplessControlState {
 
     pub fn web_search_clear_for_scope(
         &self,
-        scope: &V3ResponsesDirectStoplessControlScope,
+        scope: &V3ResponsesDirectServerToolScope,
         written_by: V3ServerToolCenterWriteOrigin,
         reason: Option<&str>,
         request_id: Option<&str>,
@@ -310,7 +248,7 @@ impl V3ResponsesDirectContinuationState {
 
 pub struct V3ResponsesDirectRuntimeSharedState<'a> {
     pub continuation_state: &'a V3ResponsesDirectContinuationState,
-    pub stopless_control: &'a V3ResponsesDirectStoplessControlState,
+    pub server_tool_state: &'a V3ResponsesDirectServerToolState,
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
@@ -319,7 +257,7 @@ pub struct V3ResponsesDirectRuntimeSharedState<'a> {
 impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
     pub fn new<H>(
         continuation_state: &'a V3ResponsesDirectContinuationState,
-        stopless_control: &'a V3ResponsesDirectStoplessControlState,
+        server_tool_state: &'a V3ResponsesDirectServerToolState,
         provider_health: H,
     ) -> Self
     where
@@ -327,7 +265,7 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
     {
         Self {
             continuation_state,
-            stopless_control,
+            server_tool_state,
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
@@ -355,8 +293,8 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
 struct V3ResponsesDirectRuntimeCoreState {
     continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
     continuation_scope: Option<V3ResponsesDirectContinuationScope>,
-    stopless_control: Option<Arc<V3ResponsesDirectStoplessControlState>>,
-    stopless_scope: Option<V3ResponsesDirectStoplessControlScope>,
+    server_tool_state: Option<Arc<V3ResponsesDirectServerToolState>>,
+    server_tool_scope: Option<V3ResponsesDirectServerToolScope>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
@@ -382,8 +320,8 @@ impl V3ResponsesDirectRuntimeCoreState {
         Self {
             continuation_state: None,
             continuation_scope: None,
-            stopless_control: None,
-            stopless_scope: None,
+            server_tool_state: None,
+            server_tool_scope: None,
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
@@ -408,8 +346,8 @@ impl V3ResponsesDirectRuntimeCoreState {
         Self {
             continuation_state: Some(Arc::new(state.clone())),
             continuation_scope: Some(scope),
-            stopless_control: None,
-            stopless_scope: None,
+            server_tool_state: None,
+            server_tool_scope: None,
             now_epoch_ms,
             provider_health: None,
             provider_health_neutral: false,
@@ -426,13 +364,13 @@ impl V3ResponsesDirectRuntimeCoreState {
         }
     }
 
-    fn with_stopless_control(
+    fn with_server_tool_state(
         mut self,
-        stopless_control: &V3ResponsesDirectStoplessControlState,
-        stopless_scope: V3ResponsesDirectStoplessControlScope,
+        server_tool_state: &V3ResponsesDirectServerToolState,
+        server_tool_scope: V3ResponsesDirectServerToolScope,
     ) -> Self {
-        self.stopless_control = Some(Arc::new(stopless_control.clone()));
-        self.stopless_scope = Some(stopless_scope);
+        self.server_tool_state = Some(Arc::new(server_tool_state.clone()));
+        self.server_tool_scope = Some(server_tool_scope);
         self
     }
 

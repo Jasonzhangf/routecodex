@@ -1,17 +1,15 @@
 use crate::direct_response_hooks::V3DirectResponseCompatBlock;
 use crate::hooks::{build_v3_provider_error_source, V3HookRegistry};
 use crate::hub_v1::{
-    apply_v3_stop_servertool_hook_at_resp03, apply_v3_stopless_request_hook_at_req04,
     apply_v3_tool_call_servertool_hook_at_resp03,
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
-    v3_responses_direct_stopless_center_enabled_for_server, V3HubContinuationOwnership,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin, V3StoplessCenterState,
+    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
+    V3HubProviderWireProtocol, V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile,
+    V3HubTransportIntent, V3ProviderRespInbound01RawContext, V3RuntimeObservability,
+    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
@@ -57,6 +55,8 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
+
+include!("kernel/direct_web_search.rs");
 
 pub mod direct_request_key_hooks;
 mod direct_runtime_helpers_stream;
@@ -115,8 +115,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let V3ResponsesDirectRuntimeCoreState {
         continuation_state,
         continuation_scope,
-        stopless_control,
-        stopless_scope,
+        server_tool_state,
+        server_tool_scope,
         now_epoch_ms,
         provider_health,
         initial_selected_target,
@@ -159,8 +159,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         // the unplanned path without re-entering the Router.
         trace.extend(plan_trace);
     }
-    let mut direct_stopless_control_prepared = false;
-    let mut direct_stopless_request_state: Option<V3StoplessCenterState> = None;
     let previous_response_id = standardized
         .body
         .get("previous_response_id")
@@ -554,7 +552,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 None,
                 "in_progress",
                 provider_failure_events.clone(),
-                false,
             );
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
@@ -775,15 +772,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &hook_registry,
                 );
             }
-            if let Err(source) = clear_v3_responses_direct_stopless_control_on_pre_resp03_terminal(
-                manifest,
-                &standardized.server_id,
-                stopless_control.as_deref(),
-                stopless_scope.as_ref(),
-                direct_stopless_request_state.as_ref(),
-            ) {
-                return error_output(source, trace, &hook_registry);
-            }
             let captured_target_09 = match expanded.as_ref() {
                 Some(expanded) => expanded.clone(),
                 None => {
@@ -807,43 +795,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 request_execution_control,
             );
         }
-        if !direct_stopless_control_prepared {
-            match prepare_v3_responses_direct_stopless_control_request(
-                manifest,
-                &standardized.server_id,
-                stopless_control.as_deref(),
-                stopless_scope.as_ref(),
-                &mut standardized.body,
-                &standardized.request_id,
-                now_epoch_ms,
-                &mut trace,
-            ) {
-                Ok(state) => {
-                    direct_stopless_request_state = state;
-                    direct_stopless_control_prepared = true;
-                }
-                Err(source) => return error_output(source, trace, &hook_registry),
-            }
-            // direct websearch：独立于 stopless center 开关的 Req04 工具面
-            // 决策（Mode B 本地化 + 激活登记）与下一轮配对收尾。
-            match prepare_v3_responses_direct_web_search_control_request(
-                manifest,
-                stopless_control.as_deref(),
-                stopless_scope.as_ref(),
-                &mut standardized.body,
-                &mut trace,
-            ) {
-                Ok(()) => {}
-                Err(source) => return error_output(source, trace, &hook_registry),
-            }
-            if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
-                stopless_control.as_deref(),
-                stopless_scope.as_ref(),
-                &standardized.body,
-                &mut trace,
-            ) {
-                return error_output(source, trace, &hook_registry);
-            }
+        match prepare_v3_responses_direct_web_search_control_request(
+            manifest,
+            server_tool_state.as_deref(),
+            server_tool_scope.as_ref(),
+            &mut standardized.body,
+            &mut trace,
+        ) {
+            Ok(()) => {}
+            Err(source) => return error_output(source, trace, &hook_registry),
+        }
+        if let Err(source) = apply_v3_responses_direct_web_search_control_completion(
+            server_tool_state.as_deref(),
+            server_tool_scope.as_ref(),
+            &standardized.body,
+            &mut trace,
+        ) {
+            return error_output(source, trace, &hook_registry);
         }
 
         // Responses direct has a protocol-specific kernel, so it must enter the
@@ -1108,7 +1076,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
                             provider_failure_events.clone(),
-                            false,
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
                         let projected =
@@ -1183,6 +1150,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         {
             Ok(projection) => projection,
             Err(source) => {
+                let transport_source = source.clone();
                 if provider_response_is_stream {
                     if let Err(error) = runtime_timing.finish_external() {
                         return error_output(
@@ -1241,7 +1209,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         provider_failure_event_sink.as_ref(),
                         &policy.target,
                         "responses",
-                        "json",
+                        if provider_response_is_stream {
+                            "sse"
+                        } else {
+                            "json"
+                        },
                         Some(event.status),
                         &provider_failure_events,
                         &event,
@@ -1286,13 +1258,29 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
                             "responses",
-                            "json",
+                            if provider_response_is_stream {
+                                "sse"
+                            } else {
+                                "json"
+                            },
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
                             provider_failure_events.clone(),
-                            false,
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
+                        if provider_response_is_stream
+                            && (transport_source.code == "provider_response_sse_stream"
+                                || transport_source.code == "provider_response_body_error")
+                        {
+                            return direct_runtime_helpers_stream::exhausted_sse_transport_error_output(
+                                transport_source,
+                                trace,
+                                &hook_registry,
+                                Some(observability),
+                                provider_request_snapshot,
+                                None,
+                            );
+                        }
                         let projected =
                             V3ErrorHandlingCenter::project_terminal(policy_result.decision);
                         return projected_error_output_with_observability(
@@ -1322,7 +1310,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             }
         };
         trace.push("V3DirectResp14ProviderProjectionPrepared");
-        let mut direct_stopless_projected = false;
         // 响应侧密文保留判定（唯一策略）：仅 gpt 模型且当前候选集合只有单一
         // provider 时保留 `encrypted_content` 给 Codex 客户端（客户端用自己的
         // 官方密文重建 reasoning 历史）；其余场景一律在进入客户端前剥离。
@@ -1337,7 +1324,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             })
             .unwrap_or(false);
         let direct_web_search_request_state =
-            match (stopless_control.as_deref(), stopless_scope.as_ref()) {
+            match (server_tool_state.as_deref(), server_tool_scope.as_ref()) {
                 (Some(control), Some(scope)) => match control.web_search_load_for_scope(scope) {
                     Ok(state) => state,
                     Err(error) => {
@@ -1359,118 +1346,43 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 ),
                 retain_response_cipher,
             );
-            if v3_responses_direct_stopless_center_enabled_for_server(
-                manifest,
-                &standardized.server_id,
+            match apply_v3_responses_direct_web_search_json_response_control(
+                server_tool_state.as_deref(),
+                server_tool_scope.as_ref(),
+                body,
+                &mut trace,
             ) {
-                match apply_v3_responses_direct_stopless_json_response_control(
-                    V3ResponsesDirectStoplessJsonResponseControlInput {
-                        manifest,
-                        server_id: &standardized.server_id,
-                        stopless_control: stopless_control.as_deref(),
-                        stopless_scope: stopless_scope.as_ref(),
-                        request_stopless_state: direct_stopless_request_state.as_ref(),
-                        request_web_search_state: direct_web_search_request_state.as_ref(),
-                        transition_request_id: &standardized.request_id,
-                        transition_updated_at: now_epoch_ms,
-                        payload: body,
-                    },
-                    &mut trace,
-                ) {
-                    Ok(outcome) => {
-                        direct_stopless_projected = outcome.intercepted;
-                        match outcome.continuation_transition {
-                            V3DirectStoplessContinuationTransition::PassThrough => {}
-                            V3DirectStoplessContinuationTransition::Continue { response_id } => {
-                                response_projection.remote_continuation =
-                                    V3RemoteContinuationObservation::Pending { response_id };
-                            }
-                            V3DirectStoplessContinuationTransition::Terminal => {
-                                response_projection.remote_continuation =
-                                    V3RemoteContinuationObservation::Terminal;
-                            }
-                        }
-                    }
-                    Err(source) => return error_output(source, trace, &hook_registry),
-                }
-            } else {
-                match apply_v3_responses_direct_web_search_json_response_control(
-                    stopless_control.as_deref(),
-                    stopless_scope.as_ref(),
-                    body,
-                    &mut trace,
-                ) {
-                    Ok(Some(state)) => {
-                        // Mode B 本地 websearch 拦截成功。MiniMax hosted
-                        // search：结果已随同一响应返回（SearchResultCaptured）
-                        // → 跳过搜索 hop；否则执行异步搜索 hop（backend
-                        // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
-                        // hosted web_search_call + 原 call_id 配对。
-                        let captured = if state.phase()
-                            == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
-                        {
-                            state
-                        } else {
-                            let backend_binding =
-                                crate::hub_v1::resolve_request_web_search_backend_binding(
-                                    manifest,
-                                    &standardized.body,
-                                );
-                            match crate::hub_v1::execute_local_web_search_hop(
+                Ok(Some(state)) => {
+                    // Mode B 本地 websearch 拦截成功。MiniMax hosted
+                    // search：结果已随同一响应返回（SearchResultCaptured）
+                    // → 跳过搜索 hop；否则执行异步搜索 hop（backend
+                    // direct pin 走正常 Hub 链 + VR 路由）。结果投影为
+                    // hosted web_search_call + 原 call_id 配对。
+                    let captured = if state.phase()
+                        == crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
+                    {
+                        state
+                    } else {
+                        let backend_binding =
+                            crate::hub_v1::resolve_request_web_search_backend_binding(
                                 manifest,
-                                &standardized.server_id,
-                                &direct_failure_session_scope,
-                                &provider_health,
-                                backend_binding.as_deref(),
-                                &state,
-                                transport,
-                                &standardized.request_id,
-                                true,
-                            )
-                            .await
-                            {
-                                Ok(captured) => captured,
-                                Err(error) => {
-                                    return error_output(
-                                        runtime_source(
-                                            "V3DirectWebSearchResp02RuntimeControlUpdated",
-                                            error,
-                                        ),
-                                        trace,
-                                        &hook_registry,
-                                    )
-                                }
-                            }
-                        };
-                        match crate::hub_v1::project_web_search_result_into_finalized(
-                            body, &captured,
-                        ) {
-                            Ok(()) => {}
-                            Err(error) => {
-                                return error_output(
-                                    runtime_source(
-                                        "V3DirectWebSearchResp03HostedResultProjected",
-                                        error,
-                                    ),
-                                    trace,
-                                    &hook_registry,
-                                )
-                            }
-                        }
-                        if let (Some(control), Some(scope)) =
-                            (stopless_control.as_ref(), stopless_scope.as_ref())
+                                &standardized.body,
+                            );
+                        match crate::hub_v1::execute_local_web_search_hop(
+                            manifest,
+                            &standardized.server_id,
+                            &direct_failure_session_scope,
+                            &provider_health,
+                            backend_binding.as_deref(),
+                            &state,
+                            transport,
+                            &standardized.request_id,
+                            true,
+                        )
+                        .await
                         {
-                            if let Err(error) = control.web_search_store_for_scope(
-                                scope,
-                                captured,
-                                V3ServerToolCenterWriteOrigin {
-                                    module: "kernel",
-                                    symbol: "resp02_direct_web_search_control_updated",
-                                    stage: "resp02_runtime_control_updated",
-                                },
-                                Some("resp02 persist captured web_search state"),
-                                None,
-                            ) {
+                            Ok(captured) => captured,
+                            Err(error) => {
                                 return error_output(
                                     runtime_source(
                                         "V3DirectWebSearchResp02RuntimeControlUpdated",
@@ -1478,15 +1390,51 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     ),
                                     trace,
                                     &hook_registry,
-                                );
+                                )
                             }
                         }
-                        trace.push("V3DirectWebSearchResp03HostedResultProjected");
-                        direct_stopless_projected = true;
+                    };
+                    match crate::hub_v1::project_web_search_result_into_finalized(body, &captured) {
+                        Ok(()) => {}
+                        Err(error) => {
+                            return error_output(
+                                runtime_source(
+                                    "V3DirectWebSearchResp03HostedResultProjected",
+                                    error,
+                                ),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
                     }
-                    Ok(None) => {}
-                    Err(source) => return error_output(source, trace, &hook_registry),
+                    if let (Some(control), Some(scope)) =
+                        (server_tool_state.as_ref(), server_tool_scope.as_ref())
+                    {
+                        if let Err(error) = control.web_search_store_for_scope(
+                            scope,
+                            captured,
+                            V3ServerToolCenterWriteOrigin {
+                                module: "kernel",
+                                symbol: "resp02_direct_web_search_control_updated",
+                                stage: "resp02_runtime_control_updated",
+                            },
+                            Some("resp02 persist captured web_search state"),
+                            None,
+                        ) {
+                            return error_output(
+                                runtime_source(
+                                    "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                    error,
+                                ),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                    }
+                    trace.push("V3DirectWebSearchResp03HostedResultProjected");
                 }
+                Ok(None) => {}
+                Err(source) => return error_output(source, trace, &hook_registry),
             }
         }
         let attempt_body = std::mem::replace(
@@ -1633,7 +1581,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                         policy_result.event.as_ref().map(|event| event.status),
                                         "failed",
                                         provider_failure_events.clone(),
-                                        false,
                                     );
                                     observability.attempts =
                                         Some(total_attempts(&accumulator, send_attempts));
@@ -1745,7 +1692,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             Some(provider_status),
             "completed",
             provider_failure_events.clone(),
-            direct_stopless_projected,
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
         observability.timing = timing;
@@ -1763,7 +1709,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     }
 }
 
-include!("kernel/direct_stopless.rs");
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
 include!("kernel/direct_continuation_commit.rs");

@@ -429,7 +429,7 @@ provider 的“原始错误 → 标准错误事实”映射是另一层，不属
 |---|---|
 | 匹配 | HTTP 401 或 HTTP 403 |
 | 第一次 | `wait_retry`，`reselect_before_client_projection`，最多 2 attempts，backoff 1s |
-| 第二次 | `scope = auth_key`，duration 3,600,000ms（1小时） |
+| 第二次 | HTTP 401：`scope = auth_key`，duration 18,000,000ms（5小时）；HTTP 403：`scope = auth_key`，duration 3,600,000ms（1小时） |
 | 冷却键 | `provider_id + auth_alias`，不含 session，不含 model |
 | 影响范围 | 只阻断该 provider 的该 key；同 provider 其他 key、其他 provider 保持可选 |
 | session | 不同 session 共享该 auth-key 冷却，避免坏 key 在新 session 继续被打 |
@@ -480,7 +480,7 @@ Responses continuation 另受三重键约束：entry protocol + continuation own
 
 ```text
 bad key #1 401 -> retry/reselect
-bad key #2 401 -> auth_key cooldown 1h
+bad key #2 401 -> auth_key cooldown 5h
 same provider key in another session -> unavailable
 same provider key with another model -> unavailable
 same provider key2 -> available
@@ -523,7 +523,7 @@ Required regression pairs：
 |---|---|---:|---|---:|---|
 | 瞬态 transient | SSE decode、SSE idle/stream interruption、连接瞬态 | 不计数 | 无 | 无 | 立即切 provider；只走防风暴阻塞等待：1s → 3s → 5s |
 | 可恢复 recoverable | 500、502 等 provider 暂时不可用 | 同一 session 连续累计 | session + provider key | 3 次 / 15 分钟 | 每 15 分钟 probe；probe 成功恢复 |
-| 不可恢复 unrecoverable | 401、402、403、503 等账号/实例不可恢复错误 | 全局连续累计 | provider + auth key | 2 次 / 1 小时 | 每 1 小时 probe；probe 成功恢复 |
+| 不可恢复 unrecoverable | 401、402、403、503 等账号/实例不可恢复错误 | 全局连续累计 | provider + auth key | HTTP 401：2 次 / 5 小时；HTTP 402/403/503：2 次 / 1 小时 | probe 按冷却时长；probe 成功恢复 |
 
 “不可恢复”表示当前账号/实例错误需要较长恢复窗口，不表示可以绕过统一策略直接返回客户端；只要还有合法候选，仍然先切 provider。最终投影仍只由 Error05 决定。
 
@@ -569,10 +569,10 @@ raw provider error
 ### 9.4 与当前代码的差异（必须修正）
 
 - 当前 transient 路径仍存在同 provider retry budget 和 30 秒 session bypass；目标应改为不计数、直接 reselect，只由统一 action queue 提供 1s/3s/5s 防风暴等待。
-- 401/403/402/503 的 auth-key 两次/1小时已纳入 `unrecoverable` typed category；recoverable 与 unrecoverable 的 probe interval 分别由 `internal.toml` 的 15 分钟/1 小时字段注入 typed policy，不再使用单一固定间隔。
+- HTTP 401 的 auth-key 两次/5小时与 402/403/503 的两次/1小时已纳入 `unrecoverable` typed category；recoverable 与 unrecoverable 的 probe interval 分别由 `internal.toml` 的 15 分钟/1 小时字段注入 typed policy，不再使用单一固定间隔。
 - 普通默认 policy 的 3 次/15 分钟是 session cooldown；冷却到期由对应 scope 的周期 probe 恢复，不能靠普通业务成功隐式绕过 active cooldown。auth-key probe 成功同时清理该 key 的 cooldown 与连续失败计数。
 - health policy 仍保留 session cooldown、auth-key cooldown、provider probe 三张物理状态表，但写入入口已由 typed policy 的 scope 与 probe interval 决定；调用方不得按 stage 自行选择。
-- 当前 architecture map 尚未登记 auth-key 跨 session resource；在实现最终收敛前必须同步 resource/function/mainline/verification map 和正反回归。
+- architecture map 已登记 auth-key 跨 session resource；resource/function/mainline/verification map 和正反回归随本变更同步。
 
 ### 9.5 审计验收矩阵
 
@@ -580,6 +580,6 @@ raw provider error
 |---|---|---|
 | transient SSE | 立即换下一个 provider；仅观测 1s/3s/5s 等待 | 不写 failure counter、不写 session/provider cooldown、不 probe 旧 key |
 | recoverable 502 | session 内第 1/2 次继续切换；第 3 次 session key 冷却 15m | session B 不继承 session A；key2 不受影响；active cooldown 不被普通成功绕过 |
-| unrecoverable 401/403/503 | 跨 session 第 2 次 auth-key 冷却 1h；每小时 probe | provider 其他 key 可选；其他 provider 可选；单次失败不立即拉黑 |
+| unrecoverable 401/403/503 | 跨 session 第 2 次 auth-key 冷却：401 为 5h，403/503 为 1h；按冷却时长 probe | provider 其他 key 可选；其他 provider 可选；单次失败不立即拉黑 |
 | provider request 400 | 进入配置分类并切 provider | 不得被入口 malformed-400 分支吞掉或直接投影 |
 | candidate exhaustion | Error05 明确 exhausted 后才 Error06 | 候选未空时不得客户端断流/返回 provider 原始错误 |

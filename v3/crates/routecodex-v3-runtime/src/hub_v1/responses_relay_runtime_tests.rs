@@ -517,13 +517,6 @@ fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_sep
     assert!(!is_v3_responses_provider_response_failure(
         &V3ResponsesRelayRuntimeError::Response(V3HubRelayResponseError::ExecutionModeNotRelay)
     ));
-    assert!(!is_v3_responses_provider_response_failure(
-        &V3ResponsesRelayRuntimeError::Response(
-            V3HubRelayResponseError::StoplessProjectionFailed {
-                reason: "missing local transition context",
-            }
-        )
-    ));
 }
 
 #[test]
@@ -1023,7 +1016,7 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("stream zero-output upstream diagnostic must not enter stopless");
+    .expect_err("stream zero-output upstream diagnostic must remain a provider failure");
 
     assert!(
         error
@@ -1139,7 +1132,7 @@ async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
         Some(&manifest),
         Some("glmrelay_openai"),
     )
-    .expect_err("configured stream diagnostic must not enter stopless");
+    .expect_err("configured stream diagnostic must remain a provider failure");
 
     assert!(
         error.to_string().contains("provider_diagnostic_zero_usage"),

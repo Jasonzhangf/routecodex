@@ -154,8 +154,8 @@ const MAIN_SKELETON_NOTES = new Map([
     title: '05B Hub Relay 请求链',
     note: 'Client raw → Chat Process 治理 → provider semantic → provider wire。',
   }],
-  ['v3.servertool_hook_skeleton_lifecycle', {
-    title: '06 Stopless / Servertool',
+  ['v3.servertool_center_skeleton', {
+    title: '06 Servertool / Hook Governance',
     note: 'Req04 restore/请求治理 + Resp03 响应治理 + Resp04 save；continuation 必须 save/restore 成对。',
   }],
   ['v3.hub_pipeline.v1.response', {
@@ -164,11 +164,11 @@ const MAIN_SKELETON_NOTES = new Map([
   }],
   ['v3.req04.tool_governance_restore', {
     title: '06 Req04 Tool Governance / Restore',
-    note: '请求侧 Chat Process：恢复 continuation，治理工具列表/工具结果，注入必要 servertool/stopless 请求控制。',
+    note: '请求侧 Chat Process：恢复 continuation，治理工具列表/工具结果，注入必要 servertool 请求控制。',
   }],
   ['v3.resp03.tool_servertool_governance', {
     title: '07 Resp03 Tool / Servertool Governance',
-    note: '响应侧 Chat Process：收割工具调用、处理 servertool/stopless/reasoningStop；唯一可治理响应语义的位置。',
+    note: '响应侧 Chat Process：收割工具调用、处理 servertool/reasoning；唯一可治理响应语义的位置。',
   }],
   ['v3.resp04.continuation_save', {
     title: '08 Resp04 Continuation Save',
@@ -211,7 +211,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3HubReqInbound01ClientRaw', ['Hub 请求入口 raw', 'Client raw 进入 Hub 的唯一入口']],
   ['V3HubReqInbound02Normalized', ['ReqInbound 归一化', '只做入口协议解析/非破坏性归一化']],
   ['V3HubReqContinuation03Classified', ['Continuation 分类', '只判定 scope/owner/entry；不恢复错误路径']],
-  ['V3HubReqChatProcess04Governed', ['Req Chat Process', '请求侧工具/history/stopless/continuation restore 唯一治理点']],
+  ['V3HubReqChatProcess04Governed', ['Req Chat Process', '请求侧工具/history/continuation restore 唯一治理点']],
   ['V3HubReqExecution05Planned', ['执行计划', '决定 relay/direct/工具复入等执行形态']],
   ['V3HubReqTarget06Resolved', ['Target 已解析', '目标 provider/model/auth 已绑定']],
   ['V3HubReqOutbound07ProviderSemantic', ['Provider semantic', 'Hub 语义 envelope；还不是 provider wire']],
@@ -221,7 +221,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3ProviderRespInbound01Raw', ['Provider response raw', 'provider 响应进入 Hub 的唯一入口']],
   ['ProviderRespCompat02ProviderCompat', ['Provider response compat', 'provider 原始响应兼容解析']],
   ['V3HubRespInbound02Normalized', ['RespInbound 归一化', '只解析 provider raw，不做工具治理']],
-  ['V3HubRespChatProcess03Governed', ['Resp Chat Process', '响应侧工具收割、servertool、stopless、reasoning harvest 唯一治理点']],
+  ['V3HubRespChatProcess03Governed', ['Resp Chat Process', '响应侧工具收割、servertool、reasoning harvest 唯一治理点']],
   ['V3HubRespContinuation04Committed', ['Continuation save', '响应侧 continuation 真相保存点；之后到下轮 restore 是不可变区']],
   ['V3HubRespOutbound05ClientSemantic', ['Client semantic', '按入口协议投影客户端语义']],
   ['V3ServerRespOutbound06ClientFrame', ['Server client frame', 'server 发送最终 client frame']],
@@ -229,12 +229,6 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3SseTransportIn02DecodedFrame', ['SSE decoded frame', '只完成 UTF-8、line、frame 字段解码；data JSON 仍保持 opaque']],
   ['V3SseTransportIn03ValidatedFrameStream', ['SSE validated frame stream', '只验证 framing/limits/EOF/drop/error；不判断 completed/tool/continuation']],
   ['V3SseTransportOut04EncodedChunk', ['SSE encoded chunk', '把已验证 frame 重新编码为字节；不修改业务 JSON 或 terminal 语义']],
-  ['V3StoplessReq01RuntimeControlLoaded', ['Stopless 状态加载', '从 runtime control side-channel 读取当前 session 状态']],
-  ['V3StoplessReq02NoopCliConsumed', ['消费 no-op CLI', '只移除 RouteCodex 自己注入的 stopless no-op 对']],
-  ['V3StoplessReq03GuidanceToolInjected', ['注入 stop schema', '追加 exactly-one reasoningStop 和当前轮 guidance']],
-  ['V3StoplessResp01ReasoningStopInspected', ['检查 reasoningStop', '判断模型是否显式选择停止 schema']],
-  ['V3StoplessResp02RuntimeControlUpdated', ['更新 stopless 状态', '三轮 guard / pass-through 状态迁移']],
-  ['V3StoplessResp03BusinessPayloadPreserved', ['保留当前轮业务响应', '控制状态只走 MetadataCenter，不改写历史或业务 payload']],
   ['V3ProviderHealthStateMutated', ['Provider health 更新', 'provider-runtime health owner 写入；Error chain 可触发，VR/Target 只读可用性']],
 
   ['V3Error01SourceRaised', ['Error source', '错误唯一入口；记录 source/stage/code，不在 Server/provider 本地分叉']],
@@ -266,18 +260,13 @@ const EDGE_STEP_NOTES = new Map([
   ['v3-rci-03', 'remote continuation 响应同样先进入 Direct 投影准备'],
   ['v3-rci-04', '先提交 continuation，再准备 client payload'],
   ['v3-rci-05', 'Resp04 之后只能走 Direct ready 节点，禁止直投'],
-  ['v3-hub-resp-03', '响应侧工具/stopless/reasoning 治理唯一入口'],
+  ['v3-hub-resp-03', '响应侧工具/servertool/reasoning 治理唯一入口'],
   ['v3-hub-resp-04', 'Chat Process 完成后保存 continuation'],
   ['v3-de-12', 'Error03 action 写入 health cooldown/disable'],
   ['v3-de-13', 'provider health 投影成 target/router 可读 availability'],
   ['v3-de-14', 'provider send/transport failure 记录 provider failure'],
   ['v3-de-15', 'provider raw received 记录 provider success'],
   ['v3-de-18', 'server request data plane 构造 Error-owned failure session scope'],
-  ['v3-servertool-stopless-req-03', '只消费 RouteCodex 注入的 no-op CLI 对'],
-  ['v3-servertool-stopless-req-04', '注入 stop schema 和当前轮 guidance'],
-  ['v3-servertool-stopless-resp-01', '检查模型是否调用 stop schema'],
-  ['v3-servertool-stopless-resp-02', '更新三轮 stopless control 状态'],
-  ['v3-servertool-stopless-resp-04', '进入 Resp04 continuation save；之后不可变'],
   ['v3-sse-transport-01', 'raw bytes 解码为 frame 字段；不解析 data JSON'],
   ['v3-sse-transport-02', '只做 transport framing/limit 校验；业务终态仍归 provider/runtime'],
   ['v3-sse-transport-03', 'provider adapter 输出 opaque validated frames；[DONE] 仍是 transport sentinel'],
@@ -852,7 +841,7 @@ function chainCategory(chainId) {
   if (/config|entry_protocol|models|server\.startup|server\.managed_lifecycle/u.test(chainId)) return 'Foundation / entry';
   if (/responses_direct|responses\.websocket|responses\.inbound_websocket|remote_continuation|remote_locator|remote_contract/u.test(chainId)) return 'Responses direct';
   if (/hub_pipeline|relay|protocol\.|protocol_conversion|anthropic_relay|openai_chat_relay|gemini_relay/u.test(chainId)) return 'Hub relay / protocol';
-  if (/servertool|stopless|tool_servertool|normalization_tool/u.test(chainId)) return 'Stopless / servertool';
+  if (/servertool|tool_servertool|normalization_tool/u.test(chainId)) return 'Servertool / hooks';
   if (/debug|error|live_provider_compat/u.test(chainId)) return 'Debug / error / compat';
   return 'Other branches';
 }
@@ -865,7 +854,7 @@ function selectedMainSkeletonChains(chains) {
     'v3.responses_direct.required_mainline',
     'v3.hub_pipeline.v1.request',
     'v3.hub_pipeline.v1.response',
-    'v3.servertool_hook_skeleton_lifecycle',
+    'v3.servertool_center_skeleton',
     'v3.debug_error_foundation.mainline',
   ];
   const byId = new Map(chains.map((chain) => [chain?.chain_id, chain]));

@@ -48,12 +48,19 @@ const REQUIRED_CHAINS = new Map([
   ]],
 ]);
 
+function projectPath(root, relative) {
+  const candidates = [path.join(root, relative)];
+  if (relative.startsWith('v3/')) candidates.push(path.join(root, relative.slice(3)));
+  else candidates.push(path.join(root, 'v3', relative));
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
+
 function read(root, relative) {
-  return fs.readFileSync(path.join(root, relative), 'utf8');
+  return fs.readFileSync(projectPath(root, relative), 'utf8');
 }
 
 function readRustSources(root, relative) {
-  const sourcePath = path.join(root, relative);
+  const sourcePath = projectPath(root, relative);
   if (!fs.existsSync(sourcePath)) return [];
   const stat = fs.statSync(sourcePath);
   if (stat.isFile()) return relative.endsWith('.rs') ? [read(root, relative)] : [];
@@ -139,7 +146,7 @@ function rustFunctionSignature(source, owner) {
 function validateStageSignature(root, stage) {
   if (!stage?.validator_owner || !stage?.validator_source) return 'missing validator owner/source';
   if (!stage.validator_source.endsWith('.rs')) return 'validator source must be Rust';
-  const sourcePath = path.join(root, stage.validator_source);
+  const sourcePath = projectPath(root, stage.validator_source);
   if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) return 'validator source is missing';
   const signature = rustFunctionSignature(fs.readFileSync(sourcePath, 'utf8'), stage.validator_owner);
   if (!signature) return 'validator owner is not a real Rust function in validator_source';
@@ -159,7 +166,7 @@ function validateStageSignature(root, stage) {
 export function verifyV3StageProtocolShapes(root = process.cwd()) {
   const failures = [];
   for (const relative of [MANIFEST, DESIGN, PACKAGE, UMBRELLA, MAINLINE, SERVER_OUTCOME]) {
-    if (!fs.existsSync(path.join(root, relative))) failures.push(`missing ${relative}`);
+    if (!fs.existsSync(projectPath(root, relative))) failures.push(`missing ${relative}`);
   }
   if (failures.length > 0) return failures;
 

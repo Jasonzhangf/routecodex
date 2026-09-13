@@ -86,15 +86,10 @@ impl V3HubRespContinuation04Committed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespContinuation04Outcome {
     data: V3HubRespContinuation04Committed,
-    control_transition: Option<V3StoplessCenterState>,
     web_search_transition: Option<V3WebSearchCenterState>,
 }
 
 impl V3HubRespContinuation04Outcome {
-    pub fn control_transition(&self) -> Option<&V3StoplessCenterState> {
-        self.control_transition.as_ref()
-    }
-
     pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
         self.web_search_transition.as_ref()
     }
@@ -103,14 +98,9 @@ impl V3HubRespContinuation04Outcome {
         self,
     ) -> (
         V3HubRespContinuation04Committed,
-        Option<V3StoplessCenterState>,
         Option<V3WebSearchCenterState>,
     ) {
-        (
-            self.data,
-            self.control_transition,
-            self.web_search_transition,
-        )
+        (self.data, self.web_search_transition)
     }
 
     pub fn into_data(self) -> V3HubRespContinuation04Committed {
@@ -129,15 +119,10 @@ impl Deref for V3HubRespContinuation04Outcome {
 pub(crate) fn commit_v3_hub_relay_response(
     input: V3HubRespChatProcess03Outcome,
 ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
-    let (input, control_transition, web_search_transition) = input.into_parts();
+    let (input, web_search_transition) = input.into_parts();
     let finalized_payload = input.previous.provider_payload().clone();
     let (action, canonical_context) = match input.terminality {
         V3HubResponseTerminality::Terminal => (V3HubContinuationCommit::None, None),
-        V3HubResponseTerminality::NonTerminal
-            if input.tool_calls.is_empty() && control_transition.is_some() =>
-        {
-            (V3HubContinuationCommit::None, None)
-        }
         V3HubResponseTerminality::NonTerminal => (
             V3HubContinuationCommit::LocalContext,
             Some(V3HubRelayCanonicalResponseContext {
@@ -155,7 +140,6 @@ pub(crate) fn commit_v3_hub_relay_response(
             finalized_payload,
             canonical_context,
         },
-        control_transition,
         web_search_transition,
     })
 }
@@ -462,29 +446,10 @@ fn local_continuation_context_ids(
     response_id: Option<&str>,
 ) -> Result<Vec<String>, V3LocalContinuationError> {
     let call_ids = assert_v3_relay_local_continuation_context_has_call_ids(canonical_context)?;
-    let mut non_internal_ids = Vec::new();
     if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
-        non_internal_ids.push(response_id.to_string());
+        return Ok(vec![response_id.to_string()]);
     }
-    for id in &call_ids {
-        if !is_v3_stopless_internal_call_id(id)
-            && !non_internal_ids.iter().any(|existing| existing == id)
-        {
-            non_internal_ids.push(id.clone());
-        }
-    }
-    if !non_internal_ids.is_empty() {
-        return Ok(non_internal_ids);
-    }
-    if call_ids
-        .iter()
-        .any(|id| is_v3_stopless_internal_call_id(id))
-    {
-        if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
-            return Ok(vec![response_id.to_string()]);
-        }
-    }
-    Ok(non_internal_ids)
+    Ok(call_ids)
 }
 
 pub(crate) fn commit_or_release_v3_relay_local_continuation_at_resp04(
@@ -538,14 +503,14 @@ mod tests {
     fn responses_scope() -> V3LocalContinuationScopeKey {
         V3LocalContinuationScopeKey::responses(
             "/v1/responses",
-            "session-stopless-repeat",
-            "conversation-stopless-repeat",
+            "session-tool-repeat",
+            "conversation-tool-repeat",
             5555,
             "coding",
         )
     }
 
-    fn stopless_context() -> Value {
+    fn tool_context() -> Value {
         json!({
             "messages": [
                 {"role":"user","content":"continue"},
@@ -553,11 +518,11 @@ mod tests {
                     "role":"assistant",
                     "content":"",
                     "tool_calls":[{
-                        "id":"call_stopless_reasoning",
+                        "id":"call_exec_tool",
                         "type":"function",
                         "function":{
                             "name":"exec_command",
-                            "arguments":"{\"cmd\":\"routecodex hook run reasoningStop\"}"
+                            "arguments":"{\"cmd\":\"pwd\"}"
                         }
                     }]
                 }
@@ -566,10 +531,10 @@ mod tests {
     }
 
     #[test]
-    fn resp04_stores_stopless_context_by_response_id_not_internal_call_id() {
+    fn resp04_stores_tool_context_by_response_id_not_internal_call_id() {
         let mut store = V3LocalContinuationStore::default();
         let scope = responses_scope();
-        let first = stopless_context();
+        let first = tool_context();
 
         commit_or_release_v3_relay_local_continuation_at_resp04(
             &mut store,
@@ -578,18 +543,18 @@ mod tests {
             60_000,
             &[],
             &first,
-            Some("resp_stopless_context"),
+            Some("resp_tool_context"),
             V3HubContinuationCommit::LocalContext,
         )
-        .expect("stopless projection context must be restorable by response id");
+        .expect("tool projection context must be restorable by response id");
 
         assert!(
-            !store.contains_in_scope(&scope, "call_stopless_reasoning"),
-            "internal stopless call id must not become a reusable local continuation context"
+            !store.contains_in_scope(&scope, "call_exec_tool"),
+            "internal tool call id must not become a reusable local continuation context"
         );
         assert!(
-            store.contains_in_scope(&scope, "resp_stopless_context"),
-            "client previous_response_id must restore the stopless projected context"
+            store.contains_in_scope(&scope, "resp_tool_context"),
+            "client previous_response_id must restore the tool projected context"
         );
 
         commit_or_release_v3_relay_local_continuation_at_resp04(
@@ -597,14 +562,14 @@ mod tests {
             scope.clone(),
             11_000,
             60_000,
-            &["resp_stopless_context".to_string()],
-            &stopless_context(),
-            Some("resp_stopless_context"),
+            &["resp_tool_context".to_string()],
+            &tool_context(),
+            Some("resp_tool_context"),
             V3HubContinuationCommit::LocalContext,
         )
-        .expect("consumed stopless response-id context must release before recommit");
+        .expect("consumed tool response-id context must release before recommit");
 
-        assert!(store.contains_in_scope(&scope, "resp_stopless_context"));
+        assert!(store.contains_in_scope(&scope, "resp_tool_context"));
     }
 
     #[test]

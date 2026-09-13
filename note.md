@@ -1,4 +1,3 @@
-
 # 2026-08-13 V4 流水线骨架补齐：模块级 debug 开关 / 错误中心 / 路由控制出口 / payload 生命周期 / dry-run
 - Jason 锁定：错误中心只做分类审计，返回给 VR；VR 拿请求/响应错误做决策，决定原始请求如何再次处理；错误中心不做路由操作。
 - Jason 锁定 payload 生命周期：请求发出 -> 响应入客户端（成功）或错误终态（错误）算周期结束；switch/cooldown/reroute 合并同一请求，原始请求 payload 不变。
@@ -1167,12 +1166,6 @@
 - Slice: `response-stage-orchestration-shell.ts` now passes `options.payload` directly into `runServerToolOrchestrationShell` without `as JsonObject`.
 - Gate: `tests/servertool/response-stage-orchestration-shell.spec.ts`, `tests/servertool/servertool-active-orchestration-audit.spec.ts`, and `scripts/verify-servertool-rust-only.mjs` now forbid the cast marker and require the direct thin-shell call.
 - Evidence: focused Jest `response-stage-orchestration-shell + servertool-active-orchestration-audit` PASS 50/50; `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
-
-# 2026-07-02: servertool handler error payload cast removed
-
-- Slice: `native-chat-process-servertool-orchestration-semantics.ts` now types `buildServertoolHandlerErrorToolOutputPayloadWithNative()` as `JsonObject`; `execution-queue-shell.ts` consumes the payload directly without `as JsonObject`.
-- Gate: `execution-queue-shell.spec.ts`, `servertool-active-orchestration-audit.spec.ts`, and `verify-servertool-rust-only.mjs` forbid the old handler-error payload cast marker and require direct native wrapper output.
-- Evidence: focused Jest `execution-queue-shell + servertool-active-orchestration-audit` PASS 49/49; sharedmodule `tsc` PASS; `verify:servertool-rust-only` PASS; `verify:function-map-compile-gate` PASS; `verify:architecture-mainline-call-map` PASS; `git diff --check` PASS.
 
 # 2026-07-02: servertool handler error payload cast removed
 

@@ -70,23 +70,17 @@ fn compact_wire_rejects_websocket_transport() {
         .contains("responses compact requires HTTP transport"));
 }
 
-fn reasoning_stop_tool_fixture() -> Value {
+fn additional_tool_fixture() -> Value {
     json!({
         "type":"function",
-        "name":"reasoningStop",
-        "description":"Use stop schema. Minimal continue sample. Minimal finished sample. Minimal blocked sample. Schema repair sample. stopreason=0 stopreason=1 stopreason=2",
+        "name":"request_user_input",
+        "description":"Request structured input from the user when the tool contract requires it.",
         "parameters":{
             "type":"object",
             "properties":{
-                "stopreason":{"type":"integer","enum":[0,1,2]},
-                "reason":{"type":"string"},
-                "current_goal":{"type":"string"},
-                "has_evidence":{"type":"integer","enum":[0,1]},
-                "evidence":{"type":"string"},
-                "next_step":{"type":"string"},
-                "needs_user_input":{"type":"boolean"}
+                "questions":{"type":"array"}
             },
-            "required":["stopreason"]
+            "required":["questions"]
         }
     })
 }
@@ -126,18 +120,18 @@ fn responses_http_provider_request_preserves_additional_tools_surface() {
         "description":"wait for exec",
         "parameters":{"type":"object","properties":{"cell_id":{"type":"string"}}}
     });
-    let reasoning_stop = reasoning_stop_tool_fixture();
+    let additional_tool = additional_tool_fixture();
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-responses-additional-tools",
         responses_http_target(),
         json!({
             "model":"glm-5.2",
-            "instructions":"stopreason reasoningStop <rcc_stop_schema>",
+            "instructions":"preserve the additional tool declaration",
             "input":[
                 {
                     "type":"additional_tools",
                     "role":"developer",
-                    "tools":[original_exec.clone(), original_wait.clone(), reasoning_stop.clone()]
+                    "tools":[original_exec.clone(), original_wait.clone(), additional_tool.clone()]
                 },
                 {"role":"user","content":"continue"}
             ],
@@ -155,7 +149,7 @@ fn responses_http_provider_request_preserves_additional_tools_surface() {
     assert_eq!(request.body()["input"][0]["type"], "additional_tools");
     assert_eq!(request.body()["input"][0]["tools"][0], original_exec);
     assert_eq!(request.body()["input"][0]["tools"][1], original_wait);
-    assert_eq!(request.body()["input"][0]["tools"][2], reasoning_stop);
+    assert_eq!(request.body()["input"][0]["tools"][2], additional_tool);
     assert_eq!(
         request.body()["input"][0]["tools"]
             .as_array()
@@ -167,7 +161,7 @@ fn responses_http_provider_request_preserves_additional_tools_surface() {
     assert!(request.body()["instructions"]
         .as_str()
         .unwrap()
-        .contains("stopreason"));
+        .contains("additional tool"));
 }
 
 #[tokio::test]

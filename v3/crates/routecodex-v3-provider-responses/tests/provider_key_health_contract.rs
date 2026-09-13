@@ -1,3 +1,4 @@
+use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
@@ -72,18 +73,14 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
     }
 
     assert!(store
-        .provider_cooldown_probe_keys_due(30_101)
+        .provider_cooldown_probe_keys_due(60_101)
         .expect("probe due query")
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(30_102)
+            .provider_cooldown_probe_keys_due(60_102)
             .expect("probe due query"),
-        vec![(
-            "provider-a".into(),
-            Some("key-a".into()),
-            Some("model-a".into())
-        )]
+        vec![("provider-a".into(), Some("key-a".into()), None,)]
     );
 }
 
@@ -106,7 +103,60 @@ fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
 }
 
 #[test]
-fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
+fn disabled_health_does_not_record_global_failure_actions() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = false, failure_threshold = 1, cooldown_ms = 1 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .expect("parse manifest authoring"),
+    )
+    .expect("compile manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+
+    for (reason, now_ms) in [("provider_429", 100), ("provider_502", 101)] {
+        let projection = store
+            .record_provider_failure_action(
+                "p",
+                "k",
+                "m",
+                &V3ProviderFailureAction::recoverable(reason),
+                now_ms,
+            )
+            .expect("disabled health failure action");
+        assert_eq!(projection.score_milli, 1);
+        assert_eq!(projection.failure_streak, 0);
+        assert!(!projection.cooldown);
+        assert!(projection.available);
+    }
+
+    let projection = store
+        .scheduling_projection("p", "k", "m", 1, 1, 102)
+        .expect("disabled health projection");
+    assert_eq!(projection.score_milli, 1);
+    assert!(projection.available);
+    assert!(store
+        .provider_cooldown_probe_keys(102, false)
+        .expect("disabled health probe keys")
+        .is_empty());
+}
+
+#[test]
+fn key_success_revives_global_cooldown_immediately() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
     for now_ms in 100..120 {
@@ -115,19 +165,21 @@ fn success_increases_score_but_probe_success_controls_cooldown_recovery() {
             .expect("failure");
     }
 
-    let blocked_success = store
+    // 全局复活契约（bug 61863a0）：冷却中的 key 收到真实成功调用时必须立即
+    // 解除全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
+    // （complete_probe_success）仍是无人成功调用时的恢复路径。
+    let revived = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 103)
-        .expect("success evidence");
-    assert_eq!(blocked_success.score_milli, 1);
-    assert_eq!(blocked_success.success_streak, 1);
-    assert!(blocked_success.cooldown);
-    assert!(!blocked_success.available);
+        .expect("success revival");
+    assert!(revived.available, "success must clear global cooldown");
+    assert!(!revived.cooldown);
+    assert_eq!(revived.success_streak, 1);
+    assert_eq!(revived.score_milli, 100);
 
-    let recovered = store
+    let probe_recovered = store
         .complete_probe_success("provider-a", "key-a", "model-a", 104)
-        .expect("probe success");
-    assert!(recovered.available);
-    assert_eq!(recovered.score_milli, 100);
+        .expect("probe success stays available");
+    assert!(probe_recovered.available);
     let post_probe_success = store
         .record_provider_key_success("provider-a", "key-a", "model-a", 105)
         .expect("post-probe success");
@@ -150,7 +202,9 @@ fn health_score_uses_only_the_latest_100_calls() {
     let success = store
         .record_provider_key_success("p", "k", "m", 101)
         .expect("success");
-    assert_eq!(success.score_milli, 0);
+    // 成功即全局复活（bug 61863a0）：分数重置回 configured_priority 基线，
+    // 窗口同时清空；后续 100 次成功仍只按最近 100 次调用计分。
+    assert_eq!(success.score_milli, 100);
     for now_ms in 102..202 {
         store
             .record_provider_key_success("p", "k", "m", now_ms)

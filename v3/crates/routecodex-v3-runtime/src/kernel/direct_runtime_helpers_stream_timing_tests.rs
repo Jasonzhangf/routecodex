@@ -62,6 +62,100 @@ async fn direct_sse_provider_error_after_partial_attempt_is_recoverable_by_resid
 }
 
 #[tokio::test]
+async fn direct_sse_committed_client_projection_removes_memory_from_delta_done_completed() {
+    use futures_util::StreamExt;
+    use routecodex_v3_agent_memory::ROUTE_CODEX_MEMORY_RAW_ENTRY_V1;
+    use serde_json::json;
+    use std::fs;
+
+    let root = std::env::temp_dir().join(format!(
+        "memory-runtime-sse-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut manifest = routecodex_v3_config::compile_v3_config_05_manifest(
+        routecodex_v3_config::parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["sse"]
+continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
+[providers.openai]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
+[providers.openai.models.gpt-test]
+supports_streaming = true
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    manifest.memory_raw_capture.enabled = true;
+    manifest.memory_raw_capture.project_root = root.clone();
+    manifest.memory_raw_capture.host_id_prefix = "runtime-test-".to_owned();
+
+    let envelope = serde_json::to_string(&json!({
+        "memory": {"entries": [{
+            "schema": ROUTE_CODEX_MEMORY_RAW_ENTRY_V1,
+            "category": "knowledge",
+            "title": "Runtime SSE capture",
+            "content": "The committed client projection strips this envelope.",
+            "tags": ["runtime", "sse"]
+        }]}
+    }))
+    .unwrap();
+    let full_text = format!("Answer kept for client. {envelope}");
+    let split = full_text.len() / 2;
+    let (first, second) = full_text.split_at(split);
+    let source: V3ClientSseStream = Box::pin(stream::iter([Ok(format!(
+        "event: response.output_text.delta\ndata: {}\n\nevent: response.output_text.delta\ndata: {}\n\nevent: response.output_text.done\ndata: {}\n\nevent: response.completed\ndata: {}\n\n",
+        json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": first}),
+        json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": second}),
+        json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": full_text}),
+        json!({"type": "response.completed", "response": {
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": full_text}]}]
+        }}),
+    )
+    .into_bytes())]));
+    let committed = collect_direct_sse_attempt_after_terminal_with_memory(
+        test_direct_sse_attempt_stream(source, crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        crate::nodes::V3AttemptBudget::process_default(),
+        Some(&manifest),
+        Some("runtime-sse-request"),
+    )
+    .await
+    .expect("memory-enabled direct SSE attempt must commit");
+    let client_bytes = committed.collect::<Vec<_>>().await.concat();
+    let client_text = String::from_utf8(client_bytes).unwrap();
+    assert!(client_text.contains("Answer kept for client."));
+    assert!(!client_text.contains(ROUTE_CODEX_MEMORY_RAW_ENTRY_V1));
+    assert!(!client_text.contains("\"memory\""));
+    assert!(root.join("memory/L3").is_dir());
+    assert_eq!(fs::read_dir(root.join("memory/L3")).unwrap().count(), 1);
+    fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
 async fn direct_sse_event_only_frame_cannot_supply_provider_json_type() {
     let source = Box::pin(stream::iter(vec![Ok(
             b"event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"
@@ -175,6 +269,75 @@ fn direct_sse_observation_retains_provider_raw_bytes_for_capture() {
     );
 }
 
+#[test]
+fn direct_sse_keepalive_objects_are_not_forwarded_to_client() {
+    let observation = V3RuntimeStreamObservation::default();
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut consumer = V3DirectSseContentConsumer {
+        provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        ..Default::default()
+    };
+    let mut semantic_state = V3DirectSseSemanticState::new();
+    for chunk in [
+        &br#"data: {"type":"keepalive"}
+
+"#[..],
+        &br#"event: keepalive
+data: {"heartbeat":true}
+
+"#[..],
+        &br#"event: keepalive
+data: not-json
+
+"#[..],
+        &br#"event: keepalive
+
+"#[..],
+    ] {
+        let frame = record_direct_sse_provider_event_json_chunk(
+            chunk,
+            &mut decoder,
+            &observation,
+            &mut consumer,
+            &mut semantic_state,
+        )
+        .expect("transport keepalive must not abort Direct projection");
+        assert!(
+            frame.is_none(),
+            "keepalive must not be forwarded to the client"
+        );
+    }
+}
+
+#[test]
+fn direct_sse_keepalive_object_before_completed_is_consumed() {
+    let observation = V3RuntimeStreamObservation::default();
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut consumer = V3DirectSseContentConsumer {
+        provider_protocol: Some(crate::hub_v1::V3HubProviderWireProtocol::Responses),
+        ..Default::default()
+    };
+    let mut semantic_state = V3DirectSseSemanticState::new();
+    let chunk = b"data: {\"type\":\"keepalive\"}\n\n\
+data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_direct\",\"status\":\"completed\",\"output\":[]}}\n\n";
+    let frame = record_direct_sse_provider_event_json_chunk(
+        chunk,
+        &mut decoder,
+        &observation,
+        &mut consumer,
+        &mut semantic_state,
+    )
+    .expect("keepalive then completed must project terminal");
+    let frame = frame.expect("response.completed must be terminal");
+    assert_eq!(frame.disposition, V3SseFrameDisposition::SemanticTerminal);
+    let bytes = String::from_utf8(frame.bytes).expect("projected SSE bytes");
+    assert!(
+        !bytes.contains(r#""type":"keepalive""#),
+        "keepalive frame must be consumed"
+    );
+    assert!(bytes.contains("response.completed"));
+}
+
 #[tokio::test]
 async fn direct_sse_toolreason_records_typed_observation_at_resp03() {
     let request_id = format!("{}-request-live-observation", module_path!());
@@ -208,8 +371,8 @@ data: {"type":"response.completed","response":{"id":"resp_live_observation","sta
         false,
         false,
         crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        true,
-        true,
+        false,
+        false,
         Some("session-live-observation".to_string()),
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
@@ -221,14 +384,7 @@ data: {"type":"response.completed","response":{"id":"resp_live_observation","sta
     }
 
     let snapshot = observation.snapshot().expect("observation snapshot");
-    let toolreason = snapshot
-        .toolreason
-        .expect("Direct Resp03 must publish the typed Toolreason observation");
-    assert_eq!(toolreason.status, "OK");
-    assert_eq!(toolreason.stage, "resp03_direct_sse");
-    assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
-    assert_eq!(toolreason.tool, "pwd");
-    assert_eq!(toolreason.reason.as_deref(), Some("确认当前工作目录"));
+    assert!(snapshot.toolreason.is_none());
 }
 
 #[tokio::test]
@@ -261,8 +417,8 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
         false,
         false,
         crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
-        true,
-        true,
+        false,
+        false,
         Some("session-live-missing".to_string()),
         Some(request_id.clone()),
         Some("gpt-5.6-sol".to_string()),
@@ -282,16 +438,11 @@ data: {"type":"response.completed","response":{"id":"resp_live_missing","status"
     assert!(!client_sse.contains("response.output_text.delta"));
     assert!(client_sse.contains("call_live_missing"));
     assert!(client_sse.contains(r#"{\"cmd\":\"pwd\"}"#));
-    let toolreason = observation
+    assert!(observation
         .snapshot()
         .expect("observation snapshot")
         .toolreason
-        .expect("Direct Resp03 must publish a MISSING observation");
-    assert_eq!(toolreason.status, "MISSING");
-    assert_eq!(toolreason.stage, "resp03_direct_sse");
-    assert_eq!(toolreason.request_id.as_deref(), Some(request_id.as_str()));
-    assert_eq!(toolreason.tool, "pwd");
-    assert_eq!(toolreason.reason, None);
+        .is_none());
 }
 
 #[tokio::test]
