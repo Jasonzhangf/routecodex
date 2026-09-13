@@ -291,6 +291,7 @@
     "verify:agent-p0-payload-control-guard-global": "node scripts/architecture/verify-agent-p0-payload-control-guard.mjs --include-global",
     "test:agent-p0-payload-control-guard-red-fixtures": "node scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs",
     "verify:v3-architecture-ci": "node v3/scripts/architecture/verify-v3-architecture-ci.mjs",
+    "test:v3-architecture-ci-failure-aggregation-regression": "node v3/scripts/tests/v3-architecture-ci-failure-aggregation-regression.mjs",
     "verify:v4-active-link": "npm --prefix v4 run verify:v4-active-link",
     "verify:v4-foundation": "npm --prefix v4 run verify:v4-foundation",
     "verify:v4-foundation-red": "npm --prefix v4 run verify:v4-foundation-red",
