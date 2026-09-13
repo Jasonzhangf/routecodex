@@ -1343,6 +1343,12 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {
             *item = project_v3_responses_client_event_output_item_done_item(item);
+            if item.get("type").and_then(Value::as_str) == Some("tool_search_call") {
+                item.as_object_mut()
+                    .expect("Responses tool_search_call must be an object")
+                    .entry("execution")
+                    .or_insert_with(|| Value::String("client".to_string()));
+            }
         }
     }
     // Providers may omit one or more counters from the terminal usage object.
@@ -1428,6 +1434,20 @@ mod completed_response_projection_tests {
         assert_eq!(projected["usage"]["input_tokens"], 0);
         assert_eq!(projected["usage"]["output_tokens"], 0);
         assert_eq!(projected["usage"]["total_tokens"], 0);
+    }
+
+    #[test]
+    fn completed_tool_search_call_defaults_to_client_execution() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_tool_search",
+            "status": "requires_action",
+            "output": [{
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "arguments": {"query": "mcpx workspace"}
+            }]
+        }));
+        assert_eq!(projected["output"][0]["execution"], "client");
     }
 }
 
