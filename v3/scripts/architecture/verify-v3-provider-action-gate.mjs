@@ -294,7 +294,6 @@ if (
 for (const token of [
   'pub struct V3Error05RecoveryAdmissionWitness',
   'pub enum V3Error05ExecutionAction',
-  'WaitThenRetrySame',
   'WaitThenReselect',
   'ProjectTerminal',
   'pub struct V3Error05TerminalDecision',
@@ -655,7 +654,7 @@ requireText(
 );
 for (const token of [
   'provider_failure_with_route_capacity_is_typed_nonterminal_error05',
-  'provider_failure_with_same_provider_budget_is_typed_retry_same',
+  'provider_failure_never_uses_same_provider_budget',
   'provider_failure_projects_only_with_route_and_default_exhaustion_proof',
 ]) {
   assertRustTest(text.errorTests, files.errorTests, token);

@@ -14,9 +14,8 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
     select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue, V3_TRANSIENT_RETRY_BUDGET,
+    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue,
 };
 use crate::remote_continuation::{
     V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,

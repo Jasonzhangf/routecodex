@@ -373,6 +373,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
                 persistence: Some(writer),
                 ..V3ProviderHealthState::default()
             })),
+            ..V3ProviderHealthStore::default()
         };
 
         store
@@ -436,6 +437,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
                 persistence: Some(writer),
                 ..V3ProviderHealthState::default()
             })),
+            ..V3ProviderHealthStore::default()
         };
 
         store
@@ -484,6 +486,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
                 persistence: Some(writer),
                 ..V3ProviderHealthState::default()
             })),
+            ..V3ProviderHealthStore::default()
         };
 
         store

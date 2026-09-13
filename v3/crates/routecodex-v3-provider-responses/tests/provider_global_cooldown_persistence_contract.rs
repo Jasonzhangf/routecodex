@@ -128,7 +128,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn failed_probe_uses_one_minute_second_probe_cadence() {
+fn failed_probe_uses_thirty_second_second_probe_cadence() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -166,11 +166,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_000)
         .unwrap();
     assert!(store
-        .provider_cooldown_probe_keys_due(61_999)
+        .provider_cooldown_probe_keys_due(31_999)
         .unwrap()
         .is_empty());
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(62_000).unwrap(),
+        store.provider_cooldown_probe_keys_due(32_000).unwrap(),
         vec![("p".into(), Some("k".into()), Some("m".into()))]
     );
 }

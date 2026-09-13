@@ -65,9 +65,9 @@ targets = [
     .await
     .expect("unmatched transient must project through the policy");
 
-    assert_eq!(result.event.action, "terminal_default_floor_exhausted");
+    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
     assert!(result.retry_selected.is_none());
-    assert_eq!(same_candidate_retries.values().copied().next(), Some(0));
+    assert!(same_candidate_retries.is_empty());
     let projection = result
         .terminal_projection
         .expect("unmatched transient exhaustion must be terminal");

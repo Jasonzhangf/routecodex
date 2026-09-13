@@ -140,9 +140,19 @@ impl V3ProviderAvailabilityReader for V3ProviderAllAvailable {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct V3ProviderHealthStore {
     state: Arc<RwLock<V3ProviderHealthState>>,
+    availability_generation: Arc<tokio::sync::watch::Sender<u64>>,
+}
+
+impl Default for V3ProviderHealthStore {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(RwLock::new(V3ProviderHealthState::default())),
+            availability_generation: Arc::new(tokio::sync::watch::channel(0).0),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +299,35 @@ pub enum V3ProviderHealthError {
 }
 
 impl V3ProviderHealthStore {
+    fn publish_availability_change(&self) {
+        let next = self
+            .availability_generation
+            .borrow()
+            .wrapping_add(1);
+        self.availability_generation.send_replace(next);
+    }
+
+    pub fn availability_generation(&self) -> u64 {
+        *self.availability_generation.borrow()
+    }
+
+    pub async fn wait_for_availability_change(
+        &self,
+        observed_generation: u64,
+    ) -> Result<u64, V3ProviderHealthError> {
+        let mut receiver = self.availability_generation.subscribe();
+        loop {
+            let current = *receiver.borrow_and_update();
+            if current != observed_generation {
+                return Ok(current);
+            }
+            receiver
+                .changed()
+                .await
+                .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        }
+    }
+
     pub fn configured_failure_policy(
         &self,
         provider_id: &str,
@@ -414,6 +453,7 @@ impl V3ProviderHealthStore {
         }
         Self {
             state: Arc::new(RwLock::new(state)),
+            availability_generation: Arc::new(tokio::sync::watch::channel(0).0),
         }
     }
 
@@ -857,6 +897,29 @@ impl V3ProviderHealthStore {
         self.provider_cooldown_probe_keys(now_ms, false)
     }
 
+    pub fn has_provider_cooldown_probe_pending(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<bool, V3ProviderHealthError> {
+        let state = self
+            .state
+            .read()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        Ok(state
+            .provider_cooldown_probes
+            .iter()
+            .any(|(key, probe_state)| {
+                key.provider_id == provider_id
+                    && key.auth_alias.as_deref() == auth_alias
+                    && (key.model_id.as_deref() == model_id || key.model_id.is_none())
+                    && (probe_state.probe_in_flight
+                        || probe_state.next_probe_at_ms.is_some()
+                        || probe_state.blocked_until_ms.is_some())
+            }))
+    }
+
     /// Acquire the only scheduled provider-health probe permit.
     pub fn acquire_provider_cooldown_probe(
         &self,
@@ -1039,6 +1102,7 @@ impl V3ProviderHealthStore {
             expected_generation,
         );
         persist_cooldown_state(state);
+        self.publish_availability_change();
         completion.map_err(V3ProviderHealthError::Poisoned)
     }
 
@@ -1086,6 +1150,7 @@ impl V3ProviderHealthStore {
                     probe_state.completion.send_replace(true);
                 }
                 persist_cooldown_state(state);
+                self.publish_availability_change();
                 return Err(V3ProviderHealthError::Poisoned(format!(
                     "stale provider health probe generation: expected {expected_generation}, current {current_generation}"
                 )));
@@ -1123,6 +1188,7 @@ impl V3ProviderHealthStore {
         // probe storm and keeps the session in select/exhaust churn.
         probe_state.completion.send_replace(true);
         persist_cooldown_state(state);
+        self.publish_availability_change();
         Ok(())
     }
 
@@ -1170,7 +1236,7 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
-            // The first probe is always the fixed 30s ladder step; adaptive
+            // The first probe is always the fixed 5s ladder step; adaptive
             // history (attempts/failures/EWMA above) stays diagnostic and
             // never reschedules the cadence.
             let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
@@ -1193,6 +1259,7 @@ impl V3ProviderHealthStore {
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
+        self.publish_availability_change();
         Ok(projection)
     }
 
@@ -1241,6 +1308,7 @@ impl V3ProviderHealthStore {
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
+        self.publish_availability_change();
         Ok(projection)
     }
 

@@ -525,11 +525,9 @@ features:
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-  - configured_retry_budget_for_failure
   - provider_error_policy_matches_failure
   - is_v3_retryable_transient_stage_code
   - V3_TRANSIENT_TRANSPORT_HANG_CODE
-  - V3_TRANSIENT_RETRY_BUDGET
   - build_v3_provider_global_probe_target
   - probe_v3_provider_global_target
   - build_v3_provider_failure_session_scope_for_request
@@ -4649,9 +4647,7 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-stage-protocol-shapes
   entry_symbols:
-  - run_v3_direct_transient_failure_policy
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
-  - V3_TRANSIENT_RETRY_BUDGET
   mainline_bindings:
   - v3-provider-action-gate-19
   - v3-provider-action-gate-20
