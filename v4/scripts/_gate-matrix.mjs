@@ -40,7 +40,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-production-mainline-red.mjs',
   'verify-v4-cordis-production-admission.mjs',
-  'verify-v4-direct-relay-sse.mjs',
+  'verify-v4-transition-deps.mjs',
 ];
 
 // Rust-owner gates are executed by verify.mjs alongside script gates. Keeping
@@ -83,6 +83,7 @@ export const RED_SUITES = [
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
   ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
   ['verify-v4-semantic-parity-red.mjs', '--red-self-test'],
+  ['verify-v4-transition-deps.mjs', '--red-self-test'],
 ];
 
 export const CONSUMER_REGRESSIONS = [
