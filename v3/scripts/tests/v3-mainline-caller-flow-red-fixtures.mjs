@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import YAML from 'yaml';
+import { auditV3ArchitectureLocks, chainFingerprint } from '../architecture/v3-mainline-caller-flow-lib.mjs';
 
 const root = process.cwd();
 const sourcePath = path.join(root, 'docs/architecture/v3-mainline-call-map.yml');
@@ -164,90 +165,43 @@ runExpectFail('missing-caller-symbol', (copy) => {
 }
 
 {
-  const lockParsedPath = path.join(tmp, 'v3-mainline-call-map.lock.json');
-  fs.writeFileSync(lockParsedPath, JSON.stringify(parsed), 'utf8');
-  const script = `
-    import { auditV3ArchitectureLocks, chainFingerprint } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const parsed = JSON.parse(fs.readFileSync(${JSON.stringify(lockParsedPath)}, 'utf8'));
-    const lockedChain = parsed.chains[0];
-    const locks = {
-      schema_version: 1,
-      locked_items: [{
-        item_id: 'chain:' + lockedChain.chain_id,
-        chain_id: lockedChain.chain_id,
-        status: 'audited_locked',
-        reviewed_by: 'Jason',
-        locked_at: '2026-07-23T00:00:00Z',
-        fingerprint: chainFingerprint(lockedChain)
-      }],
-      manual_authorizations: []
-    };
-    parsed.chains[0].edges[0].to_node = 'V3RedChangedLockedNode';
-    const audit = auditV3ArchitectureLocks(parsed, locks);
-    if (!audit.failures.some((failure) => failure.includes('audited locked fingerprint changed'))) process.exit(0);
-    console.error('audited locked fingerprint changed');
-    process.exit(1);
-  `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (result.status === 0) {
+  const copy = structuredClone(parsed);
+  const lockedChain = copy.chains[0];
+  const locks = {
+    schema_version: 1,
+    locked_items: [{
+      item_id: `chain:${lockedChain.chain_id}`,
+      chain_id: lockedChain.chain_id,
+      status: 'audited_locked',
+      reviewed_by: 'Jason',
+      locked_at: '2026-07-23T00:00:00Z',
+      fingerprint: chainFingerprint(lockedChain),
+    }],
+    manual_authorizations: [],
+  };
+  copy.chains[0].edges[0].to_node = 'V3RedChangedLockedNode';
+  const audit = auditV3ArchitectureLocks(copy, locks);
+  if (!audit.failures.some((failure) => failure.includes('audited locked fingerprint changed'))) {
     console.error('[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: expected failure but passed');
-    process.exit(1);
-  }
-  if (result.error) {
-    console.error(`[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: spawn failed: ${result.error.message}`);
-    process.exit(1);
-  }
-  const output = `${result.stdout}\n${result.stderr}`;
-  if (!output.includes('audited locked fingerprint changed')) {
-    console.error('[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: missing expected text');
-    console.error(output);
     process.exit(1);
   }
   console.log('[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: failed as expected');
 }
 
 {
-  const lockParsedPath = path.join(tmp, 'v3-mainline-call-map.skeleton.json');
-  fs.writeFileSync(lockParsedPath, JSON.stringify(parsed), 'utf8');
-  const script = `
-    import { auditV3ArchitectureLocks } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const parsed = JSON.parse(fs.readFileSync(${JSON.stringify(lockParsedPath)}, 'utf8'));
-    const locks = {
-      schema_version: 1,
-      policy: {
-        gate_audit_status: 'determined_locked',
-        main_skeleton_sop: 'docs/architecture/wiki/v3-mainline-skeleton-sop.md',
-        required_locked_chains: ['v3.hub_pipeline.v1.request']
-      },
-      locked_items: [],
-      manual_authorizations: []
-    };
-    const audit = auditV3ArchitectureLocks(parsed, locks);
-    if (!audit.failures.some((failure) => failure.includes('required main skeleton chain is not audited_locked'))) process.exit(0);
-    console.error('required main skeleton chain is not audited_locked');
-    process.exit(1);
-  `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (result.status === 0) {
+  const locks = {
+    schema_version: 1,
+    policy: {
+      gate_audit_status: 'determined_locked',
+      main_skeleton_sop: 'docs/architecture/wiki/v3-mainline-skeleton-sop.md',
+      required_locked_chains: ['v3.hub_pipeline.v1.request'],
+    },
+    locked_items: [],
+    manual_authorizations: [],
+  };
+  const audit = auditV3ArchitectureLocks(parsed, locks);
+  if (!audit.failures.some((failure) => failure.includes('required main skeleton chain is not audited_locked'))) {
     console.error('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: expected failure but passed');
-    process.exit(1);
-  }
-  if (result.error) {
-    console.error(`[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: spawn failed: ${result.error.message}`);
-    process.exit(1);
-  }
-  const output = `${result.stdout}\n${result.stderr}`;
-  if (!output.includes('required main skeleton chain is not audited_locked')) {
-    console.error('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: missing expected text');
-    console.error(output);
     process.exit(1);
   }
   console.log('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: failed as expected');
