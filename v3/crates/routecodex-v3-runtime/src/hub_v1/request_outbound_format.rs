@@ -174,9 +174,9 @@ fn promote_responses_tool_search_output_tools_to_provider_tools(
     if discovered.is_empty() {
         return Ok(());
     }
-    let top_level = payload
-        .as_object_mut()
-        .ok_or_else(|| "MalformedOutboundField target_protocol=responses path=$: expected object".to_string())?;
+    let top_level = payload.as_object_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=responses path=$: expected object".to_string()
+    })?;
     let tools = top_level
         .entry("tools".to_string())
         .or_insert_with(|| Value::Array(Vec::new()));
@@ -201,12 +201,20 @@ fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> 
             .map_err(|error| format!("MalformedOutboundField target_protocol=responses paths=$.tools[{index}]: {error}"))?
             .ok_or_else(|| format!("MalformedOutboundField target_protocol=responses paths=$.tools[{index}]"))?;
         for child in children {
-            let function = child.get("function").and_then(Value::as_object).ok_or_else(|| {
-                format!("MalformedOutboundField target_protocol=responses paths=$.tools[{index}]")
-            })?;
+            let function = child
+                .get("function")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    format!(
+                        "MalformedOutboundField target_protocol=responses paths=$.tools[{index}]"
+                    )
+                })?;
             let mut direct = Map::from_iter([
                 ("type".to_string(), Value::String("function".to_string())),
-                ("name".to_string(), function.get("name").cloned().unwrap_or(Value::Null)),
+                (
+                    "name".to_string(),
+                    function.get("name").cloned().unwrap_or(Value::Null),
+                ),
             ]);
             for key in ["description", "parameters", "strict"] {
                 if let Some(value) = function.get(key) {
@@ -1082,6 +1090,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
     let Some(name) = name else {
         return Ok(None);
     };
+    let name = provider_function_name(&name);
     let arguments = function
         .and_then(|entry| entry.get("arguments"))
         .or_else(|| row.get("arguments"))
@@ -1138,6 +1147,22 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
         ("name".to_string(), Value::String(name.to_string())),
         ("arguments".to_string(), Value::String(arguments_text)),
     ]))))
+}
+
+/// Provider function names are a transport shape.  Codex/MCP clients may
+/// return the legacy dotted namespace form (`mcp__server.tool`) in a prior
+/// tool call; normalize that one form at the provider outbound boundary so it
+/// cannot reach a provider name validator.  Namespace tools already flattened
+/// with `__` are preserved byte-for-byte.
+fn provider_function_name(name: &str) -> String {
+    if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
+        let dot = dot + "mcp__".len();
+        let mut normalized = name.to_owned();
+        normalized.replace_range(dot..=dot, "__");
+        normalized
+    } else {
+        name.to_owned()
+    }
 }
 
 fn responses_item_id_from_chat_extension(row: &Map<String, Value>) -> Option<&str> {

@@ -1054,6 +1054,26 @@ fn responses_direct_tool_search_output_promotes_mcpx_namespace_for_provider_proj
 }
 
 #[test]
+fn chat_mcp_dotted_tool_call_name_is_normalized_at_provider_boundary() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_workspace",
+                "type": "function",
+                "function": {
+                    "name": "mcp__mcpx.workspace",
+                    "arguments": "{}"
+                }
+            }]
+        }]
+    }))
+    .expect("dotted MCP tool call must remain projectable");
+    assert_eq!(request["input"][0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",
