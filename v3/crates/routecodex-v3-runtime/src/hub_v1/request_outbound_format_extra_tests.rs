@@ -1032,6 +1032,28 @@ fn tool_search_output_promotes_mcpx_namespace_for_provider_projection() {
 }
 
 #[test]
+fn responses_direct_tool_search_output_promotes_mcpx_namespace_for_provider_projection() {
+    let request = normalize_responses_payload_for_provider_standard(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [{
+            "type": "tool_search_output",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__mcpx",
+                "tools": [{
+                    "type": "function",
+                    "name": "workspace",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        }]
+    }))
+    .expect("Responses direct tool search output must register provider tools");
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",
