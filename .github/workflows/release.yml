@@ -111,7 +111,7 @@ jobs:
           overwrite_files: false
           files: ${{ steps.meta.outputs.tarball }}
           body: |
-            - V3-only Rust binary (no V2 TS runtime)
+            - V3-only Rust binary
             - Asset: `${{ steps.meta.outputs.tarball }}`
 
       - name: Publish to npm (optional)
