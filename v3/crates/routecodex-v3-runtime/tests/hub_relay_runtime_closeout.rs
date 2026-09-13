@@ -9,6 +9,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
+    execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
     execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile,
     execute_v3_responses_relay_runtime,
     execute_v3_responses_relay_runtime_with_health_and_retry_policy,
@@ -2457,8 +2458,11 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
 #[tokio::test]
 async fn provider_error_closeout_enters_error01_06_without_success_projection() {
     let server_id = "provider_error_terminal_closeout";
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest_for_scope(server_id),
+    let manifest = manifest_for_scope(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -2477,6 +2481,8 @@ async fn provider_error_closeout_enters_error01_06_without_success_projection() 
             }),
         },
         &ErrorTransport,
+        Vec::new(),
+        provider_health.runtime_health(),
     )
     .await
     .unwrap();
