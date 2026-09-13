@@ -1213,7 +1213,12 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
 ) -> usize {
+    // Availability is time-dependent (session cooldowns and global probe
+    // windows).  The caller's monotonic epoch is part of the decision; using
+    // a sentinel such as zero makes every future cooldown look active and can
+    // falsely prove whole-pool exhaustion.
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
         failed_candidates,
@@ -1226,7 +1231,7 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
-                    0,
+                    now_epoch_ms,
                 )
                 .available
         })
@@ -1237,6 +1242,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
     candidates: &[V3TargetCandidate],
     availability: &R,
     failed_candidates: &BTreeSet<String>,
+    now_epoch_ms: u64,
 ) -> Option<String> {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
@@ -1250,7 +1256,7 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
-                    0,
+                    now_epoch_ms,
                 )
                 .available
         })
