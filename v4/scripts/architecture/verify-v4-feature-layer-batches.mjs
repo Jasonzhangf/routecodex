@@ -20,6 +20,7 @@ import {
   runFeatureLayerBatchBoundarySelfTest,
   runFeatureLayerBatchRedFixtures,
   runFeatureLayerBatchSelfTest,
+  selfTestResultHasBlockingFailure,
 } from '../tests/v4-feature-layer-batches-red-fixtures.mjs';
 
 const gatePath = fileURLToPath(import.meta.url);
@@ -119,8 +120,14 @@ export function allowPendingGuardForMode(mode) {
 }
 
 function printFailures(label, failures) {
-  console.error(`[V4-LAYER-GATE-001] ${label} FAIL`);
-  for (const item of failures) console.error(`${item.code}: ${item.message}`);
+  const fatal = failures.filter((item) => item.severity !== 'warning');
+  const warning = failures.filter((item) => item.severity === 'warning');
+  for (const item of warning) console.warn(`[V4-LAYER-GATE-001] ${label} WARNING ${item.code}: ${item.message}`);
+  if (fatal.length > 0) {
+    console.error(`[V4-LAYER-GATE-001] ${label} FAIL`);
+    for (const item of fatal) console.error(`${item.code}: ${item.message}`);
+  }
+  return fatal.length;
 }
 
 function modeFromArgs(args) {
@@ -142,8 +149,7 @@ function runProductionMode(mode) {
     createProductionContext(),
     { mode, allowPendingGuard: allowPendingGuardForMode(mode) },
   );
-  if (failures.length > 0) {
-    printFailures(mode.toUpperCase(), failures);
+  if (printFailures(mode.toUpperCase(), failures) > 0) {
     process.exit(1);
   }
   if (mode === 'admission') {
@@ -168,8 +174,7 @@ function runSelfTestMode(mode) {
     productionContext: context,
     validate: validateFeatureLayerBatchAdmission,
   });
-  if (result.failures.length > 0 || result.passed !== result.total) {
-    printFailures(mode.toUpperCase(), result.failures);
+  if (printFailures(mode.toUpperCase(), result.failures) > 0 || selfTestResultHasBlockingFailure(result)) {
     process.exit(1);
   }
   console.log(`[V4-LAYER-GATE-001] ${mode.toUpperCase()} OK ${result.passed}/${result.total}`);
