@@ -90,8 +90,21 @@ export const FORBIDDEN_CANDIDATE_PREFIXES = [
 export const IMPLEMENTATION_EXTENSIONS = new Set(['.rs', '.mjs', '.js', '.cjs', '.ts', '.tsx']);
 export const GRAPH_SOURCE_EXTENSIONS = new Set(['.rs', '.mjs', '.js', '.cjs', '.ts', '.tsx', '.toml']);
 
-export function addFailure(failures, code, message) {
-  failures.push({ code, message });
+const ADVISORY_CODES = new Set([
+  'MIGRATION_HISTORY_WARNING',
+  'NON_CURRENT_RECORD_WARNING',
+  'REBUILDABLE_PROJECTION_WARNING',
+  'NON_APPLICABLE_REVIEW_WARNING',
+  'DOWNSTREAM_EVIDENCE_WARNING',
+]);
+
+export function severityForCode(code) {
+  return ADVISORY_CODES.has(code) ? 'warning' : 'fatal';
+}
+
+export function addFailure(failures, code, message, severity = severityForCode(code)) {
+  if (severity !== 'fatal' && severity !== 'warning') throw new Error(`invalid failure severity: ${severity}`);
+  failures.push({ code, message, severity });
 }
 
 export function sortedUnique(values) {
