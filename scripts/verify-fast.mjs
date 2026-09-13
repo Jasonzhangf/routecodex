@@ -2,7 +2,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 const root = process.cwd();
 const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
@@ -103,6 +103,50 @@ function fail(message) {
   process.exit(1);
 }
 
+function affectedCargoPackages(rustFiles) {
+  let metadata;
+  try {
+    metadata = JSON.parse(
+      execFileSync(
+        'cargo',
+        ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
+        },
+      ),
+    );
+  } catch (error) {
+    process.stderr.write(
+      `[verify:fast] WARN cargo metadata unavailable; skipped affected Rust compile check: ${error.message}\n`,
+    );
+    return [];
+  }
+  const packages = (metadata.packages ?? []).map((pkg) => ({
+    name: pkg.name,
+    dir: dirname(resolve(pkg.manifest_path)),
+  }));
+  const affected = new Set();
+  const unmatched = [];
+  for (const file of rustFiles) {
+    const absolute = resolve(root, file);
+    let best = null;
+    for (const pkg of packages) {
+      const path = relative(pkg.dir, absolute);
+      if (path === '' || (!path.startsWith('..') && !isAbsolute(path))) {
+        if (!best || pkg.dir.length > best.dir.length) best = pkg;
+      }
+    }
+    if (best) affected.add(best.name);
+    else unmatched.push(file);
+  }
+  if (unmatched.length > 0) {
+    process.stderr.write(`[verify:fast] WARN Rust file(s) not owned by a v3 Cargo package: ${unmatched.join(', ')}\n`);
+  }
+  return [...affected].sort();
+}
+
 try {
   if (newRef) {
     newCommits = newRefCommits();
@@ -169,4 +213,32 @@ for (const { commit, path: relative } of entries) {
   }
 }
 
-process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; affected Rust compile remains in build/affected-test scope\n`);
+const changedRustFiles = [
+  ...new Set([
+    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
+    ...deleted.filter((path) => path.endsWith('.rs')),
+  ]),
+];
+if (changedRustFiles.length > 0) {
+  const affectedPackages = affectedCargoPackages(changedRustFiles);
+  if (affectedPackages.length > 0) {
+    const cargoArgs = [
+      'check',
+      '--locked',
+      ...affectedPackages.flatMap((name) => ['-p', name]),
+      '--manifest-path',
+      'v3/Cargo.toml',
+    ];
+    try {
+      execFileSync('cargo', cargoArgs, {
+        cwd: root,
+        env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
+        stdio: 'inherit',
+      });
+    } catch (error) {
+      fail(`affected cargo check failed (${affectedPackages.join(', ')}): ${error.status ?? error.message}`);
+    }
+  }
+}
+
+process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; affected Rust compile checked\n`);
