@@ -1345,7 +1345,33 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
             *item = project_v3_responses_client_event_output_item_done_item(item);
         }
     }
+    // Some providers omit output_tokens from the terminal usage object. The
+    // Responses client schema requires the field; a missing counter means no
+    // reported output usage, so normalize it to zero at this projection edge
+    // instead of aborting the completed conversation.
+    if let Some(usage) = projected.get_mut("usage").and_then(Value::as_object_mut) {
+        usage
+            .entry("output_tokens")
+            .or_insert_with(|| Value::from(0u64));
+    }
     projected
+}
+
+#[cfg(test)]
+mod completed_response_projection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_output_tokens_is_normalized_on_completed_response() {
+        let projected = project_v3_responses_client_completed_response(&json!({
+            "id": "resp_1",
+            "status": "completed",
+            "usage": {"input_tokens": 12, "total_tokens": 12},
+            "output": []
+        }));
+        assert_eq!(projected["usage"]["output_tokens"], 0);
+    }
 }
 
 pub(crate) fn provider_target(
