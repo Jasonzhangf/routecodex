@@ -2,6 +2,7 @@
 import { run } from './_common.mjs';
 
 await run('node', ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs']);
+await run('node', ['scripts/tests/v3-aggregate-environment-availability-regression.mjs']);
 await run('node', ['tests/scripts/v3-architecture-admission-red-fixtures.mjs']);
 await run('node', ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs']);
 for (const fixture of [

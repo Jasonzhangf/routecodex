@@ -89,7 +89,7 @@ export async function runAll(entries) {
     try {
       await run(entry.command, entry.args ?? [], entry);
     } catch (error) {
-      if (error instanceof EnvironmentUnavailableError) {
+      if (error instanceof EnvironmentUnavailableError && entry.optional === true) {
         warnings.push(`${label}: ${error.message}`);
       } else {
         failures.push(`${label}: ${error.message}`);
