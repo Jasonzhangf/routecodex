@@ -151,6 +151,25 @@ pub fn default_v3_config_path(home: impl AsRef<Path>) -> PathBuf {
     home.as_ref().join(".rcc").join("config.toml")
 }
 
+/// Minimal reader for the hooks-sidecar daemon config. The lifecycle owns
+/// process supervision, but config authoring file IO stays in the config
+/// crate so V3 module-boundary enforcement is not bypassed by sidecar cleanup.
+pub fn read_codexapp_socket_from_daemon_config(
+    daemon_config: &Path,
+) -> Result<Option<String>, V3ConfigError> {
+    let raw = fs::read_to_string(daemon_config)?;
+    let value: serde_json::Value = serde_json::from_str(&raw).map_err(|error| {
+        V3ConfigError::Validation(format!(
+            "daemon config {} is not valid JSON: {error}",
+            daemon_config.display()
+        ))
+    })?;
+    Ok(value
+        .pointer("/codexapp/socket")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned))
+}
+
 /// Canonical per-listener request-records store. Server and Admin must derive
 /// the same path; the debug log file is the live path truth when configured.
 pub fn v3_webui_observability_store_path(

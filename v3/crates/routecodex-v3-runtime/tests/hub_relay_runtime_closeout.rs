@@ -1109,7 +1109,7 @@ async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
             .collect::<Vec<_>>(),
         vec![
             {
-                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool.exec","arguments":"{\"cmd\":\"pwd\"}"})
+                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool_exec","arguments":"{\"cmd\":\"pwd\"}"})
             },
             { json!({"type":"function_call_output","call_id":"call_servertool_1","output":"ok"}) }
         ]

@@ -388,8 +388,17 @@ fn project_registered_servertool_calls_to_client_exec(
         else {
             continue;
         };
-        if !profile.is_servertool_name(&name) || !is_client_exec_cli_projection(&name) {
+        let Some(canonical_name) = profile.canonical_servertool_name(&name) else {
             continue;
+        };
+        if !is_client_exec_cli_projection(&canonical_name) {
+            continue;
+        }
+        if name != canonical_name {
+            object.insert(
+                "name".to_string(),
+                Value::String(canonical_name.to_string()),
+            );
         }
         let arguments = object
             .get("arguments")
@@ -413,12 +422,15 @@ fn project_registered_servertool_calls_to_client_exec(
             index,
             reason: "registered servertool call arguments must be a JSON object",
         })?;
-        let projection =
-            build_client_exec_cli_projection_output(&name, &format!("{name}_flow"), parsed)
-                .map_err(|_| V3HubRelayResponseError::MalformedToolCall {
-                    index,
-                    reason: "registered servertool CLI projection failed",
-                })?;
+        let projection = build_client_exec_cli_projection_output(
+            &canonical_name,
+            &format!("{canonical_name}_flow"),
+            parsed,
+        )
+        .map_err(|_| V3HubRelayResponseError::MalformedToolCall {
+            index,
+            reason: "registered servertool CLI projection failed",
+        })?;
         let command = projection
             .get("execCommand")
             .and_then(Value::as_str)

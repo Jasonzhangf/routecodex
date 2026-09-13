@@ -80,7 +80,11 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
         store
             .provider_cooldown_probe_keys_due(60_102)
             .expect("probe due query"),
-        vec![("provider-a".into(), Some("key-a".into()), None,)]
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-a".into()),
+        )]
     );
 }
 

@@ -2886,9 +2886,9 @@
     {
       "output_path": "repo/v3/config/v3-file-size-policy.json",
       "source_path": "v3/config/v3-file-size-policy.json",
-      "source_commit": "06ed2d95f61e5e0662ef4b58198bc82773f912e5",
-      "sha256": "ee8e29e3c7cab1e34fcebb13fab429fc675363f90ff8a0bfe0051653584831c4"
+      "source_commit": "340d5fde6c6cc9bca8c4565596433c8d42bd627f",
+      "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "15d9ac0b7d40f2b23424a7bc5558874586fa0d0d7cabeccaa0ff03d73e9f56d4"
+  "manifest_digest": "d821e3d48758324bf6806b402f30043f61442e416bbf69d0aecc5df3dc85c8af"
 }

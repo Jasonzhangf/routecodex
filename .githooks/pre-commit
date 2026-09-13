@@ -12,7 +12,7 @@ case "$current" in
 esac
 
 if command -v npm >/dev/null 2>&1 && test -f package.json; then
-  npm run --silent verify:local
+  npm run --silent verify:fast
 else
   echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
   exit 1

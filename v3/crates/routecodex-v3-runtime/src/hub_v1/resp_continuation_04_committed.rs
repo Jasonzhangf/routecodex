@@ -449,11 +449,8 @@ fn local_continuation_context_ids(
     let mut context_ids = Vec::new();
     if let Some(response_id) = response_id.filter(|value| !value.trim().is_empty()) {
         context_ids.push(response_id.to_string());
-    }
-    for id in &call_ids {
-        if !context_ids.iter().any(|existing| existing == id) {
-            context_ids.push(id.clone());
-        }
+    } else {
+        context_ids.extend(call_ids);
     }
     Ok(context_ids)
 }

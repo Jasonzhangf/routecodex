@@ -22,7 +22,8 @@ mod validate_relations;
 
 pub use attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 pub use store::{
-    default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
+    default_v3_config_path, load_v3_config_snapshot_from_path,
+    read_codexapp_socket_from_daemon_config, v3_webui_observability_store_path,
     V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,
 };
 pub use types::*;

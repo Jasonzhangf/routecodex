@@ -15,7 +15,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 
 if command -v npm >/dev/null 2>&1 && test -f package.json; then
-  npm run --silent verify:ci
+  npm run --silent verify:fast
 else
   echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
   exit 1

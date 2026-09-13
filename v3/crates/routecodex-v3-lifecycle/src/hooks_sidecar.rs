@@ -213,15 +213,12 @@ fn required_record_path(
 // d7cb31f：sidecar 失败时清理 codexapp unix socket——残留 socket 会让
 // 后续所有 restart 因 AddrInUse 失败（孤儿进程终止后 socket 文件仍在）。
 fn cleanup_codexapp_socket(daemon_config: &Path) {
-    let Ok(config) = fs::read_to_string(daemon_config) else {
+    let Ok(Some(socket)) =
+        routecodex_v3_config::read_codexapp_socket_from_daemon_config(daemon_config)
+    else {
         return;
     };
-    let Ok(config) = serde_json::from_str::<Value>(&config) else {
-        return;
-    };
-    if let Some(socket) = config.pointer("/codexapp/socket").and_then(Value::as_str) {
-        let _ = fs::remove_file(socket);
-    }
+    let _ = fs::remove_file(socket);
 }
 
 // d7cb31f：internal codexapp 可执行文件路径由 lifecycle 从 install record

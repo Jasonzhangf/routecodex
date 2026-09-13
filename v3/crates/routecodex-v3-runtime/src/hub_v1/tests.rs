@@ -395,6 +395,102 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
 }
 
 #[test]
+fn openai_chat_namespace_tools_keep_qualified_mcp_names() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__mcpx",
+            "tools": [{
+                "type": "function",
+                "name": "workspace",
+                "description": "Open a workspace",
+                "parameters": {"type": "object"}
+            }]
+        }]
+    });
+    super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode(
+        &mut payload,
+        None,
+        routecodex_v3_config::V3WebSearchExecutionMode::None,
+        false,
+    )
+    .expect("namespace tools should flatten");
+    assert_eq!(
+        payload["tools"][0]["function"]["name"],
+        "mcp__mcpx__workspace"
+    );
+}
+
+#[test]
+fn openai_chat_nested_function_names_are_sanitized_at_outbound_boundary() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "mcp__codex_review.review_progress",
+                "parameters": {"type": "object"}
+            }
+        }]
+    });
+    super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode(
+        &mut payload,
+        None,
+        routecodex_v3_config::V3WebSearchExecutionMode::None,
+        false,
+    )
+    .expect("function declaration should project");
+    assert_eq!(
+        payload["tools"][0]["function"]["name"],
+        "mcp__codex_review_review_progress"
+    );
+}
+
+#[test]
+fn openai_responses_function_names_are_sanitized_at_outbound_boundary() {
+    let mut payload = json!({
+        "tools": [{
+            "type": "function",
+            "name": "mcp__codex_review.review_start",
+            "parameters": {"type": "object"}
+        }]
+    });
+    super::request_outbound_builtin_tool_projection::normalize_openai_responses_function_tool_names(
+        &mut payload,
+    );
+    assert_eq!(
+        payload["tools"][0]["name"],
+        "mcp__codex_review_review_start"
+    );
+}
+
+#[test]
+fn openai_responses_servertool_name_uses_legal_provider_alias_for_continuation() {
+    let mut payload = json!({
+        "tools": [{"type": "function", "name": "servertool.exec"}],
+        "input": [{"type": "function_call", "name": "servertool.exec"}]
+    });
+    super::request_outbound_builtin_tool_projection::normalize_openai_responses_function_tool_names(
+        &mut payload,
+    );
+    assert_eq!(payload["tools"][0]["name"], "servertool_exec");
+    assert_eq!(payload["input"][0]["name"], "servertool_exec");
+}
+
+#[test]
+fn openai_responses_any_named_input_item_is_sanitized_at_outbound_boundary() {
+    let mut payload = json!({
+        "input": [{"name": "mcp__codex_review.review_progress"}]
+    });
+    super::request_outbound_builtin_tool_projection::normalize_openai_responses_function_tool_names(
+        &mut payload,
+    );
+    assert_eq!(
+        payload["input"][0]["name"],
+        "mcp__codex_review_review_progress"
+    );
+}
+
+#[test]
 fn provider_req_compat_loads_selected_target_profile() {
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         json!({
