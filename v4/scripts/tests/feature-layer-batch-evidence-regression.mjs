@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+import assert from 'node:assert/strict';
+import { validateEvidenceRef } from '../architecture/lib/feature-layer-batch-evidence.mjs';
+
+const now = Date.now();
+const candidate = {
+  head_commit: '0123456789abcdef0123456789abcdef01234567',
+  scope_hash: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  blobs: [{
+    path: 'scripts/architecture/verify-v4-feature-layer-batches.mjs',
+    sha256: 'sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+  }],
+};
+const gate = {
+  status: 'active',
+  evidence_role: 'positive',
+  argv: ['node', 'scripts/architecture/verify-v4-feature-layer-batches.mjs', '--self-test'],
+  producer: { adapter: 'node', identity: 'v4_feature_layer_batches_self_test' },
+};
+const ref = {
+  role: 'positive',
+  gate_id: 'v4_feature_layer_batches_self_test',
+  path: 'docs/evidence/feature-completion/M1/V4-GATE-001/positive.json',
+};
+const baseEvidence = {
+  evidence_id: 'positive',
+  issue_id: 'V4-GATE-001',
+  experiment_id: 'v4-feature-layer-gate',
+  phase: 'positive_intervention',
+  kind: 'positive_test',
+  source_commit: candidate.head_commit,
+  scope: { feature_id: 'V4-GATE-001', module_id: 'routecodex-v4-governance' },
+  producer: gate.producer,
+  command_argv: gate.argv,
+  result: 'pass',
+  created_at: new Date(now - 1_000).toISOString(),
+  expires_at: new Date(now + 86_400_000).toISOString(),
+  input_hashes: [candidate.blobs[0].sha256],
+  scope_hash: candidate.scope_hash,
+  exit_status: 0,
+};
+const context = {
+  trackedAt: () => true,
+  ignored: () => false,
+  blobIdentity: () => candidate.blobs[0],
+};
+const shared = {
+  ref,
+  expectedRole: 'positive',
+  expectedFeatureId: 'V4-GATE-001',
+  expectedModuleIds: ['routecodex-v4-governance'],
+  expectedGateId: ref.gate_id,
+  candidate,
+  sourcePaths: [candidate.blobs[0].path],
+  gateMap: new Map([[ref.gate_id, gate]]),
+  truth: context,
+  integrationCommit: candidate.head_commit,
+  now,
+};
+
+const validFailures = [];
+validateEvidenceRef({ ...shared, evidence: baseEvidence, failures: validFailures });
+assert.equal(validFailures.length, 0, JSON.stringify(validFailures));
+
+const mismatchFailures = [];
+validateEvidenceRef({
+  ...shared,
+  evidence: {
+    ...baseEvidence,
+    producer: { adapter: 'node', identity: 'v4_feature_layer_batches' },
+    command_argv: ['node', 'scripts/architecture/verify-v4-feature-layer-batches.mjs'],
+  },
+  failures: mismatchFailures,
+});
+assert(
+  mismatchFailures.some((failure) => failure.code === 'EVIDENCE_PRODUCER_MISMATCH'),
+  'a shared-lane projection must not satisfy the self-test evidence gate',
+);
+
+process.stdout.write('[test:feature-layer-batch-evidence-regression] PASS\n');
