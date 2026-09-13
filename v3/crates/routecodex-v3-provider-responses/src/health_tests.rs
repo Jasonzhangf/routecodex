@@ -107,7 +107,7 @@ fn operator_can_remove_auth_key_cooldown_and_probe_state() {
         .iter()
         .any(|entry| entry.kind == "auth_key"));
     assert!(store
-        .remove_cooldown_entry("provider-a", Some("key-a"), None, "auth_key")
+        .remove_cooldown_entry("provider-a", Some("key-a"), Some("gpt-5.5"), "auth_key",)
         .unwrap());
     assert!(!store
         .cooldown_entries(103)
@@ -203,7 +203,11 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         .is_empty());
     assert_eq!(
         store.provider_cooldown_probe_keys_due(3_600_101).unwrap(),
-        vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
+        vec![(
+            "provider-a".to_string(),
+            Some("key-a".to_string()),
+            Some("gpt-5.5".to_string()),
+        )]
     );
     assert!(
         !store
@@ -217,7 +221,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     assert!(
-        !store
+        store
             .availability_for_session(
                 &session("session-c"),
                 "provider-a",
@@ -226,7 +230,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
                 102,
             )
             .available,
-        "auth-key cooldown must block another model under the same provider/auth alias"
+        "auth-key/model cooldown must not block another model under the same provider/auth alias"
     );
     assert!(
         store
@@ -240,7 +244,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
             .available
     );
     store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), None)
+        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap();
     assert!(
         store

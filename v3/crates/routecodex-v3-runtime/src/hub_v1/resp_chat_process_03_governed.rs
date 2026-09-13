@@ -835,6 +835,17 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
         self.servertool_names.contains(name)
+            || (name == "servertool_exec" && self.servertool_names.contains("servertool.exec"))
+    }
+
+    pub(crate) fn canonical_servertool_name(&self, name: &str) -> Option<String> {
+        if self.servertool_names.contains(name) {
+            Some(name.to_string())
+        } else if name == "servertool_exec" && self.servertool_names.contains("servertool.exec") {
+            Some("servertool.exec".to_string())
+        } else {
+            None
+        }
     }
 
     pub fn with_web_search_execution_mode(

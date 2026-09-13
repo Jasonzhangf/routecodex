@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
-  cpSync,
+  cpSync as fsCpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,12 +23,33 @@ function fail(message) {
   process.exit(2);
 }
 
+// Admission workspace copies can be interrupted by transient filesystem signals on macOS.
+// Retry only EINTR so the gate remains strict while avoiding false negatives.
+function cpSync(source, destination, options) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return fsCpSync(source, destination, options);
+    } catch (error) {
+      if (error?.code !== 'EINTR' || attempt >= 4) throw error;
+    }
+  }
+}
+
+function runGate(requested, args, options) {
+  for (let attempt = 0; ; attempt += 1) {
+    const result = spawnSync(process.execPath, [requested, ...args], options);
+    if (result.status !== -1 || attempt >= 5) {
+      return result;
+    }
+  }
+}
+
 if (!requested || requested.startsWith('/') || requested.includes('..')) {
   fail('gate path must be a V3-local relative path');
 }
 
 if (process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1') {
-  const result = spawnSync(process.execPath, [requested, ...args], {
+  const result = runGate(requested, args, {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'inherit',
@@ -60,11 +81,14 @@ try {
     }
   }
   mkdirSync(resolve(workspace, 'v3'), { recursive: true });
-  cpSync(
-    resolve(admissionRepo, 'v3', 'config'),
-    resolve(workspace, 'v3', 'config'),
-    { recursive: true },
-  );
+  cpSync(resolve(admissionRepo, 'v3', 'config'), resolve(workspace, 'v3', 'config'), {
+    recursive: true,
+  });
+  const worktreeConfigCrate = resolve(v3Root, 'crates', 'routecodex-v3-config', 'src');
+  const mirrorConfigSrc = resolve(admissionRepo, 'v3', 'config', 'src');
+  if (!existsSync(mirrorConfigSrc) && existsSync(worktreeConfigCrate)) {
+    cpSync(worktreeConfigCrate, resolve(workspace, 'v3', 'config', 'src'), { recursive: true });
+  }
   symlinkSync(resolve(workspace, 'v3', 'config'), resolve(workspace, 'config'), 'dir');
   cpSync(resolve(v3Root, 'scripts'), resolve(workspace, 'v3', 'scripts'), { recursive: true });
   symlinkSync(resolve(workspace, 'v3', 'scripts'), resolve(workspace, 'scripts'), 'dir');
@@ -97,11 +121,9 @@ try {
   for (const name of ['crates', 'fixtures', 'admin-webui']) {
     cpSync(resolve(v3Root, name), resolve(workspace, 'v3', name), { recursive: true });
   }
-  cpSync(
-    resolve(admissionRepo, 'v3', 'config'),
-    resolve(workspace, 'v3', 'config'),
-    { recursive: true },
-  );
+  // `repo/v3/config` only carries the file-size policy; the workspace above
+  // already obtained the full config crate from the worktree, so this redundant
+  // mirror copy is a no-op kept for compatibility with legacy admission builds.
   for (const name of ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml']) {
     copyFileSync(resolve(v3Root, name), resolve(workspace, 'v3', name));
   }
@@ -125,7 +147,7 @@ try {
     TMP: tempRoot,
     TEMP: tempRoot,
   };
-  const result = spawnSync(process.execPath, [requested, ...args], {
+  const result = runGate(requested, args, {
     cwd: workspace,
     env,
     stdio: 'inherit',

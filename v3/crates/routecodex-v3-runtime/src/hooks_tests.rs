@@ -393,7 +393,10 @@ fn responses_direct_openai_chat_target_uses_chat_transport_contract() {
         wire.body()
     );
     assert_eq!(wire.body()["tools"][1]["type"], "function");
-    assert_eq!(wire.body()["tools"][1]["function"]["name"], "spawn_agent");
+    assert_eq!(
+        wire.body()["tools"][1]["function"]["name"],
+        "multi_agent_v1__spawn_agent"
+    );
     let transport = registry
         .run_provider_transport(wire)
         .expect("direct OpenAI Chat target must use Chat transport");

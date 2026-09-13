@@ -3414,7 +3414,9 @@ fn direct_stream_error_projection_response_uses_error_channel() {
         project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
         None,
     );
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    // Once an SSE request is accepted, typed errors are retained for server
+    // evidence and the client sees only the transport disconnect boundary.
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
@@ -3438,6 +3440,33 @@ async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
         stream_observation: None,
     };
 
+    let response = responses_direct_output_response_with_console_for_protocol(
+        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
+        None,
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
+}
+
+#[tokio::test]
+async fn direct_responses_provider_502_disconnects_sse_without_error_body() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "HTTP_502", "message": "upstream unavailable"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
     let response = responses_direct_output_response_with_console_for_protocol(
         project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
         None,
@@ -3695,7 +3724,7 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
 }
 
 #[tokio::test]
-async fn responses_relay_json_error_projects_failure_terminal_with_done() {
+async fn responses_relay_json_error_disconnects_sse_without_error_body() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 598,
         client_body: V3ResponsesRelayClientBody::Json(json!({
@@ -3714,13 +3743,9 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
     };
 
     let response = responses_relay_output_response(output, None, None, true);
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.starts_with("event: response.failed\n"), "{text}");
-    assert!(text.contains("provider_request_payload_invalid"), "{text}");
-    assert!(text.contains("UnmappedOutboundFields"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
 }
 
 #[tokio::test]

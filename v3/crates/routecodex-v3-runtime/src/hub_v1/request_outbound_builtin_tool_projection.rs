@@ -52,6 +52,74 @@ pub(super) fn project_openai_responses_custom_tools_to_function_schema(
     Ok(())
 }
 
+pub(super) fn normalize_openai_responses_function_tool_names(payload: &mut Value) {
+    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools {
+            let Some(row) = tool.as_object_mut() else {
+                continue;
+            };
+            if let Some(Value::String(name)) = row.get_mut("name") {
+                if name == "servertool.exec" {
+                    *name = "servertool_exec".to_string();
+                } else if name.starts_with("mcp__") {
+                    *name = normalize_provider_function_name(name);
+                }
+            }
+            if let Some(function) = row.get_mut("function").and_then(Value::as_object_mut) {
+                if let Some(Value::String(name)) = function.get_mut("name") {
+                    if name == "servertool.exec" {
+                        *name = "servertool_exec".to_string();
+                    } else if name.starts_with("mcp__") {
+                        *name = normalize_provider_function_name(name);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            let Some(row) = item.as_object_mut() else {
+                continue;
+            };
+            if let Some(Value::String(name)) = row.get_mut("name") {
+                // Servertool continuation names are resolved by the local
+                // hook and must remain stable across turns. Any other MCP
+                // function item carrying a name must satisfy the provider
+                // wire grammar, regardless of the input item subtype.
+                if name == "servertool.exec" {
+                    *name = "servertool_exec".to_string();
+                } else if name.starts_with("mcp__") {
+                    *name = normalize_provider_function_name(name);
+                }
+            }
+        }
+    }
+    normalize_nested_named_fields(payload);
+}
+
+fn normalize_nested_named_fields(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(Value::String(name)) = object.get_mut("name") {
+                if name == "servertool.exec" {
+                    *name = "servertool_exec".to_string();
+                } else if name.starts_with("mcp__") {
+                    *name = normalize_provider_function_name(name);
+                }
+            }
+            for child in object.values_mut() {
+                normalize_nested_named_fields(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_nested_named_fields(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 pub(super) fn project_openai_chat_provider_tools(payload: &mut Value) -> Result<(), String> {
     project_openai_chat_provider_tools_for_web_search_mode(
@@ -88,9 +156,14 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     for (index, tool) in tools.iter().enumerate() {
         let tool_type = tool.get("type").and_then(Value::as_str);
         if tool_type == Some("namespace") {
-            let flattened = flatten_namespace_tool_for_provider("openai-chat", tool)
+            let mut flattened = flatten_namespace_tool_for_provider("openai-chat", tool)
                 .map_err(|error| format!("$.tools[{index}]: {error}"))?
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
+            let namespace_name = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("$.tools[{index}]: namespace tool requires a name"))?;
+            qualify_namespace_children(namespace_name, &mut flattened);
             normalized_tools.extend(flattened);
             continue;
         }
@@ -148,6 +221,43 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
         root.insert("web_search_options".to_string(), projected);
     }
     Ok(())
+}
+
+fn qualify_namespace_children(namespace_name: &str, tools: &mut [Value]) {
+    for tool in tools {
+        let Some(object) = tool.as_object_mut() else {
+            continue;
+        };
+        if let Some(Value::String(name)) = object.get_mut("name") {
+            *name = map_namespace_tool_name(namespace_name, name);
+        }
+        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(Value::String(name)) = function.get_mut("name") {
+                *name = map_namespace_tool_name(namespace_name, name);
+            }
+        }
+    }
+}
+
+fn map_namespace_tool_name(namespace_name: &str, child_name: &str) -> String {
+    if child_name
+        .strip_prefix(namespace_name)
+        .is_some_and(|suffix| suffix.starts_with("__"))
+    {
+        return child_name.to_string();
+    }
+    let mut mapped = String::with_capacity(namespace_name.len() + child_name.len() + 2);
+    mapped.push_str(namespace_name);
+    mapped.push_str("__");
+    for character in child_name.chars() {
+        match character {
+            character if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') => {
+                mapped.push(character)
+            }
+            _ => mapped.push('_'),
+        }
+    }
+    mapped
 }
 
 fn build_local_web_search_function_tool(
@@ -404,20 +514,53 @@ fn normalize_openai_chat_function_tool(
     path: &str,
 ) -> Result<Value, String> {
     if row.get("function").and_then(Value::as_object).is_some() {
-        // Req04 owns the only Tool-Thinking schema compilation. This adapter
-        // preserves the already-governed function declaration verbatim.
-        return Ok(Value::Object(row.clone()));
+        // Req04 owns schema compilation; outbound still owns wire-name
+        // compatibility. Provider function names accept only ASCII
+        // alphanumeric, '_' and '-'. Preserve the declaration shape while
+        // mapping namespace punctuation at this boundary.
+        let mut projected = row.clone();
+        if let Some(function) = projected.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(Value::String(name)) = function.get_mut("name") {
+                *name = normalize_provider_function_name(name);
+            }
+        }
+        return Ok(Value::Object(projected));
     }
     let mut function = Map::new();
     for key in ["name", "description", "parameters", "strict"] {
         if let Some(value) = row.get(key) {
-            function.insert(key.to_string(), value.clone());
+            let value = if key == "name" {
+                value
+                    .as_str()
+                    .map(normalize_provider_function_name)
+                    .map(Value::String)
+                    .unwrap_or_else(|| value.clone())
+            } else {
+                value.clone()
+            };
+            function.insert(key.to_string(), value);
         }
     }
     Ok(Value::Object(Map::from_iter([
         ("type".to_string(), Value::String("function".to_string())),
         ("function".to_string(), Value::Object(function)),
     ])))
+}
+
+pub(super) fn normalize_provider_function_name(name: &str) -> String {
+    let mut output = String::with_capacity(name.len());
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
+            output.push(character);
+        } else {
+            output.push('_');
+        }
+    }
+    if output.is_empty() {
+        "tool".to_string()
+    } else {
+        output
+    }
 }
 
 fn openai_chat_freeform_custom_tool_parameters() -> Value {

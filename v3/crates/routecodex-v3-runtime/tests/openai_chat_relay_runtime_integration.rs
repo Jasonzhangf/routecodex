@@ -582,7 +582,10 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
     let secondary = format!("{server_id}_secondary");
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        [primary.as_str(), secondary.as_str()]
+        [
+            primary.as_str(),
+            secondary.as_str()
+        ]
     );
     assert!(
         started.elapsed() >= Duration::from_millis(1_000),
@@ -1842,7 +1845,7 @@ async fn sse_transport_error_after_done_is_failure() {
     assert!(output.error_chain.is_some());
     assert!(
         transport.provider_ids.lock().unwrap().len() >= 1,
-        "post-terminal transport failure must reach the provider before projecting Error06"
+        "post-terminal transport failure must consume the configured same-candidate budget"
     );
     let error_body = match output.client_body {
         V3OpenAiChatRelayClientBody::Json(body) => body,

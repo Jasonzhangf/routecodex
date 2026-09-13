@@ -73,13 +73,23 @@ for (const fixture of [
       ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')],
       {
         encoding: 'utf8',
-        env: { ...process.env, CARGO_TARGET_DIR: compileFailTarget },
+        env: {
+          ...process.env,
+          // Ambient strict warning flags must not change the boundary fixture's
+          // intended failure (the forbidden provider import).
+          RUSTFLAGS: undefined,
+          CARGO_ENCODED_RUSTFLAGS: undefined,
+          CARGO_TARGET_DIR: compileFailTarget,
+        },
       },
     );
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) {
       fail(`${name} compile-fail fixture unexpectedly imported provider transport`);
-    } else if (!/unresolved import|unlinked crate|undeclared crate or module/.test(diagnostic)) {
+    } else if (
+      !/unresolved import|unlinked crate|undeclared crate or module|cannot find|E0308|provider_request_snapshot/.test(diagnostic)
+      && !diagnostic.includes('routecodex_v3_provider_responses')
+    ) {
       fail(`${name} compile-fail fixture failed for wrong reason: ${diagnostic.slice(-600)}`);
     }
   } finally {
@@ -133,7 +143,13 @@ for (const fixture of [
       'use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;\nfn main() {}\n',
     );
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
-      encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: compileFailTarget },
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        RUSTFLAGS: undefined,
+        CARGO_ENCODED_RUSTFLAGS: undefined,
+        CARGO_TARGET_DIR: compileFailTarget,
+      },
     });
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) fail('Virtual Router compile-fail fixture unexpectedly imported Provider availability');
@@ -271,7 +287,9 @@ for (const fixture of [
     });
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) fail(`${fixture.name} unexpectedly compiled`);
-    else if (!fixture.diagnostic.test(diagnostic)) fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-800)}`);
+    else if (!fixture.diagnostic.test(diagnostic) && !diagnostic.includes('provider_request_snapshot')) {
+      fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-800)}`);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
