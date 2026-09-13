@@ -421,15 +421,17 @@ impl V3ResponsesSseResponseContainer {
         }
         if let Some(usage) = &self.usage {
             let mut usage_value = serde_json::Map::new();
-            if let Some(tokens) = usage.input_tokens {
-                usage_value.insert("input_tokens".to_owned(), Value::from(tokens));
-            }
-            if let Some(tokens) = usage.output_tokens {
-                usage_value.insert("output_tokens".to_owned(), Value::from(tokens));
-            }
-            if let Some(tokens) = usage.total_tokens {
-                usage_value.insert("total_tokens".to_owned(), Value::from(tokens));
-            }
+            // A present usage object is a Responses terminal usage object;
+            // its three counters are required by the client schema. Preserve
+            // reported values and derive only omitted counters.
+            let input_tokens = usage.input_tokens.unwrap_or(0);
+            let output_tokens = usage.output_tokens.unwrap_or(0);
+            let total_tokens = usage
+                .total_tokens
+                .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
+            usage_value.insert("input_tokens".to_owned(), Value::from(input_tokens));
+            usage_value.insert("output_tokens".to_owned(), Value::from(output_tokens));
+            usage_value.insert("total_tokens".to_owned(), Value::from(total_tokens));
             for extension in &usage.extensions {
                 usage_value.insert(extension.name.clone(), extension.value.clone());
             }
