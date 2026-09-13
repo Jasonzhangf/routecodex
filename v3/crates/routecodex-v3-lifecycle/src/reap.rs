@@ -16,6 +16,12 @@ pub(crate) fn reap_inactive_runtime_files(
     } else {
         None
     };
+    if hooks_sidecar_process_group_is_alive(instance_dir)? {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "refusing to reap lifecycle state while hooks sidecar process group is alive"
+                .to_string(),
+        ));
+    }
     let terminal_status = status.as_ref().is_some_and(|status| {
         matches!(
             status.state,
@@ -79,7 +85,7 @@ pub(crate) fn reap_inactive_runtime_files(
             fs::remove_file(socket_path)?;
         }
     }
-    for file in ["pid.cache", "control.json"] {
+    for file in ["pid.cache", "control.json", HOOKS_SIDECAR_PROCESS_FILE] {
         let path = instance_dir.join(file);
         if path.exists() {
             fs::remove_file(path)?;
@@ -102,10 +108,7 @@ pub(crate) fn restart_recovery_state_is_stale_owned_unreachable(
             "refusing restart recovery for a different instance status".to_string(),
         ));
     }
-    if matches!(
-        status.state,
-        V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-    ) {
+    if status.state == V3ManagedRunState::Stopped {
         return Ok(false);
     }
     owned_unreachable_runtime_state_is_reapable(instance_dir, expected)
@@ -115,6 +118,9 @@ pub(crate) fn owned_unreachable_runtime_state_is_reapable(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<bool, V3LifecycleError> {
+    if hooks_sidecar_process_group_is_alive(instance_dir)? {
+        return Ok(false);
+    }
     let pid_path = instance_dir.join("pid.cache");
     let cached_pid = if pid_path.exists() {
         let pid: V3ManagedPidCache = read_json(&pid_path)?;

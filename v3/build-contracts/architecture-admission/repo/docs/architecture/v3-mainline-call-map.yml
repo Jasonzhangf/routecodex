@@ -7529,18 +7529,18 @@ chains:
       side_channel_writes: [v3.error.source]
   - step_id: v3-provider-global-probe-05
     from_node: V3ProviderFailureRuntimeHealth
-    to_node: V3ProviderGlobalSubscriptionFailureObservation
+    to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_in_session_with_policy
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.error.classified]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.error.classified]
-      side_channel_writes: [v3.provider.global_subscription_health]
+      consumes: [v3.provider_error.policy_manifest, v3.provider.failure_session_scope]
+      produces: [v3.provider.health_state, v3.provider.auth_key_cooldown_state]
+      side_channel_reads: [v3.provider_error.policy_manifest, v3.provider.failure_session_scope]
+      side_channel_writes: [v3.provider.health_state, v3.provider.auth_key_cooldown_state]
   - step_id: v3-provider-global-probe-07
     from_node: V3ProviderFailureRuntimeHealth
     to_node: V3ProviderHealthStore

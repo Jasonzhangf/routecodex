@@ -1266,9 +1266,9 @@ resources:
     lifecycle: v3.server.managed_lifecycle
     owner_crate: routecodex-v3-lifecycle
     owner_node: V3Lifecycle06LiveControlled
-    identity: [supervisorWrapper, pid, readinessProtocol, state]
-    allowed_writers: [start_configured_hooks_sidecar, V3HooksSidecarProcess::stop]
-    allowed_readers: [shutdown_managed_runtime]
+    identity: [supervisorWrapper, pid, processGroupId, leaderPid, leaderStartToken, readinessProtocol, state]
+    allowed_writers: [start_configured_hooks_sidecar, V3HooksSidecarProcess::stop, reap_inactive_runtime_files]
+    allowed_readers: [shutdown_managed_runtime, restart_managed_runtime_in_place, reap_inactive_runtime_files]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false

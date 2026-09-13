@@ -2319,12 +2319,10 @@ async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and
         .await
         .unwrap();
     assert_eq!(sse_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(sse_response.headers()["content-type"], "application/json");
-    let sse_body: Value = sse_response.json().await.unwrap();
-    assert_eq!(
-        sse_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(sse_response.headers()["content-type"], "text/event-stream");
+    let sse_body = sse_response.text().await.unwrap();
+    assert!(sse_body.contains("network_error"), "{sse_body}");
+    assert!(sse_body.contains("network error"), "{sse_body}");
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -4070,13 +4068,13 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
         .await
         .unwrap();
     let status = response.status();
+    let content_type = response.headers()["content-type"].clone();
     let response_body = response.text().await.unwrap();
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    let body: Value = serde_json::from_str(&response_body).unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(content_type, "text/event-stream");
+    assert!(response_body.contains("response.failed"), "{response_body}");
+    assert!(response_body.contains("network_error"), "{response_body}");
+    assert!(response_body.contains("network error"), "{response_body}");
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -4114,13 +4112,13 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
         .await
         .unwrap();
     let status = response.status();
+    let content_type = response.headers()["content-type"].clone();
     let response_body = response.text().await.unwrap();
     assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    let body: Value = serde_json::from_str(&response_body).unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(content_type, "text/event-stream");
+    assert!(response_body.contains("error"), "{response_body}");
+    assert!(response_body.contains("network_error"), "{response_body}");
+    assert!(response_body.contains("network error"), "{response_body}");
     assert!(!response_body.contains("controlled_unavailable"));
 
     let json_response = client
@@ -5064,7 +5062,10 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
     let projected = body["clientResponse"]["rawSse"]
         .as_str()
         .expect("response dry-run must materialize client SSE");
-    assert!(projected.contains("调用工具 probe：确认当前工作目录"));
+    // Production direct hooks no longer inject retired toolreason text. The
+    // dry-run still preserves the provider SSE shape and records the missing
+    // observation without manufacturing a client-visible message.
+    assert!(!projected.contains("调用工具 probe：确认当前工作目录"));
     let projected_events = projected
         .split("\n\n")
         .filter_map(|frame| {
@@ -5074,40 +5075,13 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
                 .and_then(|data| serde_json::from_str::<Value>(data).ok())
         })
         .collect::<Vec<_>>();
-    let message_added_index = projected_events
+    assert!(projected_events
         .iter()
-        .position(|event| {
-            event.get("type").and_then(Value::as_str) == Some("response.output_item.added")
-                && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
-        })
-        .expect("visible toolreason text must open an assistant message item");
-    let visible_item_id = projected_events[message_added_index]
-        .pointer("/item/id")
-        .and_then(Value::as_str)
-        .expect("visible assistant message must have an item id");
-    let text_delta_index = projected_events
-        .iter()
-        .position(|event| {
-            event.get("type").and_then(Value::as_str) == Some("response.output_text.delta")
-                && event.get("item_id").and_then(Value::as_str) == Some(visible_item_id)
-        })
-        .expect("visible toolreason text must stream within the assistant message item");
-    let message_done_index = projected_events
-        .iter()
-        .position(|event| {
-            event.get("type").and_then(Value::as_str) == Some("response.output_item.done")
-                && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
-                && event.pointer("/item/id").and_then(Value::as_str) == Some(visible_item_id)
-        })
-        .expect("visible toolreason text must close the assistant message item");
-    let completed_index = projected_events
-        .iter()
-        .position(|event| event.get("type").and_then(Value::as_str) == Some("response.completed"))
-        .expect("provider terminal response must remain projected");
-    assert!(message_added_index < text_delta_index);
-    assert!(text_delta_index < message_done_index);
-    assert!(message_done_index < completed_index);
-    assert!(!projected.contains("\\\"reason\\\":\\\"确认当前工作目录\\\""));
+        .any(|event| event.get("type").and_then(Value::as_str) == Some("response.completed")));
+    assert!(!projected_events.iter().any(|event| {
+        event.get("type").and_then(Value::as_str) == Some("response.output_item.added")
+            && event.pointer("/item/type").and_then(Value::as_str) == Some("message")
+    }));
 }
 
 #[tokio::test]

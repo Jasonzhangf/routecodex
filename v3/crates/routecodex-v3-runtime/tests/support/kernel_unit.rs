@@ -43,7 +43,19 @@ impl ResponsesTransport for CaptureTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+        let body = request.body();
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["input"], "hello");
+        if let Some(tools) = body["tools"].as_array() {
+            assert!(tools[0]["parameters"]["properties"]
+                .as_object()
+                .expect("tool parameters")
+                .contains_key("reason"));
+            assert!(tools[0]["parameters"]["properties"]
+                .as_object()
+                .expect("tool parameters")
+                .contains_key("goal_alignment_confidence"));
+        }
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -65,7 +77,17 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        assert_eq!(request.body(), &json!({"model":"gpt-test","input":"hello"}));
+        let body = request.body();
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["input"], "hello");
+        assert!(body["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .expect("tool parameters")
+            .contains_key("reason"));
+        assert!(body["tools"][0]["parameters"]["properties"]
+            .as_object()
+            .expect("tool parameters")
+            .contains_key("goal_alignment_confidence"));
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -90,7 +112,7 @@ impl ResponsesTransport for ToolreasonCaptureTransport {
 }
 
 #[tokio::test]
-async fn direct_response_hook_keeps_toolreason_disabled_when_config_requests_override() {
+async fn direct_response_hook_injects_tool_thinking_but_keeps_client_projection_disabled() {
     let mut manifest = test_manifest();
     manifest
         .servers
@@ -106,7 +128,19 @@ async fn direct_response_hook_keeps_toolreason_disabled_when_config_requests_ove
         "test",
         "req-toolreason-override",
         "exec-toolreason-override",
-        json!({"model":"client-model","input":"hello"}),
+        json!({
+            "model": "client-model",
+            "input": "hello",
+            "tools": [{
+                "type": "function",
+                "name": "pwd",
+                "description": "show cwd",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }]
+        }),
     );
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
@@ -124,7 +158,10 @@ async fn direct_response_hook_keeps_toolreason_disabled_when_config_requests_ove
         panic!("direct JSON response must remain JSON: {output:?}");
     };
     assert_eq!(body["output"][0]["type"], "function_call");
+    assert_eq!(body["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
     assert!(!body.to_string().contains("调用工具"));
+    assert!(!body.to_string().contains("确认当前工作目录"));
+    assert!(!body.to_string().contains("goal_alignment_confidence"));
 }
 
 #[tokio::test]

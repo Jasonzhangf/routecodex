@@ -43,6 +43,12 @@ pub(crate) fn instance_residual_pids_for_listener_set(
         if !pid_is_alive(pid_cache.pid) || pid_cache.pid == std::process::id() {
             continue;
         }
+        let Some(expected_start_token) = pid_cache.process_start_token.as_deref() else {
+            continue;
+        };
+        if process_start_token(pid_cache.pid)?.as_deref() != Some(expected_start_token) {
+            continue;
+        }
         let declaration_path = path.join("instance.json");
         let Ok(published) = read_json::<V3ManagedInstanceDeclaration>(&declaration_path) else {
             continue;
@@ -279,6 +285,93 @@ pub(crate) fn pid_is_alive(pid: u32) -> bool {
         return true;
     }
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn process_start_token(pid: u32) -> Result<Option<String>, V3LifecycleError> {
+    if pid == 0 {
+        return Ok(None);
+    }
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int,
+        )
+    };
+    if size == 0 {
+        return Ok(None);
+    }
+    if size != std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int {
+        return Err(V3LifecycleError::Validation(format!(
+            "macOS process start identity for PID {pid} returned unexpected size {size}"
+        )));
+    }
+    if info.pbi_pid != pid {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "macos:{}:{}",
+        info.pbi_start_tvsec, info.pbi_start_tvusec
+    )))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn process_start_token(pid: u32) -> Result<Option<String>, V3LifecycleError> {
+    if pid == 0 {
+        return Ok(None);
+    }
+    let stat_path = format!("/proc/{pid}/stat");
+    let mut stat = String::new();
+    let mut file = match File::open(&stat_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(V3LifecycleError::Io(error)),
+    };
+    file.read_to_string(&mut stat)
+        .map_err(V3LifecycleError::Io)?;
+    let Some((_, fields)) = stat.rsplit_once(") ") else {
+        return Err(V3LifecycleError::Validation(format!(
+            "Linux process stat for PID {pid} is malformed"
+        )));
+    };
+    let Some(start_ticks) = fields
+        .split_whitespace()
+        .nth(19)
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        return Err(V3LifecycleError::Validation(format!(
+            "Linux process stat for PID {pid} has no start time"
+        )));
+    };
+    Ok(Some(format!("linux:{start_ticks}")))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn process_start_token(pid: u32) -> Result<Option<String>, V3LifecycleError> {
+    if pid == 0 {
+        return Ok(None);
+    }
+    let pid_arg = pid.to_string();
+    let output = Command::new("ps")
+        .args(["-p", &pid_arg, "-o", "lstart="])
+        .output()
+        .map_err(|error| {
+            V3LifecycleError::Validation(format!(
+                "failed to discover process start token for PID {pid}: {error}"
+            ))
+        })?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(token))
 }
 
 pub(crate) fn format_pid_list(pids: &[u32]) -> String {

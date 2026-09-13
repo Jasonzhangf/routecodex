@@ -59,8 +59,8 @@ flowchart TD
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
-  module_v3_runtime -->|14 edges / 8 paths| module_v3_provider_responses
-  module_v3_runtime -->|62 edges / 19 paths| module_v3_runtime
+  module_v3_runtime -->|15 edges / 8 paths| module_v3_provider_responses
+  module_v3_runtime -->|61 edges / 19 paths| module_v3_runtime
   module_v3_runtime -->|45 edges / 11 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|4 edges / 2 paths| module_v3_target
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
@@ -104,8 +104,8 @@ flowchart TD
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
-| v3-runtime | v3-provider-responses | 14 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime | v3-runtime | 62 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-provider-responses | 15 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime | v3-runtime | 61 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses_continuation.remote_contract_store`<br/>`v3.responses_continuation.remote_locator_codec`<br/>`v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 45 | `v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.hub_relay.tool_servertool_multiturn_parity`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 4 | `v3.responses_direct.remote_continuation.integration`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
@@ -2705,9 +2705,10 @@ flowchart TD
   end
   subgraph c_67_v3_route_policy_condition_evaluation_m_v3_error["v3-error"]
     c_67_v3_route_policy_condition_evaluation_9["v3-error<br/>build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small>"]
-    c_67_v3_route_policy_condition_evaluation_15["v3-error<br/>build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_67_v3_route_policy_condition_evaluation_16["v3-error<br/>build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_67_v3_route_policy_condition_evaluation_m_v3_provider_responses["v3-provider-responses"]
+    c_67_v3_route_policy_condition_evaluation_11["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_in_session_with_policy<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
     c_67_v3_route_policy_condition_evaluation_13["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_key_success<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
   end
   subgraph c_67_v3_route_policy_condition_evaluation_m_v3_runtime["v3-runtime"]
@@ -2715,10 +2716,10 @@ flowchart TD
     c_67_v3_route_policy_condition_evaluation_6["v3-runtime<br/>plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small>"]
     c_67_v3_route_policy_condition_evaluation_7["v3-runtime<br/>V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small>"]
     c_67_v3_route_policy_condition_evaluation_10["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_67_v3_route_policy_condition_evaluation_11["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
     c_67_v3_route_policy_condition_evaluation_12["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_67_v3_route_policy_condition_evaluation_14["v3-runtime<br/>record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small>"]
-    c_67_v3_route_policy_condition_evaluation_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_67_v3_route_policy_condition_evaluation_15["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
+    c_67_v3_route_policy_condition_evaluation_17["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
   end
   subgraph c_67_v3_route_policy_condition_evaluation_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_67_v3_route_policy_condition_evaluation_8["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
@@ -2732,12 +2733,12 @@ flowchart TD
   c_67_v3_route_policy_condition_evaluation_6 -->|v3-route-policy-04<br/>V3Router05RequestClassified → V3Router06RoutePoolResolved| c_67_v3_route_policy_condition_evaluation_5
   c_67_v3_route_policy_condition_evaluation_7 -->|v3-route-policy-05<br/>V3Router05RequestClassified → V3RouteHistoryWindow| c_67_v3_route_policy_condition_evaluation_0
   c_67_v3_route_policy_condition_evaluation_8 -->|v3-provider-global-probe-relay-error-source<br/>V3HubRespChatProcess03Governed → V3Error01SourceRaised| c_67_v3_route_policy_condition_evaluation_9
-  c_67_v3_route_policy_condition_evaluation_10 -->|v3-provider-global-probe-05<br/>V3ProviderFailureRuntimeHealth → V3ProviderGlobalSubscriptionFailureObservation| c_67_v3_route_policy_condition_evaluation_11
+  c_67_v3_route_policy_condition_evaluation_10 -->|v3-provider-global-probe-05<br/>V3ProviderFailureRuntimeHealth → V3ProviderHealthStore| c_67_v3_route_policy_condition_evaluation_11
   c_67_v3_route_policy_condition_evaluation_12 -->|v3-provider-global-probe-07<br/>V3ProviderFailureRuntimeHealth → V3ProviderHealthStore| c_67_v3_route_policy_condition_evaluation_13
-  c_67_v3_route_policy_condition_evaluation_14 -->|v3-provider-global-probe-08<br/>V3ProviderFailureRuntimeHealth → V3ProviderGlobalSubscriptionFailureObservation| c_67_v3_route_policy_condition_evaluation_11
-  c_67_v3_route_policy_condition_evaluation_14 -->|v3-provider-global-probe-direct-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_67_v3_route_policy_condition_evaluation_15
-  c_67_v3_route_policy_condition_evaluation_16 -->|v3-provider-global-probe-09<br/>V3ProviderGlobalSubscriptionFailureObservation → V3ProviderHealthStore| c_67_v3_route_policy_condition_evaluation_11
-  c_67_v3_route_policy_condition_evaluation_16 -->|v3-provider-global-probe-post-commit-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_67_v3_route_policy_condition_evaluation_15
+  c_67_v3_route_policy_condition_evaluation_14 -->|v3-provider-global-probe-08<br/>V3ProviderFailureRuntimeHealth → V3ProviderGlobalSubscriptionFailureObservation| c_67_v3_route_policy_condition_evaluation_15
+  c_67_v3_route_policy_condition_evaluation_14 -->|v3-provider-global-probe-direct-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_67_v3_route_policy_condition_evaluation_16
+  c_67_v3_route_policy_condition_evaluation_17 -->|v3-provider-global-probe-09<br/>V3ProviderGlobalSubscriptionFailureObservation → V3ProviderHealthStore| c_67_v3_route_policy_condition_evaluation_15
+  c_67_v3_route_policy_condition_evaluation_17 -->|v3-provider-global-probe-post-commit-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_67_v3_route_policy_condition_evaluation_16
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2748,7 +2749,7 @@ flowchart TD
 | `v3-route-policy-04` | `V3Router05RequestClassified` → `V3Router06RoutePoolResolved` | anchored | plan_v3_responses_protocol_execution_with_provider_health<br/><small>routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs</small> | V3VirtualRouter::resolve_route_pool_plan<br/><small>routecodex-v3-virtual-router/src/lib.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-route-policy-05` | `V3Router05RequestClassified` → `V3RouteHistoryWindow` | anchored | V3RoutePolicyRuntimeState::commit_request<br/><small>routecodex-v3-runtime/src/route_policy.rs</small> | V3RouteHistoryWindow::record_turn<br/><small>routecodex-v3-route-classifier/src/policy.rs</small> | `v3.route_policy_condition_evaluation` |
 | `v3-provider-global-probe-relay-error-source` | `V3HubRespChatProcess03Governed` → `V3Error01SourceRaised` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | build_v3_error_01_source_raised_external<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-05` | `V3ProviderFailureRuntimeHealth` → `V3ProviderGlobalSubscriptionFailureObservation` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-global-probe-05` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_failure_in_session_with_policy<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-07` | `V3ProviderFailureRuntimeHealth` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::record_provider_key_success<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-08` | `V3ProviderFailureRuntimeHealth` → `V3ProviderGlobalSubscriptionFailureObservation` | anchored | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-direct-error-classification` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | record_v3_direct_provider_failure_record<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs</small> | build_v3_error_02_classified_from_v3_error_01<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |

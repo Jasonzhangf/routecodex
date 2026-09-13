@@ -32,6 +32,8 @@ mod reap;
 use reap::*;
 mod hooks_sidecar;
 use hooks_sidecar::*;
+mod restart_plan;
+use restart_plan::*;
 
 const SCHEMA_VERSION: u16 = 1;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -50,6 +52,10 @@ pub enum V3LifecycleError {
     Io(#[from] std::io::Error),
     #[error("managed lifecycle config failed: {0}")]
     Config(#[from] routecodex_v3_config::V3ConfigError),
+    #[error("managed hooks control validation failed: {0}")]
+    HooksControlValidation(String),
+    #[error("{0}")]
+    HooksOptionalUnavailable(String),
     #[error("managed lifecycle state JSON failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("managed lifecycle operation is already locked for {0}")]
@@ -91,6 +97,8 @@ pub struct V3ManagedPidCache {
     pub pid: u32,
     pub start_nonce: String,
     pub started_at_epoch_ms: u64,
+    #[serde(default)]
+    pub process_start_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -613,6 +621,11 @@ impl V3ManagedLifecycle {
         instance_dir: &Path,
         declaration: &V3ManagedInstanceDeclaration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        if hooks_sidecar_process_group_is_alive(instance_dir)? {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing forced stop while hooks sidecar process group is alive".to_string(),
+            ));
+        }
         let force_timeout = env_duration_ms(
             &[
                 "ROUTECODEX_V3_KILL_TIMEOUT_MS",
@@ -855,6 +868,23 @@ impl V3ManagedLifecycle {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
+        if hooks_sidecar_process_group_is_alive(&instance_dir)? {
+            let error = V3LifecycleError::HooksControlValidation(
+                "hooks sidecar process group from a previous run is still alive".to_string(),
+            );
+            let detail = format!("hooks sidecar startup blocked: {error}");
+            return match write_status(
+                &instance_dir,
+                &declaration.instance_id,
+                V3ManagedRunState::Failed,
+                Some(detail.clone()),
+            ) {
+                Ok(()) => Err(error),
+                Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                    "{detail}; failed to persist lifecycle failure: {status_error}"
+                ))),
+            };
+        }
         if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
             if !adopt_exec_restart_declaration_change(
                 &self.state_root,
@@ -884,6 +914,13 @@ impl V3ManagedLifecycle {
                 pid: std::process::id(),
                 start_nonce: start_nonce.clone(),
                 started_at_epoch_ms: epoch_ms(),
+                process_start_token: Some(process_start_token(std::process::id())?.ok_or_else(
+                    || {
+                        V3LifecycleError::Validation(
+                            "managed child process start token unavailable".to_string(),
+                        )
+                    },
+                )?),
             },
         )?;
         write_json_atomic(
@@ -907,30 +944,60 @@ impl V3ManagedLifecycle {
         let admin_config_path = admin_webui
             .as_ref()
             .map(|_| PathBuf::from(&declaration.config_path));
-        let mut hooks_sidecar =
-            start_managed_hooks_sidecar(&instance_dir, &declaration.instance_id, &socket_path)
-                .await?;
-        let handle =
-            match spawn_v3_server_aggregate_with_admin(manifest, admin_webui, admin_config_path)
-                .await
-            {
-                Ok(handle) => handle,
-                Err(error) => {
-                    if let Some(sidecar) = hooks_sidecar.take() {
-                        let _ = sidecar.stop().await;
-                    }
-                    write_status(
+        let (mut hooks_sidecar, hooks_sidecar_detail) =
+            match start_managed_hooks_sidecar(&instance_dir).await {
+                Ok(result) => result,
+                Err(error @ V3LifecycleError::HooksControlValidation(_)) => {
+                    let detail = format!("hooks sidecar startup blocked: {error}");
+                    return match write_status(
                         &instance_dir,
                         &declaration.instance_id,
                         V3ManagedRunState::Failed,
-                        Some(error.to_string()),
-                    )?;
-                    let _ = fs::remove_file(instance_dir.join("pid.cache"));
-                    let _ = fs::remove_file(instance_dir.join("control.json"));
-                    let _ = fs::remove_file(&socket_path);
-                    return Err(error.into());
+                        Some(detail.clone()),
+                    ) {
+                        Ok(()) => Err(error),
+                        Err(status_error) => Err(V3LifecycleError::Validation(format!(
+                            "{detail}; failed to persist lifecycle failure: {status_error}"
+                        ))),
+                    };
                 }
+                Err(error) => return Err(error),
             };
+        let handle = match spawn_v3_server_aggregate_with_admin(
+            manifest,
+            admin_webui,
+            admin_config_path,
+        )
+        .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                if let Some(sidecar) = hooks_sidecar.take() {
+                    if let Err(cleanup_error) = sidecar.stop().await {
+                        let detail = format!(
+                                "managed server startup failed: {error}; hooks sidecar shutdown failed: {cleanup_error}"
+                            );
+                        let _ = write_status(
+                            &instance_dir,
+                            &declaration.instance_id,
+                            V3ManagedRunState::Failed,
+                            Some(detail.clone()),
+                        );
+                        return Err(V3LifecycleError::Validation(detail));
+                    }
+                }
+                write_status(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    V3ManagedRunState::Failed,
+                    Some(error.to_string()),
+                )?;
+                let _ = fs::remove_file(instance_dir.join("pid.cache"));
+                let _ = fs::remove_file(instance_dir.join("control.json"));
+                let _ = fs::remove_file(&socket_path);
+                return Err(error.into());
+            }
+        };
         let handle = handle;
         let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
         if handoff_path.exists() {
@@ -957,7 +1024,7 @@ impl V3ManagedLifecycle {
             &instance_dir,
             &declaration.instance_id,
             V3ManagedRunState::Running,
-            None,
+            hooks_sidecar_detail.clone(),
         )?;
         #[cfg(unix)]
         let mut interrupt_signal =
@@ -1138,9 +1205,9 @@ impl V3ManagedLifecycle {
                     &instance_dir,
                     &declaration.instance_id,
                     V3ManagedRunState::Running,
-                    Some(format!(
-                        "released listener ports {}",
-                        format_u16_set(&released_set)
+                    Some(append_status_detail(
+                        hooks_sidecar_detail.as_deref(),
+                        format!("released listener ports {}", format_u16_set(&released_set)),
                     )),
                 )?;
                 continue;
@@ -1171,7 +1238,6 @@ impl V3ManagedLifecycle {
     fn instance_dir(&self, instance_id: &str) -> PathBuf {
         self.state_root.join("instances").join(instance_id)
     }
-
     async fn query_live(
         &self,
         declaration: &V3ManagedInstanceDeclaration,
@@ -1182,79 +1248,16 @@ impl V3ManagedLifecycle {
         if !response.accepted {
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
+        let detail = control_plane::read_live_status_detail(&instance_dir, &response.instance_id)?;
         Ok(V3ManagedStatusRecord {
             schema_version: SCHEMA_VERSION,
             instance_id: response.instance_id,
             state: response.state,
             updated_at_epoch_ms: epoch_ms(),
-            detail: None,
+            detail,
         })
     }
 }
-
-fn control_restart_plan(
-    instance_dir: &Path,
-    request: &ControlRequest,
-    current: &V3ManagedInstanceDeclaration,
-) -> Result<Option<ControlRestartPlan>, String> {
-    if request.operation != ControlOperation::Restart {
-        return Ok(None);
-    }
-    let plan_path = instance_dir.join(RESTART_PLAN_FILE);
-    let record = if plan_path.exists() {
-        let record: V3ManagedRestartPlanRecord = read_json(&plan_path)
-            .map_err(|error| format!("restart plan record is unreadable: {error}"))?;
-        if record.schema_version != SCHEMA_VERSION
-            || record.instance_id != request.instance_id
-            || record.start_nonce != request.start_nonce
-        {
-            return Err("restart plan record does not match current control identity".to_string());
-        }
-        Some(record)
-    } else {
-        None
-    };
-    let executable_path = record
-        .as_ref()
-        .map(|record| record.executable_path.as_str())
-        .unwrap_or(current.executable_path.as_str());
-    let executable_path = fs::canonicalize(executable_path).map_err(|error| {
-        format!("restart executable path is not a readable executable: {error}")
-    })?;
-    let mut declaration = record
-        .as_ref()
-        .and_then(|record| record.target_declaration.clone())
-        .unwrap_or_else(|| current.clone());
-    declaration.executable_path = executable_path.display().to_string();
-    let valid_declaration = if declaration.instance_id == current.instance_id {
-        same_instance_declaration_except_executable_path(current, &declaration)
-    } else {
-        previous_owner_matches_restart_declaration(current, &declaration)
-    };
-    if !valid_declaration {
-        return Err(
-            "restart target declaration does not match the current managed owner".to_string(),
-        );
-    }
-    let snapshot_stages = record
-        .as_ref()
-        .and_then(|record| record.snapshot_stages.as_ref())
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let snapshots = record.as_ref().is_some_and(|record| record.snapshots);
-    let snapshot_direct = record.as_ref().is_some_and(|record| record.snapshot_direct);
-    let sse_dump = record.as_ref().is_some_and(|record| record.sse_dump);
-    Ok(Some(ControlRestartPlan {
-        control_instance_id: current.instance_id.clone(),
-        declaration,
-        executable_path,
-        snapshots: snapshots || snapshot_stages.is_some(),
-        snapshot_direct,
-        snapshot_stages,
-        sse_dump,
-    }))
-}
-
 fn control_release_ports(
     request: &ControlRequest,
     current: &V3ManagedInstanceDeclaration,
@@ -1286,21 +1289,6 @@ fn control_release_ports(
         ));
     }
     Ok(Some(release_ports))
-}
-
-fn remove_restart_plan_for_previous_control_identity(
-    instance_dir: &Path,
-    start_nonce: &str,
-) -> Result<(), V3LifecycleError> {
-    let path = instance_dir.join(RESTART_PLAN_FILE);
-    if !path.exists() {
-        return Ok(());
-    }
-    let record: V3ManagedRestartPlanRecord = read_json(&path)?;
-    if record.start_nonce != start_nonce {
-        fs::remove_file(path)?;
-    }
-    Ok(())
 }
 
 async fn release_listener_set_for_start(
@@ -1440,6 +1428,10 @@ fn cleanup_forced_stopped_runtime_state(
             ));
         }
         fs::remove_file(pid_path)?;
+    }
+    let hooks_sidecar_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    if hooks_sidecar_path.exists() {
+        fs::remove_file(hooks_sidecar_path)?;
     }
     Ok(())
 }
