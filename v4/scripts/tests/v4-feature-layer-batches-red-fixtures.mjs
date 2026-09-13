@@ -501,12 +501,24 @@ export function runFeatureLayerBatchRedFixtures({
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
-      name: 'verify ci preflight removed',
-      expected: ['VERIFY_CI_PREFLIGHT_BINDING'],
+      name: 'verify ci canonical delegation removed',
+      expected: ['VERIFY_CI_DELEGATION_BINDING'],
       mutate(input) {
         input.verifyCiSource = input.verifyCiSource.replace(
-          "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
+          "run('node scripts/verify.mjs');\n",
           '',
+        );
+      },
+      options: { mode: 'definition', allowPendingGuard: true },
+    },
+    {
+      name: 'verify ci repeats canonical preflight',
+      expected: ['VERIFY_CI_DELEGATION_BINDING'],
+      mutate(input) {
+        input.verifyCiSource = input.verifyCiSource.replace(
+          "// Clean-checkout CI verifies",
+          "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n"
+            + "// Clean-checkout CI verifies",
         );
       },
       options: { mode: 'definition', allowPendingGuard: true },

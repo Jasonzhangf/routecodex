@@ -7,9 +7,8 @@
  */
 import { run } from './_common.mjs';
 
-run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
-// V4-LAYER-PREFLIGHT-END
 if (process.env.RCCV4_LOCAL_GATE === '1') {
+  run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
   console.log('[v4 verify:local] OK source/build guard');
   process.exit(0);
 }
