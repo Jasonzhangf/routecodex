@@ -253,6 +253,17 @@ fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> 
             flattened.push(Value::Object(direct));
         }
     }
+    let mut names = BTreeSet::new();
+    for (index, tool) in flattened.iter().enumerate() {
+        let Some(name) = tool.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if !names.insert(name.to_string()) {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=responses paths=$.tools[{index}].name: duplicate provider tool name {name:?}"
+            ));
+        }
+    }
     *tools = flattened;
     Ok(())
 }
