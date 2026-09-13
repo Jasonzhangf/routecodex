@@ -87,9 +87,6 @@ jobs:
       - name: Fallback and internal policy hardcode gate
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:fallback-hardcode
-      - name: V3 architecture CI umbrella
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:v3-architecture-ci
       - name: V3 Responses session admission
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:v3-responses-session-admission

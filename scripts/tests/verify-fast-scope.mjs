@@ -41,9 +41,17 @@ const cases = [
 const failures = [];
 
 const workflow = readFileSync(join(repo, '.github', 'workflows', 'test.yml'), 'utf8');
+const v3Verify = readFileSync(join(repo, 'v3', 'scripts', 'verify.mjs'), 'utf8');
+const directArchitectureRuns = (workflow.match(/^\s*run: npm run verify:v3-architecture-ci\s*$/gmu) ?? []).length;
+const canonicalArchitectureRuns = (v3Verify.match(/label: 'architecture-ci'/gu) ?? []).length;
+if (directArchitectureRuns !== 0) {
+  failures.push(`workflow duplicates canonical architecture-ci gate: ${directArchitectureRuns} direct invocation(s)`);
+}
+if (canonicalArchitectureRuns !== 1) {
+  failures.push(`v3 verify:ci must retain exactly one canonical architecture-ci gate: ${canonicalArchitectureRuns}`);
+}
 const independentGateNames = [
   'Fallback and internal policy hardcode gate',
-  'V3 architecture CI umbrella',
   'V3 Responses session admission',
   'V3 Responses session admission red fixtures',
   'V3 Responses session admission behavior',
