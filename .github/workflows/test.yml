@@ -135,7 +135,7 @@ jobs:
       - name: V3 console request count red fixtures
         if: needs.scope.outputs.v3 == 'true'
         run: npm --prefix v3 run test:v3-console-request-count-visibility-red-fixtures
-      - name: V2 and V3 route-classifier semantic gate
+      - name: V3 route-classifier semantic gate
         if: needs.scope.outputs.v3 == 'true'
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate

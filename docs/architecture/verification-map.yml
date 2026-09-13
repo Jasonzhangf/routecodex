@@ -256,35 +256,6 @@ verification:
   - Paired request/response negative coverage rejects top-level semantics, processed,
     and processingMetadata before provider/client payload projection; positive coverage
     preserves ordinary protocol and business fields.
-- feature_id: v3.v2_config_toml_compat_5555
-  change_risk: high
-  unit:
-  - v3/crates/routecodex-v3-config/src/v2_compat.rs
-  - v3/crates/routecodex-v3-config/src/store.rs
-  - v3/crates/routecodex-v3-config/src/validate.rs
-  contract:
-  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
-  - npm run test:v3-config-v2-compat-5555
-  integration:
-  - npm run test:v3-workspace
-  smoke:
-  - npm run verify:function-map-compile-gate
-  - npm run verify:architecture-mainline-call-map
-  build:
-  - npm run verify:v3-cargo-fmt
-  - npm run verify:v3-clippy
-  notes:
-  - Positive contract locks V2 root + provider config.v2.toml input, canonical Hub
-    V1 endpoint bindings and server execution declarations, Jason-defined 5555 route
-    ordering, provider type mapping, local token_file handle materialization, and
-    secret-free manifest debug output.
-  - Provider auth key-file coverage locks single-key and list expansion into ordered
-    secret_file + secret_key handles, rejects malformed/duplicate/empty keys and mixed
-    explicit authoring, and proves no secret value is materialized in manifest entries.
-  - Transport-bound V2 provider responses contract locks WebSocket v2 projection plus
-    negative HTTP-only remote_continuation and missing websocket_v2_url cases.
-  - Live closure still requires global install, V3 managed restart on 5555, health,
-    models, and same-entry route probes after source gates pass.
 - feature_id: v3.runtime_timing_observability
   change_risk: medium
   unit:
