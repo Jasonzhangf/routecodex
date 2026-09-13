@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import ts from 'typescript';
+import { GATE_SEVERITY } from './gate-policy.mjs';
 
 const root = process.cwd();
 const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
@@ -345,7 +346,7 @@ if (deleted.length > 0) {
 
 const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relative) => /\.(?:rs|toml|yaml|yml)$/u.test(relative)))];
 if (semanticFiles.length > 0) {
-  process.stderr.write(`[verify:fast] WARN semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
+  process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
 }
 
 for (const { commit, path: relative } of entries) {
