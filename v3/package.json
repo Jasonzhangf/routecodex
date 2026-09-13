@@ -18,6 +18,7 @@
     "test": "node scripts/test.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:red": "node scripts/verify-red.mjs",
+    "test:v3-verify-red-failure-aggregation-regression": "node scripts/tests/v3-verify-red-failure-aggregation-regression.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:isolation": "node scripts/verify-isolation.mjs",
     "verify:admission": "node scripts/architecture/verify-admission.mjs",

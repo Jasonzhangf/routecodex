@@ -1,11 +1,28 @@
 #!/usr/bin/env node
-import { run } from './_common.mjs';
+import { runAll } from './_common.mjs';
 
-await run('node', ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs']);
-await run('node', ['scripts/tests/v3-aggregate-environment-availability-regression.mjs']);
-await run('node', ['tests/scripts/v3-architecture-admission-red-fixtures.mjs']);
-await run('node', ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs']);
-for (const fixture of [
+const entries = [
+  {
+    label: 'independent-build-isolation-red-fixtures',
+    command: 'node',
+    args: ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs'],
+  },
+  {
+    label: 'aggregate-environment-availability-regression',
+    command: 'node',
+    args: ['scripts/tests/v3-aggregate-environment-availability-regression.mjs'],
+  },
+  {
+    label: 'architecture-admission-red-fixtures',
+    command: 'node',
+    args: ['tests/scripts/v3-architecture-admission-red-fixtures.mjs'],
+  },
+  {
+    label: 'build-test-artifact-budget-red-fixtures',
+    command: 'node',
+    args: ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs'],
+  },
+  ...[
   'scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-local-continuation-red-fixtures.mjs',
@@ -50,7 +67,22 @@ for (const fixture of [
   'scripts/tests/v3-servertool-center-skeleton-red-fixtures.mjs',
   'scripts/tests/v3-source-gate-red-fixtures.mjs',
   'scripts/tests/v3-stage-protocol-shapes-red-fixtures.mjs',
-]) {
-  run('node', ['scripts/run-admission-gate.mjs', fixture]);
+].map((fixture) => ({
+    label: fixture,
+    command: 'node',
+    args: ['scripts/run-admission-gate.mjs', fixture],
+  })),
+];
+
+const { failures, warnings } = await runAll(entries);
+if (warnings.length > 0) {
+  process.stderr.write(`[v3 verify:red] WARN ${warnings.length} gate(s)\n`);
+  for (const warning of warnings) process.stderr.write(`- ${warning}\n`);
 }
-process.stdout.write('[v3 verify:red] PASS\n');
+if (failures.length > 0) {
+  process.stderr.write(`[v3 verify:red] FAIL ${failures.length} gate(s)\n`);
+  for (const failure of failures) process.stderr.write(`- ${failure}\n`);
+  process.exitCode = 1;
+} else {
+  process.stdout.write('[v3 verify:red] PASS\n');
+}
