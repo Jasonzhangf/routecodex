@@ -128,13 +128,21 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
     let record_path = root.path().join("install.json");
     let daemon_config = root.path().join("hooksd.json");
     let supervisor_wrapper = root.path().join("supervisor-wrapper");
+    let supervisor_started = root.path().join("supervisor-started");
     let bin_directory = root.path().join("bin");
     let socket_path = root.path().join("routecodex-control.sock");
     fs::create_dir(&instance_dir).unwrap();
     fs::create_dir(&bin_directory).unwrap();
     fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
     fs::write(&daemon_config, "{}").unwrap();
-    fs::write(&supervisor_wrapper, "#!/bin/sh\nexit 17\n").unwrap();
+    fs::write(
+        &supervisor_wrapper,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nexit 17\n",
+            supervisor_started.display()
+        ),
+    )
+    .unwrap();
     let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
@@ -145,6 +153,7 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
             "supervisor_wrapper": supervisor_wrapper,
             "daemon_config": daemon_config,
             "bin_directory": bin_directory,
+            "install_root": root.path(),
         })
         .to_string(),
     )
@@ -158,6 +167,7 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
 
     assert!(sidecar.is_none());
     assert!(detail.unwrap().contains("hooks sidecar unavailable"));
+    assert!(supervisor_started.exists());
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
     assert!(socket_path.exists());
