@@ -8,6 +8,15 @@
 import { runIndependent, reportIndependentFailures } from './_common.mjs';
 import { RED_SUITES } from './_gate-matrix.mjs';
 
+const regressionFailures = runIndependent([{
+  label: 'feature-layer-batch evidence regression',
+  command: 'node scripts/tests/feature-layer-batch-evidence-regression.mjs',
+}]);
+if (regressionFailures.length > 0) {
+  reportIndependentFailures('verify:red', regressionFailures);
+  process.exit(1);
+}
+
 const failures = runIndependent(RED_SUITES.map(([gate, flag]) => ({
   label: `red:${gate} ${flag}`,
   command: `node scripts/architecture/${gate} ${flag}`,
