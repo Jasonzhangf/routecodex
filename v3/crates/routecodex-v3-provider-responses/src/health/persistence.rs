@@ -132,20 +132,27 @@ impl V3ProviderHealthPersistenceWriter {
 
 pub(super) fn start_provider_health_persistence(
     persistence_path: Option<PathBuf>,
-) -> Option<V3ProviderHealthPersistenceWriter> {
-    let mut coordinator = persistence_path.map(|path| {
+) -> Option<(
+    V3ProviderHealthPersistenceWriter,
+    V3ProviderCooldownPersistenceEntries,
+)> {
+    let coordinator = persistence_path.map(|path| {
         V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000)
             .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
     });
-    if let Some(coordinator) = coordinator.as_mut() {
-        // Durable cooldowns are diagnostic history only. Restart admission
-        // starts with a clean provider health state; in-process failures
-        // repopulate this coordinator through the normal health owner.
+    coordinator.map(|coordinator| {
+        let mut coordinator = coordinator;
+        let entries = coordinator.persisted_entries();
         coordinator
-            .replace_entries(Vec::new())
-            .unwrap_or_else(|error| panic!("provider cooldown startup clear failed: {error}"));
-    }
-    coordinator.map(V3ProviderHealthPersistenceWriter::start)
+            .reset_probe_schedule_for_startup()
+            .unwrap_or_else(|error| {
+                panic!("provider cooldown startup probe reset failed: {error}")
+            });
+        (
+            V3ProviderHealthPersistenceWriter::start(coordinator),
+            entries,
+        )
+    })
 }
 
 pub(super) fn provider_cooldown_state_path_for_manifest(

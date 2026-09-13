@@ -386,7 +386,43 @@ impl V3ProviderHealthStore {
             };
             state.adaptive_history.entry(key).or_insert(history);
         }
-        state.persistence = start_provider_health_persistence(persistence_path);
+        if let Some((writer, restored_cooldowns)) =
+            start_provider_health_persistence(persistence_path)
+        {
+            for (key, blocked_until_ms, _) in restored_cooldowns {
+                let probe_key = provider_cooldown_probe_key(
+                    &key.provider_id,
+                    key.auth_alias.as_deref(),
+                    key.model_id.as_deref(),
+                );
+                let completion = tokio::sync::watch::channel(false).0;
+                state.auth_key_cooldowns.insert(
+                    probe_key.clone(),
+                    V3ProviderCooldown {
+                        reason: "persisted_provider_cooldown".to_string(),
+                        until_ms: Some(blocked_until_ms),
+                    },
+                );
+                state.provider_cooldown_probes.insert(
+                    probe_key,
+                    V3ProviderCooldownProbeState {
+                        blocked_until_ms: Some(blocked_until_ms),
+                        next_probe_at_ms: Some(0),
+                        probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                        probe_failure_count: 0,
+                        observed_attempts: 3,
+                        observed_failures: 3,
+                        recovery_ewma_ms: None,
+                        cooldown_started_at_ms: 0,
+                        probe_in_flight: false,
+                        probe_model_id: key.model_id.clone(),
+                        rescue_probe_attempted: false,
+                        completion,
+                    },
+                );
+            }
+            state.persistence = Some(writer);
+        }
         Self {
             state: Arc::new(RwLock::new(state)),
         }

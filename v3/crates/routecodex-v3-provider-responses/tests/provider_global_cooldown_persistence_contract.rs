@@ -30,7 +30,7 @@ fn restart_loads_cooldown_and_startup_probe_is_the_only_recovery_path() {
 }
 
 #[test]
-fn health_store_clears_durable_cooldown_before_startup_admission() {
+fn health_store_keeps_durable_cooldown_until_startup_probe_succeeds() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -60,17 +60,23 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     first
         .record_provider_cooldown_failure("p", Some("k"), Some("m"), "quota", 1_000, 10)
         .unwrap();
+    first.flush_persistence().unwrap();
     drop(first);
     let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
+    let due = restored.provider_cooldown_probe_keys_due(2_000).unwrap();
     let projection = V3ProviderSessionAvailabilityReader::new(restored, scope).availability(
         "p",
         Some("k"),
         Some("m"),
         2_000,
     );
-    assert!(projection.available);
-    assert!(projection.blocked_scopes.is_empty());
+    assert!(!projection.available);
+    assert!(projection
+        .blocked_scopes
+        .iter()
+        .any(|scope| scope == "provider_cooldown_probe_pending"));
+    assert_eq!(due, vec![("p".into(), Some("k".into()), Some("m".into()))]);
 }
 
 #[test]
