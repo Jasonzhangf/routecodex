@@ -167,6 +167,32 @@ fn normalize_v3_responses_function_call_arguments_for_event(
                 return Ok(());
             }
         }
+        // Provider-compatible projections flatten MCP namespace calls to a
+        // legal function name (mcp__<server>__<tool>). Restore the Responses
+        // namespace/name pair before the client tool router builds its call;
+        // otherwise Codex treats the flattened name as an unregistered plain
+        // function and reports `unsupported call`.
+        if object.get("namespace").is_none() {
+            if let Some(name) = object.get("name").and_then(Value::as_str).map(str::to_owned) {
+                if let Some(separator) = name.find("__") {
+                    if name.starts_with("mcp__") && separator == 3 {
+                        if let Some(tool_separator) = name[separator + 2..].find("__") {
+                            let tool_separator = separator + 2 + tool_separator;
+                            let namespace = &name[..tool_separator];
+                            let tool = &name[tool_separator + 2..];
+                            if !tool.is_empty() {
+                                object.insert(
+                                    "namespace".to_owned(),
+                                    Value::String(namespace.to_owned()),
+                                );
+                                object.insert("name".to_owned(), Value::String(tool.to_owned()));
+                                normalized = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let Some(arguments) = object.get_mut("arguments") else {
             if partial_function_call {
                 object.insert("arguments".to_owned(), Value::String(String::new()));
@@ -1719,6 +1745,21 @@ mod provider_sse_json_codec_tests {
         assert_eq!(item["arguments"]["query"], "mcpx workspace");
         assert_eq!(item["arguments"]["limit"], 5);
         assert!(item.get("name").is_none());
+    }
+
+    #[test]
+    fn responses_mcp_function_call_restores_namespace_for_client_dispatch() {
+        let data = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"mcp_1","name":"mcp__mcpx__workspace","arguments":"{}"}]}}"#,
+            Some("response.completed"),
+        )
+        .expect("flattened MCP function call must normalize");
+        let value: Value = serde_json::from_str(&data).expect("normalized JSON");
+        let item = &value["response"]["output"][0];
+        assert_eq!(item["namespace"], "mcp__mcpx");
+        assert_eq!(item["name"], "workspace");
+        assert_eq!(item["arguments"], "{}");
     }
 
     #[test]
