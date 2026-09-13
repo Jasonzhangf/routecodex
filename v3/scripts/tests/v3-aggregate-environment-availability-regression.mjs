@@ -14,7 +14,7 @@ assert.match(required.failures[0], /spawn .* ENOENT/);
 
 const missingOptionalCommand = 'routecodex-optional-command-does-not-exist-095abcd';
 const optional = await runAll([
-  { label: 'optional-diagnostic', command: missingOptionalCommand, optional: true },
+  { label: 'optional-diagnostic', command: missingOptionalCommand, severity: 'WARN' },
 ]);
 
 assert.equal(optional.failures.length, 0, JSON.stringify(optional));
