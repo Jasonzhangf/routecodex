@@ -11,7 +11,6 @@ use crate::provider_cooldown_probe::{
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
-    default_provider_cooldown_state_path, migrate_legacy_provider_cooldown_state_if_needed,
     persist_cooldown_state, provider_cooldown_state_path_for_manifest,
     start_provider_health_persistence, V3ProviderHealthPersistenceWriter,
 };
@@ -308,12 +307,6 @@ impl V3ProviderHealthStore {
 
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         let persistence_path = provider_cooldown_state_path_for_manifest(manifest);
-        if std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_err() {
-            migrate_legacy_provider_cooldown_state_if_needed(
-                &persistence_path,
-                &default_provider_cooldown_state_path(),
-            );
-        }
         Self::from_manifest_with_persistence_path(manifest, persistence_path)
     }
 

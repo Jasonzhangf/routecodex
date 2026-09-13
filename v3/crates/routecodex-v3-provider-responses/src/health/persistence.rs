@@ -204,35 +204,13 @@ fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> Stri
         .collect()
 }
 
-pub(super) fn default_provider_cooldown_state_path() -> PathBuf {
+fn default_provider_cooldown_state_path() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".rcc")
         .join("state")
         .join("provider-cooldowns.json")
-}
-
-pub(super) fn migrate_legacy_provider_cooldown_state_if_needed(
-    scoped_path: &std::path::Path,
-    legacy_path: &std::path::Path,
-) {
-    if !legacy_path.is_file() {
-        return;
-    }
-    if scoped_path.exists() {
-        return;
-    }
-    if let Some(parent) = scoped_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|error| {
-                panic!("provider cooldown persistence migration parent create failed: {error}")
-            });
-        }
-    }
-    std::fs::copy(legacy_path, scoped_path).unwrap_or_else(|error| {
-        panic!("provider cooldown persistence migration copy failed: {error}")
-    });
 }
 
 fn provider_cooldown_persistence_entries(
@@ -346,28 +324,6 @@ mod tests {
                     && name.ends_with(".json")
                     && name.len() > "provider-cooldowns-.json".len()
             }));
-    }
-
-    #[test]
-    fn legacy_provider_cooldown_state_is_copied_to_scoped_file_once() {
-        let root = tempfile::tempdir().expect("create isolated migration directory");
-        let legacy = root.path().join("provider-cooldowns.json");
-        let scoped = root.path().join("provider-cooldowns-scope.json");
-        std::fs::write(&legacy, "legacy-entry").expect("write legacy state");
-
-        migrate_legacy_provider_cooldown_state_if_needed(&scoped, &legacy);
-        assert_eq!(
-            std::fs::read_to_string(&scoped).expect("read scoped state"),
-            "legacy-entry"
-        );
-
-        std::fs::write(&scoped, "scoped-entry").expect("write scoped state");
-        migrate_legacy_provider_cooldown_state_if_needed(&scoped, &legacy);
-        assert_eq!(
-            std::fs::read_to_string(&scoped).expect("read scoped state after second migration"),
-            "scoped-entry",
-            "migration must not overwrite an existing scoped file"
-        );
     }
 
     fn manifest(server_id: &str, bind: &str, port: u16) -> V3Config05ManifestPublished {
