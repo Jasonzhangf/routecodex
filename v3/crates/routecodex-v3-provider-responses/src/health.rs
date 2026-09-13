@@ -737,9 +737,13 @@ impl V3ProviderHealthStore {
         });
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         record_adaptive_success(&mut state, &auth_key, _now_ms);
-        // A business success resets session evidence only. A pending provider
-        // cooldown remains blocked until the typed probe owner reports probe
-        // success; business traffic must never resurrect it.
+        // A successful request is recovery evidence for this exact
+        // provider/key/model. It must wake every session immediately instead
+        // of leaving them blocked behind a stale cooldown probe.
+        if let Some(probe_state) = state.provider_cooldown_probes.remove(&auth_key) {
+            probe_state.completion.send_replace(true);
+        }
+        state.auth_key_cooldowns.remove(&auth_key);
         persist_cooldown_state(state);
         Ok(())
     }
