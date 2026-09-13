@@ -667,7 +667,7 @@
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
       "source_commit": "9a28cff6d2d1ba83a9f411a42f3dc6c5eb67b8c3",
-      "sha256": "0632d1ebe2c1a25548d0edc84024c57a4fa3e8e9bb94155b4847d48637435fee"
+      "sha256": "d9f4e87292d6c7d2b538a30f7426e0e4c2e4fb6f9570b2623f92f59d5a6e155d"
     },
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
@@ -768,7 +768,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "a3b8edc0124f0f0b1358b05d3c57a42028ffd60b",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "d9238be569ffff14eb58490c093b95cffae228043820d79d3e244012b9465027"
     },
     {
@@ -786,7 +786,7 @@
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "e273a07018bb785361a9476f5dd57eb1d78efd08",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "0a205e94e28010ffa5e760bd9cb0b61ea57cc93a932317fc848dfbc1c8c18b61"
     },
     {
@@ -798,7 +798,7 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "a77cdd4b1c543be1d98fcbf31b4cce6b0a5f46f4",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "d290ded639c287f315ef3412031e4d81ae15d747a939345243535190375625bc"
     },
     {
@@ -978,7 +978,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "39b840182bab6ec706b8277e1ef31dac978dc0a3c7d120fb96d26b2a1aa5dc1e"
     },
     {
@@ -1230,7 +1230,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "5a2abe46516756f24b7023cab941678e91c672bb",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "ef994c2aeef6e5737fa17725b8abad4e9b872fd7c721a79c39b1e14d70616d92"
     },
     {
@@ -2280,7 +2280,7 @@
     {
       "output_path": "repo/docs/goals/v3-managed-server-lifecycle-test-design.md",
       "source_path": "docs/goals/v3-managed-server-lifecycle-test-design.md",
-      "source_commit": "6a19fe25b62e8851ba9a8248588212ed1727fbb3",
+      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
       "sha256": "f81afc1332eeb80a1fa022c27533e1061607ebcc1080df13877627433b74cf01"
     },
     {
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "7c6da49857b9f9ffce44fdf78b79ffb4404403ee7f9fbb1829f6806e20baf340"
+  "manifest_digest": "476f92ca8ad2b002463ebfbd2cfd479f16c9727ca97169b8a3c50a5d8a97c5e7"
 }
