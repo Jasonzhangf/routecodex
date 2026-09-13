@@ -57,7 +57,7 @@ fn provider_timeout_parses_into_manifest_request_timeout_ms() {
     // 端到端：v2 provider 文件 `[provider].timeout` 经 V2→V3 兼容层必须写入
     // `V3ProviderAuthoringConfig.request_timeout_ms`（曾因 serde 静默丢弃
     // snake_case 字段导致 9 分钟超时永远不生效）。
-    // 三层验证：(1) V2 schema 解析 (2) compile_v2_provider_directory 端到点
+    // 三层验证：(1) provider schema 解析 (2) compile_provider_directory 端到点
     // 写入 (3) 缺省字段 → DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS fallback。
     use std::io::Write;
 
@@ -89,7 +89,7 @@ contextTokenEstimateScaleBps = 17000
         "snake_case timeout must parse"
     );
 
-    // (2) 端到点：临时 provider 目录 → compile_v2_provider_directory →
+    // (2) 端到点：临时 provider 目录 → compile_provider_directory →
     //      manifest request_timeout_ms == 900_000
     let tmp = std::env::temp_dir().join(format!(
         "rccv3-timeout-test-{}-{}",
@@ -130,7 +130,7 @@ contextTokenEstimateScaleBps = 17000
         BTreeSet::from(["model".to_string()]),
     );
     let (providers, _sources) =
-        compile_v2_provider_directory(&tmp, &referenced_models).expect("compile v2 provider dir");
+        compile_provider_directory(&tmp, &referenced_models).expect("compile provider directory");
     let authoring = providers.get("test-provider").expect("provider compiled");
     assert_eq!(
         authoring.request_timeout_ms, 900_000,
@@ -176,7 +176,7 @@ apiKey = "test-key"
         )
         .expect("write");
     let (providers_sse, _) =
-        compile_v2_provider_directory(&tmp_sse, &referenced_models).expect("compile");
+        compile_provider_directory(&tmp_sse, &referenced_models).expect("compile");
     assert_eq!(
         providers_sse
             .get("test-provider")
@@ -221,7 +221,7 @@ apiKey = "test-key"
         )
         .expect("write");
     let (providers_default, _sources_default) =
-        compile_v2_provider_directory(&tmp_default, &referenced_models)
+        compile_provider_directory(&tmp_default, &referenced_models)
             .expect("compile v2 provider dir (absent timeout)");
     let authoring_default = providers_default
         .get("test-provider")

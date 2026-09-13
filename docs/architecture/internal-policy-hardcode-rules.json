@@ -43,17 +43,12 @@
       "ruleId": "provider-timeout-default-in-rust"
     },
     {
-      "pathContains": "v3/crates/routecodex-v3-config/src/v2_compat.rs",
+      "pathContains": "v3/crates/routecodex-v3-config/src/provider_config.rs",
       "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
       "ruleId": "provider-timeout-default-in-rust"
     },
     {
-      "pathContains": "v3/crates/routecodex-v3-config/src/v2_compat_tests.rs",
-      "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
-      "ruleId": "provider-timeout-default-in-rust"
-    },
-    {
-      "pathContains": "v3/crates/routecodex-v3-config/src/v2_compat.rs",
+      "pathContains": "v3/crates/routecodex-v3-config/src/provider_config.rs",
       "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
       "ruleId": "policy-default-operator-in-rust"
     },

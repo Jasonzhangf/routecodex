@@ -67,7 +67,7 @@ function writeChangedScopeOutputs(paths) {
 
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
   const ciControl = has(/^\.github\/workflows\//u);
-  const v3Scope = ciControl || has(/^(?:v3\/|scripts\/|docs\/architecture\/)/u)
+  const v3Scope = ciControl || has(/^(?:v3\/|scripts\/|docs\/(?:architecture|design|goals|schemas)\/)/u)
     || has(/^package(?:-lock)?\.json$/u);
   const values = {
     changed: paths.length > 0,

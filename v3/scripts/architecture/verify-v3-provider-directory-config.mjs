@@ -11,7 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-config/src/provider_directory.rs',
-  codec: 'v3/crates/routecodex-v3-config/src/v2_compat.rs',
+  codec: 'v3/crates/routecodex-v3-config/src/provider_config.rs',
   tests: 'v3/crates/routecodex-v3-config/tests/provider_directory_config_contract.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',

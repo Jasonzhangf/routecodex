@@ -47,7 +47,7 @@ No V3 MVP source file should live under `sharedmodule/llmswitch-core/`. Existing
 
 | Crate | Owns | Must not own |
 | --- | --- | --- |
-| `routecodex-v3-config` | unique config file IO API, native `config.v3.toml` parse/write, explicit V2 root plus provider `config.v2.toml` compatibility compile, schema validation, resource registry build, deterministic manifest publish, multi-server/provider/model/forwarder/route-pool/feature declarations, provider auth handle names | route interpretation, target expansion, target selection, HTTP server, provider HTTP transport, client response projection |
+| `routecodex-v3-config` | unique config file IO API, native `config.v3.toml` parse/write, current provider-directory `config.v2.toml` codec, schema validation, resource registry build, deterministic manifest publish, multi-server/provider/model/forwarder/route-pool/feature declarations, provider auth handle names | retired V2 root config compilation, route interpretation, target expansion, target selection, HTTP server, provider HTTP transport, client response projection |
 | `routecodex-v3-server` | HTTP listener, `/v1/responses` route, request inbound parse, HTTP/SSE/JSON outbound framing | provider selection, provider send, provider wire repair, direct semantic policy, continuation |
 | `routecodex-v3-runtime` | lifecycle executor, fixed Hub v1 request/response graph, four-axis typed branch classification, adjacent node transitions, static hook registry, continuation and Chat Process boundaries | config file IO, provider-family branching, dynamic hooks, route/target/error semantic ownership, env secret read, raw provider transport IO, HTTP listener |
 | `routecodex-v3-virtual-router` | classify request, resolve route pool, hit exactly one opaque route target, publish route decision | interpreting a target, expanding forwarders/providers/keys, provider retry, provider transport |
@@ -59,12 +59,11 @@ No V3 MVP source file should live under `sharedmodule/llmswitch-core/`. Existing
 
 ## Unique config resource and API
 
-`~/.rcc/config.v3.toml` is the native V3 authoring file. `V3ConfigStore` may also
-recognize an explicit V2 root TOML and compile it together with referenced
-`provider/<providerId>/config.v2.toml` files into the same
-`V3Config02AuthoringParsed` contract. This is a declared compatibility input
-format, never a fallback after a failed V3 parse, and it never merges V2 and V3
-authoring truth.
+`~/.rcc/config.v3.toml` is the native V3 authoring file. When its provider map is
+empty, `V3ConfigStore` resolves each referenced provider through the current
+`provider/<providerId>/config.v2.toml` codec and then enters the native
+`V3Config02AuthoringParsed` contract. The retired V2 root TOML compiler is not an
+input branch or fallback.
 
 Only `routecodex-v3-config::V3ConfigStore` may read or write config sources:
 

@@ -157,7 +157,7 @@ impl V3UserConfigStore {
             ))
         })?;
         let (providers, provider_sources) =
-            crate::v2_compat::compile_v2_provider_directory(config_dir, &referenced_models)?;
+            crate::provider_config::compile_provider_directory(config_dir, &referenced_models)?;
         for (provider_id, provider) in &providers {
             if !provider.enabled {
                 return Err(validation(format!(

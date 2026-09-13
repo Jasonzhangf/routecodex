@@ -57,7 +57,7 @@ Before implementation, the positive native-V3 directory fixture must fail becaus
 ## Required gates
 
 - Focused Provider directory Config tests.
-- Existing `test:v3-config-v2-compat-5555`.
+- `test:v3-provider-directory-config`.
 - Config crate tests.
 - `verify:v3-cargo-fmt`.
 - `verify:v3-clippy`.
