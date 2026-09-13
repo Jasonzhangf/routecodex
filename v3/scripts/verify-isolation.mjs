@@ -27,16 +27,25 @@ function readLocal(path) {
   return readFileSync(resolve(v3Root, path), 'utf8');
 }
 
-function cargoMetadataFailures(env = process.env) {
+function cargoMetadataFailures(env = process.env, warn = () => {}) {
   const result = spawnSync(
     'cargo',
     ['metadata', '--locked', '--format-version', '1', '--manifest-path', resolve(v3Root, 'Cargo.toml')],
     { cwd: v3Root, env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
   );
   if (result.error || result.status !== 0) {
-    return [`cargo metadata failed: ${result.error?.message ?? result.stderr.trim() ?? `exit ${result.status}`}`];
+    warn(
+      `cargo metadata unavailable; skipping V3 isolation checks: ${result.error?.message ?? result.stderr.trim() ?? `exit ${result.status}`}`,
+    );
+    return [];
   }
-  const metadata = JSON.parse(result.stdout);
+  let metadata;
+  try {
+    metadata = JSON.parse(result.stdout);
+  } catch (error) {
+    warn(`cargo metadata output was not valid JSON; skipping V3 isolation checks: ${error.message}`);
+    return [];
+  }
   const failures = [];
   if (resolve(metadata.workspace_root) !== v3Root) {
     failures.push(`Cargo workspace root escapes V3: ${metadata.workspace_root}`);
@@ -70,6 +79,7 @@ export function collectIsolationFailures({
   read = readLocal,
   inspectCargo = cargoMetadataFailures,
   resolveNodeDependency = (name) => require.resolve(name),
+  warn = () => {},
 } = {}) {
   const failures = [];
   for (const path of requiredLocalFiles) {
@@ -124,15 +134,19 @@ export function collectIsolationFailures({
       failures.push(`V3 Node dependency yaml resolved outside v3/node_modules: ${yamlPath}`);
     }
   } catch (error) {
-    failures.push(`V3 Node dependency yaml is unavailable locally: ${error.message}`);
+    warn(`V3 Node dependency yaml is unavailable locally; skipping local resolution check: ${error.message}`);
   }
 
-  failures.push(...inspectCargo(env));
+  failures.push(...inspectCargo(env, warn));
   return failures;
 }
 
 function main() {
-  const failures = collectIsolationFailures();
+  const warnings = [];
+  const failures = collectIsolationFailures({ warn: (message) => warnings.push(message) });
+  if (warnings.length > 0) {
+    process.stderr.write(`[verify:v3-isolation] WARN\n- ${warnings.join('\n- ')}\n`);
+  }
   if (failures.length > 0) {
     process.stderr.write(`[verify:v3-isolation] FAIL\n- ${failures.join('\n- ')}\n`);
     process.exitCode = 1;

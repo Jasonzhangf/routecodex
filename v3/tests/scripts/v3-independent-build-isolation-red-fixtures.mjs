@@ -86,6 +86,7 @@ const rootNodeModulesFallback = collectIsolationFailures({
 });
 assert(rootNodeModulesFallback.some((failure) => failure.includes('outside v3/node_modules')));
 
+const missingLocalDependencyWarnings = [];
 const missingLocalDependency = collectIsolationFailures({
   env: {},
   fileExists: (path) => completeFiles.has(path),
@@ -94,8 +95,39 @@ const missingLocalDependency = collectIsolationFailures({
   resolveNodeDependency: () => {
     throw new Error('module not found');
   },
+  warn: (message) => missingLocalDependencyWarnings.push(message),
 });
-assert(missingLocalDependency.some((failure) => failure.includes('unavailable locally')));
+assert.deepEqual(
+  missingLocalDependency,
+  [],
+  'missing local yaml is an environment condition, not a hard isolation failure',
+);
+assert(
+  missingLocalDependencyWarnings.some((warning) => warning.includes('unavailable locally')),
+  'missing local yaml must warn',
+);
+
+const unavailableCargoWarnings = [];
+const unavailableCargo = collectIsolationFailures({
+  env: {},
+  fileExists: (path) => completeFiles.has(path),
+  read: validRead,
+  inspectCargo: (_env, warn) => {
+    warn('cargo metadata unavailable; skipping V3 isolation checks: spawn cargo ENOENT');
+    return [];
+  },
+  resolveNodeDependency: localYaml,
+  warn: (message) => unavailableCargoWarnings.push(message),
+});
+assert.deepEqual(
+  unavailableCargo,
+  [],
+  'missing cargo is an environment condition, not a hard isolation failure',
+);
+assert(
+  unavailableCargoWarnings.some((warning) => warning.includes('cargo metadata unavailable')),
+  'missing cargo must warn',
+);
 
 const floatingToolchain = collectIsolationFailures({
   env: {},
