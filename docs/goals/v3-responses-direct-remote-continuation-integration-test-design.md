@@ -186,5 +186,5 @@ evidence of remote-continuation availability.
   Config compile with the same HTTP-only capability error as native V3 config.
 - Negative: V2 provider with `transport = "websocket_v2"` but no endpoint fails at Config compile before
   Runtime/Provider send.
-- Gate: `npm run test:v3-config-v2-compat-5555` must include the 5555 route contract plus these V2
-  transport-bound cases; live config mutation remains out of scope unless explicitly authorized.
+- Gate: provider-directory Config tests must cover the provider `config.v2.toml` transport-bound cases;
+  the retired V2 root `config.toml` projection and its 5555 compatibility gate are out of scope.

@@ -40,6 +40,7 @@
     "verify:v3-build-admission-lockstep": "node scripts/architecture/compile-v3-build-admission.mjs --check",
     "verify:repo-sanity": "node scripts/ci/repo-sanity.mjs",
     "verify:fast": "node scripts/verify-fast.mjs",
+    "test:verify-fast-scope": "node scripts/tests/verify-fast-scope.mjs",
     "verify:no-fallback-all": "node scripts/architecture/verify-no-fallback-diff.mjs --all",
     "verify:architecture-fallback-denylist": "node scripts/architecture/verify-architecture-fallback-denylist.mjs",
     "verify:internal-policy-hardcode": "node scripts/architecture/verify-internal-policy-hardcode.mjs",
