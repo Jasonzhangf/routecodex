@@ -395,7 +395,8 @@ export function renderMainlineChainMarkdown(root, chainId, options = {}) {
     .filter((c) => c?.chain_id !== chainId)
     .map((c) => {
       const base = CHAIN_PAGE_MAP.get(c.chain_id) ?? String(c.chain_id).replace(/\./g, '-');
-      return `[${c.chain_id}](${WIKI_ROOT}/${base}.md)`;
+      const relPath = `${WIKI_ROOT}/${base}.md`;
+      return fileExists(root, relPath) ? `[${c.chain_id}](${relPath})` : c.chain_id;
     });
   if (chainLinks.length > 0) {
     lines.push('', '## Other Chains', '');
