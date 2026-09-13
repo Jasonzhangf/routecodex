@@ -860,10 +860,35 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
 ) -> Result<(), V3AnthropicCodecError> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            let namespace_name = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .ok_or(V3AnthropicCodecError::MalformedField {
+                    field: "tools[].name",
+                })?;
             let flattened = flatten_namespace_tool_for_provider("anthropic", tool)
                 .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[]" })?
                 .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
-            for child in flattened {
+            for mut child in flattened {
+                let function = child
+                    .as_object_mut()
+                    .and_then(|object| object.get_mut("function"))
+                    .and_then(Value::as_object_mut)
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "tools[].function",
+                    })?;
+                let child_name = function.get("name").and_then(Value::as_str).ok_or(
+                    V3AnthropicCodecError::MalformedField {
+                        field: "tools[].function.name",
+                    },
+                )?;
+                if !child_name.starts_with(&format!("{namespace_name}__")) {
+                    function.insert(
+                        "name".to_string(),
+                        Value::String(format!("{namespace_name}__{child_name}")),
+                    );
+                }
                 let child_object = child
                     .as_object()
                     .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
