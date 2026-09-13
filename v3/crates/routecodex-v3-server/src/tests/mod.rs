@@ -3391,6 +3391,35 @@ fn stream_projection_requires_typed_error_chain() {
 }
 
 #[test]
+fn stream_projection_ignores_diagnostic_exhaustion_trace_without_typed_witness() {
+    let frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "network_error", "message": "network error"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        error_body: None,
+        observability: None,
+        stream_observation: None,
+        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
+    };
+
+    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
+    assert_eq!(projected.content_type, "text/event-stream");
+    match projected.body {
+        V3Server16Body::Bytes(bytes) => {
+            let text = std::str::from_utf8(&bytes).unwrap();
+            assert!(text.starts_with("event: response.failed\n"), "{text}");
+            assert!(text.contains("network_error"), "{text}");
+        }
+        other => panic!("diagnostic-only exhaustion must not authorize transport body: {other:?}"),
+    }
+}
+
+#[test]
 fn direct_stream_error_projection_response_uses_error_channel() {
     let frame = V3Server16HttpFrame {
         status: 502,

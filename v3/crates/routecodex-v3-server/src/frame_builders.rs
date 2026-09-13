@@ -237,7 +237,7 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     let (code, message) = v3_error_body_code_message(&body);
     if frame.status == 502 && code == "network_error" && message == "network error" {
         if frame
-            .node_trace
+            .error_chain
             .iter()
             .any(|node| *node == "V3Error04TargetPoolExhaustion")
         {
