@@ -302,7 +302,7 @@ for (const fixture of cases) {
     const localNodeModules = path.resolve(v3Root, 'node_modules');
     const nodeModules = existsSync(localNodeModules)
       ? localNodeModules
-      : path.resolve(repoRoot, '../../node_modules');
+      : path.resolve(repoRoot, 'node_modules');
     if (existsSync(nodeModules)) {
       symlinkSync(nodeModules, path.join(root, 'node_modules'), 'dir');
     }
