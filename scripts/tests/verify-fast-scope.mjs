@@ -1,25 +1,43 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const repo = process.cwd();
 const verifier = join(repo, 'scripts', 'verify-fast.mjs');
 const cases = [
-  { relative: 'docs/design/gate.md', v3: true },
-  { relative: 'docs/goals/gate.md', v3: true },
-  { relative: 'docs/schemas/gate.yml', v3: true },
-  { relative: '.agents/skills/gate/SKILL.md', v3: false },
+  { relative: 'docs/design/gate.md', v3: true, v4: false },
+  { relative: 'docs/goals/gate.md', v3: true, v4: false },
+  { relative: 'docs/schemas/gate.yml', v3: true, v4: false },
+  { relative: '.agents/skills/gate/SKILL.md', v3: false, v4: false },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V3 gate\n    run: npm run verify:v3\n',
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V4 gate\n    run: npm --prefix v4 run verify:ci\n',
+    v3: false,
+    v4: true,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  timeout-minutes: 10\n',
+    v3: true,
+    v4: true,
+  },
 ];
 const failures = [];
 
-for (const { relative, v3 } of cases) {
+for (const { relative, contents, v3, v4 } of cases) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-verify-fast-scope-'));
   const target = join(root, relative);
   mkdirSync(join(target, '..'), { recursive: true });
-  writeFileSync(target, 'scope fixture\n');
+  writeFileSync(target, contents ?? 'scope fixture\n');
   symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir');
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['add', relative], { cwd: root });
@@ -34,9 +52,9 @@ for (const { relative, v3 } of cases) {
     },
   });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const scope = readFileSync(outputPath, 'utf8');
-  if (result.status !== 0 || !scope.includes(`v3=${v3}\n`)) {
-    failures.push(`${relative}: expected v3=${v3}, got status=${result.status}\n${output}`);
+  const scope = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '<missing scope output>';
+  if (result.status !== 0 || !scope.includes(`v3=${v3}\n`) || !scope.includes(`v4=${v4}\n`)) {
+    failures.push(`${relative}: expected v3=${v3}, v4=${v4}, got status=${result.status}\n${output}`);
   }
 }
 
@@ -46,4 +64,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`[test:verify-fast-scope] ok (${cases.length - 1} V3 roots select v3=true; skill-only changes stay outside broad V3 scope)`);
+console.log(`[test:verify-fast-scope] ok (${cases.length} scope contracts, including V3-only/V4-only/shared workflow changes)`);
