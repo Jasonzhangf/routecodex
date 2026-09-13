@@ -61,7 +61,6 @@ export function loadCanonicalInput() {
     planSource: readText('docs/goals/v4-feature-completion-plan.md'),
     buildSource: readText('scripts/build.mjs'),
     verifySource: readText('scripts/verify.mjs'),
-    verifyCiSource: readText('scripts/verify-ci.mjs'),
     installSource: readText('scripts/install-rccv4.mjs'),
     compileManifestSource: readText('scripts/compile-real-runtime-manifest.mjs'),
     architectureGates: [...ARCHITECTURE_GATES],
