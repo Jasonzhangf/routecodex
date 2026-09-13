@@ -74,3 +74,17 @@ Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply 
 ## Evidence Boundary
 
 Report source, test, build, install, restart, health, same-entry replay, review, merge, and remote receipt separately. Never infer a later level from an earlier one.
+
+## Standard Defect Delivery Flow
+
+Every RouteCodex development or bug-fix task follows this order:
+
+1. Register or reopen the bug in the project bug tracker after checking for duplicates; preserve the exact reproduction evidence, owner, scope, and priority.
+2. Create an independent clean worktree from the latest integration base. Reproduce the bug there and make the smallest owner-scoped fix with a regression test.
+3. Run the mapped focused tests and required gates, then perform the required independent review on the validated candidate.
+4. Commit the reviewed candidate and merge it into `main`; verify the resulting main tree and commit receipt.
+5. Rebuild from the merged `main`, install through the declared release path when applicable, and restart the managed server using the official lifecycle command.
+6. Verify listener health and replay the original request through the real entrypoint. Report source, tests, build, install, restart, health, replay, review, merge, and remote evidence separately.
+7. Only after the merged runtime is validated, clean up the completed worktree and close the bug with the solution and verification receipt. Never delete an active or blocked worktree to make a task appear complete.
+
+No step may be skipped or inferred from another step. A candidate commit, review result, build artifact, or restart alone does not prove merged, running, or fixed behavior.
