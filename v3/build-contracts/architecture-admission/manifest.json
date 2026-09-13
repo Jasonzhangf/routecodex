@@ -73,7 +73,7 @@
       "output_path": "repo/docs/architecture/internal-policy-hardcode-rules.json",
       "source_path": "docs/architecture/internal-policy-hardcode-rules.json",
       "source_commit": "28b9c4c0e39df6534bd74b91c4114ee0580b96b3",
-      "sha256": "ee3aa9a35c4cb90a982b6d054d564f2940e2813f6cf6120e01e8769819be6e50"
+      "sha256": "8f928094d5c00478888ee31ac424ea3e3a5e3a3f261868e7a0c8cbe865b26984"
     },
     {
       "output_path": "repo/docs/architecture/mainline-binding-budget.yml",
@@ -2872,5 +2872,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "cfcf993b0385325504255d66c78bdfa351dd222478532464f61056ea7a43056a"
+  "manifest_digest": "b663d8eb4f7bfd522a7887a6ce76127c56ea228b7152dd734069c2e7f2f38ff2"
 }

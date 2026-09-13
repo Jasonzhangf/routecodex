@@ -53,6 +53,11 @@
       "ruleId": "policy-default-operator-in-rust"
     },
     {
+      "pathContains": "v3/crates/routecodex-v3-config/src/provider_config_tests.rs",
+      "pattern": "DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS",
+      "ruleId": "provider-timeout-default-in-rust"
+    },
+    {
       "pathContains": "v3/crates/routecodex-v3-config/src/validate.rs",
       "pattern": "default_provider_sse_first_frame_timeout_ms",
       "ruleId": "provider-timeout-default-in-rust"
