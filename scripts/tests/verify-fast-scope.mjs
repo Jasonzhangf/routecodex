@@ -40,6 +40,48 @@ const cases = [
 ];
 const failures = [];
 
+const workflow = readFileSync(join(repo, '.github', 'workflows', 'test.yml'), 'utf8');
+const independentGateNames = [
+  'Fallback and internal policy hardcode gate',
+  'V3 architecture CI umbrella',
+  'V3 Responses session admission',
+  'V3 Responses session admission red fixtures',
+  'V3 Responses session admission behavior',
+  'File line-limit gate (<500)',
+  'V3 file-size ratchet gate (<=1500)',
+  'V3 and shared classifier file-size red fixtures',
+  'V3 provider action gate',
+  'V3 provider action architecture gate',
+  'V3 provider action red fixtures',
+  'V3 5520 duplicate response tool identity',
+  'V3 Runtime timing observability',
+  'V3 Runtime timing red fixtures',
+  'V3 debug side-channel contract',
+  'V3 debug payload budget',
+  'V3 debug payload budget red fixtures',
+  'V3 canonical verification stack',
+  'V3 console request count red fixtures',
+  'V3 route-classifier semantic gate',
+  'Servertool Rust-only gate',
+];
+const independentStepCondition = "if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}";
+for (const name of independentGateNames) {
+  const start = workflow.indexOf(`      - name: ${name}\n`);
+  const end = workflow.indexOf('\n      - ', start + 1);
+  const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
+  if (!block.includes(independentStepCondition)) {
+    failures.push(`workflow gate is not sibling-safe: ${name}`);
+  }
+}
+for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install built V3 CLI shim', 'Run host tests']) {
+  const start = workflow.indexOf(`      - name: ${name}\n`);
+  const end = workflow.indexOf('\n      - ', start + 1);
+  const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
+  if (block.includes('!cancelled()')) {
+    failures.push(`dependent step must retain success dependency: ${name}`);
+  }
+}
+
 for (const { relative, contents, diffMode, v3, v4 } of cases) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-verify-fast-scope-'));
   const target = join(root, relative);
