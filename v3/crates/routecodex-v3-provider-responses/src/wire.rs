@@ -635,14 +635,20 @@ fn expand_namespace_tools_in_responses_wire_body(
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
+        rewrite_namespace_qualified_call_names_from_convention(
+            &mut body,
+            provider_type == "openai_chat",
+        );
         return Ok(body);
     };
     let has_namespace = tools
         .iter()
         .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
     if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
+        rewrite_namespace_qualified_call_names_from_convention(
+            &mut body,
+            provider_type == "openai_chat",
+        );
     }
     if !has_namespace && provider_type != "openai_chat" {
         return Ok(body);
@@ -711,7 +717,10 @@ fn expand_namespace_tools_in_responses_wire_body(
     // tool declaration is incomplete or omitted its child. Apply the same
     // validated convention mapping as the no-tools path so strict providers
     // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(&mut body);
+    rewrite_namespace_qualified_call_names_from_convention(
+        &mut body,
+        provider_type == "openai_chat",
+    );
     Ok(body)
 }
 
@@ -810,7 +819,10 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
     }
 }
 
-fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
+fn rewrite_namespace_qualified_call_names_from_convention(
+    body: &mut Value,
+    rewrite_chat_tool_calls: bool,
+) {
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
             let kind = item.get("type").and_then(Value::as_str);
@@ -830,23 +842,28 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
             }
         }
     }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
-            else {
-                continue;
-            };
-            for tool_call in tool_calls {
-                if tool_call.get("type").and_then(Value::as_str) != Some("function") {
+    if rewrite_chat_tool_calls {
+        if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+            for message in messages {
+                let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
+                else {
                     continue;
-                }
-                if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut)
-                {
-                    let Some(name) = function.get("name").and_then(Value::as_str) else {
+                };
+                for tool_call in tool_calls {
+                    if tool_call.get("type").and_then(Value::as_str) != Some("function") {
                         continue;
-                    };
-                    if let Some(mapped) = map_known_internal_qualified_call_name(name) {
-                        function.insert("name".to_string(), Value::String(mapped));
+                    }
+                    if let Some(function) =
+                        tool_call.get_mut("function").and_then(Value::as_object_mut)
+                    {
+                        let Some(name) = function.get("name").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        if let Some(mapped) = map_known_namespace_qualified_call_name(name)
+                            .or_else(|| map_known_internal_qualified_call_name(name))
+                        {
+                            function.insert("name".to_string(), Value::String(mapped));
+                        }
                     }
                 }
             }

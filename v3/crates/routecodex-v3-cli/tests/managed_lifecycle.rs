@@ -763,6 +763,7 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
             "supervisor_wrapper": supervisor_wrapper,
             "daemon_config": daemon_config,
             "bin_directory": bin_directory,
+            "install_root": hooks_root,
         })
         .to_string(),
     )
