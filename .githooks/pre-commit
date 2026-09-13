@@ -11,8 +11,27 @@ case "$current" in
     ;;
 esac
 
+verify_candidate_blob() {
+  path="$1"
+  expected="$(git rev-parse --verify ":$path" 2>/dev/null)" || {
+    echo "RouteCodex governance: staged verifier file is missing: $path" >&2
+    exit 1
+  }
+  actual="$(git hash-object -- "$path" 2>/dev/null)" || {
+    echo "RouteCodex governance: working-tree verifier file is missing: $path" >&2
+    exit 1
+  }
+  if [ "$expected" != "$actual" ]; then
+    echo "RouteCodex governance: working-tree verifier drifted from staged file: $path" >&2
+    exit 1
+  fi
+}
+
 if command -v npm >/dev/null 2>&1 && test -f package.json; then
-  npm run --silent verify:local
+  verify_candidate_blob .githooks/pre-commit
+  verify_candidate_blob package.json
+  verify_candidate_blob scripts/verify-fast.mjs
+  ROUTECODEX_GATE_DIFF_MODE=staged npm run --silent verify:fast
 else
   echo "RouteCodex governance: cannot run Git main protection verification (npm/package.json missing)." >&2
   exit 1

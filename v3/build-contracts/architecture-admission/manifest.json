@@ -73,7 +73,7 @@
       "output_path": "repo/docs/architecture/internal-policy-hardcode-rules.json",
       "source_path": "docs/architecture/internal-policy-hardcode-rules.json",
       "source_commit": "b2f5c5231df7aca3f5d6f5c781e19c6bad5ea5ce",
-      "sha256": "044be3c7a6a615e67f2e0da7eed3de09ab6a72e7caf085230df911f79bbf18b6"
+      "sha256": "13685e0352bae707babc12841083a9bf1d9b4aa603996803f327306e5540bf03"
     },
     {
       "output_path": "repo/docs/architecture/mainline-binding-budget.yml",
@@ -666,8 +666,8 @@
     {
       "output_path": "repo/docs/architecture/no-fallback-diff-rules.json",
       "source_path": "docs/architecture/no-fallback-diff-rules.json",
-      "source_commit": "9a28cff6d2d1ba83a9f411a42f3dc6c5eb67b8c3",
-      "sha256": "0632d1ebe2c1a25548d0edc84024c57a4fa3e8e9bb94155b4847d48637435fee"
+      "source_commit": "d40bbc19ff320b2d67e55e06c5a71d95f23bb05f",
+      "sha256": "d9f4e87292d6c7d2b538a30f7426e0e4c2e4fb6f9570b2623f92f59d5a6e155d"
     },
     {
       "output_path": "repo/docs/architecture/repository-filesystem-module-registry.yml",
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "743e234525c9dd164f0b92eac886d65d5b746d59e8fe0b2d938b0230dc91ac08"
+  "manifest_digest": "0606310e2cf2ea08a1d69e4eee0fe800afa641f3480a8bf826f314350ad6812c"
 }
