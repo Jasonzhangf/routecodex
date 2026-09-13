@@ -124,137 +124,132 @@
       <article>
         <h1>Servertool Followup Call Graph</h1>
         <h2>Purpose</h2>
-        <p>这页只回答两件事：</p>
-        <p>1. servertool followup 主链到底怎么从 <code>HubRespChatProcess03Governed</code> 回到正常请求/响应主线。 2. followup 和 CLI projection 两条分支分别由谁 owning，哪里绝对不能长出第二份语义。</p>
-        <p>它是 review surface，不是第二份 SSOT。</p>
+        <p>This page is a review surface for the current RouteCodex V3 servertool boundary. The historical “followup” names remain here only so old evidence can be identified; V3 has no server-side servertool followup or reentry path.</p>
         <p>Canonical sources:</p>
         <ul>
-          <li><code>docs/architecture/function-map.yml</code></li>
-          <li><code>docs/architecture/verification-map.yml</code></li>
-          <li><code>docs/architecture/mainline-call-map.yml</code></li>
-          <li><code>docs/design/servertool-rust-only-architecture.md</code></li>
+          <li><code>docs/architecture/v3-function-map.yml</code></li>
+          <li><code>docs/architecture/v3-resource-operation-map.yml</code></li>
+          <li><code>docs/architecture/v3-mainline-call-map.yml</code></li>
+          <li><code>docs/architecture/v3-verification-map.yml</code></li>
+          <li><code>docs/design/v3-servertool-center-skeleton.md</code></li>
           <li><code>docs/design/servertool-cli-lifecycle.md</code></li>
-          <li><code>docs/design/servertool-cli-projection-migration.md</code></li>
-          <li><code>docs/design/responses-continuation-storage-ownership.md</code></li>
-          <li><code>docs/design/pipeline-type-topology-and-module-boundaries.md</code></li>
-        </ul>
-        <p>Key owners:</p>
-        <ul>
-          <li><code>hub.servertool_followup</code></li>
-          <li><code>hub.servertool_cli_projection</code></li>
-          <li><code>hub.servertool_orchestration_policy</code></li>
+          <li><code>docs/design/servertool-rust-only-architecture.md</code></li>
         </ul>
         <h2>Main Rule</h2>
         <ul>
-          <li>servertool 是 <code>HubRespChatProcess03Governed</code> 内部子链，不是独立 pipeline。</li>
-          <li>followup 只能从 origin snapshot 构造，不能从当前污染 payload 猜。</li>
-          <li>TS 只能做 runtime IO / bridge / reenter shell，不得重写工具语义。</li>
-          <li>client-side hook 唤醒不属于 V3 servertool followup；它由外部 hooks daemon/codexapp 通过输入接口完成。</li>
+          <li><code>HubRespChatProcess03Governed</code> remains the response-side semantic owner.</li>
+          <li>Req04 validates registered-tool input; Resp03 projects one ordinary</li>
         </ul>
+        <p><code>exec_command</code> call when a client-exec tool applies.</p>
+        <ul>
+          <li>Codex executes the public CLI through the normal tool loop and returns its</li>
+        </ul>
+        <p>stdout as the ordinary tool result on the next request.</p>
+        <ul>
+          <li>RouteCodex does not create a server-side followup request, a second kernel,</li>
+        </ul>
+        <p>or a servertool-specific response exit.</p>
+        <ul>
+          <li>Stopless, <code>reasoningStop</code>, <code>stop_message_auto</code>, and stop-response interception</li>
+        </ul>
+        <p>are retired. Official Stop, timer, and future memory hooks belong to the independent <code>codex-hooks</code> daemon/CodexApp framework.</p>
         <h2>Mainline</h2>
         <pre class="mermaid">flowchart TD
-          A[&quot;ProviderRespInbound01Raw&quot;] --&gt; B[&quot;HubRespInbound02Parsed&quot;]
-          B --&gt; C[&quot;HubRespChatProcess03Governed&quot;]
-          C --&gt; D[&quot;ServertoolResp03RuntimeAction&quot;]
-          D --&gt; E[&quot;ServertoolReq04FollowupBuilt&quot;]
-          E --&gt; F[&quot;HubReqInbound02Standardized&quot;]
-          F --&gt; G[&quot;HubReqChatProcess03Governed&quot;]
-          G --&gt; H[&quot;VrRoute04SelectedTarget&quot;]
-          H --&gt; I[&quot;HubReqOutbound05ProviderSemantic&quot;]
-          I --&gt; J[&quot;ProviderReqOutbound06WirePayload&quot;]
-          J --&gt; K[&quot;ProviderRespInbound01Raw&quot;]
-          K --&gt; L[&quot;HubRespInbound02Parsed&quot;]
-          L --&gt; M[&quot;HubRespChatProcess03Governed&quot;]
-          M --&gt; N[&quot;ServertoolResp03FollowupResult&quot;]
-          N --&gt; O[&quot;HubRespOutbound04ClientSemantic&quot;]
-          O --&gt; P[&quot;ServerRespOutbound05ClientFrame&quot;]</pre>
+          A[&quot;client request&quot;] --&gt; B[&quot;Req04 Chat Process governance&quot;]
+          B --&gt; C[&quot;provider request / response&quot;]
+          C --&gt; D[&quot;HubRespChatProcess03Governed&quot;]
+          D --&gt; E[&quot;Resp03 client-exec projection&quot;]
+          E --&gt; F[&quot;normal client semantic/frame projection&quot;]</pre>
+        <p>The active path ends at the normal client projection. The next client request is an ordinary tool-result request and starts at the normal request mainline.</p>
         <h2>Node Boundary</h2>
         <table>
-        <thead><tr><th>Node</th><th>What it owns</th><th>Must not do</th><th>Anchor</th></tr></thead>
+        <thead><tr><th>Node</th><th>Active responsibility</th><th>Forbidden responsibility</th></tr></thead>
         <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td><code>HubRespChatProcess03Governed</code></td><td>servertool/tool governance 唯一响应标准态</td><td>直接写 client frame，或从 provider raw 旁路判定</td><td>topology doc §4.1.1</td></tr>
-        <tr><td><code>ServertoolResp03RuntimeAction</code></td><td>Rust effect plan，决定 followup / client-inject / CLI projection</td><td>用 client payload 或 SSE frame 反推语义</td><td><code>run_servertool_response_stage_json</code></td></tr>
-        <tr><td><code>ServertoolReq04FollowupBuilt</code></td><td>从 origin snapshot 构造 followup 请求</td><td>从当前污染 payload 猜工具列表/上下文</td><td><code>plan_servertool_outcome_json</code></td></tr>
-        <tr><td>reenter request chain</td><td>正常 Hub 请求主线</td><td>servertool 私有旁路协议</td><td>pipeline topology</td></tr>
-        <tr><td><code>ServertoolResp03FollowupResult</code></td><td>选定 followup governed truth</td><td>被 pre-followup client payload 覆盖</td><td>Rust-only architecture</td></tr>
-        <tr><td><code>HubRespOutbound04ClientSemantic</code></td><td>client protocol projection 唯一出口</td><td>servertool 专用第二投影器</td><td><code>project_hub_resp_outbound_04_from_hub_resp_chatprocess_03</code></td></tr>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>HubRespChatProcess03Governed</code></td><td>Response-side registered-tool governance and projection plan</td><td>Direct client-frame construction or provider-raw semantic inference</td></tr>
+        <tr><td>Req04 governance</td><td>Validate registered call/result shape and tool input</td><td>Reconstruct hidden control state from payload or history</td></tr>
+        <tr><td>Resp03 projection</td><td>Emit one ordinary <code>exec_command</code> call with the original tool-call identity</td><td>Create a private followup request or a second response exit</td></tr>
+        <tr><td>public servertool CLI</td><td>Validate the registered tool and JSON object, then emit one projection descriptor</td><td>Execute a hidden server-side operation or mutate RouteCodex control state</td></tr>
+        <tr><td>Codex client tool loop</td><td>Execute the projected command and return stdout as ordinary tool result</td><td>Route around normal request/response governance</td></tr>
         </tbody>
         </table>
         <h2>Branch Split</h2>
         <pre class="mermaid">flowchart LR
-          A[&quot;HubRespChatProcess03Governed&quot;] --&gt; B{&quot;servertool outcome&quot;}
-          B --&gt;|followup runtime| C[&quot;ServertoolResp03RuntimeAction&quot;]
-          C --&gt; D[&quot;ServertoolReq04FollowupBuilt&quot;]
-          D --&gt; E[&quot;normal Hub reenter chain&quot;]
-
-          B --&gt;|generic CLI projection| F[&quot;ServertoolCliProjection01Planned&quot;]
-          F --&gt; G[&quot;HubRespOutbound04ClientSemantic&quot;]
-          G --&gt; H[&quot;client-visible exec_command&quot;]</pre>
+          A[&quot;Resp03 governed response&quot;] --&gt; B{&quot;registered client-exec tool?&quot;}
+          B --&gt;|no| C[&quot;normal client response&quot;]
+          B --&gt;|yes| D[&quot;ordinary exec_command projection&quot;]
+          D --&gt; E[&quot;Codex executes public CLI&quot;]
+          E --&gt; F[&quot;ordinary tool result on next request&quot;]</pre>
+        <p>There is no active <code>followup runtime</code> branch. The projection branch does not re-enter RouteCodex; it returns to the normal client tool loop.</p>
         <h2>Owner Matrix</h2>
         <table>
-        <thead><tr><th>Feature</th><th>Owns</th><th>Canonical builders</th><th>Must not grow in</th></tr></thead>
+        <thead><tr><th>Concern</th><th>Current owner</th><th>Boundary</th></tr></thead>
         <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td><code>hub.servertool_followup</code></td><td>followup orchestration + post-followup governed truth</td><td><code>run_servertool_response_stage_json</code>, <code>plan_servertool_outcome_json</code>, <code>project_hub_resp_outbound_04_from_hub_resp_chatprocess_03</code></td><td><code>src/providers</code>, <code>src/server</code></td></tr>
-        <tr><td><code>hub.servertool_cli_projection</code></td><td>generic servertool -&gt; client <code>exec_command</code> projection</td><td><code>build_servertool_cli_projection_01_from_hub_resp_chatprocess_03</code></td><td>provider runtime / executor local projection</td></tr>
-        <tr><td><code>hub.servertool_orchestration_policy</code></td><td>timeout, disconnect, provider pin, followup error policy</td><td><code>resolve_adapter_context_provider_key</code>, <code>compact_followup_error_reason</code></td><td>scattered handler/executor policy</td></tr>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td>registered servertool semantics</td><td><code>routecodex-v3-runtime</code> / <code>servertool-core</code></td><td>Typed V3 Req04/Resp03 resources and fixed hook placement</td></tr>
+        <tr><td>client-exec projection</td><td><code>routecodex-v3-runtime</code></td><td>One ordinary <code>exec_command</code> call and preserved tool-call pairing</td></tr>
+        <tr><td>CLI validation/projection descriptor</td><td><code>routecodex-v3-cli</code> and <code>servertool-core</code></td><td>JSON object validation and public command construction only</td></tr>
+        <tr><td>command execution</td><td>Codex client</td><td>Normal tool loop; result returns as ordinary input</td></tr>
+        <tr><td>wake-up hooks</td><td>independent <code>codex-hooks</code> daemon/CodexApp</td><td><code>sendmessage</code> input boundary; outside V3 servertool flow</td></tr>
         </tbody>
         </table>
         <h2>Followup vs CLI</h2>
         <table>
-        <thead><tr><th>Path</th><th>Trigger</th><th>Who executes</th><th>Next step</th><th>Hard boundary</th></tr></thead>
+        <thead><tr><th>Historical/current path</th><th>Status</th><th>Next step</th></tr></thead>
         <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>followup runtime</td><td>internal servertool needs local execution + reenter</td><td>server-side runtime shell under Rust plan</td><td>rebuild standard request and reenter Hub request chain</td><td>只能 relay 复入完整 Hub Pipeline</td></tr>
-        <tr><td>generic CLI projection</td><td>tool should run through normal client tool loop</td><td>client executes <code>exec_command</code></td><td>client returns ordinary tool result next turn</td><td>不得 server-side reenter</td></tr>
+        <tr><td>---</td><td>---</td><td>---</td></tr>
+        <tr><td><code>ServertoolResp03RuntimeAction</code> -&gt; <code>ServertoolReq04FollowupBuilt</code></td><td>Retired historical topology</td><td>Do not restore server-side reentry</td></tr>
+        <tr><td>client-exec CLI projection</td><td>Active V3 topology</td><td>Codex executes <code>routecodex servertool run ...</code>; next request carries the ordinary tool result</td></tr>
+        <tr><td>external Stop/timer/memory wake-up</td><td>Independent framework</td><td>hooksd decides whether to call CodexApp <code>sendmessage</code></td></tr>
         </tbody>
         </table>
         <h2>External Hooks Boundary</h2>
         <ul>
-          <li>V3 不再声明、注入或拦截 <code>reasoningStop</code>，也不再维护 Stopless continuation/state machine。</li>
-          <li>官方 Stop Hook、定时唤醒、update-goal 和后续 long-horizon hook 属于独立 hooks daemon/codexapp；它们通过 Codex 输入接口发送普通 message。</li>
-          <li>daemon 先感知 Codex 是否 working；working 时默认不发送打扰型唤醒，非 working 时才执行发送策略。</li>
-          <li>外部 hooks 的消息发送不经过 servertool followup、V3 response projection 或 SSE 修复路径。</li>
+          <li>V3 does not declare or intercept <code>reasoningStop</code> and does not own Stopless</li>
         </ul>
-        <h2>Illegal Growth</h2>
-        <table>
-        <thead><tr><th>Forbidden pattern</th><th>Why</th></tr></thead>
-        <tbody>
-        <tr><td>---</td><td>---</td></tr>
-        <tr><td>handler/executor 直接决定 servertool tool 语义</td><td>破坏 Rust-only orchestration owner</td></tr>
-        <tr><td>followup 从当前响应 payload 猜上下文</td><td>会把污染 payload 当真相</td></tr>
-        <tr><td>pre-followup <code>clientPayload</code> / <code>streamPipe.payload</code> 覆盖 post-followup truth</td><td>会丢失真实 followup 结果</td></tr>
-        <tr><td>direct/provider passthrough 进入 followup orchestration</td><td>违反“followup 只能 relay 复入完整 Hub Pipeline”</td></tr>
-        <tr><td>provider/client payload 暴露内部 followup metadata</td><td>违反 metadata 闭环边界</td></tr>
-        </tbody>
-        </table>
+        <p>state or continuation.</p>
+        <ul>
+          <li>Hooks daemon state is separate from request/response payload and provider</li>
+        </ul>
+        <p>state. Working-state gating decides whether a wake-up is deferred or sent.</p>
+        <ul>
+          <li>A hooks sidecar being unavailable must degrade/fail-open for RouteCodex</li>
+        </ul>
+        <p>startup; it must never prevent the main RouteCodex service from starting.</p>
+        <ul>
+          <li>Hook delivery is not evidence of servertool execution, response projection,</li>
+        </ul>
+        <p>or a RouteCodex followup.</p>
         <h2>Review Findings</h2>
         <table>
-        <thead><tr><th>Gap ID</th><th>Area</th><th>Current signal</th><th>Why it matters</th></tr></thead>
+        <thead><tr><th>Gap ID</th><th>Resolution</th></tr></thead>
         <tbody>
-        <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td><code>followup-gap-01</code></td><td>Dedicated wiki</td><td>此前没有 followup/CLI 合并 review 图面</td><td>servertool 分支很多，易改错层</td></tr>
-        <tr><td><code>followup-gap-02</code></td><td>Split visibility</td><td>function-map 有 owner，但 followup 与 CLI 的分流边界未在单页显式对比</td><td>容易把 CLI 路径误补成 followup</td></tr>
-        <tr><td><code>followup-gap-04</code></td><td>Post-followup truth</td><td>之前缺一张图强调 <code>ServertoolResp03FollowupResult -&gt; HubRespOutbound04ClientSemantic</code> 的唯一出口</td><td>容易重新用 pre-followup payload 投影 SSE/JSON</td></tr>
+        <tr><td>---</td><td>---</td></tr>
+        <tr><td><code>followup-gap-01</code></td><td>This page now labels the old followup graph as historical and shows the active V3 client-exec path.</td></tr>
+        <tr><td><code>followup-gap-02</code></td><td>The current CLI projection and retired followup topology are explicitly separated.</td></tr>
+        <tr><td><code>followup-gap-04</code></td><td>The normal client projection is the only active response exit; no post-followup truth exists in V3.</td></tr>
         </tbody>
         </table>
         <h2>Verification Anchors</h2>
         <ul>
-          <li><code>v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</code></li>
-          <li><code>v3/scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs</code></li>
-          <li><code>v3/scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs</code></li>
-          <li><code>npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout</code></li>
+          <li><code>npm run verify:v3-servertool-center-skeleton</code></li>
+          <li><code>npm run verify:v3-architecture-docs</code></li>
+          <li><code>npm run verify:v3-build-admission-lockstep</code></li>
+          <li><code>npm run verify:architecture-wiki-html-sync</code></li>
+          <li><code>npm run verify:v3-architecture-ci</code></li>
         </ul>
         <h2>Review Checklist</h2>
         <ul>
-          <li>当前改动是在 <code>hub.servertool_*</code> owner 或允许路径里，而不是 handler/provider/executor 本地补语义。</li>
-          <li>followup 请求是否只从 origin snapshot 构造。</li>
-          <li>followup 是否仍然走正常 Hub request/reenter chain，而不是私有旁路。</li>
-          <li>外部 hooks 是否保持在 daemon/codexapp 输入边界，不进入 V3 servertool followup。</li>
-          <li>post-followup governed truth 是否仍是 <code>HubRespOutbound04ClientSemantic</code> 的唯一输入。</li>
-          <li>provider pin / timeout / disconnect / error policy 是否仍只由 <code>hub.servertool_orchestration_policy</code> 收口。</li>
+          <li>Is the change bound to the V3 maps and the fixed Req04/Resp03 owner?</li>
+          <li>Does the CLI remain a projection/validation shell rather than a hidden</li>
         </ul>
+        <p>business-operation executor?</p>
+        <ul>
+          <li>Is the normal client tool loop the only active next step?</li>
+          <li>Are Stopless and external hook wake-ups kept outside V3 servertool flow?</li>
+          <li>Does the change avoid server-side reentry, a second kernel, a second</li>
+        </ul>
+        <p>response exit, and payload-carried control state?</p>
       </article>
     </section>
   </main>

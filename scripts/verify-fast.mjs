@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 const root = process.cwd();
@@ -58,6 +58,37 @@ function changedEntries() {
 function deletedFiles() {
   if (newRef) return allNewRefEntries.filter((entry) => entry.status === 'D').map((entry) => entry.path);
   return git(['--name-only'], 'D').split('\n').map((file) => file.trim()).filter(Boolean);
+}
+
+function writeChangedScopeOutputs(paths) {
+  const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
+  if (!outputPath) return;
+
+  const has = (pattern) => paths.some((relative) => pattern.test(relative));
+  const ciControl = has(/^\.github\/workflows\//u);
+  const v3Scope = ciControl || has(/^(?:v3\/|scripts\/|docs\/architecture\/)/u)
+    || has(/^package(?:-lock)?\.json$/u);
+  const values = {
+    changed: paths.length > 0,
+    v3: v3Scope,
+    v3_architecture: v3Scope,
+    v3_runtime: v3Scope,
+    v3_build: v3Scope,
+    v3_provider: v3Scope,
+    v3_compaction: v3Scope,
+    v3_session: v3Scope,
+    v3_timing: v3Scope,
+    v3_debug: v3Scope,
+    v3_console: v3Scope,
+    v3_router: v3Scope,
+    v3_tool: v3Scope,
+    v4: has(/^v4\//u) || ciControl,
+  };
+
+  appendFileSync(
+    outputPath,
+    Object.entries(values).map(([key, value]) => `${key}=${value ? 'true' : 'false'}\n`).join(''),
+  );
 }
 
 function contentFor(relative, commit) {
@@ -133,6 +164,10 @@ try {
 const entries = changedEntries();
 const deleted = deletedFiles();
 const skippedFullCi = '[verify:ci] SKIPPED_FOR_REPAIR (not run)';
+if (process.env.ROUTECODEX_GATE_SCOPE_OUTPUT && !staged && (!base || !head)) {
+  fail('changed-scope base/head is missing; refusing empty CI scope');
+}
+writeChangedScopeOutputs([...new Set([...entries.map(({ path }) => path), ...deleted])]);
 if (entries.length === 0 && deleted.length === 0) {
   process.stdout.write(`[verify:fast] PASS no changed files; ${skippedFullCi}\n`);
   process.exit(0);
