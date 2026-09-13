@@ -1054,6 +1054,21 @@ fn responses_direct_tool_search_output_promotes_mcpx_namespace_for_provider_proj
 }
 
 #[test]
+fn deferred_mcpx_namespace_is_not_exposed_before_tool_search_output() {
+    let request = normalize_responses_payload_for_provider_standard(&json!({
+        "model": "deepseek-v4-flash",
+        "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"find tools"}]}],
+        "tools": [
+            {"type":"tool_search","execution":"client","parameters":{"type":"object","properties":{"query":{"type":"string"}}}},
+            {"type":"namespace","name":"mcp__mcpx","tools":[{"type":"function","name":"workspace","parameters":{"type":"object"}}]}
+        ]
+    })).expect("deferred MCP namespace must remain valid");
+    let tools = request["tools"].as_array().expect("provider tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "tool_search");
+}
+
+#[test]
 fn chat_mcp_dotted_tool_call_name_is_normalized_at_provider_boundary() {
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.3",

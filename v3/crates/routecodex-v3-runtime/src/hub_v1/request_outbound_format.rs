@@ -188,6 +188,14 @@ fn promote_responses_tool_search_output_tools_to_provider_tools(
 }
 
 fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> {
+    let deferred_mcp_loaded = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.get("type").and_then(Value::as_str) == Some("tool_search_output"))
+        });
     let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) else {
         return Ok(());
     };
@@ -195,6 +203,19 @@ fn flatten_responses_namespace_tools(payload: &mut Value) -> Result<(), String> 
     for (index, tool) in tools.iter().enumerate() {
         if tool.get("type").and_then(Value::as_str) != Some("namespace") {
             flattened.push(tool.clone());
+            continue;
+        }
+        // MCP namespaces are deferred client tools. Before the client has
+        // returned a tool_search_output registry, exposing their children to
+        // the provider lets it call a tool the client has not registered yet,
+        // producing `unsupported call` on the next turn. Keep the control
+        // plane represented only by tool_search until discovery completes.
+        if !deferred_mcp_loaded
+            && tool
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| name.starts_with("mcp__"))
+        {
             continue;
         }
         let children = flatten_namespace_tool_for_provider("responses", tool)
