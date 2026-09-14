@@ -62,16 +62,30 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
         "vendor/ambient.css" => (crate::STATIC_VENDOR_AMBIENT_CSS, "text/css; charset=utf-8"),
         "app/core.js" => (crate::STATIC_APP_CORE_JS, "text/javascript; charset=utf-8"),
         "app/shell.js" => (crate::STATIC_APP_SHELL_JS, "text/javascript; charset=utf-8"),
-        "app/charts.js" => (crate::STATIC_APP_CHARTS_JS, "text/javascript; charset=utf-8"),
-        "app/drawer.js" => (crate::STATIC_APP_DRAWER_JS, "text/javascript; charset=utf-8"),
-        "app/views/dashboard.js" => {
-            (crate::STATIC_VIEW_DASHBOARD_JS, "text/javascript; charset=utf-8")
-        }
-        "app/views/usage.js" => (crate::STATIC_VIEW_USAGE_JS, "text/javascript; charset=utf-8"),
-        "app/views/providers.js" => {
-            (crate::STATIC_VIEW_PROVIDERS_JS, "text/javascript; charset=utf-8")
-        }
-        "app/views/routes.js" => (crate::STATIC_VIEW_ROUTES_JS, "text/javascript; charset=utf-8"),
+        "app/charts.js" => (
+            crate::STATIC_APP_CHARTS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/drawer.js" => (
+            crate::STATIC_APP_DRAWER_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/dashboard.js" => (
+            crate::STATIC_VIEW_DASHBOARD_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage.js" => (
+            crate::STATIC_VIEW_USAGE_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/providers.js" => (
+            crate::STATIC_VIEW_PROVIDERS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/routes.js" => (
+            crate::STATIC_VIEW_ROUTES_JS,
+            "text/javascript; charset=utf-8",
+        ),
         _ => {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
