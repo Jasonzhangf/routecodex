@@ -397,7 +397,7 @@ async function loadRecordsInner() {
     // Rail multi-selects win over the single-value facet selects when set.
     const plans = activePlans();
     if (plans.length > 12) {
-      showStatus("err", "Too many checked combinations (>12 queries) — uncheck some Layer 2-4 selections.");
+      showStatus("err", "Too many filter combinations to run at once (>12 queries) — uncheck some status, provider or model boxes.");
       return;
     }
     const responses = await Promise.all(plans.map((plan) => fetchPlan(params, plan)));
@@ -773,7 +773,40 @@ function renderEntriesPanel(panel) {
     fragments.push(banner);
   }
   if (!rows.length) {
-    fragments.push(el("div", "empty-state", "<h2>No matching requests</h2><p>Adjust your search terms or clear the checked filters.</p>"));
+    // Distinguish "the filters excluded everything" from "this range has no
+    // records at all"; the second case is not a filter problem and telling the
+    // user to clear filters there sends them in the wrong direction.
+    const filtered = state.statusKinds.size || state.providerSel.size || state.modelSel.size
+      || state.search || state.port !== "all" || state.errorStatusCode;
+    const empty = el("div", "empty-state");
+    empty.appendChild(el("h2", null, filtered ? "No matching requests" : "No requests recorded yet"));
+    const hint = el("p", null, filtered
+      ? "Adjust your search terms, or clear the checked filters in the left rail."
+      : "Nothing has been recorded for the selected range. Widen the Range control above, or send traffic through the proxy and refresh.");
+    if (filtered) {
+      const reset = el("button", "btn", "Clear all filters");
+      reset.addEventListener("click", () => {
+        state.statusKinds.clear();
+        state.providerSel.clear();
+        state.modelSel.clear();
+        state.excluded = {};
+        state.search = "";
+        state.port = "all";
+        state.errorStatusCode = null;
+        const searchInput = document.getElementById("search-filter");
+        if (searchInput) searchInput.value = "";
+        const portFilter = document.getElementById("port-filter");
+        if (portFilter) portFilter.value = "all";
+        state.page = 1;
+        renderRail();
+        renderPortTabs();
+        loadRecords();
+      });
+      hint.appendChild(document.createTextNode(" "));
+      hint.appendChild(reset);
+    }
+    empty.appendChild(hint);
+    fragments.push(empty);
     panel.replaceChildren(...fragments);
     return;
   }
@@ -1040,7 +1073,7 @@ function checkboxList(container, entries, selectedSet, onToggle) {
     return label;
   }));
   if (!entries.length) {
-    container.appendChild(el("span", "mono muted tiny", "No values available in this layer"));
+    container.appendChild(el("span", "mono muted tiny", "No values available for this filter"));
   }
 }
 
