@@ -98,9 +98,22 @@ fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
 
 #[test]
 fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
-    let transient =
-        raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended");
-    assert!(is_v3_sse_recoverable_disconnect_source(&transient));
+    for transient in [
+        raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended"),
+        raise_v3_sse_provider_failure("provider_response_event_codec_failure", "malformed SSE"),
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_http_502",
+            "upstream unavailable",
+        ),
+    ] {
+        assert!(!is_v3_sse_recoverable_disconnect_source(&transient));
+        assert_eq!(
+            v3_sse_post_commit_disposition(&transient),
+            V3SsePostCommitDisposition::ProjectInternalTerminal
+        );
+    }
 
     let http = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,

@@ -573,10 +573,9 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // Provider unavailability and client disconnect already entered the typed
-    // Error chain. Close those streams as recoverable EOF so the caller can
-    // replay the same entry. Internal response failures remain explicit 599
-    // terminals at the shared SSE transport boundary.
+    // Only client disconnect and typed target-pool exhaustion may close as
+    // transport EOF. Provider failures remain explicit typed terminals at the
+    // shared SSE transport boundary.
     let stream: V3IoSseStream = Box::pin(stream::unfold(
         (stream, false),
         move |(mut stream, done)| async move {
