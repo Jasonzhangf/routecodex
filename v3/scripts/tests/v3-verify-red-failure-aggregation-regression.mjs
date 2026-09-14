@@ -22,9 +22,9 @@ try {
   const entriesEnd = source.indexOf('\n\nconst { failures', entriesStart);
   assert(entriesStart >= 0 && entriesEnd > entriesStart, 'controlled fixture must locate entries');
   const controlledEntries = `const entries = [
-  { label: 'first-independent-failure', command: 'node', args: ['-e', "console.error('FIRST_INDEPENDENT_FAILURE'); process.exit(11)"] },
-  { label: 'second-independent-failure', command: 'node', args: ['-e', "console.error('SECOND_INDEPENDENT_FAILURE'); process.exit(12)"] },
-  { label: 'after-independent-failures', command: 'node', args: ['-e', "console.log('AFTER_INDEPENDENT_FAILURES')"] },
+  { label: 'first-independent-failure', command: 'node', args: ['-e', "console.error('FIRST_INDEPENDENT_FAILURE'); process.exit(11)"], severity: 'BLOCK' },
+  { label: 'second-independent-failure', command: 'node', args: ['-e', "console.error('SECOND_INDEPENDENT_FAILURE'); process.exit(12)"], severity: 'BLOCK' },
+  { label: 'after-independent-failures', command: 'node', args: ['-e', "console.log('AFTER_INDEPENDENT_FAILURES')"], severity: 'BLOCK' },
 ];`;
   writeFileSync(
     join(fixtureRoot, 'verify-red.mjs'),
