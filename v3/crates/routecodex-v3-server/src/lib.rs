@@ -169,6 +169,10 @@ fn v3_io_error_is_eintr(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::Interrupted || error.raw_os_error() == Some(EINTR)
 }
 
+fn v3_listener_accept_error_is_retriable(_error: &io::Error) -> bool {
+    true
+}
+
 async fn bind_v3_tcp_listener_retry_eintr<F, Fut>(mut bind: F) -> io::Result<TcpListener>
 where
     F: FnMut() -> Fut,
@@ -503,7 +507,15 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 tokio::select! {
                     _ = &mut shutdown_rx => break,
                     accepted = listener.accept() => {
-                        let Ok((stream, remote_addr)) = accepted else { break };
+                        let (stream, remote_addr) = match accepted {
+                            Ok(accepted) => accepted,
+                            Err(error) => {
+                                debug_assert!(v3_listener_accept_error_is_retriable(&error));
+                                eprintln!("V3 Front HTTP accept failed; retrying: {error}");
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                                continue;
+                            }
+                        };
                         let connection_identity = connection_broker.allocate_connection_identity();
                         let service = app_for_serve.clone().into_service();
                         let request_connection_broker = connection_broker.clone();

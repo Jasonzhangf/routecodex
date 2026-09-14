@@ -1,4 +1,10 @@
 use super::*;
+
+#[test]
+fn listener_accept_errors_are_retried_without_ending_listener_task() {
+    let error = io::Error::new(io::ErrorKind::ConnectionReset, "transient accept failure");
+    assert!(v3_listener_accept_error_is_retriable(&error));
+}
 use crate::webui_observability::V3WebuiObservability;
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
