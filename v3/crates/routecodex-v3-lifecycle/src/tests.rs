@@ -2,6 +2,7 @@ use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
+use std::time::Instant;
 use tempfile::TempDir;
 
 static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -163,7 +164,9 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
     fs::write(&socket_path, "runtime-socket-marker").unwrap();
     std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
 
+    let started_at = Instant::now();
     let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
+    assert!(started_at.elapsed() < Duration::from_secs(2));
 
     assert!(sidecar.is_none());
     assert!(detail.unwrap().contains("hooks sidecar unavailable"));

@@ -8,7 +8,10 @@ use tokio::process::{Child, Command as TokioCommand};
 const HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 const HOOKS_INSTALL_RECORD_RELATIVE: &str = ".codex/routecodex-hooks/install.json";
 pub(crate) const HOOKS_SIDECAR_PROCESS_FILE: &str = "hooks-sidecar.pid";
-const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(15);
+// Hooks are optional. Keep a broken or hung supervisor from consuming the
+// managed lifecycle control deadline; the runtime continues in degraded mode
+// with the exact startup detail persisted in status.
+const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -207,7 +210,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
     let mut reader = tokio::io::BufReader::new(stdout);
     let readiness = match tokio::time::timeout(
         SIDECAR_START_TIMEOUT,
-        read_sidecar_readiness(&mut reader),
+        read_sidecar_readiness_or_exit(&mut child, &mut reader),
     )
     .await
     {
@@ -494,6 +497,21 @@ async fn read_sidecar_readiness(
         ));
     }
     Ok(serde_json::from_str(line)?)
+}
+
+async fn read_sidecar_readiness_or_exit(
+    child: &mut Child,
+    stdout: &mut (impl AsyncBufRead + Unpin),
+) -> Result<Value, V3LifecycleError> {
+    tokio::select! {
+        readiness = read_sidecar_readiness(stdout) => readiness,
+        status = child.wait() => {
+            status.map_err(V3LifecycleError::Io)?;
+            Err(V3LifecycleError::Validation(
+                "hooks sidecar exited before readiness".to_string(),
+            ))
+        }
+    }
 }
 
 async fn terminate_sidecar(
