@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "contract_id": "v4-plugin-catalog",
+  "status": "contract_bound",
+  "owner_feature_id": "v4.plugin.catalog",
+  "canonical_docs": [
+    "v4/docs/architecture/v4-cordis-node-plugin-architecture.md"
+  ],
+  "catalog_entry_required": [
+    "plugin_id",
+    "version",
+    "owner",
+    "artifact_hash",
+    "contract_hash",
+    "supported_node_roles",
+    "services_provided",
+    "services_injected",
+    "resources_read",
+    "resources_written",
+    "required_tests"
+  ],
+  "registration_rule": "same plugin_id + version + artifact_hash + contract_hash registration is idempotent; any identity field difference is a conflict and is rejected",
+  "owner_rule": "a plugin_id is owned by exactly one owner in the catalog",
+  "hash_rule": "declared artifact_hash and contract_hash must match the registered artifact and contract digests; mismatch is rejected",
+  "dependency_rule": "version dependencies must resolve inside the catalog; missing or unsatisfied dependency is rejected; dependency cycles are rejected",
+  "snapshot_rule": "catalog snapshot is an immutable read-only view and can never be a business request input"
+}

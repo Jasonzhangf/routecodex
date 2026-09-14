@@ -95,6 +95,38 @@ pub struct ClientProjection {
     pub message: String,
 }
 
+/// Provider failure input for the error-chain owner.  The runtime supplies
+/// only typed failure identity and the already-selected policy/decision; this
+/// module owns the six-stage error transition and client projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderFailure {
+    pub code: String,
+    pub message: String,
+    pub node: String,
+    pub policy: RetryPolicy,
+    pub decision: ExecutionDecision,
+}
+
+pub fn project_provider_failure(
+    scope: Scope,
+    failure: ProviderFailure,
+) -> Result<ClientProjection, ErrorChainError> {
+    let mut chain = ErrorChain::new(scope);
+    let control_digest = format!("provider-failure:{}:{}", failure.code, failure.node);
+    chain.raise(
+        &failure.code,
+        Some(&control_digest),
+        Some(&format!("node:{}", failure.node)),
+    )?;
+    let captured = chain.capture()?;
+    let mut center = ErrorCenter::new(chain.scope().clone());
+    let witness = center.classify(captured)?;
+    chain.classify(witness)?;
+    chain.apply_policy(failure.policy)?;
+    chain.decide(failure.decision)?;
+    chain.project(&failure.message)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorChainRecord {
     pub record_id: String,
@@ -212,6 +244,15 @@ impl ErrorChain {
 
     pub fn scope(&self) -> &Scope {
         &self.scope
+    }
+
+    /// Diagnostic-only immutable checkpoint fact for the current error stage.
+    /// It is never read back into routing, retry, cooldown or payload logic.
+    pub fn stage_checkpoint(&self) -> String {
+        match self.current_stage() {
+            Some(stage) => format!("error.stage.{}", stage_name(stage)),
+            None => "error.stage.idle".to_string(),
+        }
     }
 
     /// `V4Error01SourceRaised`. First operation only; raise twice is red.
@@ -465,4 +506,15 @@ fn now_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+fn stage_name(stage: ErrorStage) -> &'static str {
+    match stage {
+        ErrorStage::SourceRaised => "source_raised",
+        ErrorStage::HostCaptured => "host_captured",
+        ErrorStage::RuntimeClassified => "runtime_classified",
+        ErrorStage::RouterPolicyApplied => "router_policy_applied",
+        ErrorStage::ExecutionDecision => "execution_decision",
+        ErrorStage::ClientProjected => "client_projected",
+    }
 }

@@ -3,7 +3,7 @@
   "contract_id": "v4-node-graph",
   "status": "active",
   "owner_feature_id": "v4.node_graph",
-  "graph_hash": "sha256:413e883986c4e605a027501ecd7f1c97f55ffac0066a55829d16806d03b6e92d",
+  "graph_hash": "sha256:95adaee0f430d3b72f767c1a9e2f9ebe9367f0dc1316cc9ec5d1e5aac8bf42d4",
   "canonical_docs": [
     "v4/docs/architecture/v4-standard-nodes-and-node-graph.md",
     "v4/docs/architecture/v4-pipeline-abstraction-model.md",
@@ -639,7 +639,8 @@
       "direct_hook_mount": "forbidden",
       "client_provider_protocol_independence": true,
       "sse_semantic_ownership": "forbidden",
-      "local_continuation": "physically_forbidden"
+      "local_continuation": "physically_forbidden",
+      "continuation_save_only_at": "V4HubRespChatProcess04Governed"
     }
   },
   "v4_config_chain": {
@@ -1410,7 +1411,7 @@
     },
     {
       "node_id": "V4PayloadCycleRegistry",
-      "position": 0,
+      "position": 2,
       "family": "ControlCenterNode",
       "role_id": "control_center",
       "scope": "original payload cycle lifecycle control center",
@@ -1474,7 +1475,7 @@
     },
     {
       "node_id": "V4MetadataCenter01ScopeRegistry",
-      "position": 0,
+      "position": 1,
       "family": "ControlCenterNode",
       "role_id": "control_center",
       "scope": "metadata center scope registry",

@@ -1,12 +1,12 @@
 {
-  "artifact_hash": "sha256:bff3769dd59162068bf94d51457863f6207fa0c19380b83b6a0d92e759871a95",
+  "artifact_hash": "sha256:5582ce42db95c1adc2d63f02df381f217100c450eaf55176db7f1a77965b65bb",
   "artifact_paths": [
     "libroutecodex_v4_error.rlib"
   ],
   "artifact_schema": 1,
   "artifacts": [
     {
-      "hash": "sha256:af90c00592974f2361337e8377aa0bc5515e428e3cf067c95b4c5b2c6cf7af69",
+      "hash": "sha256:e5a04aa173b1d0c0c0ab2ce0c6398f7eb8af4b4c5b8536c85ff46d004ae1f68e",
       "path": "libroutecodex_v4_error.rlib"
     }
   ],
@@ -18,15 +18,15 @@
     "program": "sh",
     "working_directory": "."
   },
-  "contract_hash": "sha256:6f36443a5b9abb3f0f699813b46273d83f6dab2fa91330728d6a5915f229ff19",
+  "contract_hash": "sha256:07251c9203cd70de3da8c7a9aedb950b9b40953bdedd69220a51bec556c442a5",
   "dependency_hashes": [
     {
-      "artifact_hash": "sha256:a988314c65bc74f6a7e6e38ad6c045ac91c2d516f3ec01c65f5f029fde6c2a4d",
+      "artifact_hash": "sha256:8c19706a91ebc182e9de7b9c21082666241c8b666f7234273dbea1468a1ffa68",
       "module_id": "routecodex-v4-base-node"
     }
   ],
   "module_id": "routecodex-v4-error",
-  "public_api_hash": "sha256:ec13d529b2c91b8e57dd50e8c896fb6d1cc53909c97097b6830041ebba22592f",
-  "source_hash": "sha256:30ef63cd3f0c43027927565d2a5d7f15afc84d0611f5acdbe65ee27aff902f27",
+  "public_api_hash": "sha256:c5f52b276ea1eab98a1a4ec781e64e5e9a92c05957a552fbf60c8cdc1893dfb4",
+  "source_hash": "sha256:03be55087cd1b559b98e5bc07170ea69ab2cb16ed7ee0d6cf391589ad05a582d",
   "stage": "frozen"
 }

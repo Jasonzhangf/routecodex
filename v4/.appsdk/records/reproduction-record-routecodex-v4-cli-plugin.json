@@ -1,0 +1,14 @@
+{
+  "base_commit": "66577ecc5defe80efc5f84d0264572e5bc39d27a",
+  "baseline_evidence_id": "baseline-364727e069e317ff973f7f54b1e985e77de6db58e405075a39e1c6ed6ddb2845",
+  "created_at": "2026-09-14T00:29:21.989896+00:00",
+  "first_divergence": "baseline_error_token:EXPECTED_RED",
+  "input_hashes": [
+    "sha256:53d69de09604dff573869041d9558759fe82d6d4aa3269036901aadb9fde389a"
+  ],
+  "issue_id": "legacy-v4-cli-governance-closeout",
+  "module_id": "routecodex-v4-cli-plugin",
+  "reproduction_id": "reproduction-9a947f59030aad5868525436edd734704df1fe8adee69f9f1ff15686ed9b074a",
+  "result": "reproduced",
+  "worktree_id": "worktree-09ae6ea2ef82cadf243bae4972466fd4b538f26cbe19b44dcd61a60aa7f0a4f1"
+}

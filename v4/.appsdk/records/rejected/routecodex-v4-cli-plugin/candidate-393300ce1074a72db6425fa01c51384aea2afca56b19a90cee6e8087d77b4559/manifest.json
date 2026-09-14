@@ -1,0 +1,25 @@
+{
+  "candidate_commit": "91c6aad2122a9d717f23370a2c90fef5e121d4c4",
+  "candidate_tree": "033c6314ca1b65b2bf087d648d9f50b3de314cee",
+  "fix_candidate_id": "routecodex-v4-cli-plugin-91c6aad2122a9d717f23370a2c90fef5e121d4c4",
+  "issue_id": "v4-cli-governance-closeout",
+  "module_id": "routecodex-v4-cli-plugin",
+  "records": [
+    {
+      "byte_length": 5434,
+      "file": "fix-candidate-record.json",
+      "kind": "fix-candidate-record",
+      "sha256": "sha256:4b40a64679fc9db08e56712f29f05123fae75ece2a6cf0e53a239143ff54d9fb",
+      "source": "fix-candidate-record-routecodex-v4-cli-plugin.json"
+    },
+    {
+      "byte_length": 1567,
+      "file": "pre-review-validation-record.json",
+      "kind": "pre-review-validation-record",
+      "sha256": "sha256:87cb4c9596b5805cba35b8298f2cf50556d1f1cf51fda0be76584d383f04c9ce",
+      "source": "pre-review-validation-record-routecodex-v4-cli-plugin.json"
+    }
+  ],
+  "schema_version": 1,
+  "stable_id": "candidate-393300ce1074a72db6425fa01c51384aea2afca56b19a90cee6e8087d77b4559"
+}

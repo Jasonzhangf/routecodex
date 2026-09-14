@@ -11,7 +11,11 @@ import {
   sameOrdered,
   sortedUnique,
 } from './feature-layer-batch-contract.mjs';
-import { validateEvidenceRecordShape, runRegisteredGates } from './feature-layer-batch-evidence.mjs';
+import {
+  isClosureDecisionAlias,
+  validateEvidenceRecordShape,
+  runRegisteredGates,
+} from './feature-layer-batch-evidence.mjs';
 import { validateObservedWiring } from './feature-layer-batch-graph.mjs';
 import { validateIntegrationRecords } from './feature-layer-batch-integration.mjs';
 import { canonicalJson, sha256 } from './feature-layer-batch-git.mjs';
@@ -82,9 +86,10 @@ function validateLifecycleEvidence({
   validateEvidenceRecordShape(evidence, failures, `${featureId}:${role}`, context.now);
   const contract = ROLE_CONTRACTS[role];
   const gate = input.verificationMap.gates.find((entry) => entry.gate_id === ref.gate_id);
+  const gateRoleMatches = gate?.evidence_role === role || isClosureDecisionAlias(ref, gate);
   if (!contract || !gate
       || gate.status !== 'active'
-      || gate.evidence_role !== role
+      || !gateRoleMatches
       || !Array.isArray(gate.argv) || gate.argv.length === 0
       || canonicalJson(evidence.producer) !== canonicalJson(gate.producer)
       || !sameOrdered(evidence.command_argv ?? [], gate.argv)

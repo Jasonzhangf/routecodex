@@ -1743,7 +1743,7 @@
       "evidence_role": "positive",
       "input_paths": [
         "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
-        "crates/routecodex-v4-standard-plugins/src/provider_semantic.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
         "crates/routecodex-v4-standard-plugins/src/request_governance.rs",
         "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
         "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
@@ -1784,7 +1784,7 @@
       "evidence_role": "red_gate",
       "input_paths": [
         "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
-        "crates/routecodex-v4-standard-plugins/src/provider_semantic.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
         "crates/routecodex-v4-standard-plugins/src/request_governance.rs",
         "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
         "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
@@ -1818,7 +1818,7 @@
       "evidence_role": "boundary_audit",
       "input_paths": [
         "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
-        "crates/routecodex-v4-standard-plugins/src/provider_semantic.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
         "crates/routecodex-v4-standard-plugins/src/request_governance.rs",
         "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
         "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
@@ -1853,7 +1853,7 @@
       "evidence_role": "plane_isolation",
       "input_paths": [
         "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
-        "crates/routecodex-v4-standard-plugins/src/provider_semantic.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
         "crates/routecodex-v4-standard-plugins/src/request_governance.rs",
         "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
         "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
@@ -3010,6 +3010,61 @@
         "scripts/architecture/verify-v4-cordis-production-admission.mjs"
       ],
       "required_for": ["v4.cordis.production_admission:source_green"]
+    },
+    {
+      "gate_id": "v4_transition_dependency_guard",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": [
+        "v4.governance.transition_dependency_guard"
+      ],
+      "command": "node scripts/architecture/verify-v4-transition-deps.mjs",
+      "argv": [
+        "node",
+        "scripts/architecture/verify-v4-transition-deps.mjs"
+      ],
+      "producer": {
+        "adapter": "node",
+        "identity": "v4_transition_dependency_guard"
+      },
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "contracts/lifecycle-state-machines.manifest.json",
+        "contracts/transitions/zone-transition-manifest.json",
+        "contracts/records/record-graph.contract.json",
+        "scripts/architecture/verify-v4-transition-deps.mjs"
+      ],
+      "required_for": [
+        "routecodex-v4-governance:transition_dependency_guard"
+      ]
+    },
+    {
+      "gate_id": "v4_transition_dependency_guard_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": [
+        "v4.governance.transition_dependency_guard"
+      ],
+      "command": "node scripts/architecture/verify-v4-transition-deps.mjs --red-self-test",
+      "argv": [
+        "node",
+        "scripts/architecture/verify-v4-transition-deps.mjs",
+        "--red-self-test"
+      ],
+      "producer": {
+        "adapter": "node",
+        "identity": "v4_transition_dependency_guard_red"
+      },
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "contracts/lifecycle-state-machines.manifest.json",
+        "contracts/transitions/zone-transition-manifest.json",
+        "contracts/records/record-graph.contract.json",
+        "scripts/architecture/verify-v4-transition-deps.mjs"
+      ],
+      "required_for": [
+        "routecodex-v4-governance:transition_dependency_guard_red"
+      ]
     }
   ]
 }

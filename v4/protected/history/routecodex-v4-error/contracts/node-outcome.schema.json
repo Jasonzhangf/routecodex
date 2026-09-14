@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v4://contracts/node-outcome.schema.json",
+  "title": "V4 NodeOutcome",
+  "oneOf": [
+    {"type":"object","additionalProperties":false,"required":["kind","data","control"],"properties":{"kind":{"const":"continue"},"data":{"type":"object"},"control":{"type":"object"}}},
+    {"type":"object","additionalProperties":false,"required":["kind","edge_id","data","control"],"properties":{"kind":{"const":"branch"},"edge_id":{"type":"string","minLength":1},"data":{"type":"object"},"control":{"type":"object"}}},
+    {"type":"object","additionalProperties":false,"required":["kind","response"],"properties":{"kind":{"const":"terminal"},"response":{"type":"object"}}},
+    {"type":"object","additionalProperties":false,"required":["kind","error"],"properties":{"kind":{"const":"failure"},"error":{"type":"object"}}}
+  ],
+  "$defs": {
+    "base": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string"}}, "additionalProperties": false}
+  }
+}

@@ -115,6 +115,12 @@ function expectedInputHashes(candidate, sourcePaths, gateInputPaths, truth) {
   return sortedUnique(identities.map((identity) => identity.sha256));
 }
 
+export function isClosureDecisionAlias(ref, gate) {
+  return ref?.role === 'not_needed_decision'
+    && gate?.evidence_role === 'closure_audit'
+    && ref.gate_id === 'v4_node_container_epoch_closure_audit';
+}
+
 export function validateEvidenceRef({
   ref,
   evidence,
@@ -156,8 +162,9 @@ export function validateEvidenceRef({
   const governancePlaneAlias = sharedRuntimeLane
     && ref.role === 'plane_isolation'
     && ref.gate_id === 'v4_parity_gate_plane_isolation';
+  const closureDecisionAlias = isClosureDecisionAlias(ref, gate);
   if (!gate || gate.status !== 'active'
-      || (gate.evidence_role !== ref.role && !governancePlaneAlias)
+      || (gate.evidence_role !== ref.role && !governancePlaneAlias && !closureDecisionAlias)
       || !Array.isArray(gate.argv)
       || gate.argv.length === 0
       || !gate.producer) {

@@ -62,11 +62,14 @@ regressions. The command smoke test accepts `--binary <installed-path>` and
 fails if that file cannot execute; it never substitutes the source binary.
 # Source integration and release evidence
 
-`verify:ci` / `verify:local` select contract-mode runtime admission and AppSDK
-`verify --admission`. They run the full workspace, architecture/red, Active-linked
-consumer and index/isolation matrix, but do not certify historical deployment or
-publish/freeze evidence. Explicit `verify` retains full AppSDK `verify` and live
-runtime admission. Source merge is not release/freeze approval.
+`verify:ci` selects contract-mode runtime admission and AppSDK
+`verify --admission`; it runs the full workspace, architecture/red, Active-linked
+consumer and index/isolation matrix, but does not certify historical deployment
+or publish/freeze evidence. `verify:local` is the fast pre-commit build-guard
+check and runs only the V4 layer build guard. The full local/release admission
+entry remains `verify:ci` followed by the module's explicit review-admission
+gate. Explicit `verify` retains full AppSDK `verify` and live runtime admission.
+Source merge is not release/freeze approval.
 
 During the 2026-09-05 integration, the unchanged base-node EffectivenessRecord
 predates its referenced replay evidence. Full SDK verification correctly rejects
