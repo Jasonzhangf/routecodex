@@ -288,6 +288,26 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         ) {
             return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
         }
+        match has_pending_provider_cooldown_probe(
+            provider_health,
+            &expanded,
+            request_local_excluded_candidates,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                if provider_health.store.availability_generation() != observed_generation {
+                    continue;
+                }
+                return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
+            }
+            Err(error) => {
+                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_exhaustion_recovery_probe_status_failed",
+                    error,
+                ));
+            }
+        }
         if let Err(error) = provider_health
             .store
             .wait_for_availability_change(observed_generation)
@@ -300,6 +320,31 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
             ));
         }
     }
+}
+
+fn has_pending_provider_cooldown_probe(
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    expanded: &V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: &BTreeSet<String>,
+) -> Result<bool, String> {
+    for candidate in &expanded.candidates {
+        let key = v3_relay_provider_candidate_key(candidate);
+        if request_local_excluded_candidates.contains(&key) {
+            continue;
+        }
+        if provider_health
+            .store
+            .has_provider_cooldown_probe_in_flight(
+                &candidate.provider_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+            )
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn exhaustion_is_cooldown_recovery_only(

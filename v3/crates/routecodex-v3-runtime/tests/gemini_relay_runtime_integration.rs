@@ -831,27 +831,31 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         let failing = StaticSseTransport {
             chunks: Mutex::new(Some(chunks)),
         };
-        let first = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-uncommitted-failure-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                    "stream":true
-                }),
-            },
-            &failing,
-            provider_health.runtime_health(),
+        let first = tokio::time::timeout(
+            Duration::from_secs(30),
+            execute_v3_gemini_relay_runtime_with_provider_health(
+                &manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: server_id.into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: format!("req-gemini-uncommitted-failure-{case}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                        "stream":true
+                    }),
+                },
+                &failing,
+                provider_health.runtime_health(),
+            ),
         )
         .await
+        .expect("provider attempt failure must not hang target selection")
         .expect("provider attempt failure must reach terminal Error06");
         assert_eq!(first.status, 502, "{case}: {first:?}");
         assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));

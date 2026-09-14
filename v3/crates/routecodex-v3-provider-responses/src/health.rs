@@ -917,6 +917,27 @@ impl V3ProviderHealthStore {
             }))
     }
 
+    pub fn has_provider_cooldown_probe_in_flight(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<bool, V3ProviderHealthError> {
+        let state = self
+            .state
+            .read()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        Ok(state
+            .provider_cooldown_probes
+            .iter()
+            .any(|(key, probe_state)| {
+                key.provider_id == provider_id
+                    && key.auth_alias.as_deref() == auth_alias
+                    && (key.model_id.as_deref() == model_id || key.model_id.is_none())
+                    && probe_state.probe_in_flight
+            }))
+    }
+
     /// Acquire the only scheduled provider-health probe permit.
     pub fn acquire_provider_cooldown_probe(
         &self,
