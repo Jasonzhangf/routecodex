@@ -244,20 +244,45 @@ function validateBuildGuardSeparation(canonicalInput, productionContext, validat
   const guardCommit = input.manifest.integration.guard_commit;
   if (!guardCommit) throw new Error('fixture manifest must bind a guard commit');
 
-  // Real production state: guard commit reachable, wiring observed, current
-  // guarded-surface hashes differ from the guard commit. Build guard must warn
-  // and return no blocking failure; strict admission remains the only owner of
+  // Force a deterministic wiring change while keeping the guard commit
+  // reachable. Build guard must observe that change, warn, and return no
+  // blocking failure; strict admission remains the only owner of
   // candidate/evidence enforcement.
-  const buildGuardFailures = validate(input, productionContext, {
-    mode: 'build-guard',
-    allowPendingGuard: true,
-  });
+  const changedSurface = input.manifest.integration.guarded_surfaces[0]?.path;
+  if (!changedSurface) throw new Error('fixture manifest must bind a guarded surface');
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  let buildGuardFailures;
+  try {
+    buildGuardFailures = validate(input, {
+      ...productionContext,
+      truth: {
+        ...productionContext.truth,
+        currentScopeHash(patterns) {
+          if (patterns.length === 1 && patterns[0] === changedSurface) {
+            return 'sha256:fixture-wiring-change';
+          }
+          return productionContext.truth.currentScopeHash(patterns);
+        },
+      },
+    }, {
+      mode: 'build-guard',
+      allowPendingGuard: true,
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
   const blocking = buildGuardFailures.filter((item) => item.severity !== 'warning');
   if (blocking.length > 0) {
     throw new Error(
       `build guard must not block on observed wiring changes: ${blocking
         .map((item) => item.code).join(',')}`,
     );
+  }
+  if (!warnings.some((message) => message.includes('BUILD-GUARD WARNING wiring changed since guard commit')
+    && message.includes(`surface:${changedSurface}:sha256:fixture-wiring-change`))) {
+    throw new Error(`build guard must warn on observed wiring changes: ${warnings.join(' | ')}`);
   }
 
   // Unreadable guard state (no reachable guard commit) must still block.
