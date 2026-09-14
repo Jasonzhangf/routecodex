@@ -620,6 +620,7 @@ impl UnixWsJsonRpc {
         let payload = json!({ "id": id, "method": method, "params": params });
         write_client_frame(
             &mut self.stream,
+            0x1,
             &serde_json::to_vec(&payload).map_err(transport_error)?,
         )?;
         loop {
@@ -631,7 +632,7 @@ impl UnixWsJsonRpc {
                     ))
                 }
                 0x9 => {
-                    write_server_control(&mut self.stream, 0xa, &frame.payload)?;
+                    write_client_frame(&mut self.stream, 0xa, &frame.payload)?;
                     continue;
                 }
                 0x1 => {
@@ -656,6 +657,7 @@ impl UnixWsJsonRpc {
         let payload = json!({ "method": method, "params": params });
         write_client_frame(
             &mut self.stream,
+            0x1,
             &serde_json::to_vec(&payload).map_err(transport_error)?,
         )?;
         Ok(())
@@ -705,13 +707,17 @@ fn upgrade_websocket(stream: &mut UnixStream) -> Result<(), AppServerError> {
     Ok(())
 }
 
-fn write_client_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<(), AppServerError> {
+fn write_client_frame(
+    stream: &mut UnixStream,
+    opcode: u8,
+    payload: &[u8],
+) -> Result<(), AppServerError> {
     let mask = [0x11, 0x22, 0x33, 0x44];
     let mut masked = payload.to_vec();
     for (index, byte) in masked.iter_mut().enumerate() {
         *byte ^= mask[index % 4];
     }
-    let mut header = vec![0x81];
+    let mut header = vec![0x80 | opcode];
     let len = payload.len();
     if len < 126 {
         header.push(0x80 | len as u8);
@@ -728,6 +734,7 @@ fn write_client_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<(), App
     stream.flush().map_err(io_transport_error)
 }
 
+#[cfg(test)]
 fn write_server_control(
     stream: &mut UnixStream,
     opcode: u8,
@@ -888,7 +895,7 @@ mod tests {
     #[test]
     fn websocket_client_frames_encode_and_decode_over_unix_pair() {
         let (mut client, mut server) = UnixStream::pair().unwrap();
-        write_client_frame(&mut client, b"hello websocket").unwrap();
+        write_client_frame(&mut client, 0x1, b"hello websocket").unwrap();
         let frame = read_server_frame(&mut server).unwrap();
         assert_eq!(frame.opcode, 0x1);
         assert_eq!(frame.payload, b"hello websocket");
@@ -896,6 +903,25 @@ mod tests {
         write_server_control(&mut server, 0x1, br#"{"id":1,"result":{"ok":true}}"#).unwrap();
         let reply = read_server_frame(&mut client).unwrap();
         assert_eq!(reply.payload, br#"{"id":1,"result":{"ok":true}}"#);
+    }
+
+    #[test]
+    fn websocket_ping_gets_masked_pong() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        write_client_frame(&mut client, 0xa, b"heartbeat").unwrap();
+
+        let mut header = [0_u8; 2];
+        server.read_exact(&mut header).unwrap();
+        assert_eq!(header[0] & 0x0f, 0xa);
+        assert_ne!(header[1] & 0x80, 0, "client control frames must be masked");
+        let mut mask = [0_u8; 4];
+        server.read_exact(&mut mask).unwrap();
+        let mut payload = [0_u8; 9];
+        server.read_exact(&mut payload).unwrap();
+        for (index, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[index % 4];
+        }
+        assert_eq!(&payload, b"heartbeat");
     }
 
     #[test]

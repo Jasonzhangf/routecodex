@@ -140,7 +140,7 @@ AppServerTransport      -> session_status + send_message trait boundary
 ## Test evidence
 
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks`:
-  55 lib tests, 3 `binary_handler_config` tests, 1 `binary_readiness` test,
+  56 lib tests, 3 `binary_handler_config` tests, 1 `binary_readiness` test,
   and 6 `native_delivery_replay` tests pass.
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
   --test native_delivery_replay`: an end-to-end replay against a mock App
@@ -173,7 +173,9 @@ over-read past the terminating blank line and buffer the first WebSocket frame
 when the App Server coalesces the handshake response and first frame into one
 write; dropping that reader would discard the frame and stall the first
 JSON-RPC call. Reading unbuffered leaves every post-handshake byte on the socket
-for the frame decoder. Verified by
+for the frame decoder. The client sends every control frame through the masked
+client-frame encoder, including the Pong returned for an App Server Ping.
+Verified by
 `websocket_upgrade_preserves_first_frame_coalesced_with_handshake`: the buffered
 reader hangs (frame lost), the unbuffered reader returns the frame.
 
@@ -363,7 +365,7 @@ for the `required_gates` declared in
 
 ```text
 exit 0  cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
-          55 lib + 3 binary_handler_config + 1 binary_readiness
+          56 lib + 3 binary_handler_config + 1 binary_readiness
           + 6 native_delivery_replay pass
 exit 0  cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle
           internal_hooksd_tests -- --nocapture
