@@ -1036,31 +1036,35 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            if self.sends.fetch_add(1, Ordering::SeqCst) < 3 {
-                assert_eq!(request.provider_id(), "first");
-                return Ok(V3ProviderResp14Raw::from_json(
-                    request.request_id(),
-                    request.provider_id(),
-                    200,
-                    vec![V3ProviderResponseHeader {
-                        name: "content-type".to_string(),
-                        value: b"application/json".to_vec(),
-                    }],
-                    b"{\"id\":\"broken\"".to_vec(),
-                ));
+            match self.sends.fetch_add(1, Ordering::SeqCst) {
+                0 => {
+                    assert_eq!(request.provider_id(), "first");
+                    Ok(V3ProviderResp14Raw::from_json(
+                        request.request_id(),
+                        request.provider_id(),
+                        200,
+                        vec![V3ProviderResponseHeader {
+                            name: "content-type".to_string(),
+                            value: b"application/json".to_vec(),
+                        }],
+                        b"{\"id\":\"broken\"".to_vec(),
+                    ))
+                }
+                _ => {
+                    assert_eq!(request.provider_id(), "second");
+                    assert_eq!(request.body()["model"], "wire-second");
+                    Ok(V3ProviderResp14Raw::from_json(
+                        request.request_id(),
+                        request.provider_id(),
+                        200,
+                        vec![V3ProviderResponseHeader {
+                            name: "content-type".to_string(),
+                            value: b"application/json".to_vec(),
+                        }],
+                        br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+                    ))
+                }
             }
-            assert_eq!(request.provider_id(), "second");
-            assert_eq!(request.body()["model"], "wire-second");
-            Ok(V3ProviderResp14Raw::from_json(
-                request.request_id(),
-                request.provider_id(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
-            ))
         }
     }
 
@@ -1091,8 +1095,8 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        4,
-        "2xx decode failure must retry same provider 3 times then switch: {output:?}"
+        2,
+        "2xx decode failure must switch candidates after one failed attempt: {output:?}"
     );
     assert_eq!(
         output
@@ -1103,19 +1107,19 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
         1
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-    assert!(output.node_trace.contains(&"V3DirectTransientRetrySame"));
+    assert!(!output.node_trace.contains(&"V3DirectTransientRetrySame"));
     let observability = output
         .observability
         .as_ref()
         .expect("decode failure switch must be observable");
     assert_eq!(
         observability.provider_failure_events.len(),
-        3,
-        "each transient decode retry remains observable while provider errors stay off the client stream"
+        1,
+        "one failed decode attempt must remain observable while provider errors stay off the client stream"
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "transient_exhausted",
-        "2xx decode failure is transient: must not write provider health"
+        observability.provider_failure_events[0].health_state, "healthy",
+        "one counted 2xx decode failure must not enter cooldown before threshold"
     );
 }
 
@@ -1134,33 +1138,21 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
             let attempt = self.sends.fetch_add(1, Ordering::SeqCst);
-            if attempt < 3 {
-                // 前 3 次尝试覆盖显式 failure、empty completed.output=[]、
-                // empty completed.output 缺失；都必须在 Resp15 前进入 Error01，
-                // 由既有瞬态策略同 provider 重试并最终 reselect。
+            if attempt == 0 {
                 assert_eq!(
                     request.provider_id(),
                     "first",
                     "attempt {} must hit first",
                     self.sends.load(Ordering::SeqCst)
                 );
-                let frames = match attempt {
-                    0 => vec![
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
-                        ),
-                        Ok::<Vec<u8>, V3ProviderError>(
-                            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
-                        ),
-                    ],
-                    1 => vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_array\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_array\",\"status\":\"completed\",\"output\":[]}}\n\n".to_vec(),
-                    )],
-                    2 => vec![Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_empty_absent\",\"output\":[]}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty_absent\",\"status\":\"completed\"}}\n\n".to_vec(),
-                    )],
-                    _ => unreachable!("attempt is bounded above"),
-                };
+                let frames = vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"HTTP_429\",\"message\":\"first quota exhausted\"}}}\n\n".to_vec(),
+                    ),
+                ];
                 return Ok(V3ProviderResp14Raw::from_sse(
                     request.request_id().to_string(),
                     request.provider_id().to_string(),
@@ -1223,13 +1215,13 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        4,
-        "precommit SSE failures must retry same provider 3 times then switch: {output:?}"
+        2,
+        "precommit SSE failure must switch candidates after one failed attempt: {output:?}"
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     assert!(
-        output.node_trace.contains(&"V3DirectTransientRetrySame"),
-        "precommit failures must retry same provider: {:?}",
+        !output.node_trace.contains(&"V3DirectTransientRetrySame"),
+        "precommit failures must not retry the same provider: {:?}",
         output.node_trace
     );
     let observability = output
@@ -1238,35 +1230,19 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         .expect("provider SSE precommit failure switch must be observable");
     assert_eq!(
         observability.provider_failure_events.len(),
-        3,
-        "each transient SSE retry is observable while no provider error reaches the client stream: {output:?}"
+        1,
+        "one transient SSE failure is observable while no provider error reaches the client stream: {output:?}"
     );
     assert_eq!(
         observability.provider_failure_events[0]
             .error_type
             .as_deref(),
         Some("HTTP_429"),
-        "the first malformed terminal is observable before transient retries"
-    );
-    let final_event = observability
-        .provider_failure_events
-        .last()
-        .expect("the reselect event must be present");
-    assert_eq!(
-        final_event.error_type.as_deref(),
-        Some("provider_response_sse_empty")
+        "the malformed terminal is observable before candidate switch"
     );
     assert_eq!(
-        final_event.message,
-        "provider SSE completed before content or tool output"
-    );
-    assert_eq!(
-        final_event.next_provider_key.as_deref(),
-        Some("second:key:test")
-    );
-    assert_eq!(
-        final_event.health_state, "transient_exhausted",
-        "transient failure must not write provider health (no cooldown)"
+        observability.provider_failure_events[0].health_state, "healthy",
+        "one transient failure must count toward health without entering cooldown"
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
@@ -1342,22 +1318,20 @@ async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_o
         .expect("second TCP provider address");
 
     let first_server = tokio::spawn(async move {
-        for _ in 0..3 {
-            let (mut socket, _) = first_listener.accept().await.expect("first provider accept");
-            let mut request = [0_u8; 4096];
-            let _ = socket.read(&mut request).await.expect("first provider request");
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
-                )
-                .await
-                .expect("first provider headers");
-            socket
-                .write_all(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-must-not-commit\"}\n\n")
-                .await
-                .expect("first provider partial frame");
-            socket.shutdown().await.expect("first provider disconnect");
-        }
+        let (mut socket, _) = first_listener.accept().await.expect("first provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket.read(&mut request).await.expect("first provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("first provider headers");
+        socket
+            .write_all(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-must-not-commit\"}\n\n")
+            .await
+            .expect("first provider partial frame");
+        socket.shutdown().await.expect("first provider disconnect");
     });
     let second_server = tokio::spawn(async move {
         let (mut socket, _) = second_listener
@@ -1462,7 +1436,7 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
     .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(attempt_budget.transport_attempts(), 4);
+    assert_eq!(attempt_budget.transport_attempts(), 2);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
     let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
         panic!("replacement TCP stream must be atomically committed")
@@ -1634,8 +1608,8 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
             .observability
             .as_ref()
             .and_then(|observability| observability.attempts),
-        Some(3),
-        "one request-level lifecycle must retain all same-provider attempts"
+        Some(1),
+        "one request-level lifecycle must count the failed provider attempt"
     );
 }
 

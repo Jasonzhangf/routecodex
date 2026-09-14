@@ -499,7 +499,7 @@
     },
     {
       "gate_id": "v4_router_l2_regression",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node,routecodex-v4-edge",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-router --deps routecodex-v4-base-node,routecodex-v4-edge --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib",
       "required_for": [
         "routecodex-v4-router:architecture_stable",
         "routecodex-v4-router:freeze",
@@ -900,6 +900,7 @@
       "gate_id": "v4_parity_gate_real_runtime_admission",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission_design"
       ]
@@ -908,6 +909,7 @@
       "gate_id": "v4_parity_gate_real_runtime_admission_red",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs", "--red-self-test"],
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission_design"
       ]
@@ -916,6 +918,7 @@
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission"
       ]
@@ -924,6 +927,7 @@
       "gate_id": "v4_real_runtime_compiled_manifest",
       "status": "active",
       "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-config --deps routecodex-v4-base-node,routecodex-v4-edge",
+      "argv": ["cargo", "run", "--quiet", "--release", "--manifest-path", "Cargo.toml", "-p", "routecodex-v4-build-link", "--", "test-consumer", "--root", ".", "--consumer", "routecodex-v4-config", "--deps", "routecodex-v4-base-node,routecodex-v4-edge"],
       "required_for": [
         "routecodex-v4-runtime-bin:active"
       ]
@@ -932,6 +936,7 @@
       "gate_id": "v4_real_runtime_provider_transport",
       "status": "active",
       "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-provider --deps routecodex-v4-base-node",
+      "argv": ["cargo", "run", "--quiet", "--release", "--manifest-path", "Cargo.toml", "-p", "routecodex-v4-build-link", "--", "test-consumer", "--root", ".", "--consumer", "routecodex-v4-provider", "--deps", "routecodex-v4-base-node"],
       "required_for": [
         "routecodex-v4-provider:active"
       ]
@@ -940,6 +945,7 @@
       "gate_id": "v4_real_runtime_server_http",
       "status": "active",
       "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer routecodex-v4-server --deps routecodex-v4-base-node",
+      "argv": ["cargo", "run", "--quiet", "--release", "--manifest-path", "Cargo.toml", "-p", "routecodex-v4-build-link", "--", "test-consumer", "--root", ".", "--consumer", "routecodex-v4-server", "--deps", "routecodex-v4-base-node"],
       "required_for": [
         "routecodex-v4-server:active"
       ]
@@ -948,6 +954,7 @@
       "gate_id": "v4_real_runtime_responses_json",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
       "required_for": [
         "routecodex-v4-runtime:active"
       ]
@@ -956,6 +963,7 @@
       "gate_id": "v4_real_runtime_responses_sse",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
       "required_for": [
         "routecodex-v4-runtime:active"
       ]
@@ -964,6 +972,7 @@
       "gate_id": "v4_real_runtime_v3_isolation",
       "status": "active",
       "command": "node scripts/verify-isolation.mjs",
+      "argv": ["node", "scripts/verify-isolation.mjs"],
       "required_for": [
         "routecodex-v4-runtime-bin:active"
       ]
@@ -972,6 +981,7 @@
       "gate_id": "v4_cli_l2_regression",
       "status": "active",
       "command": "cargo test -p routecodex-v4-cli --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-cli", "--manifest-path", "Cargo.toml", "--locked"],
       "required_for": [
         "routecodex-v4-cli:active"
       ]
@@ -980,6 +990,7 @@
       "gate_id": "v4_lifecycle_l2_regression",
       "status": "active",
       "command": "cargo test -p routecodex-v4-lifecycle --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-lifecycle", "--manifest-path", "Cargo.toml", "--locked"],
       "required_for": [
         "routecodex-v4-lifecycle:active"
       ]
@@ -988,6 +999,7 @@
       "gate_id": "v4_infrastructure_contract",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-infrastructure.mjs",
+      "argv": ["node", "scripts/architecture/verify-v4-infrastructure.mjs"],
       "required_for": [
         "routecodex-v4-governance:architecture_stable"
       ]
@@ -996,6 +1008,7 @@
       "gate_id": "v4_infrastructure_contract_red",
       "status": "active",
       "command": "node scripts/architecture/verify-v4-infrastructure.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-infrastructure.mjs", "--red-self-test"],
       "required_for": [
         "routecodex-v4-governance:architecture_stable"
       ]
@@ -1003,7 +1016,8 @@
     {
       "gate_id": "v4_runtime_bin_l2_regression",
       "status": "active",
-      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-lifecycle,routecodex-v4-servertool --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests",
+      "command": "cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests",
+      "argv": ["cargo", "run", "--quiet", "--release", "--manifest-path", "Cargo.toml", "-p", "routecodex-v4-build-link", "--", "test-binary", "--root", ".", "--consumer", "routecodex-v4-runtime-bin", "--deps", "routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error", "--source-deps", "routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins", "--rlib-deps", "routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib", "--out", "build-control/routecodex-v4-runtime-bin/tests"],
       "required_for": [
         "routecodex-v4-runtime-bin:active"
       ]
@@ -1012,6 +1026,7 @@
       "gate_id": "v4_servertool_l2_regression",
       "status": "active",
       "command": "cargo test -p routecodex-v4-servertool --test l2_servertool --manifest-path Cargo.toml --locked",
+      "argv": ["cargo", "test", "-p", "routecodex-v4-servertool", "--test", "l2_servertool", "--manifest-path", "Cargo.toml", "--locked"],
       "required_for": [
         "routecodex-v4-servertool:active"
       ]

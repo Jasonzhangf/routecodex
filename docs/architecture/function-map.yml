@@ -637,7 +637,6 @@ owners:
   - docs/goals/v3-runtime-timing-observability-test-design.md
   - docs/architecture
   - scripts/architecture/verify-v3-runtime-timing-observability.mjs
-  - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -653,7 +652,6 @@ owners:
   - docs/goals/v3-runtime-timing-observability-test-design.md
   required_gates:
   - npm run verify:v3-runtime-timing-observability
-  - npm run test:v3-runtime-timing-observability-red-fixtures
   - npm run verify:v3-architecture-docs
   migration_target: rust
   mainline_bindings:

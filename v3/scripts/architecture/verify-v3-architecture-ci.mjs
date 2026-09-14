@@ -5,7 +5,8 @@
 // `make verify`/release/install preconditions share the same source of truth.
 //
 // Sub-gate ordering: cheap pure checks first; doc/resource maps second;
-// type/module/call-map third; closeout gates last. Failures short-circuit.
+// type/module/call-map third; closeout gates last. Each listed gate is an
+// independent sibling; nested npm scripts retain any prerequisite semantics.
 //
 // If a sub-gate needs Jason manual authorization (e.g. lock fingerprint
 // drift), it returns non-zero with a deterministic reason; this wrapper
@@ -14,6 +15,7 @@
 import { spawnSync } from 'node:child_process';
 
 const STEPS = [
+  ['test:v3-architecture-ci-failure-aggregation-regression', 'V3 architecture CI reports all independent sibling failures'],
   ['verify:v3-direct-sse-accept-skeleton', 'Direct SSE client accept/worker skeleton remains frozen'],
   ['verify:v3-direct-sse-full-attempt-commit', 'Direct SSE provider attempts remain fully buffered until terminal success'],
   ['verify:v3-contract-map-owner', 'V3 contract-map owner and lifecycle bindings remain synchronized'],
@@ -55,7 +57,7 @@ const STEPS = [
 ];
 
 const failures = [];
-const passThrough = [];
+const passedSteps = [];
 for (const [script, description] of STEPS) {
   const r = spawnSync('npm', ['run', '--silent', script], { encoding: 'utf8', cwd: process.cwd() });
   const stdout = (r.stdout || '').trim();
@@ -66,17 +68,17 @@ for (const [script, description] of STEPS) {
   if (!ok) {
     failures.push({ script, description, code: r.status, stdout, stderr });
     process.stdout.write(`${stdout}\n${stderr}\n`);
-    break; // short-circuit on first failure
-  } else if (stdout) {
-    process.stdout.write(`${stdout}\n`);
-    passThrough.push(script);
+  } else {
+    passedSteps.push(script);
+    if (stdout) process.stdout.write(`${stdout}\n`);
   }
 }
 
 if (failures.length > 0) {
   process.stdout.write(`\n[verify:v3-architecture-ci] FAILED at ${failures[0].script} (${failures.length} sub-failure total in run)\n`);
-  process.stdout.write(`[verify:v3-architecture-ci] passed before failure: ${passThrough.length}/${STEPS.length}\n`);
+  process.stdout.write(`[verify:v3-architecture-ci] failed sub-gates: ${failures.map(({ script }) => script).join(', ')}\n`);
+  process.stdout.write(`[verify:v3-architecture-ci] passed sub-gates: ${passedSteps.length}/${STEPS.length}\n`);
   process.exit(1);
 }
 
-process.stdout.write(`\n[verify:v3-architecture-ci] ok (${passThrough.length}/${STEPS.length} sub-gates green)\n`);
+process.stdout.write(`\n[verify:v3-architecture-ci] ok (${passedSteps.length}/${STEPS.length} sub-gates green)\n`);

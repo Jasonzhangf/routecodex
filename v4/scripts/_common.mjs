@@ -24,6 +24,30 @@ export function run(command, options = {}) {
   }
 }
 
+export function runIndependent(entries) {
+  if (!Array.isArray(entries)) throw new TypeError('independent entries must be an array');
+  const failures = [];
+  for (const entry of entries) {
+    const command = typeof entry === 'string' ? entry : entry?.command;
+    const label = typeof entry === 'string' ? entry : entry?.label ?? command;
+    if (typeof command !== 'string' || command.length === 0) {
+      throw new TypeError('independent entry command must be a non-empty string');
+    }
+    try {
+      run(command, entry?.options);
+    } catch (error) {
+      failures.push({ label, message: error?.message ?? String(error) });
+    }
+  }
+  return failures;
+}
+
+export function reportIndependentFailures(scope, failures) {
+  if (failures.length === 0) return;
+  console.error(`[v4 ${scope}] FATAL ${failures.length} independent check(s) failed`);
+  for (const failure of failures) console.error(`- ${failure.label}: ${failure.message}`);
+}
+
 export function runCapture(command, options = {}) {
   const cwd = options.cwd ?? v4Root;
   return execSync(command, { cwd, encoding: 'utf8', env: process.env });

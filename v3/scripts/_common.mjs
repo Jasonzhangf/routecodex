@@ -3,11 +3,13 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GATE_SEVERITY, severityForGate } from '../../scripts/gate-policy.mjs';
 
 export const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const manifestPath = resolve(v3Root, 'Cargo.toml');
 
 export const v3TempDir = resolve(v3Root, 'build-control', 'temp');
+export { GATE_SEVERITY };
 
 // 门禁防挂死：每一步在独立进程组中运行并有硬超时。超时立刻 SIGTERM 整个
 // 进程组，5 秒后升级 SIGKILL，门禁以错误返回——绝不无限等待。
@@ -86,10 +88,11 @@ export async function runAll(entries) {
   const warnings = [];
   for (const entry of entries) {
     const label = entry.label ?? `${entry.command} ${(entry.args ?? []).join(' ')}`;
+    const severity = severityForGate(entry);
     try {
       await run(entry.command, entry.args ?? [], entry);
     } catch (error) {
-      if (error instanceof EnvironmentUnavailableError) {
+      if (severity === GATE_SEVERITY.WARN) {
         warnings.push(`${label}: ${error.message}`);
       } else {
         failures.push(`${label}: ${error.message}`);

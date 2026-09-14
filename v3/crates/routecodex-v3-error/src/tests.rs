@@ -166,7 +166,7 @@ fn provider_http_errors_reselect_when_route_pool_remains() {
 }
 
 #[test]
-fn transient_stream_failures_retry_same_before_reselect() {
+fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported() {
     for (code, stage) in [
         ("provider_response_sse_stream", "V3ProviderRespInbound01Raw"),
         (
@@ -174,21 +174,13 @@ fn transient_stream_failures_retry_same_before_reselect() {
             "V3ProviderReqOutbound09TransportRequest",
         ),
     ] {
-        let retry_same = provider_error_05(code, stage, true);
+        let decision = provider_error_05(code, stage, true);
         assert!(
             matches!(
-                retry_same.action,
-                V3Error05ExecutionAction::WaitThenRetrySame { .. }
-            ),
-            "{code} must retry same first"
-        );
-        let reselect = provider_error_05(code, stage, false);
-        assert!(
-            matches!(
-                reselect.action,
+                decision.action,
                 V3Error05ExecutionAction::WaitThenReselect { .. }
             ),
-            "{code} must reselect when same retry is unavailable"
+            "{code} must switch candidates instead of retrying the same provider"
         );
     }
 }

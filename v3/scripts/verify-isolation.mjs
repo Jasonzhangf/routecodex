@@ -27,24 +27,25 @@ function readLocal(path) {
   return readFileSync(resolve(v3Root, path), 'utf8');
 }
 
-function cargoMetadataFailures(env = process.env, warn = () => {}) {
-  const result = spawnSync(
+export function cargoMetadataFailures(env = process.env, warn = () => {}, runCargo = spawnSync) {
+  const result = runCargo(
     'cargo',
     ['metadata', '--locked', '--format-version', '1', '--manifest-path', resolve(v3Root, 'Cargo.toml')],
     { cwd: v3Root, env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
   );
   if (result.error || result.status !== 0) {
-    warn(
-      `cargo metadata unavailable; skipping V3 isolation checks: ${result.error?.message ?? result.stderr.trim() ?? `exit ${result.status}`}`,
-    );
-    return [];
+    const detail = result.error?.message ?? result.stderr?.trim() ?? `exit ${result.status}`;
+    const message = `cargo metadata unavailable; skipping V3 isolation checks: ${detail}`;
+    warn(message);
+    return [`required V3 isolation evidence unavailable: ${message}`];
   }
   let metadata;
   try {
     metadata = JSON.parse(result.stdout);
   } catch (error) {
-    warn(`cargo metadata output was not valid JSON; skipping V3 isolation checks: ${error.message}`);
-    return [];
+    const message = `cargo metadata output was not valid JSON; skipping V3 isolation checks: ${error.message}`;
+    warn(message);
+    return [`required V3 isolation evidence unavailable: ${message}`];
   }
   const failures = [];
   if (resolve(metadata.workspace_root) !== v3Root) {
@@ -134,7 +135,9 @@ export function collectIsolationFailures({
       failures.push(`V3 Node dependency yaml resolved outside v3/node_modules: ${yamlPath}`);
     }
   } catch (error) {
-    warn(`V3 Node dependency yaml is unavailable locally; skipping local resolution check: ${error.message}`);
+    const message = `V3 Node dependency yaml is unavailable locally; skipping local resolution check: ${error.message}`;
+    warn(message);
+    failures.push(`required V3 isolation evidence unavailable: ${message}`);
   }
 
   failures.push(...inspectCargo(env, warn));
