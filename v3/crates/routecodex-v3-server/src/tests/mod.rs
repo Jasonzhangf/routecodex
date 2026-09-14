@@ -3803,7 +3803,7 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
     };
 
     let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-    assert!(v3_is_sse_target_pool_exhaustion_parts(
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
         projected.status,
         &projected.node_trace,
         &projected.error_chain,
@@ -3828,6 +3828,19 @@ fn responses_stream_network_error_without_error04_projects_sse_body() {
         }
         other => panic!("network error must project SSE bytes, got {other:?}"),
     }
+}
+
+#[test]
+fn provider_network_error_with_pool_error06_only_does_not_count_as_exhaustion() {
+    let body = json!({
+        "error": {"code": "network_error", "message": "network error"}
+    });
+    assert!(!v3_is_sse_target_pool_exhaustion_parts(
+        502,
+        &["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        &["V3Error01SourceRaised", "V3Error06ClientProjected"],
+        &body,
+    ));
 }
 
 #[test]
