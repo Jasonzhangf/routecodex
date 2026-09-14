@@ -48,6 +48,10 @@ const temporaryBin = path.join(
 fs.copyFileSync(sourceBin, temporaryBin);
 if (process.platform !== 'win32') {
   fs.chmodSync(temporaryBin, 0o755);
+}
+// Ad hoc signing only exists on macOS. Linux has no codesign binary, so running
+// it there fails the build gate on every change.
+if (process.platform === 'darwin') {
   const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
     cwd: v3Root,
     encoding: 'utf8',
