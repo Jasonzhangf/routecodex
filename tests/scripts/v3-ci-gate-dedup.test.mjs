@@ -64,11 +64,10 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
       negative: transitiveGateCount(gate.negative),
     };
   }
-  // file-size's two red executions are an existing duplicate inside the
-  // unmodified V3 deep stack: architecture-ci and verify-red. The workflow
-  // owner must not add another execution; all other named paths are singular.
+  // After #52 dedup, verify-red owns the red fixtures for named V3 gates.
+  // Architecture CI must not add another execution.
   assert.deepEqual(counts, {
-    'file-size': { positive: 1, negative: 2 },
+    'file-size': { positive: 1, negative: 1 },
     'console-request-count': { positive: 1, negative: 1 },
     'responses-session-admission': { positive: 1, negative: 1 },
   }, `unexpected V3 CI gate execution: ${JSON.stringify(counts)}`);
