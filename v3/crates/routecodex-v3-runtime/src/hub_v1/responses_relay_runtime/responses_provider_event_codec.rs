@@ -314,6 +314,32 @@ fn build_typed_responses_terminal_response(
         }
     }
     object.insert("output".to_owned(), Value::Array(output));
+    let usage = object
+        .entry("usage".to_owned())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !usage.is_object() {
+        *usage = Value::Object(serde_json::Map::new());
+    }
+    let usage = usage
+        .as_object_mut()
+        .expect("usage was normalized to an object");
+    usage
+        .entry("input_tokens".to_owned())
+        .or_insert(Value::from(0));
+    usage
+        .entry("output_tokens".to_owned())
+        .or_insert(Value::from(0));
+    let input = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    usage
+        .entry("total_tokens".to_owned())
+        .or_insert(Value::from(input.saturating_add(output)));
     if !reducer.output_text.trim().is_empty() {
         object.insert(
             "output_text".to_owned(),
@@ -637,6 +663,24 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             json!("max_output_tokens")
         );
         assert_eq!(terminal["usage"]["total_tokens"], json!(15));
+    }
+
+    #[test]
+    fn response_completed_without_usage_materializes_response_completed_contract() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.completed",
+                "response": {"id": "resp_missing_usage", "status": "completed"}
+            }),
+            &mut reducer,
+        )
+        .expect("response.completed without usage must remain valid")
+        .expect("response.completed must be terminal");
+
+        assert_eq!(terminal["usage"]["input_tokens"], json!(0));
+        assert_eq!(terminal["usage"]["output_tokens"], json!(0));
+        assert_eq!(terminal["usage"]["total_tokens"], json!(0));
     }
 
     #[test]
