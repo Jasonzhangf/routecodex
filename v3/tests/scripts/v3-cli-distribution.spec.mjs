@@ -50,6 +50,18 @@ test('install builds release inside V3 and atomically publishes direct runtime a
   }
 });
 
+test('ad-hoc codesign runs only on macOS across build/install/pack owners', () => {
+  for (const [name, script] of [['copy-cli-bin', copyScript], ['install-cli', installScript], ['pack-release', packScript]]) {
+    const codesignIndex = script.indexOf("'codesign'");
+    assert.ok(codesignIndex >= 0, `${name} must publish a codesigned binary path`);
+    const guard = script.slice(0, codesignIndex);
+    assert.ok(
+      guard.includes("process.platform !== 'darwin'") || guard.includes("process.platform === 'darwin'"),
+      `${name} must gate ad-hoc codesign on darwin; codesign is unavailable on Linux`,
+    );
+  }
+});
+
 test('pack owns V3-local release target, staging, dist, and final artifacts', () => {
   assert.ok(packScript.includes("path.join(v3Root, 'build-control', 'pack')"));
   assert.ok(packScript.includes("path.join(v3Root, 'artifacts', 'pack')"));

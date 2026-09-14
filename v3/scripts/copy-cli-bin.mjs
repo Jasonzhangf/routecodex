@@ -48,6 +48,10 @@ const temporaryBin = path.join(
 fs.copyFileSync(sourceBin, temporaryBin);
 if (process.platform !== 'win32') {
   fs.chmodSync(temporaryBin, 0o755);
+}
+// Ad-hoc code signing is a macOS concern; `codesign` does not exist on Linux,
+// so signing there would report an environment failure as a build defect.
+if (process.platform === 'darwin') {
   const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
     cwd: v3Root,
     encoding: 'utf8',
