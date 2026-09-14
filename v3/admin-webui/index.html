@@ -5,44 +5,45 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RouteCodex — Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23 23 9M9 9l14 14' stroke='%235b8cff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/ambient.css">
 <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-<header>
-  <div class="brand">Route<span class="accent">Codex</span></div>
-  <nav aria-label="Primary">
-    <a href="/" class="active">Dashboard</a>
-    <a href="/routes.html">Routes</a>
-    <a href="/providers.html">Providers</a>
-    <a href="/requests.html">Requests</a>
-  </nav>
-  <div class="spacer"></div>
-  <button class="btn" id="refresh-btn" type="button">Refresh</button>
-  <button class="btn primary" id="reload-btn" type="button">Reload</button>
-</header>
-<main>
-  <h1>Dashboard</h1>
-  <div class="sub">Runtime status, ports, providers and traffic overview</div>
-  <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
-  <div class="cards" id="summary-cards"></div>
-  <div class="section">
-    <h2>Ports</h2>
-    <div class="panel" id="ports-panel"><div class="loading">loading…</div></div>
+<body class="ambient">
+<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<div class="shell">
+  <div class="topbar">
+    <div class="spacer"></div>
+    <button class="btn amb-button amb-button-cap" id="refresh-btn" type="button">Refresh</button>
+    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="reload-btn" type="button">Reload</button>
   </div>
-  <div class="layout">
+  <main>
+    <h1 id="page-title">Dashboard</h1>
+    <div id="page-sub" class="sub">Runtime status, ports, providers and traffic overview</div>
+    <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
+    <div class="cards" id="summary-cards"></div>
     <div class="section">
-      <h2>Route actual traffic</h2>
-      <div class="panel" id="traffic-panel"><div class="loading">loading…</div></div>
+      <h2>Ports</h2>
+      <div class="panel amb-surface amb-elevation-1" id="ports-panel"><div class="loading">loading…</div></div>
+    </div>
+    <div class="layout">
+      <div class="section">
+        <h2>Route actual traffic</h2>
+        <div class="panel amb-surface amb-elevation-1" id="traffic-panel"><div class="loading">loading…</div></div>
+      </div>
+      <div class="section">
+        <h2>Traffic mix</h2>
+        <div class="panel amb-surface amb-elevation-1" id="traffic-donut"></div>
+      </div>
     </div>
     <div class="section">
       <h2>Revisions</h2>
-      <div class="panel" id="revisions-panel"><div class="loading">loading…</div></div>
+      <div class="panel amb-surface amb-elevation-1" id="revisions-panel"><div class="loading">loading…</div></div>
     </div>
-  </div>
-</main>
+  </main>
+</div>
 
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
-<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+<div class="drawer amb-surface amb-elevation-2" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
   <button class="btn close" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
   <h2 id="drawer-title">Details</h2>
   <div id="drawer-body"></div>
@@ -51,163 +52,6 @@
     <button class="btn" id="drawer-cancel" type="button">Cancel</button>
   </div>
 </div>
-<script src="/app.embedded.txt"></script>
-<script>
-async function load() {
-  try {
-    const data = await api("/api/overview");
-    renderSummary(data);
-    renderPorts(data);
-    renderTraffic(data);
-    renderRevisions(data);
-  } catch (error) {
-    showStatus("err", `overview failed: ${error.message}`);
-  }
-}
-
-function renderSummary(data) {
-  const cards = document.getElementById("summary-cards");
-  cards.innerHTML = "";
-  const runtime = data.runtime.managed_instance;
-  const runtimeState = runtime && runtime.state ? runtime.state : "unknown";
-  const healthyPorts = data.runtime.ports.filter((port) => port.healthy).length;
-  // Ablation pass: dropped the redundant "Persisted received" card and the
-  // duplicated hints; color is reserved for error states only.
-  const cardsData = [
-    ["Runtime", runtimeState, runtime ? runtime.instance_id : "no instance", ""],
-    ["Ports", `${healthyPorts} / ${data.runtime.ports.length}`, "healthy / total", ""],
-    ["Providers", data.providers.total, `${data.providers.enabled} enabled · ${data.providers.disabled} disabled`, ""],
-    ["Requests (total)", data.traffic.total_requests.toLocaleString(), `daily ${data.traffic.daily_requests.toLocaleString()}`, ""],
-    ["Provider errors", data.traffic.persisted_provider_errors.toLocaleString(), data.traffic.persisted_provider_errors > 0 ? "" : "", data.traffic.persisted_provider_errors > 0 ? "bad" : ""],
-    ["Revisions", data.revisions.length, "", ""],
-  ];
-  for (const [label, value, hint, kind] of cardsData) {
-    const card = el("button", "card");
-    card.setAttribute("aria-haspopup", "dialog");
-    card.setAttribute("aria-label", `${label} details`);
-    card.appendChild(el("div", "label", label));
-    card.appendChild(el("div", kind ? `value ${kind}` : "value", value));
-    if (hint) card.appendChild(el("div", "hint", hint));
-    card.addEventListener("click", () => openDashboardDetail(label, data));
-    cards.appendChild(card);
-  }
-}
-
-function dashboardField(label, value) {
-  const wrapper = el("div", "field");
-  wrapper.appendChild(el("label", null, label));
-  wrapper.appendChild(el("span", "v", String(value ?? "\u2014")));
-  return wrapper;
-}
-
-function openDashboardDetail(label, data) {
-  const body = document.getElementById("drawer-body");
-  document.getElementById("drawer-title").textContent = label;
-  body.innerHTML = "";
-  const grid = el("div", "detail-grid");
-  if (label === "Runtime") {
-    const runtime = data.runtime.managed_instance;
-    grid.appendChild(dashboardField("State", runtime?.state || "unknown"));
-    grid.appendChild(dashboardField("Instance ID", runtime?.instance_id || "\u2014"));
-    if (runtime?.updated_at_epoch_ms) {
-      grid.appendChild(dashboardField("Updated", new Date(runtime.updated_at_epoch_ms).toLocaleString([], { hour12: false })));
-    }
-  } else if (label === "Ports") {
-    for (const port of data.runtime.ports) {
-      grid.appendChild(dashboardField(`${port.server_id} :${port.port}`, `${port.healthy ? "healthy" : "down"} \u00b7 http ${port.http_status || "unreachable"} \u00b7 ${port.endpoints.join(", ")}`));
-    }
-  } else if (label === "Providers") {
-    grid.appendChild(dashboardField("Total", data.providers.total));
-    grid.appendChild(dashboardField("Enabled", data.providers.enabled));
-    grid.appendChild(dashboardField("Disabled", data.providers.disabled));
-  } else if (label === "Requests (total)") {
-    grid.appendChild(dashboardField("Total requests", data.traffic.total_requests.toLocaleString()));
-    grid.appendChild(dashboardField("Daily requests", data.traffic.daily_requests.toLocaleString()));
-    if (data.traffic.last_request_at_epoch_ms) {
-      grid.appendChild(dashboardField("Last request", new Date(data.traffic.last_request_at_epoch_ms).toLocaleString([], { hour12: false })));
-    }
-  } else if (label === "Persisted received") {
-    grid.appendChild(dashboardField("Received", data.traffic.persisted_received.toLocaleString()));
-    grid.appendChild(dashboardField("Source", `${data.traffic.store_sources?.length ?? 0} request record stores`));
-  } else if (label === "Provider errors") {
-    grid.appendChild(dashboardField("Errors", data.traffic.persisted_provider_errors.toLocaleString()));
-    for (const [target, count] of Object.entries(data.traffic.route_targets || {}).sort(([, a], [, b]) => b - a)) {
-      grid.appendChild(dashboardField(target, count.toLocaleString()));
-    }
-  } else if (label === "Revisions") {
-    for (const rev of data.revisions.slice(0, 10)) {
-      grid.appendChild(dashboardField(`#${rev.seq}`, `${rev.action} \u2014 ${rev.reason}`));
-    }
-  }
-  body.appendChild(grid);
-  openPanel();
-}
-
-function renderPorts(data) {
-  const panel = document.getElementById("ports-panel");
-  panel.innerHTML = "";
-  if (!data.runtime.ports.length) {
-    panel.appendChild(el("div", "loading", "no ports configured"));
-    return;
-  }
-  for (const port of data.runtime.ports) {
-    const row = el("div", "row");
-    const name = el("div", "name", `${port.server_id}`);
-    name.appendChild(el("div", "meta", `127.0.0.1:${port.port} · ${port.endpoints.join(", ")}`));
-    row.appendChild(name);
-    row.appendChild(badge(port.healthy ? "healthy" : "down"));
-    if (!port.healthy) row.appendChild(el("span", "meta", `http ${port.http_status || "unreachable"}`));
-    panel.appendChild(row);
-  }
-}
-
-function renderTraffic(data) {
-  const panel = document.getElementById("traffic-panel");
-  panel.innerHTML = "";
-  const targets = data.traffic.route_targets;
-  const entries = Object.entries(targets).sort((a, b) => b[1] - a[1]);
-  if (!entries.length) {
-    panel.appendChild(el("div", "loading", "no routed records in persisted store"));
-    return;
-  }
-  const max = entries[0][1];
-  for (const [target, count] of entries) {
-    const row = el("div", "row");
-    const name = el("div", "name", target);
-    name.appendChild(el("div", "meta", `${count.toLocaleString()} requests`));
-    row.appendChild(name);
-    const meter = el("div", "traffic-meter");
-    const fill = el("span");
-    fill.style.width = `${Math.max(4, Math.round((count / max) * 100))}%`;
-    meter.appendChild(fill);
-    row.appendChild(meter);
-    panel.appendChild(row);
-  }
-}
-
-function renderRevisions(data) {
-  const panel = document.getElementById("revisions-panel");
-  panel.innerHTML = "";
-  const list = el("div", "rev-list");
-  if (!data.revisions.length) {
-    panel.appendChild(el("div", "loading", "no revisions yet"));
-    return;
-  }
-  for (const rev of data.revisions) {
-    const row = el("div", "rev");
-    row.appendChild(el("span", "seq", `#${rev.seq}`));
-    row.appendChild(el("span", "ts", rev.ts));
-    row.appendChild(el("span", null, `${rev.action} — ${rev.reason}`));
-    list.appendChild(row);
-  }
-  panel.appendChild(list);
-}
-
-document.getElementById("refresh-btn").addEventListener("click", load);
-document.getElementById("reload-btn").addEventListener("click", reload);
-document.getElementById("drawer-cancel")?.addEventListener("click", closePanel);
-startAutoRefresh(load);
-load();
-</script>
+<script type="module" src="/app/views/dashboard.js"></script>
 </body>
 </html>

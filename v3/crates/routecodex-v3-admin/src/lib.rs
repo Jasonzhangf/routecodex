@@ -16,6 +16,18 @@ pub const STATIC_PROVIDERS_HTML: &str = include_str!("../../../admin-webui/provi
 pub const STATIC_REQUESTS_HTML: &str = include_str!("../../../admin-webui/requests.html");
 pub const STATIC_APP_JS: &str = include_str!("../../../admin-webui/app.embedded.txt");
 pub const STATIC_STYLE_CSS: &str = include_str!("../../../admin-webui/styles.css");
+pub const STATIC_VENDOR_AMBIENT_CSS: &str =
+    include_str!("../../../admin-webui/vendor/ambient.css");
+pub const STATIC_APP_CORE_JS: &str = include_str!("../../../admin-webui/app/core.js");
+pub const STATIC_APP_SHELL_JS: &str = include_str!("../../../admin-webui/app/shell.js");
+pub const STATIC_APP_CHARTS_JS: &str = include_str!("../../../admin-webui/app/charts.js");
+pub const STATIC_APP_DRAWER_JS: &str = include_str!("../../../admin-webui/app/drawer.js");
+pub const STATIC_VIEW_DASHBOARD_JS: &str =
+    include_str!("../../../admin-webui/app/views/dashboard.js");
+pub const STATIC_VIEW_USAGE_JS: &str = include_str!("../../../admin-webui/app/views/usage.js");
+pub const STATIC_VIEW_PROVIDERS_JS: &str =
+    include_str!("../../../admin-webui/app/views/providers.js");
+pub const STATIC_VIEW_ROUTES_JS: &str = include_str!("../../../admin-webui/app/views/routes.js");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderHealthEntry {
