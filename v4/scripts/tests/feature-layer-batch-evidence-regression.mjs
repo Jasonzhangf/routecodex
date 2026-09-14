@@ -80,6 +80,63 @@ assert(
   'a shared-lane projection must not satisfy the self-test evidence gate',
 );
 
+const sharedRuntimeCandidate = {
+  head_commit: candidate.head_commit,
+  scope_hash: candidate.scope_hash,
+  blobs: [
+    ...candidate.blobs,
+    {
+      path: 'crates/routecodex-v4-runtime/Cargo.toml',
+      sha256: 'sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd',
+    },
+  ],
+};
+const sharedRuntimeGate = {
+  status: 'active',
+  evidence_role: 'positive',
+  argv: ['node', 'scripts/architecture/verify-v4-runtime.mjs', '--request-port'],
+  producer: { adapter: 'node', identity: 'v4_runtime_005_request_port_positive' },
+};
+const sharedRuntimeRef = {
+  role: 'positive',
+  gate_id: 'v4_runtime_005_request_port_positive',
+  path: 'docs/evidence/feature-completion/M2/V4-RUNTIME-005/positive.json',
+};
+const incompleteSharedRuntimeFailures = [];
+validateEvidenceRef({
+  ref: sharedRuntimeRef,
+  expectedRole: 'positive',
+  expectedFeatureId: 'V4-RUNTIME-005',
+  expectedModuleIds: ['routecodex-v4-runtime'],
+  expectedGateId: sharedRuntimeRef.gate_id,
+  candidate: sharedRuntimeCandidate,
+  sourcePaths: [candidate.blobs[0].path],
+  gateInputPaths: [sharedRuntimeCandidate.blobs[1].path],
+  gateMap: new Map([[sharedRuntimeRef.gate_id, sharedRuntimeGate]]),
+  truth: {
+    ...context,
+    blobIdentity(_commit, sourcePath) {
+      return sharedRuntimeCandidate.blobs.find((blob) => blob.path === sourcePath);
+    },
+  },
+  integrationCommit: sharedRuntimeCandidate.head_commit,
+  now,
+  evidence: {
+    ...baseEvidence,
+    evidence_id: 'positive',
+    issue_id: 'V4-RUNTIME-005',
+    scope: { feature_id: 'V4-RUNTIME-005', module_id: 'routecodex-v4-runtime' },
+    producer: sharedRuntimeGate.producer,
+    command_argv: sharedRuntimeGate.argv,
+    input_hashes: [sharedRuntimeCandidate.blobs[0].sha256],
+  },
+  failures: incompleteSharedRuntimeFailures,
+});
+assert(
+  incompleteSharedRuntimeFailures.some((failure) => failure.code === 'EVIDENCE_INPUT_HASH_MISMATCH'),
+  'shared runtime evidence must bind every declared input hash',
+);
+
 const sharedArgv = ['cargo', 'test', '-p', 'fixture'];
 const distinctArgv = ['node', 'fixture/gate.mjs'];
 const gateMap = new Map([
