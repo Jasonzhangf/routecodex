@@ -1432,6 +1432,24 @@ fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value
             }
         }
     }
+    if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
+        for part in parts {
+            let Some(part_object) = part.as_object_mut() else {
+                continue;
+            };
+            if let Some(name) = part_object.get("name").and_then(Value::as_str) {
+                let normalized = provider_function_name(name);
+                part_object.insert("name".to_string(), Value::String(normalized));
+            }
+            if let Some(tool_use) = part_object.get_mut("tool_use").and_then(Value::as_object_mut)
+            {
+                if let Some(name) = tool_use.get("name").and_then(Value::as_str) {
+                    let normalized = provider_function_name(name);
+                    tool_use.insert("name".to_string(), Value::String(normalized));
+                }
+            }
+        }
+    }
 }
 
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
