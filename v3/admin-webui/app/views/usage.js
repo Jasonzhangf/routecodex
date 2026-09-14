@@ -109,25 +109,41 @@ const state = {
   stats: {},
   timeseries: [],
   facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+  // The rail's value list must not come from `facets`: the server narrows
+  // facets to whatever the current filter selected, so filtering to one
+  // provider would delete the other providers from the rail and the user
+  // could never re-check them. This snapshot is taken from an unfiltered
+  // query instead, and only ever grows.
+  railFacets: null,
+  // Values already offered to the user per layer, so auto-seeding can tell a
+  // genuinely new provider from one the user deliberately unchecked.
+  knownLayerValues: {},
   errorStatusCode: null,
   selected: null,
   tableWidths: { entries: null, attempts: null, errors: null },
   loading: false,
-  // layered filter model: port tabs (Layer 1) → status kinds (Layer 2) →
-  // provider (Layer 3) → model (Layer 4); within a layer selections are OR,
-  // across layers they AND.
+  // Filter model: whitelist-by-default, opt-out to hide.
+  // - Within a layer, checked values are OR (a row passes the layer if it
+  //   matches at least one checked value).
+  // - Across layers the layers AND (Status × Provider × Model × Error code).
+  // - "No values checked in a layer" means "this layer excludes everything"
+  //   — the table is empty, which is the visible signal that the user has
+  //   hidden everything.
+  // - New values that appear after a refresh are added to the checked set
+  //   automatically so a brand-new provider or error code is never silently
+  //   hidden from the user.
   port: "all",
   sortMode: "time",
-  statusKinds: new Set(),
-  providerSel: new Set(),
-  modelSel: new Set(),
-  excluded: {},
+  statusInclude: null,        // null = "not yet seeded"; replaced by Set of kind keys
+  providerInclude: null,      // null = "not yet seeded"; replaced by Set of provider names
+  modelInclude: null,         // null = "not yet seeded"; replaced by Set of model names
+  errorCodeInclude: null,     // null = "not yet seeded"; replaced by Set of status-code strings
   collapsed: new Set(),
-  openExclude: null,
   selection: new Set(),
   kindCounts: {},
   providerCounts: {},
   modelCounts: {},
+  errorCodeCounts: {},
   exports: [],
 };
 
@@ -266,16 +282,42 @@ function attachColumnResizers(table, tab) {
 }
 
 function activePlans() {
-  const kinds = state.statusKinds.size ? [...state.statusKinds] : [null];
-  const providers = state.providerSel.size ? [...state.providerSel] : [null];
-  const models = state.modelSel.size ? [...state.modelSel] : [null];
-  const plans = [];
-  for (const status of kinds) {
-    for (const provider of providers) {
-      for (const model of models) {
-        plans.push({ status, provider, model });
-      }
+  // Build a flat list of {status, provider, model, error_code} permutations
+  // from the user's include sets.
+  //
+  // A null set means the layer has not been seeded yet, so it must not
+  // constrain the query — otherwise the very first load, which happens before
+  // the unfiltered value list arrives, would hide every row. An *empty* set is
+  // different: the user unchecked everything in that layer, which must yield
+  // zero plans and therefore zero rows rather than silently dropping the
+  // constraint.
+  //
+  // A layer with every known value checked is indistinguishable from no
+  // constraint, so it is dropped. That keeps the common "nothing filtered"
+  // case at a single request instead of the product of all four layers.
+  const rail = state.railFacets || {};
+  const allValues = {
+    status: Object.keys(STATUS_KIND_LABELS),
+    provider: Object.keys(rail.providers || {}),
+    model: Object.keys(rail.models || {}),
+    errorCode: Object.keys(rail.error_status_codes || {}),
+  };
+  const active = [];
+  for (const key of ["status", "provider", "model", "errorCode"]) {
+    const set = state[`${key}Include`];
+    if (set == null) continue;
+    if (!set.size) return [];
+    const every = allValues[key];
+    if (every.length && every.every((value) => set.has(value))) continue;
+    active.push([key, [...set]]);
+  }
+  const plans = [{}];
+  for (const [key, values] of active) {
+    const next = [];
+    for (const plan of plans) {
+      for (const value of values) next.push({ ...plan, [key]: value });
     }
+    plans.splice(0, plans.length, ...next);
   }
   return plans;
 }
@@ -285,6 +327,7 @@ async function fetchPlan(base, plan) {
   if (plan.status) params.set("status", plan.status);
   if (plan.provider) params.set("provider", plan.provider);
   if (plan.model) params.set("model", plan.model);
+  if (plan.errorCode) params.set("error_status_code", plan.errorCode);
   return api(`/api/observability/records?${params}`);
 }
 
@@ -396,8 +439,22 @@ async function loadRecordsInner() {
     if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
     // Rail multi-selects win over the single-value facet selects when set.
     const plans = activePlans();
-    if (plans.length > 12) {
-      showStatus("err", "Too many filter combinations to run at once (>12 queries) — uncheck some status, provider or model boxes.");
+    if (!plans.length) {
+      // A layer is empty, so nothing can match. Clear the table without
+      // querying and keep the stats/facets the rail needs to recover from.
+      state.records = [];
+      state.total = 0;
+      state.stats = {};
+      state.timeseries = [];
+      state.attemptRecords = [];
+      state.attemptsTotal = 0;
+      state.errorFacets = [];
+      state.errorStatuses = 0;
+      renderAll();
+      return;
+    }
+    if (plans.length > 60) {
+      showStatus("err", "Too many filter combinations to run at once (>60 queries) — uncheck more provider or model boxes.");
       return;
     }
     const responses = await Promise.all(plans.map((plan) => fetchPlan(params, plan)));
@@ -409,10 +466,63 @@ async function loadRecordsInner() {
     for (const response of responses) mergeFacets(mergedFacets, response.facets || {});
     state.facets = mergedFacets;
     if (state.port === "all") state.portCountsCache = { ...(mergedFacets.ports || {}) };
-    await Promise.all([loadAttempts(), loadErrors()]);
+    await Promise.all([loadAttempts(), loadErrors(), loadRailFacets()]);
     renderAll();
   } catch (error) {
     showStatus("err", `records query failed: ${error.message}`);
+  }
+}
+
+async function loadRailFacets() {
+  // One unfiltered query per range, used only to enumerate the values the rail
+  // offers and their totals. Kept separate from `loadRecordsInner` so the rail
+  // keeps every value visible regardless of what is currently checked.
+  try {
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    params.set("page_size", "1");
+    params.set("range", document.getElementById("chart-range").value);
+    params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
+    const response = await api(`/api/observability/records?${params}`);
+    const merged = state.railFacets || {};
+    mergeFacets(merged, response.facets || {});
+    state.railFacets = merged;
+  } catch (error) {
+    // Keep the previous snapshot: a stale value list still lets the user
+    // re-check something, an empty one does not.
+    if (!state.railFacets) state.railFacets = {};
+  }
+  seedIncludeSets();
+}
+
+function seedIncludeSets() {
+  // A null include-set means "the user has not chosen yet", so the layer is
+  // unconstrained and every value is admitted. Seeding happens once the
+  // unfiltered value list is known.
+  //
+  // Only genuinely new values are added to an already-seeded layer: a value the
+  // user unchecked must stay unchecked, or the next load would silently undo
+  // their choice. `knownLayerValues` remembers what has already been offered
+  // for exactly that reason.
+  const rail = state.railFacets || {};
+  const kindKeys = Object.keys(STATUS_KIND_LABELS);
+  const buckets = [
+    ["statusInclude", kindKeys],
+    ["providerInclude", Object.keys(rail.providers || {})],
+    ["modelInclude", Object.keys(rail.models || {})],
+    ["errorCodeInclude", Object.keys(rail.error_status_codes || {})],
+  ];
+  for (const [key, values] of buckets) {
+    if (!values.length) continue;
+    const seen = state.knownLayerValues[key] || (state.knownLayerValues[key] = new Set());
+    if (state[key] == null) {
+      state[key] = new Set(values);
+    } else {
+      for (const value of values) {
+        if (!seen.has(value)) state[key].add(value);
+      }
+    }
+    values.forEach((value) => seen.add(value));
   }
 }
 
@@ -629,60 +739,22 @@ function groupHeadRow(code, groupRows) {
   btn.appendChild(el("span", "code" + (groupRank(code) === 0 ? " error" : ""), code));
   const latest = groupRows[0] ? ` · latest ${timeText(Math.max(...groupRows.map((row) => row.started_epoch_ms || 0)))}` : "";
   btn.appendChild(el("span", "n", `${groupRows.length} rows${latest}`));
-  const excludedCount = state.excluded[code]?.size || 0;
-  if (excludedCount) btn.appendChild(el("span", "exclude-chip", `${excludedCount} excluded`));
   btn.addEventListener("click", () => {
     state.collapsed.has(code) ? state.collapsed.delete(code) : state.collapsed.add(code);
     renderRequests();
   });
   td.appendChild(btn);
-  const actions = el("span", "group-actions");
-  const excludeBtn = el("button", "btn", "Exclude…");
-  excludeBtn.type = "button";
-  excludeBtn.setAttribute("aria-expanded", String(state.openExclude === code));
-  excludeBtn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    state.openExclude = state.openExclude === code ? null : code;
-    renderRequests();
-  });
-  actions.appendChild(excludeBtn);
-  td.appendChild(actions);
-  tr.appendChild(td);
-  return tr;
-}
-
-function excludeRowEl(code, groupRows) {
-  const tr = el("tr", "exclude-row");
-  const td = el("td");
-  td.colSpan = 8;
-  const list = el("div", "exclude-list");
-  const combos = new Map();
-  for (const row of groupRows) combos.set(comboOf(row), (combos.get(comboOf(row)) || 0) + 1);
-  for (const [combo, count] of [...combos.entries()].sort((a, b) => b[1] - a[1])) {
-    const label = el("label", "filter-item");
-    const input = el("input");
-    input.type = "checkbox";
-    input.checked = state.excluded[code]?.has(combo) || false;
-    input.addEventListener("change", () => {
-      const bucket = state.excluded[code] || (state.excluded[code] = new Set());
-      input.checked ? bucket.add(combo) : bucket.delete(combo);
-      renderRequests();
-    });
-    label.append(input, el("span", null, combo), el("span", "n", String(count)));
-    list.appendChild(label);
-  }
-  list.appendChild(el("span", "mono muted", "checked = hide that provider/model/key within this group"));
-  td.appendChild(list);
   tr.appendChild(td);
   return tr;
 }
 
 function drilldownErrorStatus(code) {
-  // Drill into Entries with the clicked status code, layer-2 narrowed to
-  // errors, keeping the rest of the filter rail.
+  // Drill into Entries narrowed to one status code. Error codes are their own
+  // filter layer now, so set that layer to just this code and make sure the
+  // status layer still admits error rows.
   state.page = 1;
-  state.statusKinds = new Set(["error"]);
-  state.errorStatusCode = code;
+  state.statusInclude = new Set(["error"]);
+  state.errorCodeInclude = new Set([String(code)]);
   state.tab = "entries";
   loadRecords();
 }
@@ -776,20 +848,21 @@ function renderEntriesPanel(panel) {
     // Distinguish "the filters excluded everything" from "this range has no
     // records at all"; the second case is not a filter problem and telling the
     // user to clear filters there sends them in the wrong direction.
-    const filtered = state.statusKinds.size || state.providerSel.size || state.modelSel.size
-      || state.search || state.port !== "all" || state.errorStatusCode;
+    const layered = state.statusInclude != null || state.providerInclude != null
+      || state.modelInclude != null || state.errorCodeInclude != null;
+    const filtered = layered || state.search || state.port !== "all" || state.errorStatusCode;
     const empty = el("div", "empty-state");
     empty.appendChild(el("h2", null, filtered ? "No matching requests" : "No requests recorded yet"));
     const hint = el("p", null, filtered
-      ? "Adjust your search terms, or clear the checked filters in the left rail."
+      ? "Adjust your search terms, or re-check the boxes you unchecked in the left rail."
       : "Nothing has been recorded for the selected range. Widen the Range control above, or send traffic through the proxy and refresh.");
     if (filtered) {
       const reset = el("button", "btn", "Clear all filters");
       reset.addEventListener("click", () => {
-        state.statusKinds.clear();
-        state.providerSel.clear();
-        state.modelSel.clear();
-        state.excluded = {};
+        state.statusInclude = null;
+        state.providerInclude = null;
+        state.modelInclude = null;
+        state.errorCodeInclude = null;
         state.search = "";
         state.port = "all";
         state.errorStatusCode = null;
@@ -857,11 +930,8 @@ function renderEntriesPanel(panel) {
     for (const code of [...groups.keys()].sort(compareCodes)) {
       const groupRows = groups.get(code);
       body.appendChild(groupHeadRow(code, groupRows));
-      if (state.openExclude === code) body.appendChild(excludeRowEl(code, groupRows));
       if (state.collapsed.has(code)) continue;
-      const excluded = state.excluded[code];
-      const shown = excluded ? groupRows.filter((row) => !excluded.has(comboOf(row))) : groupRows;
-      for (const row of shown) body.appendChild(requestRow(row));
+      for (const row of groupRows) body.appendChild(requestRow(row));
     }
   } else {
     for (const row of rows) body.appendChild(requestRow(row));
@@ -1017,63 +1087,101 @@ const STATUS_KIND_LABELS = { success: "Success (2xx)", error: "Error (4xx/5xx)",
 
 function renderRail() {
   const stats = state.stats || {};
-  if (!state.statusKinds.size) {
-    state.kindCounts = {
-      success: Number(stats.success_count || 0),
-      error: Number(stats.error_count || 0),
-      cancelled: Number(stats.cancelled_count || 0),
-      active: Number(stats.active_count || 0),
-    };
-  }
-  if (!state.providerSel.size) state.providerCounts = { ...(state.facets.providers || {}) };
-  if (!state.modelSel.size) state.modelCounts = { ...(state.facets.models || {}) };
+  // The value list and the include-set seeding both come from the unfiltered
+  // rail snapshot (see seedIncludeSets). A null set here means the snapshot has
+  // not arrived yet; render it as unconstrained rather than as an empty filter.
+  const rail = state.railFacets || state.facets || {};
+  const kindKeys = Object.keys(STATUS_KIND_LABELS);
+  const providerNames = Object.keys(rail.providers || {});
+  const modelNames = Object.keys(rail.models || {});
+  const errorCodes = Object.keys(rail.error_status_codes || {});
+
+  state.kindCounts = {
+    success: Number(stats.success_count || 0),
+    error: Number(stats.error_count || 0),
+    cancelled: Number(stats.cancelled_count || 0),
+    active: Number(stats.active_count || 0),
+  };
+  state.providerCounts = { ...(rail.providers || {}) };
+  state.modelCounts = { ...(rail.models || {}) };
+  state.errorCodeCounts = { ...(rail.error_status_codes || {}) };
+
   checkboxList(document.getElementById("filter-status"),
-    Object.keys(STATUS_KIND_LABELS).map((kind) => [STATUS_KIND_LABELS[kind], state.kindCounts[kind] || 0]),
-    new Set([...state.statusKinds].map((kind) => STATUS_KIND_LABELS[kind])),
+    kindKeys.map((kind) => [kind, STATUS_KIND_LABELS[kind], state.kindCounts[kind] || 0]),
+    new Set([...(state.statusInclude || [])].map((kind) => STATUS_KIND_LABELS[kind])),
     (label, on) => {
-      const kind = Object.keys(STATUS_KIND_LABELS).find((key) => STATUS_KIND_LABELS[key] === label);
-      on ? state.statusKinds.add(kind) : state.statusKinds.delete(kind);
+      const kind = kindKeys.find((key) => STATUS_KIND_LABELS[key] === label);
+      on ? state.statusInclude.add(kind) : state.statusInclude.delete(kind);
       state.page = 1;
       loadRecords();
     });
   checkboxList(document.getElementById("filter-provider"),
-    Object.entries(state.providerCounts).sort((a, b) => b[1] - a[1]),
-    state.providerSel,
+    Object.entries(state.providerCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => [name, name, count]),
+    new Set([...(state.providerInclude || [])]),
     (value, on) => {
-      on ? state.providerSel.add(value) : state.providerSel.delete(value);
+      on ? state.providerInclude.add(value) : state.providerInclude.delete(value);
       state.page = 1;
       loadRecords();
     });
   checkboxList(document.getElementById("filter-model"),
-    Object.entries(state.modelCounts).sort((a, b) => b[1] - a[1]),
-    state.modelSel,
+    Object.entries(state.modelCounts).sort((a, b) => b[1] - a[1]).map(([name, count]) => [name, name, count]),
+    new Set([...(state.modelInclude || [])]),
     (value, on) => {
-      on ? state.modelSel.add(value) : state.modelSel.delete(value);
+      on ? state.modelInclude.add(value) : state.modelInclude.delete(value);
       state.page = 1;
       loadRecords();
     });
+  checkboxList(document.getElementById("filter-error-code"),
+    Object.entries(state.errorCodeCounts).sort((a, b) => Number(a[0]) - Number(b[0])).map(([code, count]) => [code, code, count]),
+    new Set([...(state.errorCodeInclude || [])]),
+    (value, on) => {
+      on ? state.errorCodeInclude.add(value) : state.errorCodeInclude.delete(value);
+      state.page = 1;
+      loadRecords();
+    });
+  // "Clear" re-checks every value rather than unchecking it: the default is
+  // "show everything", so clearing a filter means returning to that default.
   document.querySelectorAll(".filter-clear").forEach((btn) => {
     btn.onclick = () => {
-      state[btn.dataset.clear].clear();
+      const key = btn.dataset.clear;
+      if (key === "statusInclude") state.statusInclude = new Set(kindKeys);
+      if (key === "providerInclude") state.providerInclude = new Set(Object.keys(rail.providers || {}));
+      if (key === "modelInclude") state.modelInclude = new Set(Object.keys(rail.models || {}));
+      if (key === "errorCodeInclude") state.errorCodeInclude = new Set(Object.keys(rail.error_status_codes || {}));
       state.page = 1;
       loadRecords();
     };
   });
 }
 
+// `entries` is [storedValue, displayLabel, count]: the checkbox tracks the
+// value that goes on the wire while the row shows the friendly label.
+// Rebuilding the checkbox nodes on every data load destroys the node the user
+// is currently interacting with, so the rail is only re-rendered when its
+// contents actually change; otherwise the existing inputs are updated in place.
 function checkboxList(container, entries, selectedSet, onToggle) {
   if (!container) return;
-  container.replaceChildren(...entries.map(([value, count]) => {
-    const label = el("label", "filter-item");
+  const signature = JSON.stringify(entries.map(([value, label, count]) => [value, label, count]));
+  if (container.dataset.signature === signature) {
+    const inputs = container.querySelectorAll("input[type=checkbox]");
+    entries.forEach(([, label], index) => {
+      const input = inputs[index];
+      if (input) input.checked = selectedSet.has(label);
+    });
+    return;
+  }
+  container.dataset.signature = signature;
+  container.replaceChildren(...entries.map(([value, label, count]) => {
+    const item = el("label", "filter-item");
     const input = el("input");
     input.type = "checkbox";
-    input.checked = selectedSet.has(value);
-    input.addEventListener("change", () => onToggle(value, input.checked));
-    label.append(input, el("span", null, value), el("span", "n", String(count)));
-    return label;
+    input.checked = selectedSet.has(label);
+    input.addEventListener("change", () => onToggle(label, input.checked));
+    item.append(input, el("span", null, label), el("span", "n", String(count)));
+    return item;
   }));
   if (!entries.length) {
-    container.appendChild(el("span", "mono muted tiny", "No values available for this filter"));
+    container.appendChild(el("span", "mono muted tiny", "Nothing recorded yet"));
   }
 }
 
