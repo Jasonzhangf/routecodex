@@ -40,6 +40,10 @@ const ADDITIONAL_PROMOTION_REQUIREMENTS = [
   'promotion_record',
 ];
 
+// Lifecycle steps that are not zone transition requirements. They still stay
+// in the canonical record graph, but the zone manifest has no matching knob.
+const NON_ZONE_RECORD_STEPS = new Set(['collaboration_claimed']);
+
 const ZONE_REQUIREMENT_BY_RECORD_STEP = {
   clean_worktree: 'clean_worktree',
   baseline_reproduction: 'baseline_reproduction',
@@ -92,8 +96,30 @@ function requiredPromotionRequirements(recordGraph) {
   )];
 }
 
+function unmappedPromotionSteps(recordGraph) {
+  const lifecycle = recordGraph?.properties?.fix_lifecycle?.properties;
+  const singleOrder = lifecycle?.single_order?.const;
+  const parallelOrder = lifecycle?.parallel_order?.const;
+  if (!Array.isArray(singleOrder) || !Array.isArray(parallelOrder)) {
+    return [];
+  }
+  const parallelOnly = parallelOrder.filter((entry) => !singleOrder.includes(entry));
+  const requiredSteps = [...singleOrder, ...parallelOnly, ...ADDITIONAL_PROMOTION_REQUIREMENTS];
+  return [...new Set(
+    requiredSteps.filter(
+      (step) =>
+        !NON_ZONE_RECORD_STEPS.has(step)
+        && !Object.hasOwn(ZONE_REQUIREMENT_BY_RECORD_STEP, step),
+    ),
+  )];
+}
+
 export function validateTransitionContract(lifecycle, zone, recordGraph) {
   const failures = [];
+  const unmapped = unmappedPromotionSteps(recordGraph);
+  if (unmapped.length > 0) {
+    failures.push(`record graph promotion steps must map to zone requirements, unmapped: ${unmapped.join(', ')}`);
+  }
   const promotionRequirements = requiredPromotionRequirements(recordGraph);
   if (!promotionRequirements) {
     failures.push('record graph must define fix_lifecycle.single_order and fix_lifecycle.parallel_order arrays');
@@ -211,6 +237,12 @@ function runRedSelfTest() {
     const active = manifest.zone.transitions.find((entry) => entry.from === 'playground' && entry.to === 'active');
     active.requirements = active.requirements.join(' ');
   }, 'must declare requirements array');
+  expectReject((manifest) => {
+    manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const = [
+      ...manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const,
+      'security_review_pass',
+    ];
+  }, 'must map to zone requirements');
   expectReject((manifest) => {
     const protectedEdge = manifest.zone.transitions.find((entry) => entry.from === 'active' && entry.to === 'protected');
     protectedEdge.record_required = protectedEdge.record_required.filter((record) => record !== 'FreezeRecord');
