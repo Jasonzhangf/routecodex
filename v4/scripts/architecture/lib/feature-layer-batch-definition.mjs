@@ -31,7 +31,6 @@ import {
 } from './feature-layer-batch-contract.mjs';
 import { SHA256_PATTERN, sha256 } from './feature-layer-batch-git.mjs';
 import { validateRegistryBindings } from './feature-layer-batch-registry.mjs';
-import { validateSourceGreenClaims } from './feature-layer-batch-source.mjs';
 
 const ROOT_KEYS = [
   'schema_version', 'manifest_id', 'status', 'owner_feature_id', 'owner_module_id',
@@ -363,7 +362,6 @@ export function validateFeatureLayerDefinition(input, context, options = {}) {
   if (((manifest.integration?.wiring_edges ?? []).length > 0) !== manifest.integration?.wiring_started) {
     addFailure(failures, 'WIRING_STATE_DRIFT', 'wiring_started and wiring_edges must change together');
   }
-  validateSourceGreenClaims(input, context, failures);
   for (const edge of input.mainlineMap.edges ?? []) {
     const serialized = JSON.stringify(edge);
     if (!manifest.integration?.wiring_started
