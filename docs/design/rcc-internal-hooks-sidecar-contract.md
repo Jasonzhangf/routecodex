@@ -399,3 +399,51 @@ exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-lifecycle
           -p routecodex-v3-hooks --all-targets
           0 errors; warnings only (pre-existing TEST_ENV_LOCK test pattern)
 ```
+
+## Integration gate receipts (branch `codex/rcc-internal-hooks-sidecar-main-0914`)
+
+Executed in the integration worktree
+`/Users/fanzhang/Documents/github/routecodex/playground/rcc-internal-hooks-sidecar-main-0914`
+on the candidate HEAD, base `origin/main` `3fe9790007f7d2abfe044dd7a466c258847c53f4`.
+These are real command exit results for the `required_gates` in
+`docs/architecture/v3-verification-map.yml`; they are source, test, and gate
+evidence only, not install, restart, or live replay evidence.
+
+```text
+2026-09-14T19:00Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
+                     56 lib + 3 binary_handler_config + 1 binary_readiness
+                     + 6 native_delivery_replay pass
+2026-09-14T19:00Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
+                     52 pass
+2026-09-14T19:00Z  exit 0  node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+                     6 pass
+2026-09-14T19:14Z  exit 0  npm run verify:v3-resource-map
+2026-09-14T19:14Z  exit 0  npm run verify:v3-mainline-caller-flow
+                     binding_pending edges 13; locked 55; pending 21
+2026-09-14T19:14Z  exit 0  npm run verify:v3-module-boundaries
+2026-09-14T19:14Z  exit 0  npm run verify:v3-architecture-docs
+                     docs 26; resources 171; edges 442
+2026-09-14T19:14Z  exit 0  git diff --check
+2026-09-14T19:16Z  exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-hooks --all-targets
+                     0 errors
+```
+
+Review findings and their fixes are recorded in
+`docs/design/rcc-internal-hooks-sidecar-review-0914.md`, including the red
+evidence for each fix.
+
+### Live replay gap (unchanged)
+
+The declared `live_required` items are still not closed:
+
+- No real TUI/TUI or TUI/Desktop same-entry replay has produced native
+  `delivered/replied/read` evidence on the current candidate. The only real
+  App Server history-read attempt on the default Desktop daemon returned
+  `list_turns is not supported yet`, and no cursor was available, so no `read`
+  observation exists.
+- No real sidecar failure injection has been run against an installed
+  production binary; the missing/crash/timeout cases are contract and unit
+  level only.
+
+Install, restart, merge, and push remain explicitly unauthorized and are owned
+by the supervisor.

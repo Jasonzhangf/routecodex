@@ -257,6 +257,7 @@ pub fn handle_control_request<T: AppServerTransport>(
 
 pub struct ControlServer {
     listener: UnixListener,
+    socket_path: std::path::PathBuf,
     core: Arc<Mutex<HooksSidecarCore<AnyAppServerTransport>>>,
 }
 
@@ -274,6 +275,7 @@ impl ControlServer {
         };
         Ok(Self {
             listener: bind_control_socket(socket_path)?,
+            socket_path: socket_path.to_path_buf(),
             core: Arc::new(Mutex::new(core)),
         })
     }
@@ -354,6 +356,7 @@ impl ControlServer {
         }
         Ok(Self {
             listener: bind_control_socket(socket_path)?,
+            socket_path: socket_path.to_path_buf(),
             core: Arc::new(Mutex::new(core)),
         })
     }
@@ -409,7 +412,19 @@ impl ControlServer {
             }
         }
         let _ = timer.join();
+        // The server owns this path. Removing it after the loop exits keeps a
+        // clean restart from failing with AddrInUse on a stale socket left by
+        // an explicit shutdown.
+        remove_control_socket(&self.socket_path)?;
         result
+    }
+}
+
+fn remove_control_socket(socket_path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(socket_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -681,6 +696,15 @@ mod tests {
         server
             .join()
             .expect("control server should exit gracefully");
+        // A graceful shutdown must not leave the owned socket behind: the next
+        // daemon binds the same path without external cleanup.
+        assert!(
+            !socket_path.exists(),
+            "shutdown must remove the owned control socket"
+        );
+        ControlServer::new(&socket_path).expect("rebind after shutdown");
+        let rebound = std::fs::metadata(&socket_path);
+        assert!(rebound.is_ok(), "rebound control socket must exist");
         let _ = std::fs::remove_file(socket_path);
     }
 
