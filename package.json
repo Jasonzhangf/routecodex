@@ -50,6 +50,7 @@
     "test:provider-response-errorerr-bypass-closeout-red-fixtures": "node scripts/tests/provider-response-errorerr-bypass-closeout-red-fixtures.mjs",
     "test:vr-token-estimation-red-fixtures": "node scripts/tests/vr-token-estimation-red-fixtures.mjs",
     "verify:file-line-limit": "node scripts/ci/check-file-line-limit.mjs",
+    "test:file-line-limit": "node --test tests/scripts/file-line-limit.test.mjs",
     "audit:custom-payload-carrier-owner-queryability": "node scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs",
     "audit:function-map-canonical-builder-spread": "node scripts/architecture/audit-function-map-canonical-builder-spread.mjs",
     "audit:resource-global-coverage": "node scripts/architecture/audit-resource-global-coverage.mjs",

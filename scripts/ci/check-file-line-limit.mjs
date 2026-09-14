@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
 const policyPath = path.join(repoRoot, 'config', 'file-line-limit-policy.json');
@@ -70,9 +70,9 @@ function parseNameStatus(output) {
       if (parts.length < 2) return null;
       const status = parts[0];
       if (status.startsWith('R')) {
-        return { status: 'R', path: parts[2] || parts[1] };
+        return { status: 'R', basePath: parts[1], path: parts[2] || parts[1] };
       }
-      return { status: status[0], path: parts[1] };
+      return { status: status[0], basePath: parts[1], path: parts[1] };
     })
     .filter((v) => v && typeof v.path === 'string');
 }
@@ -92,8 +92,33 @@ function isCodeFile(filePath, policy) {
 
 function countLines(filePath) {
   const content = fs.readFileSync(path.join(repoRoot, filePath), 'utf8');
+  return countContentLines(content);
+}
+
+function countContentLines(content) {
   if (!content.length) return 0;
   return content.split(/\r?\n/).length;
+}
+
+function countLinesAtRevision(revision, filePath) {
+  if (!revision) return null;
+  try {
+    const content = execFileSync('git', ['show', `${revision}:${filePath}`], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8'
+    });
+    return countContentLines(content);
+  } catch {
+    return null;
+  }
+}
+
+function baseRevisionForRange(range) {
+  if (!range) return 'HEAD';
+  const separator = range.indexOf('...');
+  if (separator < 0) return null;
+  return range.slice(0, separator);
 }
 
 function getChangedFiles(range) {
@@ -113,6 +138,8 @@ function main() {
   }
 
   const violations = [];
+  const warnings = [];
+  const baseRevision = baseRevisionForRange(range);
   for (const entry of changed) {
     const filePath = entry.path;
     if (!filePath || !fs.existsSync(path.join(repoRoot, filePath))) {
@@ -126,10 +153,27 @@ function main() {
       continue;
     }
     const violationType = entry.status === 'A' ? 'new-file-over-limit' : 'modified-file-over-limit';
+    if (entry.status !== 'A') {
+      const baselineLines = countLinesAtRevision(baseRevision, entry.basePath || filePath);
+      if (baselineLines !== null && lines <= baselineLines) {
+        warnings.push({ type: violationType, path: filePath, lines, baselineLines });
+        continue;
+      }
+    }
     violations.push({ type: violationType, path: filePath, lines });
   }
 
+  if (warnings.length) {
+    console.warn(`[file-line-limit] warn (limit=${policy.limit}, range=${range || 'HEAD'})`);
+    for (const warning of warnings) {
+      console.warn(
+        `- ${warning.type}: ${warning.path} (${warning.lines} lines; baseline ${warning.baselineLines}; no growth)`
+      );
+    }
+  }
+
   if (!violations.length) {
+    if (warnings.length) return;
     console.log(
       `[file-line-limit] pass (range=${range || 'HEAD'} limit=${policy.limit}, checked=${changed.length})`
     );

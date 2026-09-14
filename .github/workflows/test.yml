@@ -103,6 +103,9 @@ jobs:
       - name: File line-limit gate (<500)
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:file-line-limit
+      - name: File line-limit behavior regression
+        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        run: npm run test:file-line-limit
       - name: V3 provider action gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate
