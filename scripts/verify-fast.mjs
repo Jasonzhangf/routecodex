@@ -216,6 +216,15 @@ function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
   return scopes;
 }
 
+function classifyV4FullScope(paths, { rootPackageChanged, workflowScope }) {
+  if (rootPackageChanged || workflowScope.v4 || paths.includes('scripts/verify-fast.mjs')) return true;
+
+  return paths.some((path) => {
+    if (!path.startsWith('v4/')) return false;
+    return !/^v4\/(?:crates\/[^/]+\/(?:src|tests|examples|benches)\/|cordis\/[^/]+\/(?:src|tests)\/)/u.test(path);
+  });
+}
+
 function writeChangedScopeOutputs(entries) {
   const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
   if (!outputPath) return;
@@ -225,6 +234,7 @@ function writeChangedScopeOutputs(entries) {
   const workflowScope = classifyWorkflowScope(entries);
   const rootPackageChanged = has(/^package(?:-lock)?\.json$/u);
   const fineScopes = classifyV3FineScopes(paths, { rootPackageChanged, workflowScope });
+  const v4FullScope = classifyV4FullScope(paths, { rootPackageChanged, workflowScope });
   const v3Scope = fineScopes.size > 0 || workflowScope.v3 || has(/^v3\//u)
     || paths.some((relative) => isV3RootScript(relative))
     || has(/^docs\/(?:architecture|design|goals|schemas)\//u)
@@ -240,6 +250,7 @@ function writeChangedScopeOutputs(entries) {
     v3_router: fineScopes.has('v3_router'),
     v3_tool: fineScopes.has('v3_tool'),
     v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged || paths.includes('scripts/verify-fast.mjs'),
+    v4_full: v4FullScope,
   };
 
   appendFileSync(

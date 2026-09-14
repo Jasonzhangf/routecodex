@@ -41,8 +41,8 @@ const cases = [
   { relative: 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/tests/agent-collab-protocol-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true },
-  { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true },
+  { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true, v4Full: true },
+  { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true, v4Full: true },
   { relative: 'scripts/ensure-cli-command-shim.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/install-v3-cli.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'tests/scripts/v3-cli-distribution.spec.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -62,6 +62,7 @@ const cases = [
     contents: '  - name: V4 gate\n    run: npm --prefix v4 run verify:ci\n',
     v3: false,
     v4: true,
+    v4Full: true,
   },
   {
     relative: '.github/workflows/test.yml',
@@ -69,6 +70,7 @@ const cases = [
     fine: Object.fromEntries(fineScopes.map((name) => [name, true])),
     v3: true,
     v4: true,
+    v4Full: true,
   },
   {
     relative: '.github/workflows/test.yml',
@@ -76,6 +78,21 @@ const cases = [
     diffMode: 'new-ref',
     v3: false,
     v4: true,
+    v4Full: true,
+  },
+  {
+    relative: 'v4/crates/routecodex-v4-config/src/lib.rs',
+    contents: 'pub const SCOPE_FIXTURE: bool = true;\n',
+    v3: false,
+    v4: true,
+    v4Full: false,
+  },
+  {
+    relative: 'v4/docs/architecture/v4-build-domain.md',
+    contents: '# V4 scope fixture\n',
+    v3: false,
+    v4: true,
+    v4Full: true,
   },
 ];
 const failures = [];
@@ -89,6 +106,33 @@ if (directArchitectureRuns !== 0) {
 }
 if (canonicalArchitectureRuns !== 1) {
   failures.push(`v3 verify:ci must retain exactly one canonical architecture-ci gate: ${canonicalArchitectureRuns}`);
+}
+if (!workflow.includes("v4_full: ${{ steps.changed.outputs.v4_full }}")) {
+  failures.push('scope job must publish the V4 full-matrix decision');
+}
+if (!workflow.includes("if: needs.scope.outputs.v4_full == 'true'")) {
+  failures.push('V4 full jobs must require the explicit full-matrix scope');
+}
+if (!workflow.includes("if: needs.scope.outputs.v4 == 'true' && needs.scope.outputs.v4_full != 'true'")) {
+  failures.push('V4 source changes must have a scoped owner-check job');
+}
+if (!readFileSync(join(repo, 'v4', 'package.json'), 'utf8').includes('"verify:scoped": "node scripts/verify-scoped.mjs"')) {
+  failures.push('V4 scoped owner-check entrypoint is not wired');
+}
+const scopedPlan = spawnSync(process.execPath, [join(repo, 'v4', 'scripts', 'verify-scoped.mjs')], {
+  cwd: repo,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    ROUTECODEX_GATE_DIFF_BASE: '94c70c77cb9e716f8c305ecadd6f0e7699ea0529',
+    ROUTECODEX_GATE_DIFF_HEAD: '5d3cc3ecc9d3ab10de8f1092aa7ce442498bb320',
+    RCCV4_SCOPED_PLAN_ONLY: '1',
+  },
+});
+if (scopedPlan.status !== 0
+    || !`${scopedPlan.stdout || ''}`.includes('modules=routecodex-v4-config')
+    || `${scopedPlan.stdout || ''}`.includes('consumer:routecodex-v4-config')) {
+  failures.push(`V4 scoped owner plan must resolve the changed module, got status=${scopedPlan.status}\n${scopedPlan.stdout || ''}\n${scopedPlan.stderr || ''}`);
 }
 const independentGateScopes = {
   'Fallback and internal policy hardcode gate': 'v3',
@@ -122,7 +166,7 @@ for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install 
 }
 
 mkdirSync(join(repo, 'playground'), { recursive: true });
-for (const { relative, contents, diffMode, fine, v3, v4 } of cases) {
+for (const { relative, contents, diffMode, fine, v3, v4, v4Full = false } of cases) {
   const root = mkdtempSync(join(repo, 'playground', '.verify-fast-scope-'));
   try {
     const target = join(root, relative);
@@ -153,8 +197,8 @@ for (const { relative, contents, diffMode, fine, v3, v4 } of cases) {
     const scope = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : '<missing scope output>';
     const expectedFine = fine && Object.fromEntries(fineScopes.map((name) => [name, fine[name] === true]));
     const fineMatches = !fine || fineScopes.every((name) => scope.includes(`${name}=${expectedFine[name]}\n`));
-    if (result.status !== 0 || !scope.includes(`v3=${v3}\n`) || !scope.includes(`v4=${v4}\n`) || !fineMatches) {
-      failures.push(`${relative}: expected v3=${v3}, v4=${v4}, got status=${result.status}\n${output}`);
+    if (result.status !== 0 || !scope.includes(`v3=${v3}\n`) || !scope.includes(`v4=${v4}\n`) || !scope.includes(`v4_full=${v4Full}\n`) || !fineMatches) {
+      failures.push(`${relative}: expected v3=${v3}, v4=${v4}, v4_full=${v4Full}, got status=${result.status}\n${output}`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -200,14 +244,19 @@ try {
   symlinkSync(join(repo, 'node_modules'), join(v4RustRoot, 'node_modules'), 'dir');
   execFileSync('git', ['init', '-q'], { cwd: v4RustRoot });
   execFileSync('git', ['add', 'v4/crates/routecodex-v4-config/src/lib.rs'], { cwd: v4RustRoot });
+  const scopeOutputPath = join(v4RustRoot, 'scope-output.txt');
   const result = spawnSync(process.execPath, [verifier], {
     cwd: v4RustRoot,
     encoding: 'utf8',
-    env: { ...process.env, ROUTECODEX_GATE_DIFF_MODE: 'staged' },
+    env: { ...process.env, ROUTECODEX_GATE_DIFF_MODE: 'staged', ROUTECODEX_GATE_SCOPE_OUTPUT: scopeOutputPath },
   });
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
   if (result.status !== 0 || !output.includes('V4 workspace compile deferred')) {
     failures.push(`V4 Rust owner must defer to its workspace gate, got status=${result.status}\n${output}`);
+  }
+  const scopeOutput = readFileSync(scopeOutputPath, 'utf8');
+  if (!scopeOutput.includes('v4_full=false\n')) {
+    failures.push(`V4 module source must not select the full matrix, got ${scopeOutput}`);
   }
   const scopedResult = spawnSync(process.execPath, [verifier], {
     cwd: v4RustRoot,
