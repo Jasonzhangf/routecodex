@@ -184,6 +184,9 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
             "response.completed usage.{field} must be a non-negative integer: {completed}"
         );
     }
+    assert_eq!(completed["response"]["usage"]["input_tokens"], 7);
+    assert_eq!(completed["response"]["usage"]["output_tokens"], 3);
+    assert_eq!(completed["response"]["usage"]["total_tokens"], 10);
     assert!(!sse_body.contains("data: [DONE]"), "{sse_body}");
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
     assert_eq!(sse_capture.accept.as_deref(), Some("text/event-stream"));
@@ -430,7 +433,7 @@ async fn controlled_responses_upstream(
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
                 .body(Body::from(
-                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3,\"total_tokens\":10}}}\n\ndata: [DONE]\n\n",
                 ))
                 .unwrap()
         }
