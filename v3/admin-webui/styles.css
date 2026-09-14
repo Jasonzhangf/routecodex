@@ -1,27 +1,42 @@
 /* RouteCodex V3 admin webui — Ambient light-based skin.
    Depth, volume and highlights come from /vendor/ambient.css surfaces only;
    this file owns layout, type and interaction states. No hand-written
-   box-shadow, no gradient fills, single accent = --amb-lume. */
+   box-shadow, no gradient fills; the single brand accent is a fixed teal
+   that survives albedo changes (see --accent below). */
 
 :root {
-  /* Ambient scene: dark console room, single cool key light from top-left. */
+  /* Ambient scene: the vendor-default lit clay room. Albedo is neutral grey
+     and the key is bright (vendor default 0.9) so the curve-delta separates
+     elevations and the surface actually has volume; the fill softens the
+     shadow side. The teal hue below is the only brand-specific override on
+     the scene. */
   --amb-light-x: -1;
   --amb-light-y: -1;
-  --amb-key-light-intensity: 0.42;
-  --amb-fill-light-intensity: 0.30;
+  --amb-key-light-intensity: 0.9;
+  --amb-fill-light-intensity: 0.7;
   --amb-light-hue: 234;
   --amb-light-saturation: 15%;
-  --amb-albedo: color(srgb-linear .16 .18 .22);
+  --amb-albedo: color(srgb-linear .82 .82 .82);
   --amb-lume-hue: 172;
 
-  /* Derived tokens (all trace back to the scene above).
-     Ambient's own --amb-label is tuned for Blender-lit surfaces and lands near
-     2.3:1 here, under WCAG AA. Re-derive the text ramp from the same light hue so
-     primary text clears AA on every surface this skin uses. */
-  --accent: var(--amb-lume);
-  --label: color-mix(in srgb, hsl(var(--amb-light-hue) var(--amb-light-saturation) 88%), var(--amb-lit) 12%);
-  --muted: color-mix(in srgb, var(--label), var(--amb-lit) 14%);
-  --line: color-mix(in srgb, var(--amb-label), transparent 82%);
+  /* Derived tokens.
+     --label traces back to Ambient's own --amb-label so text contrast follows
+     the scene: at the strong key above it lands near 26% lightness on a light
+     surface (≈9:1, comfortably above WCAG AA). --muted pulls 18% toward the
+     lit surface so card labels and headings stay readable but lighter than
+     primary text.
+     --accent is the brand teal and stays fixed across albedo changes so AC3
+     (--amb-albedo change re-colors surfaces and preserves teal accent) holds.
+     --accent-bg / --accent-fg give the primary button a dark teal fill with
+     light text. In a light scene Ambient's own --amb-lume and --amb-label
+     collapse onto each other (both ≈25%), so we pin the button's colors
+     directly instead of asking Ambient for a light-theme primary action. */
+  --label: var(--amb-label);
+  --muted: color-mix(in srgb, var(--label), var(--amb-lit) 10%);
+  --line: color-mix(in srgb, var(--label), transparent 82%);
+  --accent: hsl(var(--amb-lume-hue) 62% 22%);
+  --accent-bg: hsl(var(--amb-lume-hue) 62% 22%);
+  --accent-fg: hsl(var(--amb-lume-hue) 60% 90%);
   --danger: var(--amb-emit-red);
   --radius: 12px;
   --content-pad: 24px;
@@ -41,7 +56,9 @@ html, body {
 body {
   font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", sans-serif;
   color: var(--label);
-  background: var(--amb-lit);
+  /* The room the panels sit in: one step below the lit surface so elevation
+     reads as relief against the page, not as a same-color patch. */
+  background: hsl(from var(--amb-lit) h s calc(l - 6));
 }
 
 body.ambient {
@@ -76,6 +93,7 @@ a:hover { text-decoration: underline; }
   font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  color: var(--accent);
 }
 
 .sidebar .brand .accent { color: var(--accent); }
@@ -98,10 +116,17 @@ a:hover { text-decoration: underline; }
 .sidebar nav a:hover {
   color: var(--label);
   text-decoration: none;
+  background: color-mix(in srgb, var(--label), transparent 92%);
 }
 
 .sidebar nav a.active {
-  color: var(--label);
+  /* Accent-tinted chip: the tint is mixed toward the lit surface (not toward
+     transparent over an unknown backdrop) so the dark teal text keeps its
+     contrast instead of sitting on a near-identical teal. */
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent), var(--amb-lit) 88%);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
 }
 
 .sidebar-foot {
@@ -134,7 +159,7 @@ h2 {
   font-size: 14px;
   font-weight: 600;
   margin: 0 0 10px;
-  color: var(--muted);
+  color: var(--label);
   text-transform: none;
 }
 
@@ -291,8 +316,13 @@ tbody tr:hover { background: color-mix(in srgb, var(--amb-label), transparent 94
 
 /* ---------- controls ---------- */
 
+/* Secondary buttons stay ghost controls: --label text directly on the lit
+   surface (≈9:1) with a hairline edge so they still read as buttons. This
+   overrides the vendor .amb-button fill on purpose — at this scene's light
+   exposure Ambient's --amb-lume and --amb-label are both ≈25% grey, so a
+   lume-filled pill with label text would be unreadable. */
 .btn {
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 14px;
   font: inherit;
@@ -300,16 +330,41 @@ tbody tr:hover { background: color-mix(in srgb, var(--amb-label), transparent 94
   color: var(--label);
   background: none;
   cursor: pointer;
-  transition: color 120ms var(--ease-state);
+  transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
 }
 
-.btn:hover:not(:disabled) { color: var(--label); }
+.btn:hover:not(:disabled) {
+  color: var(--label);
+  background: color-mix(in srgb, var(--label), transparent 92%);
+}
 
-.btn.primary { color: var(--accent); }
+/* Primary action: the one filled control. Dark teal fill + light text clears
+   AA in both directions and keeps the brand accent fixed across albedo
+   changes. */
+.btn.primary {
+  color: var(--accent-fg);
+  background: var(--accent-bg);
+  border-color: transparent;
+}
+
+.btn.primary:hover:not(:disabled) {
+  color: var(--accent-fg);
+  background: color-mix(in srgb, var(--accent-bg), var(--label) 18%);
+}
 
 .btn:disabled {
   color: var(--muted);
   cursor: not-allowed;
+}
+
+/* A disabled primary drops its fill entirely: keeping the dark teal while
+   switching the text to --muted would put mid-grey on dark teal (≈1.1:1).
+   Dropping to the ghost treatment keeps the disabled state readable and makes
+   "not actionable" unmistakable. */
+.btn.primary:disabled {
+  color: var(--muted);
+  background: none;
+  border-color: var(--line);
 }
 
 .btn.close {
