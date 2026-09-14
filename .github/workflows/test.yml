@@ -145,13 +145,13 @@ jobs:
         run: npm run build:min
       - name: Install direct V3 CLI binary
         if: needs.scope.outputs.v3_build == 'true'
-        run: RUSTUP_TOOLCHAIN=stable npm run install:v3
+        run: npm run install:v3
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
-        run: node v3/scripts/run-v3-cargo-test.mjs +stable --workspace -- --nocapture
+        run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
 
   v4-build:
     needs: scope
