@@ -3,6 +3,7 @@
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
 use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
+use reqwest::StatusCode;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -393,6 +394,47 @@ async fn revisions_and_static_assets_are_served() {
         .await
         .expect("css response");
     assert!(css.status().is_success());
+}
+
+/// The admin embeds each view module with `include_str!` and serves it from a
+/// hard-coded route. A module that exists on disk but is missing from those two
+/// lists returns 404, and because the views are ES modules a single 404 breaks
+/// the whole page. Adding a module is therefore only complete once it is served,
+/// so this walks the real view directory and requests every file.
+#[tokio::test]
+async fn every_view_module_is_served() {
+    let (base, _state, _home) = bind_test_server().await;
+    let views_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../admin-webui/app/views");
+    let mut checked = 0usize;
+    for entry in std::fs::read_dir(&views_dir).expect("read app/views") {
+        let path = entry.expect("dir entry").path();
+        let name = path
+            .file_name()
+            .expect("file name")
+            .to_string_lossy()
+            .to_string();
+        if !name.ends_with(".js") {
+            continue;
+        }
+        let response = http_client()
+            .get(format!("{base}/app/views/{name}"))
+            .send()
+            .await
+            .expect("module response");
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "app/views/{name} is not served by the admin; add both an embedded asset and a route for it"
+        );
+        let body = response.text().await.expect("module body");
+        assert!(!body.is_empty(), "app/views/{name} served empty");
+        checked += 1;
+    }
+    assert!(
+        checked >= 10,
+        "expected to check the full view module set, saw {checked}"
+    );
 }
 
 static HEALTH_ENTRY: OnceLock<ProviderHealthEntry> = OnceLock::new();
