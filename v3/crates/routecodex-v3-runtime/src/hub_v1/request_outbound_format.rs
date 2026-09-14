@@ -1414,21 +1414,38 @@ fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value
     }) {
         return;
     }
-    let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for call in tool_calls {
-        let Some(call) = call.as_object_mut() else {
-            continue;
-        };
-        if let Some(name) = call.get("name").and_then(Value::as_str) {
-            let normalized = provider_function_name(name);
-            call.insert("name".to_string(), Value::String(normalized));
-        }
-        if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
-            if let Some(name) = function.get("name").and_then(Value::as_str) {
+    if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
+        for call in tool_calls {
+            let Some(call) = call.as_object_mut() else {
+                continue;
+            };
+            if let Some(name) = call.get("name").and_then(Value::as_str) {
                 let normalized = provider_function_name(name);
-                function.insert("name".to_string(), Value::String(normalized));
+                call.insert("name".to_string(), Value::String(normalized));
+            }
+            if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
+                if let Some(name) = function.get("name").and_then(Value::as_str) {
+                    let normalized = provider_function_name(name);
+                    function.insert("name".to_string(), Value::String(normalized));
+                }
+            }
+        }
+    }
+    if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
+        for part in parts {
+            let Some(part_object) = part.as_object_mut() else {
+                continue;
+            };
+            if let Some(name) = part_object.get("name").and_then(Value::as_str) {
+                let normalized = provider_function_name(name);
+                part_object.insert("name".to_string(), Value::String(normalized));
+            }
+            if let Some(tool_use) = part_object.get_mut("tool_use").and_then(Value::as_object_mut)
+            {
+                if let Some(name) = tool_use.get("name").and_then(Value::as_str) {
+                    let normalized = provider_function_name(name);
+                    tool_use.insert("name".to_string(), Value::String(normalized));
+                }
             }
         }
     }
