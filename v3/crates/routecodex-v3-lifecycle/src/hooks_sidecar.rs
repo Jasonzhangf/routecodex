@@ -1208,15 +1208,19 @@ mod tests {
     fn replaced_codexapp_socket_is_removed_but_original_identity_is_preserved() {
         let root = TempDir::new_in("/tmp").unwrap();
         let socket_path = root.path().join("codexapp.sock");
+        let replacement_path = root.path().join("codexapp.replacement.sock");
         let original = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
         let pre_start_identity =
             codexapp_socket_identity(&fs::symlink_metadata(&socket_path).unwrap());
+        // Keep both socket entries alive while they are allocated. Rebinding the
+        // same path after unlink can reuse the original inode on CI filesystems.
+        let replacement = std::os::unix::net::UnixListener::bind(&replacement_path).unwrap();
+        let startup_identity =
+            codexapp_socket_identity(&fs::symlink_metadata(&replacement_path).unwrap());
+        assert_ne!(pre_start_identity, startup_identity);
         drop(original);
         fs::remove_file(&socket_path).unwrap();
-        let replacement = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
-        let startup_identity =
-            codexapp_socket_identity(&fs::symlink_metadata(&socket_path).unwrap());
-        assert_ne!(pre_start_identity, startup_identity);
+        fs::rename(&replacement_path, &socket_path).unwrap();
 
         cleanup_codexapp_socket(&CodexAppSocketCleanup {
             path: socket_path.clone(),
