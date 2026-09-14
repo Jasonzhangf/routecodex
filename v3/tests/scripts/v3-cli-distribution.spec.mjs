@@ -32,6 +32,11 @@ test('V3 owns one local runtime binary, Admin host, and command alias contract',
   assert.ok(copyScript.includes("path.join(v3Root, 'dist', 'bin'"));
 });
 
+test('CLI copy signs only on macOS so Linux release builds do not require codesign', () => {
+  assert.match(copyScript, /process\.platform === 'darwin'/);
+  assert.doesNotMatch(copyScript, /process\.platform !== 'win32'/);
+});
+
 test('install builds release inside V3 and atomically publishes direct runtime and Admin binaries', () => {
   assert.ok(installScript.includes("path.join(v3Root, 'build-control', 'install-target'"));
   assert.match(installScript, /runInterruptibleCommand\('cargo', \[[\s\S]*'--locked',[\s\S]*'--release'/);

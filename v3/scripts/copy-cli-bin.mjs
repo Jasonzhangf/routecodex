@@ -46,7 +46,9 @@ const temporaryBin = path.join(
   `.${path.basename(targetBin)}.${process.pid}.${Date.now()}.tmp`,
 );
 fs.copyFileSync(sourceBin, temporaryBin);
-if (process.platform !== 'win32') {
+// Ad hoc signatures are a macOS requirement. Linux release runners do not
+// provide Apple's codesign tool and must preserve the executable unchanged.
+if (process.platform === 'darwin') {
   fs.chmodSync(temporaryBin, 0o755);
   const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
     cwd: v3Root,
