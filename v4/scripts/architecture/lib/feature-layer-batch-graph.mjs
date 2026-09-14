@@ -297,8 +297,14 @@ const GUARD_BOOTSTRAP_FAILURE_LINE = '  throw new Error(' + TEMPLATE_TICK
   + '{admission.stderr || admission.stdout}' + TEMPLATE_TICK + ');\n';
 const GUARD_BOOTSTRAP_REMOVALS = new Map([
   ['scripts/build.mjs', [
-    "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n"
-      + '// V4-LAYER-PREFLIGHT-END\n',
+    "export function runGuardedBuild() {\n"
+      + "  run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n"
+      + '  // V4-LAYER-PREFLIGHT-END\n'
+      + '  runBuild();\n'
+      + '}\n\n'
+      + "const direct = process.argv[1]\n"
+      + "  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);\n"
+      + 'if (direct) runGuardedBuild();\n',
   ]],
   ['scripts/verify.mjs', [
     "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n"
