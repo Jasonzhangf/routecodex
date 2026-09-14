@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { validateEvidenceRef } from '../architecture/lib/feature-layer-batch-evidence.mjs';
+import {
+  runRegisteredGates,
+  validateEvidenceRef,
+} from '../architecture/lib/feature-layer-batch-evidence.mjs';
 
 const now = Date.now();
 const candidate = {
@@ -76,5 +79,49 @@ assert(
   mismatchFailures.some((failure) => failure.code === 'EVIDENCE_PRODUCER_MISMATCH'),
   'a shared-lane projection must not satisfy the self-test evidence gate',
 );
+
+const sharedArgv = ['cargo', 'test', '-p', 'fixture'];
+const distinctArgv = ['node', 'fixture/gate.mjs'];
+const gateMap = new Map([
+  ['fixture_positive', { status: 'active', argv: sharedArgv }],
+  ['fixture_red', { status: 'active', argv: [...sharedArgv] }],
+  ['fixture_boundary', { status: 'active', argv: distinctArgv }],
+]);
+const executed = [];
+const gateFailures = [];
+runRegisteredGates({
+  gateIds: ['fixture_positive', 'fixture_red', 'fixture_boundary'],
+  gateMap,
+  truth: {
+    runGate(argv) {
+      executed.push(argv);
+      return { status: 0 };
+    },
+  },
+  failures: gateFailures,
+  context: 'regression',
+});
+assert.deepEqual(executed, [sharedArgv, distinctArgv], 'identical gate argv must execute once');
+assert.equal(gateFailures.length, 0, JSON.stringify(gateFailures));
+
+const failedExecutions = [];
+const failedGateFailures = [];
+runRegisteredGates({
+  gateIds: ['fixture_positive', 'fixture_red'],
+  gateMap,
+  truth: {
+    runGate(argv) {
+      failedExecutions.push(argv);
+      return { status: 17 };
+    },
+  },
+  failures: failedGateFailures,
+  context: 'regression',
+});
+assert.equal(failedExecutions.length, 1, 'a failed identical gate must not be rerun');
+assert.deepEqual(failedGateFailures.map((failure) => failure.message), [
+  'regression: fixture_positive exited 17',
+  'regression: fixture_red exited 17',
+]);
 
 process.stdout.write('[test:feature-layer-batch-evidence-regression] PASS\n');
