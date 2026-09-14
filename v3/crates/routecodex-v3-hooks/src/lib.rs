@@ -74,6 +74,9 @@ fn parse_iso8601_to_epoch_nanos(input: &str) -> Result<i128, String> {
         .next()
         .and_then(|part| part.parse().ok())
         .ok_or_else(|| format!("invalid ISO-8601 date: {date}"))?;
+    if !(-9999..=9999).contains(&year) {
+        return Err(format!("invalid ISO-8601 year: {year}"));
+    }
     let month: u32 = date_parts
         .next()
         .and_then(|part| part.parse().ok())
