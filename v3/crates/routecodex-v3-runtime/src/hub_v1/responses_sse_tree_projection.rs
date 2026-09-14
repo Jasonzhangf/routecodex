@@ -59,7 +59,37 @@ pub fn project_v3_responses_sse_item_sse(
 }
 
 pub fn project_v3_responses_sse_event_json(semantic: &V3ResponsesSseSemanticObject) -> Value {
-    semantic.to_normalized_value()
+    let mut value = semantic.to_normalized_value();
+    let terminal = matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("response.completed" | "response.done" | "response.incomplete")
+    );
+    if terminal {
+        if let Some(response) = value.get_mut("response").and_then(Value::as_object_mut) {
+            // Codex's terminal Responses decoder requires all three usage
+            // counters. Provider terminal events may omit the usage object;
+            // the terminal schema still needs a complete structural record.
+            let usage = response
+                .entry("usage")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .expect("terminal Responses usage must be an object");
+            let input = usage
+                .get("input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.entry("input_tokens").or_insert(Value::from(input));
+            usage.entry("output_tokens").or_insert(Value::from(output));
+            usage
+                .entry("total_tokens")
+                .or_insert(Value::from(input.saturating_add(output)));
+        }
+    }
+    value
 }
 
 pub fn project_v3_responses_sse_event_sse(
