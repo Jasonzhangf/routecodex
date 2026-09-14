@@ -775,7 +775,7 @@
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
       "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
-      "sha256": "0a205e94e28010ffa5e760bd9cb0b61ea57cc93a932317fc848dfbc1c8c18b61"
+      "sha256": "5796bf58447d132c3ed0c6b432cee6959ccd383b08f90e927512698247bfe7b2"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -1483,7 +1483,7 @@
       "output_path": "repo/docs/design/v3-provider-health-scoring-cooldown-design.md",
       "source_path": "docs/design/v3-provider-health-scoring-cooldown-design.md",
       "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
-      "sha256": "720104eee349d1a1cd674e269ea3a8382b358e22fc6483e3c71c8ab43b0a4925"
+      "sha256": "d2d6f11306c7af009f485405bbab1c65a63ea3fd2de23cdd58398ddfba0cdc34"
     },
     {
       "output_path": "repo/docs/design/v3-routecodex-runtime-resource-contract.md",
@@ -2377,7 +2377,7 @@
       "output_path": "repo/docs/goals/v3-provider-health-scoring-cooldown-plan.md",
       "source_path": "docs/goals/v3-provider-health-scoring-cooldown-plan.md",
       "source_commit": "04919bd6d84f8b7e42e7a6f02f0d99552dbb33f6",
-      "sha256": "e419a5b5c38df130007a8811c30b15c7427ce06052b726936d7f95cf822bf234"
+      "sha256": "5abd182df8c83e129d61772fc94c273fa6b9b056611c96415e0bbfb4f0ae0458"
     },
     {
       "output_path": "repo/docs/goals/v3-provider-response-error-policy-test-design.md",
@@ -2872,5 +2872,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "47b165c9768db75e04e54d5490265d237fa054f28dc458bcfdb226b60ada081c"
+  "manifest_digest": "d759889a94e46d2c85b158a9ff07fd99be182cf10775f31093eb8b0243f4f27e"
 }

@@ -16,6 +16,79 @@ fn health_projection_without_history_uses_contract_default_score() {
 }
 
 #[test]
+fn low_priority_baseline_does_not_collapse_threshold_to_one_failure() {
+    // Regression: score baseline is the configured priority, so a priority-1 key
+    // reaches score 0 after a single -5 delta. A thresholded recoverable failure
+    // must still wait for `failure_threshold` consecutive failures instead of
+    // cooling down after one transient error.
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "a", env = "KEY" }] }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+"#,
+        )
+        .expect("parse manifest authoring"),
+    )
+    .expect("compile manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+    let mut action = V3ProviderFailureAction::recoverable("provider_502");
+    action.failure_threshold = 3;
+
+    let first = store
+        .record_provider_failure_action("p", "a", "m", &action, 100)
+        .expect("first recoverable failure");
+    assert_eq!(first.score_milli, 0);
+    assert!(
+        !first.cooldown,
+        "one thresholded failure must not cool down a low-priority key"
+    );
+    assert!(first.available);
+    assert!(store
+        .provider_cooldown_probe_keys(100, false)
+        .expect("probe keys after first failure")
+        .is_empty());
+    let first_scheduling = store
+        .scheduling_projection("p", "a", "m", 1, 1, 100)
+        .expect("first scheduling projection");
+    assert!(
+        first_scheduling.available,
+        "score zero without a cooldown must remain schedulable"
+    );
+    assert_eq!(first_scheduling.score_milli, 0);
+    assert_eq!(first_scheduling.effective_weight_milli, 1);
+    assert!(first_scheduling.blocked_scopes.is_empty());
+
+    store
+        .record_provider_failure_action("p", "a", "m", &action, 101)
+        .expect("second recoverable failure");
+    let third = store
+        .record_provider_failure_action("p", "a", "m", &action, 102)
+        .expect("third recoverable failure");
+    assert!(third.cooldown, "threshold must still cool the key down");
+    assert!(!third.available);
+    let third_scheduling = store
+        .scheduling_projection("p", "a", "m", 1, 1, 102)
+        .expect("third scheduling projection");
+    assert!(!third_scheduling.available);
+    assert_eq!(
+        third_scheduling.blocked_scopes,
+        vec!["provider_key_health_cooldown".to_string()]
+    );
+}
+
+#[test]
 fn recoverable_failures_lower_score_then_cool_at_zero() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
