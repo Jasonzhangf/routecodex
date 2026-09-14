@@ -69,6 +69,7 @@ pub(crate) use history_image_cleanup::{
 };
 mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;
+mod request_outbound_mcp_names;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
 pub(crate) use request_outbound_format::{
