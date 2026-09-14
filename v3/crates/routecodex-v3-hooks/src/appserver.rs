@@ -543,7 +543,7 @@ pub fn correlate_delivery_evidence(
     intent_id: &str,
     baseline: &[String],
     items: &[NativeThreadItem],
-    _cursor: Option<&str>,
+    cursor: Option<&str>,
 ) -> Result<DeliveryEvidenceRecord, AppServerError> {
     let baseline_set = baseline.iter().collect::<std::collections::HashSet<_>>();
     let receipt = items.iter().find(|item| {
@@ -572,17 +572,22 @@ pub fn correlate_delivery_evidence(
         )));
     };
     let message_id = receipt.id.clone().unwrap_or_else(|| intent_id.to_string());
-    let state = if reply.is_some() {
-        DeliveryState::Replied
-    } else {
-        DeliveryState::Delivered
+    let cursor = cursor.filter(|cursor| !cursor.is_empty());
+    let (state, cursor, read_item_id) = match (reply, cursor) {
+        (Some(reply), Some(cursor)) => (
+            DeliveryState::Read,
+            Some(cursor.to_string()),
+            reply.id.clone(),
+        ),
+        (Some(_), None) => (DeliveryState::Replied, None, None),
+        (None, _) => (DeliveryState::Delivered, None, None),
     };
     Ok(DeliveryEvidenceRecord {
         intent_id: intent_id.to_string(),
         message_id,
         state,
-        cursor: None,
-        read_item_id: None,
+        cursor,
+        read_item_id,
     })
 }
 
@@ -933,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn delivery_evidence_maps_receipt_and_reply_without_promoting_baseline() {
+    fn delivery_evidence_maps_receipt_reply_and_read_without_promoting_baseline() {
         let intent_id = "intent-1";
         let baseline = vec!["old-user".to_string(), "old-agent".to_string()];
         let items = vec![
@@ -961,8 +966,52 @@ mod tests {
         ];
         let evidence =
             correlate_delivery_evidence(intent_id, &baseline, &items, Some("cursor-1")).unwrap();
-        assert_eq!(evidence.state, DeliveryState::Replied);
+        assert_eq!(evidence.state, DeliveryState::Read);
         assert_eq!(evidence.message_id, "receipt-1");
+        assert_eq!(evidence.cursor.as_deref(), Some("cursor-1"));
+        assert_eq!(evidence.read_item_id.as_deref(), Some("reply-1"));
+    }
+
+    #[test]
+    fn delivery_evidence_does_not_claim_read_without_cursor() {
+        let intent_id = "intent-no-cursor";
+        let baseline = vec![];
+        let items = vec![
+            NativeThreadItem {
+                id: Some("receipt-no-cursor".to_string()),
+                kind: Some("userMessage".to_string()),
+                client_user_message_id: Some(intent_id.to_string()),
+                turn_id: Some("turn-no-cursor".to_string()),
+                text: Some("probe".to_string()),
+            },
+            NativeThreadItem {
+                id: Some("reply-no-cursor".to_string()),
+                kind: Some("agentMessage".to_string()),
+                client_user_message_id: None,
+                turn_id: Some("turn-no-cursor".to_string()),
+                text: Some("reply".to_string()),
+            },
+        ];
+        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items, None).unwrap();
+        assert_eq!(evidence.state, DeliveryState::Replied);
+        assert!(evidence.cursor.is_none());
+        assert!(evidence.read_item_id.is_none());
+    }
+
+    #[test]
+    fn delivery_evidence_does_not_claim_read_without_reply() {
+        let intent_id = "intent-no-reply";
+        let baseline = vec![];
+        let items = vec![NativeThreadItem {
+            id: Some("receipt-no-reply".to_string()),
+            kind: Some("userMessage".to_string()),
+            client_user_message_id: Some(intent_id.to_string()),
+            turn_id: Some("turn-no-reply".to_string()),
+            text: Some("probe".to_string()),
+        }];
+        let evidence =
+            correlate_delivery_evidence(intent_id, &baseline, &items, Some("cursor-1")).unwrap();
+        assert_eq!(evidence.state, DeliveryState::Delivered);
         assert!(evidence.cursor.is_none());
         assert!(evidence.read_item_id.is_none());
     }
