@@ -25,70 +25,125 @@ pub fn flatten_namespace_tool_for_provider(
         })?;
 
     let mut flattened = Vec::with_capacity(children.len());
+    flatten_namespace_children(
+        protocol,
+        &namespace_name,
+        children,
+        &format!("provider namespace tool {namespace_name}"),
+        &mut flattened,
+    )?;
+    Ok(Some(flattened))
+}
+
+fn flatten_namespace_children(
+    protocol: &str,
+    namespace_name: &str,
+    children: &[Value],
+    path: &str,
+    flattened: &mut Vec<Value>,
+) -> Result<(), String> {
     for (index, child) in children.iter().enumerate() {
-        let child = child.as_object().ok_or_else(|| {
-            format!("provider namespace tool {namespace_name}.tools[{index}] must be an object")
-        })?;
-        if child.get("type").and_then(Value::as_str) != Some("function") {
-            return Err(format!(
-                "provider namespace tool {namespace_name}.tools[{index}].type must be function"
-            ));
-        }
-        let function = match child.get("function") {
-            Some(Value::Object(function)) => Some(function),
-            Some(_) => {
+        let child = child
+            .as_object()
+            .ok_or_else(|| format!("{path}.tools[{index}] must be an object"))?;
+        match child.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                let nested_name = child
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        format!("{path}.tools[{index}] requires a non-empty namespace name")
+                    })?;
+                let nested_children = child
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .filter(|items| !items.is_empty())
+                    .ok_or_else(|| format!("{path}.tools[{index}] requires non-empty tools"))?;
+                let nested_path = format!("{path}.tools[{index}]");
+                let qualified_namespace = format!("{namespace_name}__{nested_name}");
+                flatten_namespace_children(
+                    protocol,
+                    &qualified_namespace,
+                    nested_children,
+                    &nested_path,
+                    flattened,
+                )?;
+            }
+            Some("function") => {
+                flatten_namespace_function(
+                    protocol,
+                    namespace_name,
+                    child,
+                    &format!("{path}.tools[{index}]"),
+                    flattened,
+                )?;
+            }
+            _ => {
                 return Err(format!(
-                    "provider namespace tool {namespace_name}.tools[{index}].function must be an object"
+                    "{path}.tools[{index}].type must be namespace or function"
                 ));
             }
-            None => None,
-        };
-        let child_name = function
-            .and_then(|row| row.get("name"))
-            .or_else(|| child.get("name"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "provider namespace tool {namespace_name}.tools[{index}] requires a non-empty function name"
-                )
-            })?;
-        let child_path = format!("provider namespace tool {namespace_name}.tools[{index}]");
-        let description = read_optional_namespace_child_field(
-            &child_path,
-            child,
-            function,
-            "description",
-            "a string",
-            Value::is_string,
-        )?;
-        let parameters = read_optional_namespace_child_field(
-            &child_path,
-            child,
-            function,
-            "parameters",
-            "an object",
-            Value::is_object,
-        )?;
-        let strict = read_optional_namespace_child_field(
-            &child_path,
-            child,
-            function,
-            "strict",
-            "a boolean",
-            Value::is_boolean,
-        )?;
-        flattened.push(build_provider_function_tool(
-            protocol,
-            namespace_name,
-            child_name,
-            description,
-            parameters,
-            strict,
-        ));
+        }
     }
-    Ok(Some(flattened))
+    Ok(())
+}
+
+fn flatten_namespace_function(
+    protocol: &str,
+    namespace_name: &str,
+    child: &Map<String, Value>,
+    child_path: &str,
+    flattened: &mut Vec<Value>,
+) -> Result<(), String> {
+    let function = match child.get("function") {
+        Some(Value::Object(function)) => Some(function),
+        Some(_) => {
+            return Err(format!("{child_path}.function must be an object"));
+        }
+        None => None,
+    };
+    let child_name = function
+        .and_then(|row| row.get("name"))
+        .or_else(|| child.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{child_path} requires a non-empty function name"))?;
+    let description = read_optional_namespace_child_field(
+        &child_path,
+        child,
+        function,
+        "description",
+        "a string",
+        Value::is_string,
+    )?;
+    let parameters = read_optional_namespace_child_field(
+        &child_path,
+        child,
+        function,
+        "parameters",
+        "an object",
+        Value::is_object,
+    )?;
+    let strict = read_optional_namespace_child_field(
+        &child_path,
+        child,
+        function,
+        "strict",
+        "a boolean",
+        Value::is_boolean,
+    )?;
+    flattened.push(build_provider_function_tool(
+        protocol,
+        namespace_name,
+        child_name,
+        description,
+        parameters,
+        strict,
+    ));
+    Ok(())
 }
 
 fn read_optional_namespace_child_field(
@@ -201,6 +256,30 @@ mod tests {
     }
 
     #[test]
+    fn recursively_flattens_nested_mcpx_namespace_children() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "openai-chat",
+            &json!({
+                "type":"namespace",
+                "name":"mcp__mcpx",
+                "tools":[{
+                    "type":"namespace",
+                    "name":"workspace",
+                    "tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]
+                }]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened.len(), 1);
+        assert_eq!(flattened[0]["type"], "function");
+        assert_eq!(
+            flattened[0]["function"]["name"],
+            "mcp__mcpx__workspace__read"
+        );
+    }
+
+    #[test]
     fn rejects_malformed_namespace_child_instead_of_dropping_it() {
         let error = flatten_namespace_tool_for_provider(
             "openai-chat",
@@ -211,7 +290,7 @@ mod tests {
             }),
         )
         .unwrap_err();
-        assert!(error.contains("tools[0].type must be function"));
+        assert!(error.contains("tools[0].type must be namespace or function"));
     }
 
     #[test]
