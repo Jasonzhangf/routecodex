@@ -376,7 +376,8 @@ for (const { commit, path: relative } of entries) {
   }
 
   if (/\.sh$/u.test(relative) || relative === '.githooks/pre-commit' || relative === '.githooks/pre-push') {
-    const result = spawnSync('sh', ['-n'], { encoding: 'utf8', input: content });
+    const shell = /^#!\s*\/bin\/bash\b/u.test(content) ? 'bash' : 'sh';
+    const result = spawnSync(shell, ['-n'], { encoding: 'utf8', input: content });
     if (result.status !== 0) fail(`${relative} shell syntax check failed`);
   }
 }
