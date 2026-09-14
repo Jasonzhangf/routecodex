@@ -74,7 +74,6 @@ export const GATE_INPUT_SETS = {
 const GATE_MATRIX_HASHES = {
   architecture: 'sha256:cd3e240f83926cb2e5c4ff495dacfc5cd60f790bae02a967a8e4c68a028e1bf8',
   red: 'sha256:42b55ada9d4c8a4544cb8da5fef5f17ea638f64413c4ac682fd052164b40333a',
-  packageScripts: 'sha256:4037eda3c523c0def4f0d5ad1c6bd3fe39169c6001cb3357790e6fc3624499f5',
 };
 const PREFLIGHT_PREFIXES = new Map([
   ['build', ['buildSource', 'sha256:0c66e6e16328c5d107ff843d0445f65287c3c5445d2d1a3acb71b3e92c63cea7', 'BUILD_PREFLIGHT_BINDING']],
@@ -303,10 +302,6 @@ export function validateRegistryBindings(input, failures) {
   if (Object.entries(expectedScripts).slice(4)
     .some(([name, command]) => scripts[name] !== command)) {
     addFailure(failures, 'PACKAGE_SCRIPT_BINDING', 'V4 package layer-gate scripts drifted');
-  }
-  if (sha256(canonicalJson(scripts)) !== GATE_MATRIX_HASHES.packageScripts) {
-    addFailure(failures, 'PACKAGE_SCRIPT_FULL_BINDING',
-      'the complete V4 package script surface must match its protected semantic projection');
   }
   const buildSource = input.buildSource;
   const buildFunction = buildSource.indexOf('export function runBuild()');

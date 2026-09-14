@@ -101,7 +101,13 @@ function evidenceRecord({ id, taskId, moduleId, sourceCommit, scopeHash, inputHa
  * temporary Git repository.  This is test-only: it never changes production
  * manifests, bypasses a gate, or substitutes a fake runGate implementation.
  */
-export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Date.now() }) {
+export function runAllReadyAdmissionFixture({
+  canonicalInput,
+  validate,
+  now = Date.now(),
+  mutateFixture = null,
+  expectedFailureCode = null,
+}) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-layer-admission-ready-'));
   try {
     run(repo, 'git', ['init', '--quiet']);
@@ -155,11 +161,12 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
     const allTaskIds = taskDescriptors.map((entry) => entry.taskId);
     for (const [suffix, role] of ROLE_GATES) {
       const gateId = `fixture_${suffix}`;
+      const argv = ['node', 'fixture/gate.mjs', suffix];
       input.verificationMap.gates.push({
         gate_id: gateId,
         status: 'active',
-        command: 'node fixture/gate.mjs',
-        argv: ['node', 'fixture/gate.mjs'],
+        command: argv.join(' '),
+        argv,
         owner_module_id: 'routecodex-v4-governance',
         feature_ids: allTaskIds,
         evidence_role: role,
@@ -251,8 +258,11 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
           path: `docs/evidence/feature-completion/M1/${task.task_id}/${role}.json`,
         }));
         const evidenceDir = `docs/evidence/feature-completion/M1/${task.task_id}`;
+        const evidenceSourcePaths = batch.batch_id === 'F'
+          ? entries.map((entry) => entry.sourcePath)
+          : task.source_paths;
         const inputHashes = [...new Set([
-          ...task.source_paths.map((sourcePath) => truth.blobIdentity(candidate.head_commit, sourcePath).sha256),
+          ...evidenceSourcePaths.map((sourcePath) => truth.blobIdentity(candidate.head_commit, sourcePath).sha256),
           truth.blobIdentity(candidate.head_commit, 'fixture/gate.mjs').sha256,
         ])].sort();
         const scope = candidate.scope_hash;
@@ -265,7 +275,7 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
             scopeHash: scope,
             inputHashes,
             gateId: `fixture_${suffix}`,
-            argv: ['node', 'fixture/gate.mjs'],
+            argv: ['node', 'fixture/gate.mjs', suffix],
             producer: { adapter: 'node', identity: `fixture_${suffix}` },
             phase,
             kind,
@@ -293,19 +303,19 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
     write(repo, 'docs/evidence/feature-completion/M1/V4-CURRENT-TREE/baseline_replay.json', JSON.stringify(evidenceRecord({
       id: 'baseline_replay', taskId: 'V4-CURRENT-TREE', moduleId: RUNTIME_MODULE_ID, sourceCommit: base,
       scopeHash: baselineScope.scope_hash, inputHashes: baselineScope.input_hashes,
-      gateId: 'fixture_baseline_replay', argv: ['node', 'fixture/gate.mjs'], producer: { adapter: 'node', identity: 'fixture_baseline_replay' },
+      gateId: 'fixture_baseline_replay', argv: ['node', 'fixture/gate.mjs', 'baseline_replay'], producer: { adapter: 'node', identity: 'fixture_baseline_replay' },
       phase: 'baseline_reproduction', kind: 'sample_replay', now,
     }), null, 2));
     const closureScope = scopeFor(truth, hCandidate.head_commit, 'V4-RUNTIME-002', RUNTIME_MODULE_ID, [hEntry.sourcePath]);
     write(repo, 'docs/evidence/feature-completion/M1/V4-RUNTIME-002/closure_audit.json', JSON.stringify(evidenceRecord({
       id: 'closure_audit', taskId: 'V4-RUNTIME-002', moduleId: RUNTIME_MODULE_ID, sourceCommit: hCandidate.head_commit,
       scopeHash: closureScope.scope_hash, inputHashes: closureScope.input_hashes,
-      gateId: 'fixture_closure_audit', argv: ['node', 'fixture/gate.mjs'], producer: { adapter: 'node', identity: 'fixture_closure_audit' },
+      gateId: 'fixture_closure_audit', argv: ['node', 'fixture/gate.mjs', 'closure_audit'], producer: { adapter: 'node', identity: 'fixture_closure_audit' },
       phase: 'development_whitebox', kind: 'gate', now,
     }), null, 2));
     input.verificationMap.gates.push(
-      { gate_id: 'fixture_baseline_replay', status: 'active', command: 'node fixture/gate.mjs', argv: ['node', 'fixture/gate.mjs'], owner_module_id: 'routecodex-v4-governance', feature_ids: ['V4-CURRENT-TREE'], evidence_role: 'baseline_replay', producer: { adapter: 'node', identity: 'fixture_baseline_replay' }, input_paths: ['fixture/gate.mjs'], required_for: ['baseline'] },
-      { gate_id: 'fixture_closure_audit', status: 'active', command: 'node fixture/gate.mjs', argv: ['node', 'fixture/gate.mjs'], owner_module_id: 'routecodex-v4-governance', feature_ids: ['V4-RUNTIME-002'], evidence_role: 'closure_audit', producer: { adapter: 'node', identity: 'fixture_closure_audit' }, input_paths: ['fixture/gate.mjs'], required_for: ['closure'] },
+      { gate_id: 'fixture_baseline_replay', status: 'active', command: 'node fixture/gate.mjs baseline_replay', argv: ['node', 'fixture/gate.mjs', 'baseline_replay'], owner_module_id: 'routecodex-v4-governance', feature_ids: ['V4-CURRENT-TREE'], evidence_role: 'baseline_replay', producer: { adapter: 'node', identity: 'fixture_baseline_replay' }, input_paths: ['fixture/gate.mjs'], required_for: ['baseline'] },
+      { gate_id: 'fixture_closure_audit', status: 'active', command: 'node fixture/gate.mjs closure_audit', argv: ['node', 'fixture/gate.mjs', 'closure_audit'], owner_module_id: 'routecodex-v4-governance', feature_ids: ['V4-RUNTIME-002'], evidence_role: 'closure_audit', producer: { adapter: 'node', identity: 'fixture_closure_audit' }, input_paths: ['fixture/gate.mjs'], required_for: ['closure'] },
     );
     for (const [batchId, candidate] of candidates) {
       for (const entry of taskDescriptors.filter((item) => item.batchId === batchId)) {
@@ -335,6 +345,7 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
     write(repo, 'docs/architecture/maps/resource-map.json', JSON.stringify(input.resourceMap, null, 2));
     write(repo, 'docs/architecture/maps/verification-map.json', JSON.stringify(input.verificationMap, null, 2));
     write(repo, '.appsdk/maps/module-registry.json', JSON.stringify(input.moduleRegistry, null, 2));
+    mutateFixture?.({ repo, input, manifest });
     const finalHead = commit(repo, 'fixture all-ready evidence');
     const fixtureInput = { ...input, manifest };
     const context = {
@@ -346,7 +357,13 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
       },
     };
     const failures = validate(fixtureInput, context, { mode: 'admission' });
-    if (failures.length > 0) throw new Error(failures.map((item) => `${item.code}:${item.message}`).join(' | '));
+    if (expectedFailureCode !== null) {
+      if (!failures.some((item) => item.code === expectedFailureCode)) {
+        throw new Error(`expected admission failure ${expectedFailureCode}, observed ${failures.map((item) => item.code).join(', ') || 'PASS'}`);
+      }
+    } else if (failures.length > 0) {
+      throw new Error(failures.map((item) => `${item.code}:${item.message}`).join(' | '));
+    }
     if (truth.currentHead() !== finalHead || !truth.controlledScopeClean(['v4/**'])) throw new Error('all-ready fixture is not clean at final committed HEAD');
     return true;
   } finally {

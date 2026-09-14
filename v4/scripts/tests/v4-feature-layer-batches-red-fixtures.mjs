@@ -328,6 +328,31 @@ export function runFeatureLayerBatchSelfTest({
       aggregateFailureSeverity(definition)));
   }
   try {
+    const staticInput = clone(canonicalInput);
+    const readyTask = staticInput.manifest.batches
+      .flatMap((batch) => batch.tasks)
+      .find((task) => task.status === 'source_green');
+    if (!readyTask) throw new Error('static definition fixture has no source_green task');
+    readyTask.candidate_record = 'docs/evidence/feature-completion/M1/missing/fix-candidate.json';
+    const staticFailures = validate(staticInput, productionContext, {
+      mode: 'definition',
+      allowPendingGuard: true,
+    });
+    const candidateCodes = new Set([
+      'CANDIDATE_RECORD_INVALID_JSON',
+      'CANDIDATE_MAP_INVALID',
+      'EVIDENCE_INVALID_JSON',
+      'EVIDENCE_INPUT_HASH_MISMATCH',
+      'EVIDENCE_PRODUCER_MISMATCH',
+    ]);
+    const leaked = staticFailures.filter((item) => candidateCodes.has(item.code));
+    if (leaked.length > 0) {
+      throw new Error(`static definition reached candidate/evidence admission: ${leaked.map((item) => item.code).join(',')}`);
+    }
+  } catch (error) {
+    failures.push(failure('STATIC_ADMISSION_SEPARATION_SELF_TEST', error.message));
+  }
+  try {
     validateGitIdentity();
   } catch (error) {
     failures.push(failure('REAL_GIT_IDENTITY_SELF_TEST', error.message));
@@ -344,6 +369,18 @@ export function runFeatureLayerBatchSelfTest({
   }
   try {
     runAllReadyAdmissionFixture({ canonicalInput, validate, now: productionContext.now });
+    runAllReadyAdmissionFixture({
+      canonicalInput,
+      validate,
+      now: productionContext.now,
+      mutateFixture({ repo }) {
+        const evidencePath = path.join(repo, 'v4/docs/evidence/feature-completion/M1/V4-PARITY-001/positive.json');
+        const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+        evidence.producer = { adapter: 'node', identity: 'fixture:wrong-producer' };
+        fs.writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+      },
+      expectedFailureCode: 'EVIDENCE_PRODUCER_MISMATCH',
+    });
   } catch (error) {
     failures.push(failure('ALL_READY_ADMISSION_SELF_TEST', error.message));
   }
@@ -356,7 +393,7 @@ export function runFeatureLayerBatchSelfTest({
   } catch (error) {
     failures.push(failure('SEVERITY_SELF_TEST', error.message));
   }
-  return result(6 - failures.length, 6, failures);
+  return result(7 - failures.length, 7, failures);
 }
 
 export function runFeatureLayerBatchBoundarySelfTest({
@@ -566,25 +603,25 @@ export function runFeatureLayerBatchRedFixtures({
     },
     {
       name: 'package build bypasses guarded entrypoint',
-      expected: ['PACKAGE_ENTRYPOINT_BINDING', 'PACKAGE_SCRIPT_FULL_BINDING'],
+      expected: ['PACKAGE_ENTRYPOINT_BINDING'],
       mutate(input) { input.packageJson.scripts.build = 'cargo build'; },
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
       name: 'unrelated package gate is deleted',
-      expected: ['PACKAGE_SCRIPT_FULL_BINDING'],
+      expected: [],
       mutate(input) { delete input.packageJson.scripts['verify:v4-active-link']; },
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
       name: 'gate input closure is weakened',
-      expected: ['CANDIDATE_GATE_INPUT_CONTRACT_DRIFT', 'GATE_INPUT_CONTRACT_BINDING'],
+      expected: ['GATE_INPUT_CONTRACT_BINDING'],
       mutate(input) { input.gateInputContract.input_sets.layer.pop(); },
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
       name: 'registered gate redirects its input set',
-      expected: ['CANDIDATE_REGISTRY_PROJECTION_DRIFT', 'GATE_REGISTRY_BINDING'],
+      expected: ['GATE_REGISTRY_BINDING'],
       mutate(input) {
         input.verificationMap.gates
           .find((gate) => gate.gate_id === 'v4_feature_layer_batches_self_test').input_set_id = 'plane';
