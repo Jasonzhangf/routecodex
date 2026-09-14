@@ -65,13 +65,15 @@ pub fn project_v3_responses_sse_event_json(semantic: &V3ResponsesSseSemanticObje
         Some("response.completed" | "response.incomplete")
     );
     if terminal {
-        if let Some(usage) = value
-            .pointer_mut("/response/usage")
-            .and_then(Value::as_object_mut)
-        {
-            // Codex's ResponsesCompleted decoder treats usage as a complete
-            // record. Providers may omit total_tokens; derive only the
-            // protocol-required aggregate from the values already present.
+        if let Some(response) = value.get_mut("response").and_then(Value::as_object_mut) {
+            // Codex's terminal Responses decoder requires all three usage
+            // counters. Provider terminal events may omit the usage object;
+            // the terminal schema still needs a complete structural record.
+            let usage = response
+                .entry("usage")
+                .or_insert_with(|| Value::Object(serde_json::Map::new()))
+                .as_object_mut()
+                .expect("terminal Responses usage must be an object");
             let input = usage
                 .get("input_tokens")
                 .and_then(Value::as_u64)

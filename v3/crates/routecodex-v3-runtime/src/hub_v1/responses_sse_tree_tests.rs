@@ -322,6 +322,22 @@ fn responses_completed_projection_completes_partial_usage_record() {
 }
 
 #[test]
+fn responses_completed_projection_adds_missing_usage_record() {
+    let input = json!({
+        "type":"response.completed",
+        "response": {
+            "id":"resp_missing_usage",
+            "status":"completed"
+        }
+    });
+    let semantic = classify_v3_responses_sse_event(&input).unwrap();
+    let projected = project_v3_responses_sse_event_json(&semantic);
+    assert_eq!(projected["response"]["usage"]["input_tokens"], 0);
+    assert_eq!(projected["response"]["usage"]["output_tokens"], 0);
+    assert_eq!(projected["response"]["usage"]["total_tokens"], 0);
+}
+
+#[test]
 fn responses_created_accepts_nullable_envelope_fields() {
     let input = json!({
         "type":"response.created",
