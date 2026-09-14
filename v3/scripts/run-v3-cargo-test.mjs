@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 
 export const MAX_DEBUG_BYTES = 2147483648;
 const CLEANUP_FAILURE_EXIT = 86;
+export const CARGO_TEST_TIMEOUT_MS = 40 * 60 * 1000;
+const CARGO_TEST_KILL_GRACE_MS = 5_000;
 const STALE_LOCK_GRACE_MS = 60_000;
 const UNVERIFIABLE_LIVE_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -386,7 +388,7 @@ export function lockOwnerMatchesProcess(owner, liveIdentity) {
     && owner.processStartedAt === liveIdentity?.processStartedAt;
 }
 
-function executeCargo(cargoArgs, executables) {
+export function executeCargo(cargoArgs, executables, { timeoutMs = CARGO_TEST_TIMEOUT_MS } = {}) {
   return new Promise((resolveExit, reject) => {
     const child = spawn('cargo', cargoArgs, {
       cwd: v3Root,
@@ -395,6 +397,19 @@ function executeCargo(cargoArgs, executables) {
     });
     let buffered = '';
     let parseError = null;
+    let timedOut = false;
+    let settled = false;
+    let killTimer;
+    const settleReject = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const settleResolve = (code) => {
+      if (settled) return;
+      settled = true;
+      resolveExit(code);
+    };
     const handleLine = (line) => {
       if (!line || parseError) return;
       try {
@@ -413,16 +428,40 @@ function executeCargo(cargoArgs, executables) {
         handleLine(line);
       }
     });
-    child.on('error', reject);
+    child.on('error', settleReject);
     child.on('close', (code, signal) => {
+      if (killTimer) clearTimeout(killTimer);
       handleLine(buffered);
       if (parseError) {
-        reject(parseError);
+        settleReject(parseError);
         return;
       }
       if (signal) process.stderr.write(`[v3-cargo-test] cargo terminated by ${signal}\n`);
-      resolveExit(code ?? 1);
+      if (timedOut) {
+        settleReject(new Error(`cargo test timed out after ${timeoutMs}ms and was terminated`));
+        return;
+      }
+      settleResolve(code ?? 1);
     });
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      process.stderr.write(`[v3-cargo-test] cargo timeout ${timeoutMs}ms; sending SIGTERM to pid ${child.pid}\n`);
+      try {
+        process.kill(child.pid, 'SIGTERM');
+      } catch (error) {
+        if (error?.code !== 'ESRCH') settleReject(error);
+      }
+      killTimer = setTimeout(() => {
+        if (settled) return;
+        process.stderr.write(`[v3-cargo-test] cargo timeout grace expired; sending SIGKILL to pid ${child.pid}\n`);
+        try {
+          process.kill(child.pid, 'SIGKILL');
+        } catch (error) {
+          if (error?.code !== 'ESRCH') settleReject(error);
+        }
+      }, CARGO_TEST_KILL_GRACE_MS);
+    }, timeoutMs);
+    child.once('close', () => clearTimeout(timeoutTimer));
   });
 }
 
