@@ -4,7 +4,7 @@ import { runAll } from '../_common.mjs';
 
 const missingRequiredCommand = 'routecodex-required-command-does-not-exist-095abcd';
 const required = await runAll([
-  { label: 'required-missing', command: missingRequiredCommand },
+  { label: 'required-missing', command: missingRequiredCommand, severity: 'BLOCK' },
 ]);
 
 assert.equal(required.failures.length, 1, JSON.stringify(required));
