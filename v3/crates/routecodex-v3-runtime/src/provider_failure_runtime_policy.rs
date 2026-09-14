@@ -91,11 +91,6 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
     action
 }
 
-pub(crate) use crate::provider_failure_runtime_helpers::{
-    build_v3_transient_failure_record, build_v3_transient_recovery_witness,
-    V3_TRANSIENT_RETRY_BUDGET,
-};
-
 pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'static str {
     match error {
         V3ProviderError::UnexpectedContentType { .. }
@@ -149,23 +144,12 @@ impl Default for V3RelayProviderFailureRetryPolicy {
 
 impl V3RelayProviderFailureRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        // 同候选预算只由显式 RetrySame 模式供给；ReselectBeforeClientProjection
-        // 表示等待后立即换候选（aedeac2/a6a1985 不变量）。
-        let same_candidate_retries = manifest
-            .error
-            .provider_error_default_path
-            .iter()
-            .find_map(|step| match step {
-                V3ProviderDispositionStepManifest::WaitRetry {
-                    retry_mode: V3ProviderErrorRetryMode::RetrySame,
-                    max_attempts,
-                    ..
-                } => Some(max_attempts.saturating_sub(1) as usize),
-                _ => None,
-            })
-            .unwrap_or(0);
+        // Every provider failure changes the candidate. RetrySame is retained
+        // only as a config compatibility enum and never grants production
+        // same-candidate retries.
+        let _ = manifest;
         Self {
-            same_candidate_retries,
+            same_candidate_retries: 0,
         }
     }
 }
@@ -1005,17 +989,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
-    // 瞬态失败（SSE 流内/挂起）判定由错误处理中心按「阶段 + 类别」表达：
-    // relay 侧在这里按同样的 stage/code 规则消费，直接驱动 health-neutral
-    // 同 provider 重试（前 2 次静默，第 3 次失败一次回报再切），与入口脱耦。
-    let transient = matches!(
-        classify_v3_internal_provider_error(
-            source_stage,
-            status,
-            error_type.as_deref().unwrap_or_default(),
-        ),
-        routecodex_v3_config::internal::V3InternalErrorCategory::Transient
-    );
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -1027,33 +1000,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             &message,
         )
     });
-    let configured_same_candidate_retries = configured_retry_budget_for_failure(
-        matched_policy,
-        context.retry_policy.same_candidate_retries,
-    );
-    let mut transient_admission = if transient && matched_policy.is_none() {
-        Some(
-            context
-                .provider_health
-                .wait_for_provider_action_failure_in_scope(
-                    &context.failure_session_scope,
-                    &selected.candidate.provider_id,
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    error_type.as_deref().unwrap_or("provider_sse_transient"),
-                )
-                .await?,
-        )
-    } else {
-        None
-    };
-    let transient_wait_ms = transient_admission
-        .as_ref()
-        .map(|admission| admission.minimum_delay_ms);
-    // A held transient admission would invalidate a recovery witness created
-    // later in the same policy decision, so release it before retry/reselect
-    // records the next action-gate generation.
-    drop(transient_admission.take());
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
         || error_type.as_deref() == Some("provider_request_compat_error")
@@ -1104,63 +1050,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .get(&candidate_key)
         .copied()
         .unwrap_or(0);
-    if configured_retry_mode(matched_policy, context.retry_policy.same_candidate_retries)
-        == Some(V3ProviderErrorRetryMode::RetrySame)
-        && health_record.state != "cooldown"
-        // Request-local projection/compat failures describe this request, not
-        // provider health. They must project terminally without spending a
-        // same-candidate retry budget or entering a provider action wait.
-        && !is_request_local_compat_failure
-        && retries_done < configured_same_candidate_retries
-        && status != 400
-        // HTTP 503 is an upstream availability signal.  Do not spend a
-        // same-candidate retry budget on it; mark this candidate failed and
-        // reselect immediately.
-        && status != 503
-    {
-        state
-            .same_candidate_retries
-            .insert(candidate_key.clone(), retries_done.saturating_add(1));
-        state.trace.push("V3TargetPolicyRetriedSame");
-        let failure_record = context
-            .provider_health
-            .record_provider_action_failure_in_scope_with_minimum_delay(
-                &context.failure_session_scope,
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                error_type.as_deref().unwrap_or("provider_failure"),
-                configured_retry_backoff_ms(matched_policy, retries_done),
-            )?;
-        let decision = build_v3_relay_provider_error_05_decision(
-            &selected,
-            source_stage,
-            status,
-            error_type.as_deref(),
-            &message,
-            0,
-            selected.candidate.default_pool_member,
-            true,
-            Some(failure_record.recovery_witness()?),
-        );
-        return Ok(V3RelayProviderFailurePolicyResult {
-            terminal_projection: terminal_projection_for(&decision, matched_policy),
-            decision,
-            retry_selected: Some(Box::new(selected.clone())),
-            event: build_v3_relay_provider_failure_policy_event(
-                V3RelayProviderFailurePolicyEventInput {
-                    candidate: selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    action: "policy_retry_same",
-                    next_provider_key: Some(candidate_key),
-                    wait_ms: Some(failure_record.minimum_delay_ms),
-                },
-            ),
-        });
-    }
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(
@@ -1241,10 +1130,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                             health_record,
                             action: "switch_provider",
                             next_provider_key: Some(alternative_key),
-                            wait_ms: recovery
-                                .as_ref()
-                                .map(|record| record.minimum_delay_ms)
-                                .or_else(|| transient_wait_ms),
+                            wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
                         },
                     ),
                 });
@@ -1317,152 +1203,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             ),
         });
     }
-    if health_record.state != "cooldown"
-        && (selected.default_floor_protected || selected.candidate.default_pool_member)
-    {
-        let retries_done = state
-            .same_candidate_retries
-            .entry(candidate_key.clone())
-            .or_insert(0);
-        // 400/InvalidRequest（客户端请求错误，如 context window 超限）重试结果
-        // 必然相同：同一 provider 不重试。与普通分支(874-877)对齐——default floor
-        // 分支同样拦截 400，避免 asxs-grok 等 default 池成员 400 被同 provider
-        // 重试多次才 terminal。
-        if *retries_done >= configured_same_candidate_retries || status == 400 {
-            let decision = build_v3_relay_provider_error_05_decision(
-                &selected,
-                source_stage,
-                status,
-                error_type.as_deref(),
-                &message,
-                0,
-                false,
-                false,
-                None,
-            );
-            drop(transient_admission.take());
-            let admission = context
-                .provider_health
-                .wait_for_terminal_provider_projection_in_scope(
-                    &context.failure_session_scope,
-                    &selected.candidate.provider_id,
-                    Some(&selected.candidate.auth_alias),
-                    Some(&selected.candidate.model_id),
-                    error_type.as_deref().unwrap_or("provider_failure"),
-                )
-                .await?;
-            return Ok(V3RelayProviderFailurePolicyResult {
-                terminal_projection: terminal_projection_for(&decision, matched_policy),
-                decision,
-                retry_selected: None,
-                event: build_v3_relay_provider_failure_policy_event(
-                    V3RelayProviderFailurePolicyEventInput {
-                        candidate: selected.candidate,
-                        status,
-                        error_type,
-                        message,
-                        health_record,
-                        action: "terminal_default_floor_exhausted",
-                        next_provider_key: None,
-                        wait_ms: Some(admission.minimum_delay_ms),
-                    },
-                ),
-            });
-        }
-        *retries_done = retries_done.saturating_add(1);
-        state.trace.push("V3DefaultFloorBackoffWait");
-        let failure_record = context
-            .provider_health
-            .record_provider_action_failure_in_scope_with_minimum_delay(
-                &context.failure_session_scope,
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                error_type.as_deref().unwrap_or("provider_failure"),
-                configured_retry_backoff_ms(matched_policy, retries_done.saturating_sub(1)),
-            )?;
-        let wait_ms = failure_record.minimum_delay_ms;
-        let decision = build_v3_relay_provider_error_05_decision(
-            &selected,
-            source_stage,
-            status,
-            error_type.as_deref(),
-            &message,
-            0,
-            true,
-            true,
-            Some(failure_record.recovery_witness()?),
-        );
-        return Ok(V3RelayProviderFailurePolicyResult {
-            terminal_projection: terminal_projection_for(&decision, matched_policy),
-            decision,
-            retry_selected: Some(Box::new(selected.clone())),
-            event: build_v3_relay_provider_failure_policy_event(
-                V3RelayProviderFailurePolicyEventInput {
-                    candidate: selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    action: "default_floor_retry_wait",
-                    next_provider_key: Some(candidate_key),
-                    wait_ms: Some(wait_ms),
-                },
-            ),
-        });
-    }
-    let retries_done = state
-        .same_candidate_retries
-        .entry(candidate_key.clone())
-        .or_insert(0);
-    if health_record.state != "cooldown"
-        && *retries_done < configured_same_candidate_retries
-        // 400 客户端请求错误（如 context window 超限）重试结果必然相同：
-        // 同一 provider 不重试，直接 reselect 到下一个候选。
-        && status != 400
-    {
-        *retries_done = retries_done.saturating_add(1);
-        state.trace.push("V3TargetLocalRetried");
-        let failure_record = context
-            .provider_health
-            .record_provider_action_failure_in_scope_with_minimum_delay(
-                &context.failure_session_scope,
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                error_type.as_deref().unwrap_or("provider_failure"),
-                configured_retry_backoff_ms(matched_policy, retries_done.saturating_sub(1)),
-            )?;
-        let wait_ms = Some(failure_record.minimum_delay_ms);
-        let decision = build_v3_relay_provider_error_05_decision(
-            &selected,
-            source_stage,
-            status,
-            error_type.as_deref(),
-            &message,
-            0,
-            false,
-            true,
-            Some(failure_record.recovery_witness()?),
-        );
-        return Ok(V3RelayProviderFailurePolicyResult {
-            terminal_projection: terminal_projection_for(&decision, matched_policy),
-            decision,
-            retry_selected: Some(Box::new(selected.clone())),
-            event: build_v3_relay_provider_failure_policy_event(
-                V3RelayProviderFailurePolicyEventInput {
-                    candidate: selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    action: "retry_provider",
-                    next_provider_key: Some(candidate_key),
-                    wait_ms,
-                },
-            ),
-        });
-    }
     if !route_resolution_proved_no_alternative {
         return Err(
             "target resolution did not prove route/default exhaustion before terminal Error05"
@@ -1481,7 +1221,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         false,
         None,
     );
-    drop(transient_admission.take());
     let admission = context
         .provider_health
         .wait_for_terminal_provider_projection_in_scope(

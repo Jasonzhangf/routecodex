@@ -162,10 +162,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             retryable_transient: false,
         });
     }
-    if is_v3_retryable_transient_source(&source) {
-        return run_v3_direct_transient_failure_policy(context, selected, source, status, state)
-            .await;
-    }
     let health_record = record_v3_direct_provider_failure_record(
         context.provider_health,
         context.failure_session_scope,
@@ -242,16 +238,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     let provider_scope = V3ErrorActionScope::ProviderInstance {
         provider_id: selected.candidate.provider_id.clone(),
     };
-    let retries_done = *state.same_candidate_retries.get(&failed_key).unwrap_or(&0);
-    let ordinary_same_provider_retry_available = health_record.state != "cooldown"
-        && remaining == 0
-        && (context.provider_pinned
-            || selected.default_floor_protected
-            || selected.candidate.default_pool_member)
-        && retries_done < context.provider_health.default_same_provider_retries()
-        && source.source_kind != V3ErrorSourceKind::InvalidRequest;
-    let same_provider_retry_available = ordinary_same_provider_retry_available;
-    let recovery_record = if remaining > 0 || same_provider_retry_available {
+    let recovery_record = if remaining > 0 {
         Some(
             context
                 .provider_health
@@ -272,7 +259,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         provider_scope,
         remaining,
         false,
-        same_provider_retry_available,
+        false,
         match recovery_record.as_ref() {
             Some(record) => Some(
                 record
@@ -309,30 +296,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             retryable_transient: false,
         });
     }
-    if matches!(
-        decision.action,
-        V3Error05ExecutionAction::WaitThenRetrySame { .. }
-    ) {
-        let retries_done = state.same_candidate_retries.entry(failed_key).or_insert(0);
-        *retries_done = retries_done.saturating_add(1);
-        state.trace.push("V3DefaultFloorBackoffWait");
-        let failure_record = recovery_record
-            .as_ref()
-            .expect("retry-same Error05 must carry its recorded recovery witness");
-        return Ok(V3DirectProviderFailurePolicyResult {
-            decision,
-            retry_selected: Some(Box::new(selected.clone())),
-            event: Some(build_v3_direct_provider_failure_observation(
-                selected,
-                status,
-                &source,
-                &health_record,
-                "retry_provider",
-                Some(candidate_key(&selected.candidate)),
-                Some(failure_record.minimum_delay_ms),
-            )),
-            retryable_transient: false,
-        });
+    if matches!(decision.action, V3Error05ExecutionAction::WaitThenRetrySame { .. }) {
+        return Err(runtime_source(
+            "V3Error05ExecutionDecision",
+            "retry_same is not a production provider failure action",
+        ));
     }
     if !matches!(decision.action, V3Error05ExecutionAction::ProjectTerminal) {
         return Err(runtime_source(
@@ -382,175 +350,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             Some(admission.minimum_delay_ms),
         )),
         retryable_transient: false,
-    })
-}
-
-/// 流内/挂起瞬态失败策略（health-neutral + 同 provider 3 次尝试）：
-/// HTTP 2xx 后 SSE 流内协议失败（裸 error 事件、空包、首事件超时等）或
-/// transport 响应头挂起超时，不写入 provider health（不冷却、不计失败数），
-/// 在同一 provider 上直接重试；第 3 次尝试仍失败才回报一次错误事件并切走。
-/// 与 relay 侧 request_local_provider_compat 的处理一致：synthetic health
-/// record + 直接构造 recovery witness，不触碰 provider health store。
-async fn run_v3_direct_transient_failure_policy<R: V3ProviderAvailabilityReader>(
-    context: &V3DirectProviderFailurePolicyContext<'_, R>,
-    selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    source: V3Error01SourceRaised,
-    status: u16,
-    state: &mut V3DirectProviderFailurePolicyState<'_>,
-) -> Result<V3DirectProviderFailurePolicyResult, V3Error01SourceRaised> {
-    let failed_key = candidate_key(&selected.candidate);
-    let retries_done = *state.same_candidate_retries.get(&failed_key).unwrap_or(&0);
-    let provider_scope = V3ErrorActionScope::ProviderInstance {
-        provider_id: selected.candidate.provider_id.clone(),
-    };
-    let expanded_candidates = match (context.expanded, context.provider_pinned) {
-        (Some(expanded), _) => Some(&expanded.candidates),
-        (None, true) => None,
-        (None, false) => {
-            return Err(runtime_source(
-                "V3Target09CandidateSetExpanded",
-                "routed candidate set missing",
-            ))
-        }
-    };
-    let mut failed_with_current = state.failed_candidates.clone();
-    failed_with_current.insert(failed_key.clone());
-    let mut remaining = expanded_candidates.map_or(0, |candidates| {
-        remaining_available_candidates(candidates, context.availability, &failed_with_current)
-    });
-    let mut next_provider_key = expanded_candidates.and_then(|candidates| {
-        first_remaining_available_candidate_key(
-            candidates,
-            context.availability,
-            &failed_with_current,
-        )
-    });
-    if remaining == 0 {
-        if let Some(candidates) = expanded_candidates {
-            if candidates.len() > 1 {
-                remaining = candidates
-                    .iter()
-                    .filter(|candidate| {
-                        let key = candidate_key(candidate);
-                        !failed_with_current.contains(&key)
-                            && context
-                                .provider_health
-                                .availability(
-                                    &candidate.provider_id,
-                                    Some(&candidate.auth_alias),
-                                    Some(&candidate.model_id),
-                                    context.now_epoch_ms,
-                                )
-                                .available
-                    })
-                    .count();
-                if next_provider_key.is_none() {
-                    next_provider_key = candidates.iter().find_map(|candidate| {
-                        let key = candidate_key(candidate);
-                        (!failed_with_current.contains(&key)
-                            && context
-                                .provider_health
-                                .availability(
-                                    &candidate.provider_id,
-                                    Some(&candidate.auth_alias),
-                                    Some(&candidate.model_id),
-                                    context.now_epoch_ms,
-                                )
-                                .available)
-                            .then(|| key)
-                    });
-                }
-            }
-        }
-    }
-    let recovery = build_v3_transient_recovery_witness(
-        context.failure_session_scope,
-        &failed_key,
-        &source.code,
-    )
-    .map_err(|error| runtime_source("V3Error05RecoveryAdmissionWitness", error))?;
-    if retries_done < V3_TRANSIENT_RETRY_BUDGET {
-        // 瞬态失败仍保持 request-local health-neutral，但不能静默：
-        // 每一次重试都通过 typed observability/error consumer 发布，客户端
-        // 仍不会收到 provider frame 或 provider error。
-        state
-            .same_candidate_retries
-            .insert(failed_key.clone(), retries_done + 1);
-        state.trace.push("V3DirectTransientRetrySame");
-        let decision = (context.run_error)(
-            source.clone(),
-            provider_scope,
-            remaining,
-            false,
-            true,
-            Some(recovery),
-        );
-        let health_record = build_v3_transient_failure_record(
-            &failed_key,
-            (retries_done + 1) as u32,
-            Some(&source.message),
-        );
-        return Ok(V3DirectProviderFailurePolicyResult {
-            decision,
-            retry_selected: Some(Box::new(selected.clone())),
-            event: Some(build_v3_direct_provider_failure_observation(
-                selected,
-                status,
-                &source,
-                &health_record,
-                "policy_retry_same",
-                Some(failed_key),
-                Some(1),
-            )),
-            retryable_transient: true,
-        });
-    }
-    // 第 3 次尝试仍失败：回报一次错误中心 + 切 provider（无候选则 terminal）。
-    // 同时写 session 级短期绕行（30s）：同 session 后续请求绕开该 provider，
-    // 避免 health-neutral 导致反复命中同一失败 provider；不触发 15 分钟冷却。
-    context
-        .provider_health
-        .record_provider_transient_bypass_in_session(
-            context.failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            Some(&source.message),
-            context.now_epoch_ms,
-        )
-        .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))?;
-    state.failed_candidates.insert(failed_key.clone());
-    state.trace.push("V3TargetLocalReselected");
-    let decision = (context.run_error)(
-        source.clone(),
-        provider_scope,
-        remaining,
-        false,
-        false,
-        Some(recovery),
-    );
-    let health_record = build_v3_transient_failure_record(
-        &failed_key,
-        (retries_done + 1) as u32,
-        Some(&source.message),
-    );
-    Ok(V3DirectProviderFailurePolicyResult {
-        decision,
-        retry_selected: None,
-        event: Some(build_v3_direct_provider_failure_observation(
-            selected,
-            status,
-            &source,
-            &health_record,
-            if remaining > 0 {
-                "switch_provider"
-            } else {
-                "terminal_transient_exhausted"
-            },
-            next_provider_key,
-            Some(1),
-        )),
-        retryable_transient: true,
     })
 }
 

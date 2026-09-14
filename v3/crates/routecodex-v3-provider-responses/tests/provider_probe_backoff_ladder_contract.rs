@@ -1,19 +1,19 @@
 //! Spec contract: the provider cooldown probe cadence is the fixed,
-//! observable ladder 30s / 1m / 3m / 15m / 1h / 3h, looping after the
-//! 3h step. The first probe after a key enters cooldown is due 30s later.
+//! observable ladder 5s / 30s / 1m / 3m / 15m / 1h / 3h, looping after the
+//! 3h step. The first probe after a key enters cooldown is due 5s later.
 //! Restart semantics (probe history reset) are owned by the persistence
-//! module and start the same ladder from 30s.
+//! module and start the same ladder from 5s.
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::V3ProviderHealthStore;
 
 const LADDER_MS: [u64; 7] = [
-    30_000,     // first probe after block (probe failure count 0)
-    60_000,     // after probe failure 1
-    180_000,    // after probe failure 2
-    900_000,    // after probe failure 3
-    3_600_000,  // after probe failure 4
-    10_800_000, // after probe failure 5
-    30_000,     // after probe failure 6: the ladder loops
+    5_000,      // first probe after block (probe failure count 0)
+    30_000,     // after probe failure 1
+    60_000,     // after probe failure 2
+    180_000,    // after probe failure 3
+    900_000,    // after probe failure 4
+    3_600_000,  // after probe failure 5
+    10_800_000, // after probe failure 6
 ];
 
 fn scope() -> V3ProviderFailureSessionScope {
@@ -34,19 +34,19 @@ fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
 }
 
 #[test]
-fn first_probe_is_due_exactly_30s_after_block_and_probe_success_resurrects() {
+fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
         fail(&store, now_ms);
     }
-    // Block was created at now_ms = 3; first probe due at 3 + 30_000.
-    let first_due = 3 + 30_000;
+    // Block was created at now_ms = 3; first probe due at 3 + 5_000.
+    let first_due = 3 + 5_000;
     assert!(
         store
             .provider_cooldown_probe_keys_due(first_due - 1)
             .unwrap()
             .is_empty(),
-        "first probe must not be due before 30s"
+        "first probe must not be due before 5s"
     );
     assert_eq!(
         store
@@ -54,7 +54,7 @@ fn first_probe_is_due_exactly_30s_after_block_and_probe_success_resurrects() {
             .unwrap()
             .len(),
         1,
-        "first probe must be due at 30s"
+        "first probe must be due at 5s"
     );
     // While the probe entry exists the key stays unavailable for every
     // session until the typed probe owner reports success.
@@ -121,7 +121,7 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
-fn probe_failures_stretch_1m_3m_15m_1h_3h_then_loop_back_to_30s() {
+fn probe_failures_follow_5s_30s_1m_3m_15m_1h_3h_ladder() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
         fail(&store, now_ms);

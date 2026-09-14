@@ -15,7 +15,8 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_health_and_retry_policy,
     execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayLocalContinuationScope,
     V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    V3ProviderFailureRuntimeHealth, V3ResponsesRelayClientBody,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -1632,11 +1633,11 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         .expect("successful retry must keep console observability");
     assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
     assert_eq!(observability.provider_status, Some(200));
-    assert_eq!(observability.attempts, Some(7));
+    assert_eq!(observability.attempts, Some(3));
     assert_eq!(observability.unavailable_candidates.len(), 1);
     assert!(observability.unavailable_candidates[0].contains("limited:key1:gpt-5.5:availability("));
-    assert_eq!(observability.provider_failure_events.len(), 3);
-    let provider_event = observability.provider_failure_events.last().unwrap();
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let provider_event = &observability.provider_failure_events[0];
     assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
     assert_eq!(provider_event.status, 502);
     assert_eq!(provider_event.action, "switch_provider");
@@ -1644,15 +1645,13 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         provider_event.next_provider_key.as_deref(),
         Some("minimax:key1:MiniMax-M3")
     );
-    assert_eq!(provider_event.failure_count, 3);
+    assert_eq!(provider_event.failure_count, 1);
     assert_eq!(provider_event.health_state, "healthy");
 
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 4);
+    assert_eq!(captures.len(), 2);
     assert_eq!(captures[0].0, "limited");
-    assert_eq!(captures[1].0, "limited");
-    assert_eq!(captures[2].0, "limited");
-    assert_eq!(captures[3].0, "minimax");
+    assert_eq!(captures[1].0, "minimax");
 }
 
 #[tokio::test]
@@ -1696,9 +1695,9 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
             .expect("successful retry must keep console observability");
         assert_eq!(observability.provider_id.as_deref(), Some("minimax"));
         assert_eq!(observability.provider_status, Some(200));
-        assert_eq!(observability.attempts, Some(7));
-        assert_eq!(observability.provider_failure_events.len(), 3);
-        let provider_event = observability.provider_failure_events.last().unwrap();
+        assert_eq!(observability.attempts, Some(3));
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        let provider_event = &observability.provider_failure_events[0];
         assert_eq!(provider_event.provider_key, "limited:key1:gpt-5.5");
         assert_eq!(provider_event.status, 502);
         assert_eq!(provider_event.action, "switch_provider");
@@ -1708,11 +1707,9 @@ async fn responses_relay_provider_duplicate_tool_identity_reselects_before_proje
         );
 
         let captures = transport.captures.lock().unwrap();
-        assert_eq!(captures.len(), 4);
+        assert_eq!(captures.len(), 2);
         assert_eq!(captures[0].0, "limited");
-        assert_eq!(captures[1].0, "limited");
-        assert_eq!(captures[2].0, "limited");
-        assert_eq!(captures[3].0, "minimax");
+        assert_eq!(captures[1].0, "minimax");
     }
 }
 
@@ -1825,10 +1822,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             observability.provider_failure_events[0].action,
             "switch_provider"
         );
-        assert_eq!(
-            observability.provider_failure_events[0].wait_ms,
-            Some(1_000)
-        );
+        assert_eq!(observability.provider_failure_events[0].wait_ms, None);
         assert_eq!(observability.provider_failure_events[0].failure_count, 0);
         assert_eq!(
             observability.provider_failure_events[0].health_state,
@@ -1885,11 +1879,11 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
 }
 
 #[tokio::test]
-async fn responses_relay_default_floor_retries_until_success_within_cap() {
+async fn responses_relay_default_floor_projects_error_after_single_failure() {
     let server_id = "responses_default_floor_success";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
-        fail_count: 2,
+        fail_count: usize::MAX,
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
         &responses_single_limited_manifest_for_scope(server_id),
@@ -1910,31 +1904,34 @@ async fn responses_relay_default_floor_retries_until_success_within_cap() {
         },
         &transport,
         V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 2,
+            same_candidate_retries: 0,
         },
     )
     .await
     .unwrap();
 
-    assert_eq!(output.status, 200);
-    assert_eq!(output.error_chain, None);
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_ref().unwrap(),
+        &V3_ERROR_CHAIN_NODE_IDS
+    );
     let observability = output
         .observability
         .as_ref()
-        .expect("default floor retry success must keep console observability");
+        .expect("default floor terminal must keep console observability");
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
-    assert_eq!(observability.provider_status, Some(200));
-    assert_eq!(observability.response_status.as_deref(), Some("completed"));
-    assert_eq!(observability.attempts, Some(5));
+    assert_eq!(observability.provider_status, Some(429));
+    assert_eq!(observability.response_status.as_deref(), Some("error"));
+    assert_eq!(observability.attempts, Some(1));
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 3);
+    assert_eq!(captures.len(), 1);
     assert!(captures
         .iter()
         .all(|(provider_id, _)| provider_id == "limited"));
 }
 
 #[tokio::test]
-async fn responses_relay_default_floor_projects_error_after_retry_cap() {
+async fn responses_relay_default_floor_projects_error_without_retry_wait() {
     let server_id = "responses_default_floor_terminal";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
@@ -1961,7 +1958,7 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
             },
             &transport,
             V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 2,
+                same_candidate_retries: 0,
             },
         ),
     )
@@ -1983,20 +1980,20 @@ async fn responses_relay_default_floor_projects_error_after_retry_cap() {
     assert_eq!(observability.provider_id.as_deref(), Some("limited"));
     assert_eq!(observability.provider_status, Some(429));
     assert_eq!(observability.response_status.as_deref(), Some("error"));
-    assert_eq!(observability.attempts, Some(5));
+    assert_eq!(observability.attempts, Some(1));
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 3);
+    assert_eq!(captures.len(), 1);
     assert!(captures
         .iter()
         .all(|(provider_id, _)| provider_id == "limited"));
 }
 
 #[tokio::test]
-async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
+async fn responses_relay_default_floor_waits_before_terminal_projection() {
     let server_id = "responses_default_floor_wait";
     let transport = ResponsesDefaultFloorFailsThenSucceedsTransport {
         captures: Mutex::new(Vec::new()),
-        fail_count: 1,
+        fail_count: usize::MAX,
     };
     let started = Instant::now();
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
@@ -2018,18 +2015,18 @@ async fn responses_relay_default_floor_retry_wait_blocks_between_errors() {
         },
         &transport,
         V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 1,
+            same_candidate_retries: 0,
         },
     )
     .await
     .unwrap();
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 502);
     assert!(
         started.elapsed() >= Duration::from_millis(1_000),
-        "default floor retry must consume the isolated one-second action gate"
+        "default floor terminal must consume the isolated one-second action gate"
     );
-    assert_eq!(transport.captures.lock().unwrap().len(), 2);
+    assert_eq!(transport.captures.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -2456,46 +2453,42 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
 }
 
 #[tokio::test]
-async fn provider_error_closeout_enters_error01_06_without_success_projection() {
+async fn provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery() {
     let server_id = "provider_error_terminal_closeout";
     let manifest = manifest_for_scope(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
-        &manifest,
-        V3AnthropicRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            toolreason_observation_session_id: None,
-            request_id: "req-closeout-error".into(),
-            payload: json!({
-                "model":"claude-client-alias",
-                "messages":[{"role":"user","content":"fail"}],
-                "tools":[{"name":"servertool.exec","input_schema":{"type":"object"}}],
-                "stream":false
-            }),
-        },
-        &ErrorTransport,
-        Vec::new(),
-        provider_health.runtime_health(),
+    let pending = tokio::time::timeout(
+        Duration::from_millis(100),
+        execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+            &manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                toolreason_observation_session_id: None,
+                request_id: "req-closeout-error".into(),
+                payload: json!({
+                    "model":"claude-client-alias",
+                    "messages":[{"role":"user","content":"fail"}],
+                    "tools":[{"name":"servertool.exec","input_schema":{"type":"object"}}],
+                    "stream":false
+                }),
+            },
+            &ErrorTransport,
+            Vec::new(),
+            provider_health.runtime_health(),
+        ),
     )
-    .await
-    .unwrap();
-    assert_eq!(output.status, 502);
-    assert_eq!(output.client_response["error"]["code"], "network_error");
-    assert_eq!(output.client_response["error"]["message"], "network error");
-    assert_eq!(
-        output.error_chain.as_ref().unwrap(),
-        &V3_ERROR_CHAIN_NODE_IDS
+    .await;
+    assert!(
+        pending.is_err(),
+        "pool exhaustion must hold the client until a cooldown probe restores availability"
     );
-    assert!(!output.node_trace.contains(&"V3ProviderRespInbound01Raw"));
-    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
-    assert!(!output.servertool_followup_required);
 }
 
 fn responses_reselect_manifest_for_scope(

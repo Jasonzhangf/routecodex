@@ -52,7 +52,7 @@ fn provider_failure_with_route_capacity_is_typed_nonterminal_error05() {
 }
 
 #[test]
-fn provider_failure_with_same_provider_budget_is_typed_retry_same() {
+fn provider_failure_never_uses_same_provider_budget() {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: provider_failure(),
@@ -70,7 +70,7 @@ fn provider_failure_with_same_provider_budget_is_typed_retry_same() {
 
     assert!(matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenRetrySame { .. }
+        V3Error05ExecutionAction::WaitThenReselect { .. }
     ));
     assert!(decision.try_into_terminal().is_err());
 }

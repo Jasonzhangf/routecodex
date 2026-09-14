@@ -487,6 +487,34 @@ fn exhaustion_rescue_identity_is_model_scoped() {
     assert!(!identities.insert(("opencode-go-zen", "key1", "mimo-v2.5-free",)));
 }
 
+#[test]
+fn exhaustion_wait_allows_only_cooldown_recovery_scopes() {
+    let projection = |blocked: &[&str]| V3ProviderAvailabilityProjection {
+        provider_id: "provider-a".to_string(),
+        auth_alias: Some("key-a".to_string()),
+        model_id: Some("model-a".to_string()),
+        available: blocked.is_empty(),
+        blocked_scopes: blocked.iter().map(|scope| (*scope).to_string()).collect(),
+    };
+
+    assert!(availability_is_cooldown_recovery_only(&projection(&[
+        "provider_cooldown_probe_pending",
+    ])));
+    assert!(availability_is_cooldown_recovery_only(&projection(&[
+        "provider_cooldown_probe_pending",
+        "auth_key:provider-a:key-a",
+    ])));
+    assert!(!availability_is_cooldown_recovery_only(&projection(&[
+        "provider_cooldown_probe_pending",
+        "configured_disabled:provider_instance:provider-a",
+    ])));
+    assert!(!availability_is_cooldown_recovery_only(&projection(&[
+        "provider_cooldown_probe_pending",
+        "quota:provider_instance:provider-a",
+    ])));
+    assert!(!availability_is_cooldown_recovery_only(&projection(&[])));
+}
+
 fn assert_resolution_failure(
     resolution: V3RelayProviderTargetResolution,
     expected_stage: &str,
@@ -1400,10 +1428,14 @@ targets = [
     .await
     .expect("exact matched policy must drive Error05");
 
-    assert_eq!(result.event.action, "policy_retry_same");
-    assert_eq!(result.event.wait_ms, Some(7000));
-    assert!(result.retry_selected.is_some());
-    assert_eq!(same_candidate_retries.values().copied().next(), Some(1));
+    assert_ne!(
+        result.event.action, "policy_retry_same",
+        "configured RetrySame must not create a production same-candidate retry"
+    );
+    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
+    assert!(result.retry_selected.is_none());
+    assert!(result.terminal_projection.is_some());
+    assert!(same_candidate_retries.is_empty());
 }
 
 #[tokio::test]
@@ -1427,9 +1459,9 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
         retry_policy: V3RelayProviderFailureRetryPolicy::from_manifest(&manifest),
         deterministic_sample: 0,
     };
-    assert!(
-        context.retry_policy.same_candidate_retries > 0,
-        "default path must expose a same-candidate retry budget for this regression"
+    assert_eq!(
+        context.retry_policy.same_candidate_retries, 0,
+        "the default path must never expose a same-candidate retry budget"
     );
     let result = run_v3_relay_provider_failure_policy(
         &context,
@@ -1454,8 +1486,8 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
         "codec failure must never spend the same-candidate retry budget"
     );
     assert!(
-        same_candidate_retries.values().all(|retries| *retries == 0),
-        "codec failure must not increment the same-candidate retry counter: {same_candidate_retries:?}"
+        same_candidate_retries.is_empty(),
+        "codec failure must not allocate a same-candidate retry counter: {same_candidate_retries:?}"
     );
     assert!(
         !trace.contains(&"V3TargetPolicyRetriedSame"),
