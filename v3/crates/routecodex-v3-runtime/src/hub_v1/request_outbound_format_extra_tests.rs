@@ -1089,6 +1089,26 @@ fn chat_mcp_dotted_tool_call_name_is_normalized_at_provider_boundary() {
 }
 
 #[test]
+fn openai_chat_provider_normalizes_dotted_mcp_history_tool_call_name() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_workspace",
+                "type": "function",
+                "function": {"name": "mcp__mcpx.workspace", "arguments": "{}"}
+            }]
+        }]
+    }))
+    .expect("OpenAI Chat history must remain projectable");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx__workspace"
+    );
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",
