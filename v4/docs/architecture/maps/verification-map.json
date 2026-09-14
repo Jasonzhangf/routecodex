@@ -3031,6 +3031,7 @@
       "input_paths": [
         "contracts/lifecycle-state-machines.manifest.json",
         "contracts/transitions/zone-transition-manifest.json",
+        "contracts/records/record-graph.contract.json",
         "scripts/architecture/verify-v4-transition-deps.mjs"
       ],
       "required_for": [
@@ -3058,6 +3059,7 @@
       "input_paths": [
         "contracts/lifecycle-state-machines.manifest.json",
         "contracts/transitions/zone-transition-manifest.json",
+        "contracts/records/record-graph.contract.json",
         "scripts/architecture/verify-v4-transition-deps.mjs"
       ],
       "required_for": [

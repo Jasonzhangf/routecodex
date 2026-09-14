@@ -15,6 +15,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const v4Root = path.resolve(scriptDir, '..', '..');
 const lifecyclePath = path.join(v4Root, 'contracts/lifecycle-state-machines.manifest.json');
 const zonePath = path.join(v4Root, 'contracts/transitions/zone-transition-manifest.json');
+const recordGraphPath = path.join(v4Root, 'contracts/records/record-graph.contract.json');
 
 // Promotion records that must be present at the playground -> active release
 // boundary. Optional parallel records are checked separately because they
@@ -31,23 +32,10 @@ const REQUIRED_PROMOTION_RECORDS = [
   'PromotionRecord',
 ];
 
-// Prerequisites that must be present before the playground -> active release
-// boundary can be crossed. Parallel-only entries stay in the same contract so
-// removing them must not silently weaken the non-parallel release boundary.
-const REQUIRED_PROMOTION_REQUIREMENTS = [
-  'clean_worktree',
-  'baseline_reproduction',
-  'fix_candidate_verified',
-  'development_whitebox_pass',
-  'deployed_blackbox_pass',
-  'pre_review_validation_pass',
-  'architecture_review_pass',
-  'post_architecture_effectiveness_pass',
+// Requirements beyond the record graph order that the zone manifest still
+// declares at the promotion boundary.
+const ADDITIONAL_PROMOTION_REQUIREMENTS = [
   'scenario_composition_verified',
-  'merge_queue_admitted_when_parallel',
-  'tested_integration_verified_when_parallel',
-  'local_and_remote_mainline_receipt_when_parallel',
-  'mainline_merge_verified',
   'compile',
   'promotion_record',
 ];
@@ -70,8 +58,23 @@ function missingMembers(actual, expected) {
   return expected.filter((record) => !(actual ?? []).includes(record));
 }
 
-export function validateTransitionContract(lifecycle, zone) {
+function requiredPromotionRequirements(recordGraph) {
+  const lifecycle = recordGraph?.properties?.fix_lifecycle?.properties;
+  const singleOrder = lifecycle?.single_order?.const;
+  const parallelOrder = lifecycle?.parallel_order?.const;
+  if (!Array.isArray(singleOrder) || !Array.isArray(parallelOrder)) {
+    return null;
+  }
+  const parallelOnly = parallelOrder.filter((entry) => !singleOrder.includes(entry));
+  return [...new Set([...singleOrder, ...parallelOnly, ...ADDITIONAL_PROMOTION_REQUIREMENTS])];
+}
+
+export function validateTransitionContract(lifecycle, zone, recordGraph) {
   const failures = [];
+  const promotionRequirements = requiredPromotionRequirements(recordGraph);
+  if (!promotionRequirements) {
+    failures.push('record graph must define fix_lifecycle.single_order and fix_lifecycle.parallel_order arrays');
+  }
   if (lifecycle.stage_graph !== undefined) {
     failures.push('lifecycle state machine must not define stage_graph; use record-graph.contract.json and zone manifest');
   }
@@ -87,14 +90,15 @@ export function validateTransitionContract(lifecycle, zone) {
   if (!active) {
     failures.push('playground -> active transition is required');
   } else {
-    const missingRequirements = missingMembers(
-      active.requirements,
-      REQUIRED_PROMOTION_REQUIREMENTS,
-    );
-    if (missingRequirements.length > 0) {
-      failures.push(
-        `playground -> active must require full promotion prerequisites, missing: ${missingRequirements.join(', ')}`,
-      );
+    if (!Array.isArray(active.requirements)) {
+      failures.push('playground -> active must declare requirements array');
+    } else if (promotionRequirements) {
+      const missingRequirements = missingMembers(active.requirements, promotionRequirements);
+      if (missingRequirements.length > 0) {
+        failures.push(
+          `playground -> active must require full promotion prerequisites, missing: ${missingRequirements.join(', ')}`,
+        );
+      }
     }
     const records = active.record_required;
     if (!Array.isArray(records)) {
@@ -137,12 +141,13 @@ function load() {
   return {
     lifecycle: JSON.parse(fs.readFileSync(lifecyclePath, 'utf8')),
     zone: JSON.parse(fs.readFileSync(zonePath, 'utf8')),
+    recordGraph: JSON.parse(fs.readFileSync(recordGraphPath, 'utf8')),
   };
 }
 
 function runProduction() {
-  const { lifecycle, zone } = load();
-  const failures = validateTransitionContract(lifecycle, zone);
+  const { lifecycle, zone, recordGraph } = load();
+  const failures = validateTransitionContract(lifecycle, zone, recordGraph);
   if (failures.length > 0) {
     for (const failure of failures) console.error(`[V4-TRANSITION-DEPS] FAIL ${failure}`);
     process.exit(1);
@@ -151,10 +156,10 @@ function runProduction() {
 }
 
 function expectReject(mutate, expected) {
-  const { lifecycle, zone } = load();
-  const mutated = JSON.parse(JSON.stringify({ lifecycle, zone }));
+  const { lifecycle, zone, recordGraph } = load();
+  const mutated = JSON.parse(JSON.stringify({ lifecycle, zone, recordGraph }));
   mutate(mutated);
-  const failures = validateTransitionContract(mutated.lifecycle, mutated.zone);
+  const failures = validateTransitionContract(mutated.lifecycle, mutated.zone, mutated.recordGraph);
   if (!failures.some((failure) => failure.includes(expected))) {
     throw new Error(`red fixture did not report ${expected}`);
   }
@@ -179,6 +184,10 @@ function runRedSelfTest() {
     const active = manifest.zone.transitions.find((entry) => entry.from === 'playground' && entry.to === 'active');
     active.requirements = active.requirements.filter((requirement) => requirement !== 'clean_worktree');
   }, 'must require full promotion prerequisites');
+  expectReject((manifest) => {
+    const active = manifest.zone.transitions.find((entry) => entry.from === 'playground' && entry.to === 'active');
+    active.requirements = active.requirements.join(' ');
+  }, 'must declare requirements array');
   expectReject((manifest) => {
     const protectedEdge = manifest.zone.transitions.find((entry) => entry.from === 'active' && entry.to === 'protected');
     protectedEdge.record_required = protectedEdge.record_required.filter((record) => record !== 'FreezeRecord');
