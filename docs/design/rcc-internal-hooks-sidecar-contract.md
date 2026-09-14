@@ -404,7 +404,7 @@ exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-lifecycle
 
 Executed in the integration worktree
 `/Users/fanzhang/Documents/github/routecodex/playground/rcc-internal-hooks-sidecar-main-0914`
-on source candidate commit `faab2b454bc97a6a05dcf2e473f4f309cfb55586`;
+on source candidate commit `d59e6f6be1153fea70966c72bedf44077f09c7fd`;
 later commits in this review branch are documentation-only and do not change
 source; base
 `origin/main` `3fe9790007f7d2abfe044dd7a466c258847c53f4`. These are real
@@ -414,24 +414,24 @@ build, and isolated installed-binary failure-injection evidence only, not
 production install, restart, or same-entry live replay evidence.
 
 ```text
-2026-09-14T21:15Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
+2026-09-14T22:23Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
                      61 lib + 3 binary_handler_config + 1 binary_readiness
                      + 6 native_delivery_replay pass
-2026-09-14T21:16Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
+2026-09-14T22:24Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
                      52 pass
-2026-09-14T21:15Z  exit 0  node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+2026-09-14T22:23Z  exit 0  node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
                      6 pass
-2026-09-14T21:17Z  exit 0  npm run verify:v3-resource-map
-2026-09-14T21:17Z  exit 0  npm run verify:v3-mainline-caller-flow
+2026-09-14T22:25Z  exit 0  npm run verify:v3-resource-map
+2026-09-14T22:25Z  exit 0  npm run verify:v3-mainline-caller-flow
                      binding_pending edges 13; locked 55; pending 21
-2026-09-14T21:17Z  exit 0  npm run verify:v3-module-boundaries
-2026-09-14T21:17Z  exit 0  npm run verify:v3-architecture-docs
+2026-09-14T22:25Z  exit 0  npm run verify:v3-module-boundaries
+2026-09-14T22:25Z  exit 0  npm run verify:v3-architecture-docs
                      docs 26; resources 171; edges 442
-2026-09-14T21:18Z  exit 0  git diff --check
-2026-09-14T21:18Z  exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-hooks --all-targets
+2026-09-14T22:26Z  exit 0  git diff --check
+2026-09-14T22:26Z  exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-hooks --all-targets
                      0 errors
-2026-09-14T21:16Z  exit 0  CARGO_NET_OFFLINE=true cargo build --locked -p routecodex-v3-cli
-2026-09-14T21:18Z  isolated installed-binary failure injection
+2026-09-14T22:24Z  exit 0  CARGO_NET_OFFLINE=true cargo build --locked -p routecodex-v3-cli
+2026-09-14T22:26Z  isolated installed-binary failure injection
                      ROUTECODEX_HOOKS_INSTALL_RECORD=$ROOT/install.json rccv3 start --config $ROOT/config.v3.toml --snap
                      state=running; listeners started on 127.0.0.1:45464/45465/45466
                      status detail=hooks sidecar unavailable: hooks_unavailable:crashed:
