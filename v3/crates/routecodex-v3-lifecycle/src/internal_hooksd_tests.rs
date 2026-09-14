@@ -53,10 +53,9 @@ async fn internal_hooksd_anchor_leader_stays_alive_through_readiness_and_stop() 
     // The lifecycle-owned anchor leader must still be alive after readiness.
     // The production start path keeps the piped `ChildStdin` owned by the
     // retained `Child`, so the `read -r line` anchor does not see EOF.
-    let record: serde_json::Value = serde_json::from_slice(
-        &fs::read(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE)).unwrap(),
-    )
-    .unwrap();
+    let record: serde_json::Value =
+        serde_json::from_slice(&fs::read(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE)).unwrap())
+            .unwrap();
     let process_group_id = record["process_group_id"].as_i64().unwrap() as libc::pid_t;
     let leader_pid = record["leader_pid"].as_u64().unwrap() as libc::pid_t;
     assert_eq!(

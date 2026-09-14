@@ -16,7 +16,8 @@ use std::time::Duration;
 /// directory; this is the unique owner of the control boundary.
 fn bind_control_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
     let listener = UnixListener::bind(socket_path)?;
-    if let Err(error) = std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))
+    if let Err(error) =
+        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))
     {
         // Never leave a control socket reachable with wider permissions than
         // intended: fail closed and remove the just-created path.
@@ -329,9 +330,7 @@ impl ControlServer {
         state_path: Option<&Path>,
     ) -> std::io::Result<Self> {
         let transport = if appserver_sockets.has_any_socket() {
-            AnyAppServerTransport::Native(NativeAppServerTransport::with_sockets(
-                appserver_sockets,
-            ))
+            AnyAppServerTransport::Native(NativeAppServerTransport::with_sockets(appserver_sockets))
         } else {
             AnyAppServerTransport::Disabled(DisabledTransport)
         };
@@ -730,10 +729,7 @@ mod tests {
             second.is_err(),
             "second daemon must not hijack a live control socket"
         );
-        assert_eq!(
-            second.err().unwrap().kind(),
-            std::io::ErrorKind::AddrInUse
-        );
+        assert_eq!(second.err().unwrap().kind(), std::io::ErrorKind::AddrInUse);
 
         // The first daemon's socket inode must be untouched by the refused
         // bind, so its own listener still owns the advertised path.

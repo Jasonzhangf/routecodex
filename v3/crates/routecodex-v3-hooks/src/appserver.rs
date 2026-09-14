@@ -7,6 +7,10 @@ use std::path::Path;
 use std::time::Duration;
 
 const NATIVE_TRANSPORT_TIMEOUT: Duration = Duration::from_secs(15);
+// A native App Server frame is a JSON-RPC response. The advertised payload
+// length is untrusted input: reject it before allocating so a peer on the
+// local socket cannot force an unbounded allocation.
+const NATIVE_MAX_FRAME_PAYLOAD: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -756,6 +760,7 @@ fn write_server_control(
     stream.flush().map_err(io_transport_error)
 }
 
+#[derive(Debug)]
 struct Frame {
     opcode: u8,
     payload: Vec<u8>,
@@ -778,7 +783,20 @@ fn read_server_frame(stream: &mut UnixStream) -> Result<Frame, AppServerError> {
         stream
             .read_exact(&mut extended)
             .map_err(io_transport_error)?;
-        len = u64::from_be_bytes(extended) as usize;
+        let advertised = u64::from_be_bytes(extended);
+        if advertised > NATIVE_MAX_FRAME_PAYLOAD as u64 {
+            return Err(AppServerError::Transport(format!(
+                "native frame payload {advertised} exceeds the {} byte native frame limit",
+                NATIVE_MAX_FRAME_PAYLOAD
+            )));
+        }
+        len = advertised as usize;
+    }
+    if len > NATIVE_MAX_FRAME_PAYLOAD {
+        return Err(AppServerError::Transport(format!(
+            "native frame payload {len} exceeds the {} byte native frame limit",
+            NATIVE_MAX_FRAME_PAYLOAD
+        )));
     }
     let mask = if masked {
         let mut key = [0_u8; 4];
@@ -961,6 +979,35 @@ mod tests {
             error,
             AppServerError::TransportTimeout("read timed out".to_string())
         );
+    }
+
+    #[test]
+    fn oversized_advertised_native_frame_is_rejected_before_allocation() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        // 64-bit extended length far above the native limit.
+        client.write_all(&[0x81, 0xff]).unwrap();
+        client.write_all(&(u64::MAX).to_be_bytes()).unwrap();
+        client.flush().unwrap();
+        let error = read_server_frame(&mut server).expect_err("oversized frame must fail closed");
+        match error {
+            AppServerError::Transport(detail) => {
+                assert!(detail.contains("exceeds"), "unexpected detail: {detail}");
+                assert!(
+                    detail.contains("native frame limit"),
+                    "unexpected detail: {detail}"
+                );
+            }
+            other => panic!("expected a typed transport error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn in_limit_native_frame_is_accepted() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let payload = vec![b'a'; 300];
+        write_client_frame(&mut client, 0x1, &payload).unwrap();
+        let frame = read_server_frame(&mut server).expect("in-limit frame still decodes");
+        assert_eq!(frame.payload, payload);
     }
 
     #[test]
