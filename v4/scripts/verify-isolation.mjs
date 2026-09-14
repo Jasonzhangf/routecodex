@@ -24,12 +24,26 @@
  * Red fixtures prove each negative class fails through the same code paths.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import yaml from 'js-yaml';
 import { v4Root, runCapture } from './_common.mjs';
-import { ARCHITECTURE_GATES, RED_SUITES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
+import {
+  ARCHITECTURE_GATES,
+  RED_SUITES,
+  CONSUMER_REGRESSIONS,
+  RUNTIME_BIN_REGRESSION,
+  architectureCommand,
+  consumerCommand,
+} from './_gate-matrix.mjs';
+import {
+  ADMISSION_COMMAND,
+  BOUNDARY_COMMAND,
+  BUILD_GUARD_COMMAND,
+  SELF_TEST_COMMAND,
+} from './architecture/lib/feature-layer-batch-contract.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
 const failures = [];
@@ -462,7 +476,10 @@ function checkDeclaredExecutedBinding(
 ) {
   const out = [];
   const declaredGates = new Set();
+  const declaredArchitectureCommands = new Set();
   const declaredConsumers = new Set();
+  const declaredConsumerCommands = new Set();
+  const declaredBinaryCommands = new Set();
   const declaredFunctionalTests = new Set();
   const declaredConsumerDetails = new Map();
   const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
@@ -473,6 +490,21 @@ function checkDeclaredExecutedBinding(
     }
     seenGateIds.add(gate.gate_id);
     const command = String(gate.command ?? '');
+    if (Array.isArray(gate.argv)) {
+      const declaredArgv = gate.argv.every((part) => typeof part === 'string')
+        ? gate.argv.join(' ')
+        : null;
+      if (declaredArgv === null || declaredArgv !== command) {
+        out.push(`gate ${gate.gate_id} command and argv are not exact: command=${JSON.stringify(command)} argv=${JSON.stringify(gate.argv)}`);
+      }
+    }
+    for (const segment of command.split(/\s*&&\s*/).map((part) => part.trim())) {
+      if (segment.startsWith('node scripts/architecture/')) {
+        declaredArchitectureCommands.add(segment);
+      }
+      if (segment.includes('test-consumer')) declaredConsumerCommands.add(segment);
+      if (segment.includes('test-binary')) declaredBinaryCommands.add(segment);
+    }
     for (const match of command.matchAll(/node scripts\/architecture\/(verify-v4-[a-z0-9_-]+\.mjs)/g)) {
       declaredGates.add(match[1]);
     }
@@ -491,6 +523,14 @@ function checkDeclaredExecutedBinding(
   }
   const executedGates = new Set(ARCHITECTURE_GATES);
   for (const [gate] of RED_SUITES) executedGates.add(gate);
+  const executedArchitectureCommands = new Set([
+    ...ARCHITECTURE_GATES.map((gate) => architectureCommand(gate)),
+    ...RED_SUITES.map(([gate, flag]) => architectureCommand(gate, flag)),
+    BUILD_GUARD_COMMAND,
+    SELF_TEST_COMMAND,
+    ADMISSION_COMMAND,
+    BOUNDARY_COMMAND,
+  ]);
   const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
   const executedConsumerDetails = new Map();
   for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
@@ -499,6 +539,51 @@ function checkDeclaredExecutedBinding(
       deps,
       sourceDeps: sourceIndex >= 0 ? (extra[sourceIndex + 1] ?? '') : '',
     });
+  }
+
+  for (const command of executedArchitectureCommands) {
+    if (!declaredArchitectureCommands.has(command)) {
+      const [, gate] = command.match(/^node scripts\/architecture\/([^ ]+)/) ?? [];
+      const variants = [...declaredArchitectureCommands].filter((declared) => declared.includes(`scripts/architecture/${gate}`));
+      if (variants.length > 0) {
+        out.push(`architecture gate ${gate} declared command arguments ${JSON.stringify(variants)} != executed ${JSON.stringify(command)}`);
+      } else {
+        out.push(`architecture gate command not registered in verification-map.json: ${command}`);
+      }
+    }
+  }
+  for (const command of declaredArchitectureCommands) {
+    if (!executedArchitectureCommands.has(command)) {
+      const [, gate] = command.match(/^node scripts\/architecture\/([^ ]+)/) ?? [];
+      out.push(`architecture gate ${gate} declared command arguments ${JSON.stringify(command)} != executed matrix`);
+    }
+  }
+  if (!declaredBinaryCommands.has(RUNTIME_BIN_REGRESSION)) {
+    const variants = [...declaredBinaryCommands];
+    out.push(`runtime binary declared command arguments ${JSON.stringify(variants)} != executed ${JSON.stringify(RUNTIME_BIN_REGRESSION)}`);
+  }
+  for (const command of declaredBinaryCommands) {
+    if (command !== RUNTIME_BIN_REGRESSION) {
+      out.push(`runtime binary declared command arguments ${JSON.stringify(command)} != executed ${JSON.stringify(RUNTIME_BIN_REGRESSION)}`);
+    }
+  }
+  for (const entry of CONSUMER_REGRESSIONS) {
+    const command = consumerCommand(entry);
+    if (declaredConsumerCommands.has(command)) continue;
+    const consumer = entry[0];
+    const variants = [...declaredConsumerCommands].filter((declared) => declared.includes(`--consumer ${consumer} `));
+    if (variants.length > 0) {
+      out.push(`consumer ${consumer} declared command arguments ${JSON.stringify(variants)} != executed ${JSON.stringify(command)}`);
+    } else {
+      out.push(`consumer command not registered in verification-map.json: ${command}`);
+    }
+  }
+  const executedConsumerCommands = new Set(CONSUMER_REGRESSIONS.map((entry) => consumerCommand(entry)));
+  for (const command of declaredConsumerCommands) {
+    if (!executedConsumerCommands.has(command)) {
+      const consumer = command.match(/--consumer\s+([a-z0-9-]+)/)?.[1] ?? '(unknown)';
+      out.push(`consumer ${consumer} declared command arguments ${JSON.stringify(command)} != executed matrix`);
+    }
   }
 
   const unregistered = [...executedGates].filter((gate) => !declaredGates.has(gate));
@@ -542,6 +627,37 @@ function checkDeclaredExecutedBinding(
     }
   }
   return out;
+}
+
+function runCommandBindingSelfTest() {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-isolation-command-binding-'));
+  try {
+    const architectureDir = path.join(fixtureRoot, 'architecture');
+    fs.mkdirSync(architectureDir, { recursive: true });
+    fs.writeFileSync(path.join(architectureDir, 'verify-v4-active-link.mjs'), '');
+    const verificationMapPath = path.join(fixtureRoot, 'verification-map.json');
+    fs.writeFileSync(verificationMapPath, JSON.stringify({
+      gates: [{
+        gate_id: 'v4_parity_gate_active_link',
+        command: 'node scripts/architecture/verify-v4-active-link.mjs --tampered',
+        argv: ['node', 'scripts/architecture/verify-v4-active-link.mjs'],
+      }],
+    }));
+    const failures = checkDeclaredExecutedBinding(verificationMapPath, architectureDir);
+    if (!failures.some((failure) => failure.includes('command arguments'))
+        || !failures.some((failure) => failure.includes('command and argv are not exact'))) {
+      console.error('[v4 isolation] command binding self-test did not reject argument drift');
+      process.exit(1);
+    }
+    console.log('[v4 isolation] command binding self-test OK');
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[2] === '--command-binding-self-test') {
+  runCommandBindingSelfTest();
+  process.exit(0);
 }
 
 function reportAndExit(label) {
