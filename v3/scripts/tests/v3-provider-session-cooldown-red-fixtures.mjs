@@ -282,7 +282,7 @@ const cases = [
     path: copied[12],
     mutate: (source) =>
       source.replace(
-        "let (session_id, _) = responses_control_scope_headers(headers)?;",
+        "let (session_id, _) = responses_control_scope_headers(headers, None)?;",
         "let session_id = Some(request_id.to_string());",
       ),
     diagnostic: /must not derive control identity from request identity/u,

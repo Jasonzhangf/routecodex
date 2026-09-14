@@ -16,9 +16,7 @@ use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
-use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime, V3AnthropicRelayRuntimeInput,
-};
+use routecodex_v3_runtime::{execute_v3_anthropic_relay_runtime, V3AnthropicRelayRuntimeInput};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 

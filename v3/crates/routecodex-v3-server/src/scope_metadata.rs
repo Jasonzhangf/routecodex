@@ -204,7 +204,9 @@ pub(crate) fn responses_control_scope_headers(
         .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
         .or_else(|| read_first_scope_value(payload, BODY_SESSION_PATHS));
     let conversation_id = direct_conversation_id
-        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+        .or_else(|| {
+            read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS)
+        })
         .or_else(|| read_first_scope_value(payload, BODY_CONVERSATION_PATHS));
     Ok((session_id, conversation_id))
 }

@@ -668,35 +668,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         };
-        let provider_wire_protocol = match provider_wire_protocol_for_provider_type(
-            &selected.candidate.provider_id,
-            &selected.candidate.provider_type,
-        ) {
-            Ok(protocol) => protocol,
-            Err(error) => {
-                let terminal_failure = handle_provider_failure(
-                    &failure_context,
-                    selected,
-                    provider_request_failure(
-                        "V3ProviderTarget06WireProtocol",
-                        "provider_wire_protocol_unsupported",
-                        error,
-                    ),
-                    &mut V3RelayProviderFailurePolicyState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        trace: &mut trace,
-                    },
-                    &mut retry_selected,
-                    &mut pending_provider_action_recovery,
-                )
-                .await?;
-                if let Some(failure) = terminal_failure {
-                    return Ok(provider_failure_output(failure, trace));
-                }
-                continue;
-            }
-        };
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
@@ -720,10 +691,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             selected.candidate.clone(),
         );
         trace.push("V3HubReqTarget06Resolved");
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target(), None)?;
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -745,6 +712,21 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }};
         }
+        let provider_wire_protocol = match provider_wire_protocol_for_provider_type(
+            &selected.candidate.provider_id,
+            &selected.candidate.provider_type,
+        ) {
+            Ok(protocol) => protocol,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderTarget06WireProtocol",
+                "provider_wire_protocol_unsupported",
+                error
+            ),
+        };
+        let req07 =
+            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let target = provider_target(manifest, req07.selected_target(), None)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(req_compat) => req_compat,
             Err(error) => {

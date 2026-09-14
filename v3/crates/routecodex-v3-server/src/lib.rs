@@ -828,26 +828,27 @@ async fn admit_v3_responses_session_after_json_parse(
     request_headers: &HeaderMap,
     payload: &Value,
 ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) = match responses_control_scope_headers(request_headers, Some(payload)) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                Ok(request_id) => request_id,
-                Err(response) => return Err(*response),
-            };
-            return Err(
-                error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    request_headers,
-                    Some(payload),
-                    resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                ),
-            );
-        }
-    };
+    let (session_id, conversation_id) =
+        match responses_control_scope_headers(request_headers, Some(payload)) {
+            Ok(scope) => scope,
+            Err(message) => {
+                let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
+                    Ok(request_id) => request_id,
+                    Err(response) => return Err(*response),
+                };
+                return Err(
+                    error_output_response_for_responses_request_with_project_path(
+                        &state.server,
+                        path,
+                        &request_id,
+                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                        request_headers,
+                        Some(payload),
+                        resolve_v3_console_project_path(request_headers, payload).as_deref(),
+                    ),
+                );
+            }
+        };
     let permit = state
         .responses_session_admission
         .admit(V3ResponsesSessionAdmissionScope {

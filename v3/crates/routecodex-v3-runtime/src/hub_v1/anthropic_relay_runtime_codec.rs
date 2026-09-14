@@ -202,10 +202,7 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
     Ok(message)
 }
 
-fn openai_chat_stop_reason_as_anthropic_stop_reason(
-    choice: &Value,
-    tool_calls: &[Value],
-) -> Value {
+fn openai_chat_stop_reason_as_anthropic_stop_reason(choice: &Value, tool_calls: &[Value]) -> Value {
     if !tool_calls.is_empty() {
         return Value::String("tool_use".to_string());
     }
