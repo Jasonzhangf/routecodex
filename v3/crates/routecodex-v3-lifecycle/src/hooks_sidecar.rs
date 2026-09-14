@@ -297,7 +297,10 @@ pub(crate) async fn start_managed_hooks_sidecar(
                 .and_then(|sidecar| sidecar.degraded_detail.clone());
             Ok((sidecar, detail))
         }
-        Err(error @ V3LifecycleError::HooksControlValidation(_)) => {
+        Err(ref error @ V3LifecycleError::HooksControlValidation(ref message))
+            if message.contains("identity mismatch")
+                || message.contains("identity no longer matches") =>
+        {
             Ok((None, Some(format!("hooks sidecar unavailable: {error}"))))
         }
         Err(error @ V3LifecycleError::HooksOptionalUnavailable(_)) => {
