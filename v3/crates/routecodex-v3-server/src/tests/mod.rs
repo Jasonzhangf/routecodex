@@ -2393,6 +2393,21 @@ fn openai_chat_relay_does_not_accept_sse_before_terminal_provider_outcome() {
 }
 
 #[test]
+fn anthropic_messages_dispatches_through_protocol_decision_before_relay() {
+    let source = include_str!("../endpoint_handlers.rs");
+    let decision = source
+        .find("plan_v3_anthropic_protocol_execution_with_provider_health(")
+        .expect("Anthropic endpoint must compute the typed protocol decision");
+    let direct = source
+        .find("V3Execution11ProtocolDecisionMode::SameProtocolDirect")
+        .expect("Anthropic endpoint must dispatch same-protocol Direct");
+    let relay = source
+        .find("execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(")
+        .expect("Anthropic endpoint must retain cross-protocol Relay");
+    assert!(decision < direct && direct < relay);
+}
+
+#[test]
 fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error() {
     let source = include_str!("../endpoint_handlers.rs");
     let branch_start = source
