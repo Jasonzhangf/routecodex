@@ -403,11 +403,12 @@ exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-lifecycle
 
 Executed in the integration worktree
 `/Users/fanzhang/Documents/github/routecodex/playground/rcc-internal-hooks-sidecar-main-0914`
-on source candidate commit `d59e6f6be1153fea70966c72bedf44077f09c7fd`;
-later commits in this review branch are documentation-only and do not change
-source; base
-`origin/main` `3fe9790007f7d2abfe044dd7a466c258847c53f4`. These are real
-command exit results for the `required_gates` in
+on source candidate commit `ef5fc05034341df5cc990bbf84e5fb6292201e33`, tree
+`573d8c3f9a793409f94152ce3896a968ae8f21ea`; base
+`origin/main` `c37a3946ae90641239fcfbef8ae7b118445a81ee`. The
+`delivery_evidence` cursor fix is included in this candidate, and later commits
+in this review branch are documentation-only and do not change the hooks source
+subtree. These are real command exit results for the `required_gates` in
 `docs/architecture/v3-verification-map.yml`; they are source, test, gate,
 build, and isolated installed-binary failure-injection evidence only, not
 production install, restart, or same-entry live replay evidence.

@@ -140,6 +140,33 @@ CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
 The prior P1 is fixed but this merge candidate requires a new independent
 review after the fix commit.
 
+## Round 14: fix candidate `ef5fc0503`, task `rcc-internal-hooks-sidecar-main-0914-r14`
+
+Verdict: `fail / code_failure`, one P1.
+
+- P1 `docs/design/rcc-internal-hooks-sidecar-contract.md:406`: the integration
+  gate receipts still named source candidate `d59e6f6be` and claimed later
+  commits were documentation-only. The reviewed source fix in `ef5fc0503`
+  changed native App Server correlation, so those receipts did not prove the
+  current candidate had passed the required gates.
+
+Fix: the contract now binds the receipts to source candidate `ef5fc0503`,
+tree `573d8c3f9a793409f94152ce3896a968ae8f21ea`, and base
+`c37a3946a`. Subsequent branch commits are limited to documentation or the
+version-only merge from current `origin/main`, and the hooks source subtree
+receipt is proven unchanged with:
+
+```text
+git diff --exit-code ef5fc0503 -- \
+  v3/crates/routecodex-v3-hooks \
+  v3/crates/routecodex-v3-lifecycle \
+  v3/scripts/install-cli.mjs \
+  v3/scripts/copy-cli-bin.mjs \
+  v3/scripts/pack-release.mjs
+```
+
+The prior P1 requires a new independent review of the updated candidate.
+
 ## Unchanged boundary
 
 Install, production restart, merge, and push are not authorized and have not
