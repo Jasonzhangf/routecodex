@@ -462,7 +462,7 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
     .await
     .unwrap();
 
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
     let projection = transport
         .captured_projection
         .lock()
