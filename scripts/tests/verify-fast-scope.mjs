@@ -92,6 +92,34 @@ const cases = [
     contents: '# V4 scope fixture\n',
     v3: false,
     v4: true,
+    v4Full: false,
+  },
+  {
+    relative: 'v4/contracts/node-graph.contract.json',
+    contents: '{"scopeFixture":true}\n',
+    v3: false,
+    v4: true,
+    v4Full: true,
+  },
+  {
+    relative: 'v4/docs/architecture/maps/verification-map.json',
+    contents: '{"gates":[]}\n',
+    v3: false,
+    v4: true,
+    v4Full: false,
+  },
+  {
+    relative: 'v4/docs/architecture/maps/function-map.json',
+    contents: '{"functions":[]}\n',
+    v3: false,
+    v4: true,
+    v4Full: true,
+  },
+  {
+    relative: 'v4/scripts/verify.mjs',
+    contents: 'export const scopeFixture = true;\n',
+    v3: false,
+    v4: true,
     v4Full: true,
   },
 ];
@@ -133,6 +161,39 @@ if (scopedPlan.status !== 0
     || !`${scopedPlan.stdout || ''}`.includes('modules=routecodex-v4-config')
     || `${scopedPlan.stdout || ''}`.includes('consumer:routecodex-v4-config')) {
   failures.push(`V4 scoped owner plan must resolve the changed module, got status=${scopedPlan.status}\n${scopedPlan.stdout || ''}\n${scopedPlan.stderr || ''}`);
+}
+const metadataScopedPlan = spawnSync(process.execPath, [join(repo, 'v4', 'scripts', 'verify-scoped.mjs')], {
+  cwd: repo,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    ROUTECODEX_GATE_DIFF_BASE: '6b69bff97e406e67456418c2af975c1dae4c75a6',
+    ROUTECODEX_GATE_DIFF_HEAD: '6608b4911410fb6eef1af6eaf34c7447cc559152',
+    RCCV4_SCOPED_PLAN_ONLY: '1',
+  },
+});
+if (metadataScopedPlan.status !== 0
+    || !`${metadataScopedPlan.stdout || ''}`.includes('metadata-only')
+    || !`${metadataScopedPlan.stdout || ''}`.includes('checks=3')
+    || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map')
+    || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map-binding')
+    || !`${metadataScopedPlan.stdout || ''}`.includes('shared:data-control-plane')) {
+  failures.push(`V4 metadata-only plan must not require a module owner, got status=${metadataScopedPlan.status}\n${metadataScopedPlan.stdout || ''}\n${metadataScopedPlan.stderr || ''}`);
+}
+const docsOnlyPlan = spawnSync(process.execPath, [join(repo, 'v4', 'scripts', 'verify-scoped.mjs')], {
+  cwd: repo,
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    ROUTECODEX_GATE_DIFF_BASE: '7a8caa4a0274ec7a59575834bb362e7a7d00ead4',
+    ROUTECODEX_GATE_DIFF_HEAD: '4f5e252fed33f6c2aeb4c7b7a3b966fb1e15d41',
+    RCCV4_SCOPED_PLAN_ONLY: '1',
+  },
+});
+if (docsOnlyPlan.status !== 0
+    || !`${docsOnlyPlan.stdout || ''}`.includes('metadata-only')
+    || !`${docsOnlyPlan.stdout || ''}`.includes('shared:data-control-plane')) {
+  failures.push(`V4 docs-only plan must retain the shared contract check, got status=${docsOnlyPlan.status}\n${docsOnlyPlan.stdout || ''}\n${docsOnlyPlan.stderr || ''}`);
 }
 const independentGateScopes = {
   'Fallback and internal policy hardcode gate': 'v3',
