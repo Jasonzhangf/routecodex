@@ -9,8 +9,6 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub mod v2;
-
 pub const CONFIG_CHAIN_VERSION: &str = "v4-config-1";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -55,6 +53,8 @@ pub struct AuthoringParsed {
     resources: Vec<ResourceAuthoring>,
     #[serde(default)]
     auth_handles: Vec<AuthHandleAuthoring>,
+    #[serde(default)]
+    codex_sample: Option<CodexSampleAuthoring>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -132,6 +132,49 @@ struct AuthHandleAuthoring {
     provider_id: String,
     alias: String,
     source: String,
+}
+
+/// Diagnostic codex-sample capture authorization published by the V4
+/// manifest. This is configuration truth, never a live runtime control input;
+/// it must not enter provider or client payloads.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodexSampleAuthoring {
+    pub managed_instance_id: String,
+    #[serde(default)]
+    pub codex_samples_enabled: bool,
+    #[serde(default)]
+    pub direct_snapshots_enabled: bool,
+    #[serde(default)]
+    pub snapshot_stages: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexSampleAuthorization {
+    pub managed_instance_id: String,
+    pub codex_samples_enabled: bool,
+    pub direct_snapshots_enabled: bool,
+    pub snapshot_stages: Vec<String>,
+}
+
+impl CodexSampleAuthorization {
+    fn from_authoring(authoring: &Option<CodexSampleAuthoring>) -> Option<Self> {
+        authoring.as_ref().map(|sample| {
+            let mut stages = sample.snapshot_stages.clone();
+            stages.sort();
+            stages.dedup();
+            Self {
+                managed_instance_id: sample.managed_instance_id.clone(),
+                codex_samples_enabled: sample.codex_samples_enabled,
+                direct_snapshots_enabled: sample.direct_snapshots_enabled,
+                snapshot_stages: stages,
+            }
+        })
+    }
+
+    pub fn should_capture_snapshot_stage(&self, stage: &str) -> bool {
+        self.codex_samples_enabled && self.snapshot_stages.iter().any(|value| value == stage)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -290,6 +333,7 @@ pub struct ConfigManifest {
     hooks: Vec<ManifestHook>,
     resources: Vec<ManifestResource>,
     auth_handles: Vec<AuthHandle>,
+    codex_sample: Option<CodexSampleAuthorization>,
     hash: String,
 }
 
@@ -328,6 +372,10 @@ impl ConfigManifest {
 
     pub fn auth_handles(&self) -> &[AuthHandle] {
         &self.auth_handles
+    }
+
+    pub fn codex_sample_authorization(&self) -> Option<&CodexSampleAuthorization> {
+        self.codex_sample.as_ref()
     }
 
     pub fn hash(&self) -> &str {
@@ -387,6 +435,15 @@ impl ConfigManifest {
             lines.push(format!(
                 "auth_handle|{}|{}|{}",
                 handle.provider_id, handle.alias, handle.source
+            ));
+        }
+        if let Some(sample) = &self.codex_sample {
+            lines.push(format!(
+                "codex_sample|{}|{}|{}|{}",
+                sample.managed_instance_id,
+                sample.codex_samples_enabled,
+                sample.direct_snapshots_enabled,
+                sample.snapshot_stages.join(",")
             ));
         }
         lines.join("\n")
@@ -549,6 +606,7 @@ fn publish_manifest(registry: ResourceRegistryBuilt) -> Result<ConfigManifest, C
         hooks,
         resources: _,
         auth_handles,
+        codex_sample,
     } = validated.authoring;
 
     let mut manifest = ConfigManifest {
@@ -610,6 +668,7 @@ fn publish_manifest(registry: ResourceRegistryBuilt) -> Result<ConfigManifest, C
                 source: handle.source,
             })
             .collect(),
+        codex_sample: CodexSampleAuthorization::from_authoring(&codex_sample),
         hash: String::new(),
     };
     manifest.nodes.sort();
