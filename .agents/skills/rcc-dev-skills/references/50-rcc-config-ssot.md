@@ -6,7 +6,7 @@ Use for listener, provider, auth handle, model, route pool, install, restart, he
 
 ## Truth Order
 
-1. User-specified active V3 config; otherwise `~/.rcc/config.v3.toml`.
+1. User-specified active V3 config; otherwise `~/.rcc/config.toml`.
 2. Provider files explicitly referenced by that V3 authoring.
 3. `rccv3 config check` compiled manifest/result.
 4. Installed binary identity and managed lifecycle status.
