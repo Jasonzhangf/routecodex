@@ -23,7 +23,16 @@ const GUARD_SURFACES = [
   'scripts/compile-real-runtime-manifest.mjs',
 ];
 const GUARD_REMOVALS = new Map([
-  ['scripts/build.mjs', "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n// V4-LAYER-PREFLIGHT-END\n"],
+  ['scripts/build.mjs', [
+    "export function runGuardedBuild() {\n"
+      + "  run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n"
+      + '  // V4-LAYER-PREFLIGHT-END\n'
+      + '  runBuild();\n'
+      + '}\n\n'
+      + "const direct = process.argv[1]\n"
+      + "  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);\n"
+      + 'if (direct) runGuardedBuild();\n',
+  ]],
   ['scripts/verify.mjs', "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n// V4-LAYER-PREFLIGHT-END\n"],
   ['scripts/verify-ci.mjs', "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n// V4-LAYER-PREFLIGHT-END\n"],
   ['scripts/install-rccv4.mjs', "const admission = spawnSync(process.execPath, [\n  'scripts/architecture/verify-v4-feature-layer-batches.mjs',\n  '--admission',\n], { cwd: root, encoding: 'utf8' });\nif (admission.status !== 0) {\n  throw new Error(`V4 feature-layer admission failed: ${admission.stderr || admission.stdout}`);\n}\n// V4-LAYER-PREFLIGHT-END\n"],

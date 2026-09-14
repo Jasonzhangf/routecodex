@@ -506,6 +506,17 @@ export function runFeatureLayerBatchRedFixtures({
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
+      name: 'verify re-enters guarded build entrypoint',
+      expected: ['VERIFY_PREFLIGHT_BINDING'],
+      mutate(input) {
+        input.verifySource = input.verifySource.replace(
+          'runBuild();',
+          "run('node scripts/build.mjs');",
+        );
+      },
+      options: { mode: 'definition', allowPendingGuard: true },
+    },
+    {
       name: 'verify side effect precedes preflight',
       expected: ['VERIFY_PREFLIGHT_BINDING'],
       mutate(input) {
