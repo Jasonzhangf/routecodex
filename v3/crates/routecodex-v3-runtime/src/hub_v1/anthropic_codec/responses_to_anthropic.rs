@@ -1187,6 +1187,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn anthropic_namespace_tools_expand_to_qualified_children() {
+        let object = json!({
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__mcpx",
+                "tools": [{
+                    "type": "function",
+                    "name": "workspace",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        });
+        let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap()).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+        assert_ne!(tools[0]["name"], "mcp__mcpx");
+    }
+
+    #[test]
+    fn anthropic_empty_namespace_is_omitted_from_provider_tools() {
+        let tools = responses_tools_for_anthropic_wire(
+            json!({"tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": []}]} )
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn anthropic_namespace_custom_child_is_projected_without_tools_shape_failure() {
+        let object = json!({
+            "tools": [{
+                "type": "namespace",
+                "name": "functions",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__mcpx",
+                    "tools": [{
+                        "type": "function",
+                        "name": "workspace",
+                        "parameters": {"type": "object"}
+                    }]
+                }]
+            }]
+        });
+        let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap())
+            .expect("custom namespace child must have a legal Anthropic projection");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
     fn openai_chat_tool_call_malformed_arguments_project_reversible_anthropic_input() {
         let tool_use = openai_chat_tool_call_as_anthropic_tool_use(&json!({
             "id": "call_malformed_chat",
