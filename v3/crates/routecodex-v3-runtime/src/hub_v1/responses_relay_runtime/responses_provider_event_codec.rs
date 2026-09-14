@@ -314,15 +314,36 @@ fn build_typed_responses_terminal_response(
         }
     }
     object.insert("output".to_owned(), Value::Array(output));
-    if let Some(usage) = object.get_mut("usage").and_then(Value::as_object_mut) {
-        if !usage.contains_key("total_tokens") {
-            if let (Some(input), Some(output)) = (
-                usage.get("input_tokens").and_then(Value::as_u64),
-                usage.get("output_tokens").and_then(Value::as_u64),
-            ) {
-                usage.insert("total_tokens".to_owned(), Value::from(input + output));
-            }
-        }
+    // The terminal response is the canonical Responses value consumed by the
+    // client projection.  Providers may omit usage entirely or return only a
+    // subset of counters; leave the terminal schema complete at this single
+    // materialization owner so every downstream client path sees the same
+    // contract and never has to route around a missing field.
+    let usage = object
+        .entry("usage".to_owned())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "typed Responses terminal usage must be an object".to_owned(),
+            )
+        })?;
+    usage
+        .entry("input_tokens".to_owned())
+        .or_insert_with(|| Value::from(0u64));
+    usage
+        .entry("output_tokens".to_owned())
+        .or_insert_with(|| Value::from(0u64));
+    if !usage.contains_key("total_tokens") {
+        let input = usage
+            .get("input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        usage.insert("total_tokens".to_owned(), Value::from(input + output));
     }
     if !reducer.output_text.trim().is_empty() {
         object.insert(
@@ -686,6 +707,23 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
         .expect("response.completed must remain terminal when total_tokens is omitted")
         .expect("response.completed must produce terminal response");
         assert_eq!(terminal["usage"]["total_tokens"], json!(15));
+    }
+
+    #[test]
+    fn response_completed_materializes_missing_usage_counters_for_client_contract() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.completed",
+                "response": {"id": "resp_missing_usage", "status": "completed"}
+            }),
+            &mut reducer,
+        )
+        .expect("response.completed without usage must remain a valid terminal")
+        .expect("response.completed must produce terminal response");
+        assert_eq!(terminal["usage"]["input_tokens"], json!(0));
+        assert_eq!(terminal["usage"]["output_tokens"], json!(0));
+        assert_eq!(terminal["usage"]["total_tokens"], json!(0));
     }
 
     #[test]
