@@ -76,6 +76,7 @@
     "test:v3-execution-control-payload-architecture-red-fixtures": "npm --prefix v3 run test:v3-execution-control-payload-architecture-red-fixtures",
     "verify:v3-runtime-restart-handoff": "node v3/scripts/architecture/verify-v3-runtime-restart-handoff.mjs",
     "verify:v3-managed-server-lifecycle": "npm --prefix v3 run verify:v3-managed-server-lifecycle",
+    "verify:webui-smoke": "npm --prefix v3 run verify:webui-smoke",
     "test:v3-managed-server-lifecycle-red-fixtures": "npm --prefix v3 run test:v3-managed-server-lifecycle-red-fixtures",
     "test:v3-managed-server-lifecycle": "npm --prefix v3 run test:v3-managed-server-lifecycle",
     "verify:v3-anthropic-relay-runtime-integration": "npm --prefix v3 run verify:v3-anthropic-relay-runtime-integration",

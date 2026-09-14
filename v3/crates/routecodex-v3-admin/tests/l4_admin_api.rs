@@ -382,7 +382,10 @@ async fn revisions_and_static_assets_are_served() {
     assert!(routes_body.contains("Tier 1 is tried first"));
     assert_eq!(routes_body.matches("id=\"save-btn\"").count(), 1);
     assert!(!routes_body.contains("Cooldown pool"));
-    assert!(routes_body.contains("load();"));
+    assert!(
+        routes_body.contains(r#"<script type="module" src="/app/views/routes.js"></script>"#),
+        "routes page wires its view through the module entry"
+    );
     assert!(routes_body.contains("aria-live=\"polite\""));
     let css = http_client()
         .get(format!("{base}/styles.css"))

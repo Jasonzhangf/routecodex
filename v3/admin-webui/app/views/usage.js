@@ -1,0 +1,1273 @@
+// RCC V3 Admin WebUI — Usage (Requests) view.
+// feature_id: v3.admin_observability_aggregation (v3/admin-webui/app/views/usage.js)
+
+import { api, el, fmtMs, fmtCompact, timeText, escapeHtml, showStatus, startAutoRefresh } from "../core.js";
+import { openPanel, closePanel, wireDrawer } from "../drawer.js";
+import { renderBarChart, renderDonut } from "../charts.js";
+import { initShell } from "../shell.js";
+
+initShell("usage", {
+  title: "Usage",
+  subtitle: "Request records, tokens, cache hit rate and errors",
+});
+
+wireDrawer();
+
+// Endpoint label: shorten canonical V3 entry paths so exports stay compact
+// without losing the protocol identity; non-canonical paths pass through.
+function endpointLabel(endpoint) {
+  if (endpoint == null || endpoint === "—") return "—";
+  if (endpoint === "/v1/responses") return "responses";
+  if (endpoint === "/v1/chat/completions") return "chat";
+  if (endpoint === "/v1/messages") return "messages";
+  if (endpoint === "/v1beta/models") return "gemini";
+  return endpoint;
+}
+
+function statusText(row) {
+  const http = row.meta?.provider_status;
+  if (http != null && Number.isFinite(Number(http))) {
+    return String(http);
+  }
+  const errorCode = compactErrorReason(row);
+  if (/^\d+$/.test(errorCode)) {
+    return errorCode;
+  }
+  const fallback = row.result;
+  if (fallback) {
+    if (fallback === "success") return "200";
+    if (fallback === "error") return "5xx";
+    if (fallback === "cancelled") return "499";
+    return fallback;
+  }
+  return "—";
+}
+
+function compactErrorReason(row) {
+  const ec = row.meta?.error_category;
+  if (!ec) return "—";
+  const map = {
+    provider_http_400: "400",
+    provider_http_401: "401",
+    provider_http_402: "402",
+    provider_http_403: "403",
+    provider_http_429: "429",
+    provider_http_500: "500",
+    provider_http_502: "502",
+    provider_http_503: "503",
+    provider_http_504: "504",
+    target_pool: "exhausted",
+    internal_request_lane: "598",
+    v3_debug_failure: "598",
+    debug_sink: "598",
+    internal_response_lane: "599",
+    provider_response_sse_event_invalid: "599",
+    provider_response_body_error: "599",
+    provider_stream_handoff_runtime_failed: "599",
+  };
+  return map[ec] || ec;
+}
+function compactFinishReason(row) {
+  const reason = row.meta?.finish_reason;
+  if (!reason || reason === "—") return "—";
+  const map = {
+    tool_calls: "tool_calls",
+    stop: "stop",
+    length: "length",
+    content_filter: "filter",
+    requires_action: "action",
+    completed: "done",
+    error: "error",
+    cancel: "cancel",
+    client_disconnected: "client drop",
+    provider_http_400: "http_400",
+    provider_http_401: "http_401",
+    provider_http_402: "http_402",
+    provider_http_403: "http_403",
+    provider_http_429: "http_429",
+    provider_http_500: "http_500",
+    provider_http_502: "http_502",
+    provider_http_503: "http_503",
+    provider_http_504: "http_504",
+  };
+  return map[reason] || reason;
+}
+
+const state = {
+  records: [],
+  attemptRecords: [],
+  errorFacets: [],
+  page: 1,
+  pageSize: 100,
+  total: 0,
+  attemptsTotal: 0,
+  attemptsPage: 1,
+  errorStatuses: 0,
+  errorExamples: {},
+  tab: "entries",
+  entriesGroup: "pool",
+  stats: {},
+  timeseries: [],
+  facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+  errorStatusCode: null,
+  selected: null,
+  tableWidths: { entries: null, attempts: null, errors: null },
+  loading: false,
+  // layered filter model: port tabs (Layer 1) → status kinds (Layer 2) →
+  // provider (Layer 3) → model (Layer 4); within a layer selections are OR,
+  // across layers they AND.
+  port: "all",
+  sortMode: "time",
+  statusKinds: new Set(),
+  providerSel: new Set(),
+  modelSel: new Set(),
+  excluded: {},
+  collapsed: new Set(),
+  openExclude: null,
+  selection: new Set(),
+  kindCounts: {},
+  providerCounts: {},
+  modelCounts: {},
+  exports: [],
+};
+
+function statusOf(row) {
+  const r = row.result;
+  if (r === "success") return "success";
+  if (r === "error") return "error";
+  if (r === "cancelled") return "cancelled";
+  if (r === "failed-attempt") return "error";
+  return "active";
+}
+function usageText(usage) {
+  if (!usage) return "—";
+  const input = Number(usage.input_tokens ?? 0);
+  const output = Number(usage.output_tokens ?? 0);
+  const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+  const created = Number(usage.cache_creation_input_tokens ?? 0);
+  return `${fmtCompact(input)} / ${fmtCompact(output)} · read=${fmtCompact(read)} · created=${fmtCompact(created)}`;
+}
+
+function hitRateText(usage) {
+  if (!usage) return "—";
+  const input = Number(usage.input_tokens ?? 0);
+  const read = Number(usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0);
+  return input > 0 ? `${((read / input) * 100).toFixed(1)}%` : "—";
+}
+
+function metaValue(row, key) {
+  return row.meta?.[key] ?? "—";
+}
+
+function comboOf(row) {
+  const provider = metaValue(row, "provider");
+  const model = metaValue(row, "model");
+  const key = metaValue(row, "auth_alias");
+  return `${provider}/${model} · ${key}`;
+}
+
+// Group rank: error codes first (numeric desc), then success, then
+// in-flight, cancelled last.
+function groupRank(code) {
+  const n = Number(code);
+  if (!Number.isFinite(n)) return 2;
+  if (n === 499) return 3;
+  if (n >= 400) return 0;
+  return 1;
+}
+function compareCodes(a, b) {
+  const ra = groupRank(a), rb = groupRank(b);
+  if (ra !== rb) return ra - rb;
+  const na = Number(a), nb = Number(b);
+  if (ra === 0) return nb - na;
+  if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return a.localeCompare(b);
+}
+
+// Per-tab Excel-style column resizing with localStorage persistence so
+// each tab keeps its own widths across reloads.
+const TABLE_WIDTH_PREFIX = "v3-admin-webui-requests-table";
+function loadTableWidths(tab) {
+  try {
+    const raw = window.localStorage.getItem(`${TABLE_WIDTH_PREFIX}-${tab}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+function saveTableWidths(tab, widths) {
+  try {
+    window.localStorage.setItem(`${TABLE_WIDTH_PREFIX}-${tab}`, JSON.stringify(widths));
+  } catch (_error) {
+    /* storage unavailable; layout still works for the session. */
+  }
+}
+function applyTableWidths(table, widths) {
+  if (!widths || !table) return;
+  const colgroup = table.querySelector("colgroup");
+  if (!colgroup) return;
+  [...colgroup.children].forEach((col) => {
+    const cls = [...col.classList].find((token) => token.startsWith("col-"));
+    if (cls && typeof widths[cls] === "number" && widths[cls] >= 40) {
+      col.style.width = `${widths[cls]}px`;
+    }
+  });
+}
+function attachColumnResizers(table, tab) {
+  const colgroup = table.querySelector("colgroup");
+  if (!colgroup || table.dataset.resizable === "attached") return;
+  table.dataset.resizable = "attached";
+  const headRow = table.querySelector("thead tr");
+  if (!headRow) return;
+  const columns = [...colgroup.children];
+  [...headRow.children].forEach((th, index) => {
+    const col = columns[index];
+    if (!col) return;
+    const cls = [...col.classList].find((token) => token.startsWith("col-"));
+    if (!cls) return;
+    if (th.querySelector(".col-resizer")) return;
+    const handle = el("span", "col-resizer");
+    handle.setAttribute("aria-hidden", "true");
+    th.appendChild(handle);
+    // Stop propagation so dragging the handle never triggers the header
+    // click handler; preventDefault kills text selection and native DnD.
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const startX = event.clientX;
+      const startWidth = col.getBoundingClientRect().width || 40;
+      let moved = false;
+      const onMove = (ev) => {
+        moved = true;
+        const next = Math.max(40, Math.round(startWidth + (ev.clientX - startX)));
+        col.style.width = `${next}px`;
+        ev.preventDefault();
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        if (!moved) return;
+        const updated = { ...(state.tableWidths[tab] || {}) };
+        const finalWidth = Math.round(col.getBoundingClientRect().width || startWidth);
+        updated[cls] = finalWidth;
+        state.tableWidths[tab] = updated;
+        saveTableWidths(tab, updated);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+    handle.addEventListener("click", (event) => {
+      event.stopPropagation();
+    });
+  });
+}
+
+function activePlans() {
+  const kinds = state.statusKinds.size ? [...state.statusKinds] : [null];
+  const providers = state.providerSel.size ? [...state.providerSel] : [null];
+  const models = state.modelSel.size ? [...state.modelSel] : [null];
+  const plans = [];
+  for (const status of kinds) {
+    for (const provider of providers) {
+      for (const model of models) {
+        plans.push({ status, provider, model });
+      }
+    }
+  }
+  return plans;
+}
+
+async function fetchPlan(base, plan) {
+  const params = new URLSearchParams(base);
+  if (plan.status) params.set("status", plan.status);
+  if (plan.provider) params.set("provider", plan.provider);
+  if (plan.model) params.set("model", plan.model);
+  return api(`/api/observability/records?${params}`);
+}
+
+function mergeFacets(target, source) {
+  for (const [key, values] of Object.entries(source || {})) {
+    const bucket = target[key] || (target[key] = {});
+    for (const [value, count] of Object.entries(values || {})) {
+      bucket[value] = (bucket[value] || 0) + Number(count || 0);
+    }
+  }
+  return target;
+}
+
+function mergeStats(statsList, rowsTotal) {
+  if (statsList.length === 1) return statsList[0] || {};
+  const keys = ["count", "success_count", "error_count", "cancelled_count", "active_count",
+    "switch_count", "input_tokens", "output_tokens", "cached_tokens",
+    "cache_read_input_tokens", "cache_creation_input_tokens", "total_tokens",
+    "provider_failure_count"];
+  const merged = {};
+  for (const key of keys) {
+    merged[key] = statsList.reduce((sum, item) => sum + Number(item?.[key] || 0), 0);
+  }
+  // Cache hit rate recomputed from summed read/input; the server uses the
+  // effective input denominator, so multi-plan mode is a close estimate.
+  merged.cache_hit_rate_percent = merged.input_tokens > 0
+    ? (merged.cache_read_input_tokens / merged.input_tokens) * 100
+    : 0;
+  const durationWeighted = statsList.reduce((sum, item) => {
+    const avg = Number(item?.avg_duration_ms || 0);
+    const withDuration = Number(item?.count || 0);
+    return sum + avg * withDuration;
+  }, 0);
+  merged.avg_duration_ms = merged.count > 0 ? durationWeighted / merged.count : 0;
+  const byPort = {};
+  const byProvider = {};
+  for (const item of statsList) {
+    for (const [port, entry] of Object.entries(item?.by_port || {})) {
+      const bucket = byPort[port] || (byPort[port] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0 });
+      for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
+    }
+    for (const [provider, entry] of Object.entries(item?.by_provider || {})) {
+      const bucket = byProvider[provider] || (byProvider[provider] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+      for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
+    }
+  }
+  merged.by_port = byPort;
+  merged.by_provider = byProvider;
+  return merged;
+}
+
+// Latest-wins loading: a filter change that lands while a query is in
+// flight queues exactly one trailing reload instead of being dropped.
+let loadInFlight = false;
+let loadQueued = false;
+async function loadRecords() {
+  if (loadInFlight) {
+    loadQueued = true;
+    return;
+  }
+  loadInFlight = true;
+  state.loading = true;
+  try {
+    await loadRecordsInner();
+  } finally {
+    loadInFlight = false;
+    state.loading = false;
+    if (loadQueued) {
+      loadQueued = false;
+      loadRecords();
+    }
+  }
+}
+
+async function loadRecordsInner() {
+  try {
+    const params = new URLSearchParams();
+    params.set("page", String(state.page));
+    params.set("page_size", String(state.pageSize));
+    params.set("range", document.getElementById("chart-range").value);
+    params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
+    const sortMode = state.sortMode;
+    if (sortMode === "time") {
+      params.set("sort_by", "started_epoch_ms");
+      params.set("sort_order", "desc");
+    } else if (sortMode === "code") {
+      params.set("sort_by", "result");
+      params.set("sort_order", "desc");
+    } else {
+      params.set("sort_by", document.getElementById("sort-field").value);
+      params.set("sort_order", document.getElementById("sort-order").value);
+    }
+    const port = document.getElementById("port-filter").value;
+    if (port !== "all") params.set("port", port);
+    const provider = document.getElementById("provider-filter").value;
+    if (provider !== "all") params.set("provider", provider);
+    const model = document.getElementById("model-filter").value;
+    if (model !== "all") params.set("model", model);
+    const endpoint = document.getElementById("endpoint-filter").value;
+    if (endpoint !== "all") params.set("endpoint", endpoint);
+    const route = document.getElementById("route-filter").value.trim();
+    if (route) params.set("route", route);
+    const protocol = document.getElementById("protocol-filter").value;
+    if (protocol !== "all") params.set("entry_protocol", protocol);
+    const mode = document.getElementById("mode-filter").value;
+    if (mode !== "all") params.set("execution_mode", mode);
+    const search = document.getElementById("search-filter").value.trim();
+    if (search) params.set("search", search);
+    if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
+    // Rail multi-selects win over the single-value facet selects when set.
+    const plans = activePlans();
+    if (plans.length > 12) {
+      showStatus("err", "Too many checked combinations (>12 queries) — uncheck some Layer 2-4 selections.");
+      return;
+    }
+    const responses = await Promise.all(plans.map((plan) => fetchPlan(params, plan)));
+    state.records = responses.flatMap((response) => response.records || []);
+    state.total = responses.reduce((sum, response) => sum + Number(response.total || 0), 0);
+    state.stats = mergeStats(responses.map((response) => response.stats || {}), state.total);
+    state.timeseries = responses[0]?.timeseries || [];
+    const mergedFacets = {};
+    for (const response of responses) mergeFacets(mergedFacets, response.facets || {});
+    state.facets = mergedFacets;
+    if (state.port === "all") state.portCountsCache = { ...(mergedFacets.ports || {}) };
+    await Promise.all([loadAttempts(), loadErrors()]);
+    renderAll();
+  } catch (error) {
+    showStatus("err", `records query failed: ${error.message}`);
+  }
+}
+
+async function loadAttempts() {
+  try {
+    const params = new URLSearchParams();
+    params.set("status", "error");
+    params.set("page", String(state.attemptsPage));
+    params.set("page_size", "50");
+    params.set("sort_by", "updated_epoch_ms");
+    params.set("sort_order", "desc");
+    params.set("range", "today");
+    const response = await api(`/api/observability/records?${params}`);
+    state.attemptRecords = (response.records || []).filter((row) => row.result === "failed-attempt");
+    state.attemptsTotal = state.attemptRecords.length;
+  } catch (error) {
+    state.attemptRecords = [];
+    state.attemptsTotal = 0;
+  }
+}
+
+async function loadErrors() {
+  try {
+    const codes = Object.entries(state.facets.error_status_codes || {})
+      .map(([code, count]) => ({ code, count }))
+      .sort((a, b) => b.count - a.count);
+    state.errorFacets = codes;
+    state.errorStatuses = codes.reduce((sum, item) => sum + Number(item.count || 0), 0);
+    state.errorExamples = {};
+    await Promise.all(codes.slice(0, 12).map(async (item) => {
+      try {
+        const params = new URLSearchParams();
+        params.set("status", "error");
+        params.set("error_status_code", item.code);
+        params.set("page", "1");
+        params.set("page_size", "1");
+        params.set("range", "today");
+        const response = await api(`/api/observability/records?${params}`);
+        const first = (response.records || [])[0];
+        state.errorExamples[item.code] = first?.meta?.error_detail
+          || first?.meta?.error_category
+          || "—";
+      } catch (error) {
+        state.errorExamples[item.code] = "—";
+      }
+    }));
+  } catch (error) {
+    state.errorFacets = [];
+    state.errorStatuses = 0;
+  }
+}
+
+async function load() {
+  await loadRecords();
+}
+
+function renderStats(stats) {
+  stats = stats || {};
+  const portBody = document.querySelector("#ports-table tbody");
+  const ports = [...(stats.by_port ? Object.entries(stats.by_port) : [])].sort(([a], [b]) => Number(a) - Number(b));
+  portBody.replaceChildren(...ports.map(([port, item]) => {
+    const failed = Number(item.provider_failures || 0);
+    const cls = item.error || failed > 0 ? "status-error" : item.active ? "status-active" : "status-success";
+    const row = el("tr", cls);
+    row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled));
+    return row;
+  }));
+  if (!ports.length) {
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    const emptyRow = document.createElement("tr");
+    emptyRow.appendChild(cell);
+    portBody.replaceChildren(emptyRow);
+  }
+  const errorBody = document.querySelector("#errors-table tbody");
+  // Group errors by raw numeric status; semantic error details stay in the drawer.
+  const errorMap = new Map();
+  for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
+    errorMap.set(code, { terminal: count });
+  }
+  const statusCodes = [...errorMap.entries()]
+    .sort(([left], [right]) => Number(left) - Number(right));
+  errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
+    const row = el("tr", "status-error");
+    row.style.cursor = "pointer";
+    row.title = `Filter requests by status code "${statusCode}"`;
+    row.addEventListener("click", () => drilldownErrorStatus(statusCode));
+    row.append(el("td", null, statusCode), numberCell(entry.terminal));
+    return row;
+  }));
+  if (!statusCodes.length) {
+    const cell = document.createElement("td");
+    cell.colSpan = 2;
+    const emptyRow = document.createElement("tr");
+    emptyRow.appendChild(cell);
+    errorBody.replaceChildren(emptyRow);
+  }
+  const portSelect = document.getElementById("port-filter");
+  const selectedPort = portSelect.value;
+  const allPorts = el("option", null, "all ports");
+  allPorts.value = "all";
+  portSelect.replaceChildren(allPorts, ...Object.entries(state.facets.ports || {}).sort(([a],[b])=>Number(a)-Number(b)).map(([port]) => {
+    const option = el("option", null, String(port)); option.value = String(port); return option;
+  }));
+  portSelect.value = [...portSelect.options].some((option) => option.value === selectedPort) ? selectedPort : "all";
+  populateFacetSelect("protocol-filter", state.facets.response_types || {});
+  populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
+  populateFacetSelect("model-filter", state.facets.models || {}, "all models");
+  populateFacetSelect("endpoint-filter", state.facets.endpoints || {}, "all endpoints");
+}
+function populateFacetSelect(id, facet, allLabel = "all") {
+  const select = document.getElementById(id);
+  const selected = select.value;
+  const all = el("option", null, allLabel); all.value = "all";
+  select.replaceChildren(all, ...Object.entries(facet).sort(([,a],[,b])=>b-a).map(([value]) => {
+    const option = el("option", null, String(value)); option.value = String(value); return option;
+  }));
+  select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
+}
+
+function numberCell(value) {
+  return el("td", "num", Number(value || 0).toLocaleString());
+}
+
+function detailGrid(row) {
+  const grid = el("div", "detail-grid");
+  const usage = row.usage || {};
+  const fields = [
+    ["request key", row.request_key], ["request id", row.meta?.request_id],
+    ["port", row.scope?.port], ["protocol", row.meta?.entry_protocol], ["endpoint", row.meta?.endpoint],
+    ["mode", row.meta?.execution_mode], ["transport", row.meta?.transport],
+    ["session", row.scope?.session], ["workdir", row.scope?.workdir],
+    ["route", row.meta?.route], ["pool", row.meta?.pool],
+    ["model", row.meta?.model], ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
+    ["provider id", row.meta?.provider_id], ["provider type", row.meta?.provider_type],
+    ["attempts", row.attempts], ["failed attempts", row.failed_attempts], ["switches", row.switches],
+    ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
+    ["finish reason", row.meta?.finish_reason],
+    ["servertool", row.servertool ? "yes" : "no"],
+    ["error category", row.meta?.error_category], ["error detail", row.meta?.error_detail],
+    ["usage in", usage.input_tokens != null ? Number(usage.input_tokens).toLocaleString() : "—"],
+    ["usage out", usage.output_tokens != null ? Number(usage.output_tokens).toLocaleString() : "—"],
+    ["usage cache read", usage.cache_read_input_tokens != null ? Number(usage.cache_read_input_tokens).toLocaleString() : (usage.cached_tokens != null ? Number(usage.cached_tokens).toLocaleString() : "—")],
+    ["usage cache creation", usage.cache_creation_input_tokens != null ? Number(usage.cache_creation_input_tokens).toLocaleString() : "—"],
+    ["usage total", usage.total_tokens != null ? Number(usage.total_tokens).toLocaleString() : "—"],
+    ["internal time", row.timing_internal_ms != null ? `${row.timing_internal_ms} ms` : "—"],
+    ["external time", row.timing_external_ms != null ? `${row.timing_external_ms} ms` : "—"],
+    ["duration", fmtMs(row.duration_ms)],
+    ["artifact", row.raw_artifact_ref],
+    ["started", timeText(row.started_epoch_ms)], ["updated", timeText(row.updated_epoch_ms)], ["finished", timeText(row.finished_epoch_ms)],
+  ];
+  for (const [label, value] of fields) {
+    const item = el("span");
+    item.append(el("strong", null, `${label}: `), document.createTextNode(String(value ?? "—")));
+    grid.appendChild(item);
+  }
+  return grid;
+}
+
+function checkCell(row) {
+  const td = el("td", "col-check");
+  const input = el("input");
+  input.type = "checkbox";
+  input.checked = state.selection.has(row.request_key);
+  input.setAttribute("aria-label", `Select row ${timeText(row.started_epoch_ms)} ${statusText(row)} ${metaValue(row, "model")}`);
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("change", () => {
+    input.checked ? state.selection.add(row.request_key) : state.selection.delete(row.request_key);
+    renderSelection();
+  });
+  td.appendChild(input);
+  return td;
+}
+
+function requestRow(row) {
+  const tr = el("tr");
+  tr.dataset.requestKey = row.request_key;
+  tr.style.cursor = "pointer";
+  tr.addEventListener("click", () => openRequestDetail(row));
+  tr.appendChild(checkCell(row));
+  tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
+  tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
+  const code = statusText(row);
+  const kind = statusOf(row);
+  const codeCell = el("td", "col-code");
+  codeCell.appendChild(el("span", kind === "error" ? "status-text error" : "mono", code));
+  codeCell.title = row.meta?.error_category ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim() : kind;
+  tr.appendChild(codeCell);
+  const modelCell = el("td", "col-model");
+  modelCell.innerHTML = `<span>${escapeHtml(metaValue(row, "provider"))}/${escapeHtml(metaValue(row, "model"))}</span> <span class="key">· ${escapeHtml(metaValue(row, "auth_alias"))}</span>`;
+  tr.appendChild(modelCell);
+  if ((state.entriesGroup || "pool") === "reason") {
+    tr.appendChild(el("td", "col-route", metaValue(row, "route_reason")));
+  } else {
+    tr.appendChild(el("td", "col-pool", metaValue(row, "pool")));
+  }
+  const usage = row.usage || {};
+  const usageCell = el("td", "mono col-usage");
+  usageCell.appendChild(el("div", "usage-value", usageText(usage)));
+  usageCell.appendChild(el("div", "hit-rate", hitRateText(usage)));
+  tr.appendChild(usageCell);
+  tr.appendChild(el("td", "num mono", fmtMs(row.duration_ms)));
+  return tr;
+}
+
+function groupHeadRow(code, groupRows) {
+  const tr = el("tr", "group-head" + (state.collapsed.has(code) ? " collapsed" : ""));
+  const td = el("td");
+  td.colSpan = 8;
+  const btn = el("button", "group-head-btn");
+  btn.type = "button";
+  btn.setAttribute("aria-expanded", String(!state.collapsed.has(code)));
+  btn.appendChild(el("span", "caret", "▾"));
+  btn.appendChild(el("span", "code" + (groupRank(code) === 0 ? " error" : ""), code));
+  const latest = groupRows[0] ? ` · latest ${timeText(Math.max(...groupRows.map((row) => row.started_epoch_ms || 0)))}` : "";
+  btn.appendChild(el("span", "n", `${groupRows.length} rows${latest}`));
+  const excludedCount = state.excluded[code]?.size || 0;
+  if (excludedCount) btn.appendChild(el("span", "exclude-chip", `${excludedCount} excluded`));
+  btn.addEventListener("click", () => {
+    state.collapsed.has(code) ? state.collapsed.delete(code) : state.collapsed.add(code);
+    renderRequests();
+  });
+  td.appendChild(btn);
+  const actions = el("span", "group-actions");
+  const excludeBtn = el("button", "btn", "Exclude…");
+  excludeBtn.type = "button";
+  excludeBtn.setAttribute("aria-expanded", String(state.openExclude === code));
+  excludeBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.openExclude = state.openExclude === code ? null : code;
+    renderRequests();
+  });
+  actions.appendChild(excludeBtn);
+  td.appendChild(actions);
+  tr.appendChild(td);
+  return tr;
+}
+
+function excludeRowEl(code, groupRows) {
+  const tr = el("tr", "exclude-row");
+  const td = el("td");
+  td.colSpan = 8;
+  const list = el("div", "exclude-list");
+  const combos = new Map();
+  for (const row of groupRows) combos.set(comboOf(row), (combos.get(comboOf(row)) || 0) + 1);
+  for (const [combo, count] of [...combos.entries()].sort((a, b) => b[1] - a[1])) {
+    const label = el("label", "filter-item");
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = state.excluded[code]?.has(combo) || false;
+    input.addEventListener("change", () => {
+      const bucket = state.excluded[code] || (state.excluded[code] = new Set());
+      input.checked ? bucket.add(combo) : bucket.delete(combo);
+      renderRequests();
+    });
+    label.append(input, el("span", null, combo), el("span", "n", String(count)));
+    list.appendChild(label);
+  }
+  list.appendChild(el("span", "mono muted", "checked = hide that provider/model/key within this group"));
+  td.appendChild(list);
+  tr.appendChild(td);
+  return tr;
+}
+
+function drilldownErrorStatus(code) {
+  // Drill into Entries with the clicked status code, layer-2 narrowed to
+  // errors, keeping the rest of the filter rail.
+  state.page = 1;
+  state.statusKinds = new Set(["error"]);
+  state.errorStatusCode = code;
+  state.tab = "entries";
+  loadRecords();
+}
+
+function openRequestDetail(row) {
+  state.selected = row;
+  renderRequestDetail();
+  openPanel();
+}
+
+function renderRequestDetail() {
+  const row = state.selected;
+  const body = document.getElementById("drawer-body");
+  if (!row) {
+    document.getElementById("drawer-title").textContent = "Details";
+    body.replaceChildren();
+    return;
+  }
+  document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
+  body.replaceChildren(detailGrid(row));
+}
+
+function renderRequests() {
+  const panel = document.getElementById("requests-panel");
+  const tab = state.tab || "entries";
+  const subBar = document.getElementById("entries-sub-tab-bar");
+  if (subBar) subBar.hidden = tab !== "entries";
+  if (tab === "attempts") {
+    renderAttemptsPanel(panel);
+    wireTableResizers(panel, "attempts");
+    return;
+  }
+  if (tab === "errors") {
+    renderErrorsPanel(panel);
+    wireTableResizers(panel, "errors");
+    return;
+  }
+  renderEntriesPanel(panel);
+  wireTableResizers(panel, "entries");
+  syncEntriesSubTabs();
+  renderPortTabs();
+  renderRail();
+  renderSelection();
+}
+
+// Persist per-tab column widths once each table is rendered.
+function wireTableResizers(panel, tab) {
+  const table = panel ? panel.querySelector("table.request-table") : null;
+  if (!table) return;
+  const widths = state.tableWidths[tab] || loadTableWidths(tab);
+  if (widths) state.tableWidths[tab] = widths;
+  applyTableWidths(table, widths);
+  attachColumnResizers(table, tab);
+}
+
+function syncEntriesSubTabs() {
+  const bar = document.getElementById("entries-sub-tab-bar");
+  if (!bar) return;
+  const active = (state.entriesGroup || "pool") === "reason" ? "reason" : "pool";
+  bar.querySelectorAll(".sub-tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.subTab === active);
+  });
+}
+
+const ENTRY_COLUMNS = [
+  { key: "__check", label: "", colClass: "col-check", width: 36 },
+  { key: "started_epoch_ms", label: "Time", colClass: "col-time", width: 78 },
+  { key: "scope.port", label: "Port", colClass: "col-port", width: 64 },
+  { key: "result", label: "Status", colClass: "col-code", width: 78 },
+  { key: "meta.provider", label: "Provider · Key", colClass: "col-model", width: 220 },
+  { key: "meta.pool", label: "Pool", colClass: "col-pool", width: 110 },
+  { key: "usage_total_tokens", label: "Usage", colClass: "col-usage", width: 160 },
+  { key: "duration_ms", label: "Duration", colClass: "col-dur", width: 84 },
+];
+
+function renderEntriesPanel(panel) {
+  const rows = state.records;
+  const fragments = [];
+  if (state.errorStatusCode) {
+    const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
+    const clear = el("button", "btn", "Clear filter");
+    clear.addEventListener("click", () => {
+      state.errorStatusCode = null;
+      state.page = 1;
+      loadRecords();
+    });
+    banner.appendChild(clear);
+    fragments.push(banner);
+  }
+  if (!rows.length) {
+    fragments.push(el("div", "empty-state", "<h2>No matching requests</h2><p>Adjust your search terms or clear the checked filters.</p>"));
+    panel.replaceChildren(...fragments);
+    return;
+  }
+  const table = el("table", "request-table");
+  const colgroup = el("colgroup");
+  ENTRY_COLUMNS.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+  table.appendChild(colgroup);
+  const tableHead = document.createElement("thead");
+  const head = el("tr");
+  ENTRY_COLUMNS.forEach((col) => {
+    const th = el("th", col.colClass, col.label);
+    if (col.key === "__check") {
+      const checkAll = el("input");
+      checkAll.type = "checkbox";
+      checkAll.id = "check-all";
+      checkAll.setAttribute("aria-label", "Select all visible rows");
+      checkAll.addEventListener("change", () => {
+        const inputs = [...panel.querySelectorAll("#table-body td.col-check input")];
+        inputs.forEach((input) => {
+          input.checked = checkAll.checked;
+          const key = input.closest("tr").dataset.requestKey;
+          checkAll.checked ? state.selection.add(key) : state.selection.delete(key);
+        });
+        renderSelection();
+      });
+      th.textContent = "";
+      th.appendChild(checkAll);
+    }
+    head.appendChild(th);
+  });
+  tableHead.appendChild(head);
+  table.appendChild(tableHead);
+  const body = document.createElement("tbody");
+  body.id = "table-body";
+  if (state.sortMode === "code") {
+    const sorted = [...rows].sort((a, b) => {
+      const codeA = statusText(a), codeB = statusText(b);
+      const rank = compareCodes(codeA, codeB);
+      if (rank !== 0) return rank;
+      return (b.started_epoch_ms || 0) - (a.started_epoch_ms || 0);
+    });
+    const groups = new Map();
+    for (const row of sorted) {
+      const code = statusText(row);
+      if (!groups.has(code)) groups.set(code, []);
+      groups.get(code).push(row);
+    }
+    for (const code of [...groups.keys()].sort(compareCodes)) {
+      const groupRows = groups.get(code);
+      body.appendChild(groupHeadRow(code, groupRows));
+      if (state.openExclude === code) body.appendChild(excludeRowEl(code, groupRows));
+      if (state.collapsed.has(code)) continue;
+      const excluded = state.excluded[code];
+      const shown = excluded ? groupRows.filter((row) => !excluded.has(comboOf(row))) : groupRows;
+      for (const row of shown) body.appendChild(requestRow(row));
+    }
+  } else {
+    for (const row of rows) body.appendChild(requestRow(row));
+  }
+  table.appendChild(body);
+  fragments.push(table);
+  panel.replaceChildren(...fragments);
+  state.tableWidths.entries = loadTableWidths("entries");
+  applyTableWidths(table, state.tableWidths.entries);
+  attachColumnResizers(table, "entries");
+  const checkAll = panel.querySelector("#check-all");
+  if (checkAll) {
+    const inputs = [...body.querySelectorAll("td.col-check input")];
+    checkAll.checked = inputs.length > 0 && inputs.every((input) => input.checked);
+    checkAll.indeterminate = inputs.some((input) => input.checked) && !inputs.every((input) => input.checked);
+  }
+}
+
+function renderAttemptsPanel(panel) {
+  const rows = state.attemptRecords || [];
+  if (!rows.length) {
+    panel.replaceChildren(el("div", "loading", "no failed attempts"));
+    return;
+  }
+  const table = el("table", "request-table");
+  const head = el("tr");
+  const columns = [
+    { key: "status", label: "Status", colClass: "col-code" },
+    { key: "scope.port", label: "Port", colClass: "col-port" },
+    { key: "meta.pool", label: "Pool", colClass: "col-pool" },
+    { key: "meta.route_reason", label: "Reason", colClass: "col-route" },
+    { key: "meta.provider", label: "Model", colClass: "col-model" },
+    { key: "duration_ms", label: "Duration", colClass: "col-dur" },
+    { key: "error", label: "Error", colClass: "col-usage" },
+    { key: "switches", label: "Next", colClass: "col-finish" },
+    { key: "updated_epoch_ms", label: "When", colClass: "col-time col-time-last" },
+  ];
+  const colgroup = el("colgroup");
+  columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+  table.appendChild(colgroup);
+  const trh = el("tr");
+  columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+  const tableHead = document.createElement("thead");
+  tableHead.appendChild(trh);
+  table.appendChild(tableHead);
+  const body = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = el("tr");
+    tr.dataset.requestKey = row.request_key;
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", () => openRequestDetail(row));
+    const detail = row.meta?.error_category
+      ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim()
+      : "—";
+    const codeCell = el("td", "col-code");
+    codeCell.appendChild(el("span", "status-text error", statusText(row)));
+    codeCell.title = detail;
+    tr.appendChild(codeCell);
+    tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
+    tr.appendChild(el("td", "col-pool", metaValue(row, "pool")));
+    tr.appendChild(el("td", "col-route", metaValue(row, "route_reason")));
+    tr.appendChild(el("td", "col-model", `${metaValue(row, "provider")}/${metaValue(row, "model")} · ${metaValue(row, "auth_alias")}`));
+    tr.appendChild(el("td", "num mono", fmtMs(row.duration_ms)));
+    tr.appendChild(el("td", "mono col-usage", detail));
+    tr.appendChild(el("td", "col-finish", row.switches > 0 ? "switched" : "terminal"));
+    tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
+  panel.replaceChildren(table);
+  state.tableWidths.attempts = loadTableWidths("attempts");
+  applyTableWidths(table, state.tableWidths.attempts);
+  attachColumnResizers(table, "attempts");
+}
+
+function renderErrorsPanel(panel) {
+  const codes = state.errorFacets || [];
+  if (!codes.length) {
+    panel.replaceChildren(el("div", "loading", "no errors"));
+    return;
+  }
+  const wrapper = el("div");
+  const table = el("table", "request-table");
+  const columns = [
+    { key: "code", label: "Status", colClass: "col-code" },
+    { key: "count", label: "Count", colClass: "col-port" },
+    { key: "example", label: "Example detail", colClass: "col-usage" },
+  ];
+  const colgroup = el("colgroup");
+  columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
+  table.appendChild(colgroup);
+  const trh = el("tr");
+  columns.forEach((col) => trh.appendChild(el("th", col.colClass, col.label)));
+  const head = document.createElement("thead");
+  head.appendChild(trh);
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  codes.forEach((item) => {
+    const tr = el("tr");
+    tr.style.cursor = "pointer";
+    tr.title = `View Requests filtered by status ${item.code}`;
+    // Drilldown: jump to Entries tab with layer-2 narrowed to errors and
+    // the clicked status code, keeping other filters.
+    tr.addEventListener("click", () => drilldownErrorStatus(item.code));
+    const codeCell = el("td", "col-code");
+    codeCell.appendChild(el("span", "status-text error", item.code));
+    tr.appendChild(codeCell);
+    tr.appendChild(el("td", "col-port", String(item.count)));
+    tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
+    body.appendChild(tr);
+  });
+  table.appendChild(body);
+  const summary = el("div", "muted", `Total error requests: ${state.errorStatuses}`);
+  wrapper.append(summary, table);
+  panel.replaceChildren(wrapper);
+  state.tableWidths.errors = loadTableWidths("errors");
+  applyTableWidths(table, state.tableWidths.errors);
+  attachColumnResizers(table, "errors");
+}
+
+function renderPortTabs() {
+  const bar = document.getElementById("port-tabs");
+  if (!bar) return;
+  // Counts come from the unfiltered-by-port response; keep the last known
+  // per-port counts while a specific port tab is active.
+  const source = state.port === "all" ? (state.facets.ports || {}) : (state.portCountsCache || {});
+  const ports = Object.entries(source).sort(([a], [b]) => Number(a) - Number(b));
+  const tabs = [{ value: "all", label: "All ports", count: state.port === "all" ? state.total : null }];
+  for (const [port, count] of ports) {
+    tabs.push({ value: port, label: port, count: Number(count) });
+  }
+  bar.replaceChildren(...tabs.map((tab) => {
+    const btn = el("button", "port-tab");
+    btn.type = "button";
+    btn.role = "tab";
+    btn.dataset.port = tab.value;
+    btn.setAttribute("aria-selected", String(state.port === tab.value));
+    btn.append(el("span", null, tab.label));
+    if (tab.count != null) btn.appendChild(el("span", "count", String(tab.count)));
+    btn.addEventListener("click", () => {
+      if (state.port === tab.value) return;
+      state.port = tab.value;
+      document.getElementById("port-filter").value = tab.value;
+      state.page = 1;
+      renderPortTabs();
+      loadRecords();
+    });
+    return btn;
+  }));
+}
+
+const STATUS_KIND_LABELS = { success: "Success (2xx)", error: "Error (4xx/5xx)", cancelled: "Cancelled (499)", active: "In progress" };
+
+function renderRail() {
+  const stats = state.stats || {};
+  if (!state.statusKinds.size) {
+    state.kindCounts = {
+      success: Number(stats.success_count || 0),
+      error: Number(stats.error_count || 0),
+      cancelled: Number(stats.cancelled_count || 0),
+      active: Number(stats.active_count || 0),
+    };
+  }
+  if (!state.providerSel.size) state.providerCounts = { ...(state.facets.providers || {}) };
+  if (!state.modelSel.size) state.modelCounts = { ...(state.facets.models || {}) };
+  checkboxList(document.getElementById("filter-status"),
+    Object.keys(STATUS_KIND_LABELS).map((kind) => [STATUS_KIND_LABELS[kind], state.kindCounts[kind] || 0]),
+    new Set([...state.statusKinds].map((kind) => STATUS_KIND_LABELS[kind])),
+    (label, on) => {
+      const kind = Object.keys(STATUS_KIND_LABELS).find((key) => STATUS_KIND_LABELS[key] === label);
+      on ? state.statusKinds.add(kind) : state.statusKinds.delete(kind);
+      state.page = 1;
+      loadRecords();
+    });
+  checkboxList(document.getElementById("filter-provider"),
+    Object.entries(state.providerCounts).sort((a, b) => b[1] - a[1]),
+    state.providerSel,
+    (value, on) => {
+      on ? state.providerSel.add(value) : state.providerSel.delete(value);
+      state.page = 1;
+      loadRecords();
+    });
+  checkboxList(document.getElementById("filter-model"),
+    Object.entries(state.modelCounts).sort((a, b) => b[1] - a[1]),
+    state.modelSel,
+    (value, on) => {
+      on ? state.modelSel.add(value) : state.modelSel.delete(value);
+      state.page = 1;
+      loadRecords();
+    });
+  document.querySelectorAll(".filter-clear").forEach((btn) => {
+    btn.onclick = () => {
+      state[btn.dataset.clear].clear();
+      state.page = 1;
+      loadRecords();
+    };
+  });
+}
+
+function checkboxList(container, entries, selectedSet, onToggle) {
+  if (!container) return;
+  container.replaceChildren(...entries.map(([value, count]) => {
+    const label = el("label", "filter-item");
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = selectedSet.has(value);
+    input.addEventListener("change", () => onToggle(value, input.checked));
+    label.append(input, el("span", null, value), el("span", "n", String(count)));
+    return label;
+  }));
+  if (!entries.length) {
+    container.appendChild(el("span", "mono muted tiny", "No values available in this layer"));
+  }
+}
+
+// ---------- selection & export ----------
+const CSV_HEAD = ["time", "port", "status", "endpoint", "provider", "model", "key", "pool", "input", "output", "duration", "request_id", "error_detail"];
+function selectedRows() {
+  return state.exports;
+}
+function exportFields(row) {
+  const usage = row.usage || {};
+  return [
+    timeText(row.started_epoch_ms),
+    String(row.scope?.port ?? "—"),
+    statusText(row),
+    endpointLabel(row.meta?.endpoint),
+    String(row.meta?.provider ?? "—"),
+    String(row.meta?.model ?? "—"),
+    String(row.meta?.auth_alias ?? "—"),
+    String(row.meta?.pool ?? "—"),
+    fmtCompact(usage.input_tokens ?? 0),
+    fmtCompact(usage.output_tokens ?? 0),
+    fmtMs(row.duration_ms),
+    String(row.meta?.request_id || row.request_key || "—"),
+    String(row.meta?.error_detail || row.meta?.error_category || "—"),
+  ];
+}
+function toTSV(rows) {
+  return [CSV_HEAD.join("\t"), ...rows.map((row) => exportFields(row).join("\t"))].join("\n");
+}
+function toCSV(rows) {
+  const esc = (value) => /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  return [CSV_HEAD.join(","), ...rows.map((row) => exportFields(row).map(esc).join(","))].join("\n");
+}
+function renderSelection() {
+  const bar = document.getElementById("selection-bar");
+  state.exports = state.records.filter((row) => state.selection.has(row.request_key));
+  // The bar reflects what an export would actually contain: the selected
+  // rows among the currently loaded records.
+  bar.classList.toggle("show", state.exports.length > 0);
+  document.getElementById("sel-count").textContent = String(state.exports.length);
+  const has = state.exports.length > 0;
+  for (const id of ["export-csv-top", "copy-tsv-top"]) document.getElementById(id).disabled = !has;
+}
+async function copyTSV() {
+  const rows = selectedRows();
+  if (!rows.length) return;
+  try {
+    await navigator.clipboard.writeText(toTSV(rows));
+    showStatus("ok", `Copied ${rows.length} rows to clipboard (TSV, includes request_id / error_detail).`);
+  } catch (error) {
+    showStatus("err", "Clipboard unavailable (browser permission denied).");
+  }
+}
+function exportCSV() {
+  const rows = selectedRows();
+  if (!rows.length) return;
+  const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `rcc-requests-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showStatus("ok", `Exported ${rows.length} rows to CSV.`);
+}
+
+function renderStatsCards() {
+  const stats = state.stats || {};
+  const cards = document.getElementById("summary-cards");
+  cards.replaceChildren();
+  const total = Number(stats.count || 0);
+  const providerFails = Number(stats.provider_failure_count ?? 0);
+  const values = [
+    ["Requests", total],
+    ["Success", Number(stats.success_count ?? 0)],
+    ["Errors", Number(stats.error_count ?? 0), stats.error_count > 0 ? "bad" : ""],
+    ["Provider fails", providerFails, providerFails > 0 ? "bad" : ""],
+    ["Input tokens", fmtCompact(Number(stats.input_tokens || 0))],
+    ["Output tokens", fmtCompact(Number(stats.output_tokens || 0))],
+    ["Cached tokens", fmtCompact(Number(stats.cached_tokens || 0))],
+    ["Total tokens", fmtCompact(Number(stats.total_tokens || 0))],
+    ["Avg cache hit", stats.cache_hit_rate_percent != null ? `${Number(stats.cache_hit_rate_percent).toFixed(1)}%` : "—"],
+    ["Avg duration", stats.avg_duration_ms != null ? `${Math.round(Number(stats.avg_duration_ms))} ms` : "—"],
+  ];
+  for (const item of values) {
+    const [label, value, tone = ""] = item;
+    const card = el("div", `card stat-${label.toLowerCase().replace(/\s+/g, "-")}${tone ? ` ${tone}` : ""}`);
+    card.appendChild(el("div", "label", label));
+    card.appendChild(el("div", `value${tone ? ` ${tone}` : ""}`, String(value)));
+    cards.appendChild(card);
+  }
+  const donutHost = document.getElementById("status-donut");
+  if (donutHost) {
+    const entries = [
+      ["success", Number(stats.success_count || 0)],
+      ["error", Number(stats.error_count || 0)],
+      ["cancelled", Number(stats.cancelled_count || 0)],
+      ["active", Number(stats.active_count || 0)],
+    ];
+    renderDonut(donutHost, entries, "requests");
+  }
+}
+
+function renderTimeseries() {
+  const chart = document.getElementById("usage-chart");
+  const metric = document.getElementById("chart-metric").value;
+  const range = document.getElementById("chart-range").value;
+  renderBarChart(chart, state.timeseries || [], metric, range);
+}
+
+function renderPagination() {
+  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+  const info = document.getElementById("page-info");
+  info.textContent = `page ${state.page} of ${pages} · ${state.total.toLocaleString()} records`;
+  document.getElementById("page-prev").disabled = state.page <= 1;
+  document.getElementById("page-next").disabled = state.page >= pages;
+}
+
+function renderAll() {
+  renderStats(state.stats);
+  renderStatsCards();
+  renderTimeseries();
+  renderTabCounts();
+  renderRequests();
+  renderPagination();
+  renderRequestDetail();
+}
+
+function renderTabCounts() {
+  const entriesCount = document.getElementById("tab-count-entries");
+  const attemptsCount = document.getElementById("tab-count-attempts");
+  const errorsCount = document.getElementById("tab-count-errors");
+  if (entriesCount) entriesCount.textContent = state.total ? `${state.total}` : "0";
+  if (attemptsCount) attemptsCount.textContent = state.attemptsTotal ? `${state.attemptsTotal}` : "0";
+  if (errorsCount) errorsCount.textContent = state.errorStatuses ? `${state.errorStatuses}` : "0";
+  document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === (state.tab || "entries"));
+  });
+}
+
+document.getElementById("reload-btn").addEventListener("click", () => load().catch((error) => showStatus("err", error.message)));
+document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.tab = btn.dataset.tab;
+    if (state.tab === "attempts" && !state.attemptRecords.length) loadAttempts().then(renderAll);
+    else renderAll();
+  });
+});
+document.querySelectorAll("#entries-sub-tab-bar .sub-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const next = btn.dataset.subTab === "reason" ? "reason" : "pool";
+    if (state.entriesGroup === next) return;
+    state.entriesGroup = next;
+    renderAll();
+  });
+});
+["chart-range","chart-metric"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
+});
+["provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+  const input = document.getElementById(id);
+  let timer = null;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
+  });
+  if (input.tagName === "SELECT") input.addEventListener("change", () => {
+    state.page = 1;
+    loadRecords();
+  });
+});
+document.getElementById("sort-field").addEventListener("change", () => {
+  setSortMode(null);
+  state.page = 1;
+  loadRecords();
+});
+document.getElementById("sort-order").addEventListener("change", () => { state.page = 1; loadRecords(); });
+document.getElementById("page-prev").addEventListener("click", () => {
+  if (state.page > 1) { state.page -= 1; loadRecords(); }
+});
+document.getElementById("page-size").addEventListener("change", (event) => {
+  state.pageSize = Number(event.currentTarget.value);
+  state.page = 1;
+  loadRecords();
+});
+document.getElementById("page-next").addEventListener("click", () => {
+  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+  if (state.page < pages) { state.page += 1; loadRecords(); }
+});
+document.getElementById("sort-mode").addEventListener("click", (event) => {
+  const btn = event.target.closest("button[data-mode]");
+  if (!btn) return;
+  setSortMode(btn.dataset.mode);
+  state.page = 1;
+  loadRecords();
+});
+function setSortMode(mode) {
+  state.sortMode = mode || "custom";
+  document.querySelectorAll("#sort-mode button").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === state.sortMode));
+  });
+}
+for (const id of ["copy-tsv-bar", "copy-tsv-top"]) document.getElementById(id).addEventListener("click", copyTSV);
+for (const id of ["export-csv-bar", "export-csv-top"]) document.getElementById(id).addEventListener("click", exportCSV);
+document.getElementById("sel-clear").addEventListener("click", () => {
+  state.selection.clear();
+  renderSelection();
+  renderRequests();
+});
+startAutoRefresh(() => loadRecords(), 5000);
+document.getElementById("drawer-back")?.addEventListener("click", () => {
+  const previous = state.drawerSourceTab;
+  closePanel();
+  if (previous && previous !== state.tab) {
+    state.tab = previous;
+    renderAll();
+  }
+});
+document.getElementById("drawer")?.addEventListener("transitionend", (event) => {
+  if (event.propertyName !== "transform" && event.propertyName !== "opacity") return;
+  const drawer = document.getElementById("drawer");
+  if (!drawer || drawer.classList.contains("is-open")) return;
+  const previous = state.drawerSourceTab;
+  state.drawerSourceTab = null;
+  if (previous && previous !== state.tab) {
+    state.tab = previous;
+    renderAll();
+  }
+});
+
+load().catch((error) => showStatus("err", `observability failed: ${error.message}`));

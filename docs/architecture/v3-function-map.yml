@@ -5399,6 +5399,15 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/observability.rs
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/admin-webui/requests.html
+  - v3/admin-webui/vendor/ambient.css
+  - v3/admin-webui/app/core.js
+  - v3/admin-webui/app/shell.js
+  - v3/admin-webui/app/charts.js
+  - v3/admin-webui/app/drawer.js
+  - v3/admin-webui/app/views/dashboard.js
+  - v3/admin-webui/app/views/usage.js
+  - v3/admin-webui/app/views/providers.js
+  - v3/admin-webui/app/views/routes.js
   resource_bindings:
   - v3.observability.webui_store
   entry_symbols:
@@ -5410,6 +5419,15 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/admin-webui/requests.html
   - v3/admin-webui/styles.css
+  - v3/admin-webui/vendor/ambient.css
+  - v3/admin-webui/app/core.js
+  - v3/admin-webui/app/shell.js
+  - v3/admin-webui/app/charts.js
+  - v3/admin-webui/app/drawer.js
+  - v3/admin-webui/app/views/dashboard.js
+  - v3/admin-webui/app/views/usage.js
+  - v3/admin-webui/app/views/providers.js
+  - v3/admin-webui/app/views/routes.js
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
