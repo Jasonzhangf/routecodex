@@ -771,6 +771,24 @@ if (process.argv[2] === '--command-binding-self-test') {
   process.exit(0);
 }
 
+function runVerificationMapBindingCheck() {
+  const bindingFailures = checkDeclaredExecutedBinding(
+    path.join(v4Root, 'docs/architecture/maps/verification-map.json'),
+    path.join(v4Root, 'scripts/architecture'),
+  );
+  if (bindingFailures.length > 0) {
+    console.error('[v4 isolation] verification-map binding FAIL');
+    console.error(bindingFailures.join('\n'));
+    process.exit(1);
+  }
+  console.log('[v4 isolation] verification-map binding OK');
+}
+
+if (process.argv[2] === '--verification-map-binding') {
+  runVerificationMapBindingCheck();
+  process.exit(0);
+}
+
 function reportAndExit(label) {
   if (failures.length > 0) {
     console.error(`[v4 isolation] ${label} FAIL`);

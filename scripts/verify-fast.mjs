@@ -221,7 +221,12 @@ function classifyV4FullScope(paths, { rootPackageChanged, workflowScope }) {
 
   return paths.some((path) => {
     if (!path.startsWith('v4/')) return false;
-    return !/^v4\/(?:crates\/[^/]+\/(?:src|tests|examples|benches)\/|cordis\/[^/]+\/(?:src|tests)\/)/u.test(path);
+    if (/^v4\/(?:crates\/[^/]+\/(?:src|tests|examples|benches)\/|cordis\/[^/]+\/(?:src|tests)\/)/u.test(path)) return false;
+    if (/^v4\/docs\/(?:goals|design)\//u.test(path)) return false;
+    if (/^v4\/docs\/README\.md$/u.test(path)) return false;
+    if (/^v4\/docs\/architecture\/[^/]+\.md$/u.test(path)) return false;
+    if (path === 'v4/docs/architecture/maps/verification-map.json') return false;
+    return true;
   });
 }
 
