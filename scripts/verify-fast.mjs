@@ -344,6 +344,19 @@ if (deleted.length > 0) {
   process.stderr.write(`[verify:fast] INFO deleted file(s): ${deleted.join(', ')}\n`);
 }
 
+const changedRustFiles = [
+  ...new Set([
+    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
+    ...deleted.filter((path) => path.endsWith('.rs')),
+  ]),
+];
+const changedV3RustFiles = changedRustFiles.filter((path) => path.startsWith('v3/'));
+const changedV4RustFiles = changedRustFiles.filter((path) => path.startsWith('v4/'));
+const unsupportedRustFiles = changedRustFiles.filter((path) => !path.startsWith('v3/') && !path.startsWith('v4/'));
+if (unsupportedRustFiles.length > 0) {
+  fail(`affected Rust compile evidence unavailable; no declared fast-gate owner for: ${unsupportedRustFiles.join(', ')}`);
+}
+
 const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relative) => /\.(?:rs|toml|yaml|yml)$/u.test(relative)))];
 if (semanticFiles.length > 0) {
   process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
@@ -381,14 +394,11 @@ for (const { commit, path: relative } of entries) {
   }
 }
 
-const changedRustFiles = [
-  ...new Set([
-    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
-    ...deleted.filter((path) => path.endsWith('.rs')),
-  ]),
-];
-if (!scopeOnly && changedRustFiles.length > 0) {
-  const affectedPackages = affectedCargoPackages(changedRustFiles);
+if (changedV4RustFiles.length > 0) {
+  process.stderr.write(`[verify:fast] WARN V4 Rust compile deferred to its scoped workspace gate: ${changedV4RustFiles.join(', ')}\n`);
+}
+if (!scopeOnly && changedV3RustFiles.length > 0) {
+  const affectedPackages = affectedCargoPackages(changedV3RustFiles);
   if (affectedPackages.length > 0) {
     const cargoArgs = [
       'check',
@@ -409,7 +419,16 @@ if (!scopeOnly && changedRustFiles.length > 0) {
   }
 }
 
+const deferredCompileTargets = [
+  ...(changedV3RustFiles.length > 0 ? ['scoped V3 test job'] : []),
+  ...(changedV4RustFiles.length > 0 ? ['scoped V4 workspace job'] : []),
+];
 const compileEvidence = scopeOnly
-  ? 'affected Rust compile deferred to scoped V3 test job'
-  : 'affected Rust compile checked';
+  ? deferredCompileTargets.length > 0
+    ? `affected Rust compile deferred to ${deferredCompileTargets.join(' and ')}`
+    : 'no Rust compile applicable'
+  : [
+      ...(changedV3RustFiles.length > 0 ? ['affected V3 Rust compile checked'] : []),
+      ...(changedV4RustFiles.length > 0 ? ['V4 workspace compile deferred'] : []),
+    ].join('; ') || 'no Rust compile applicable';
 process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; ${compileEvidence}\n`);
