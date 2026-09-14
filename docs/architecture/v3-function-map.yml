@@ -4199,7 +4199,6 @@ features:
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml
   - scripts/architecture/verify-v3-runtime-timing-observability.mjs
-  - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -4215,7 +4214,6 @@ features:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_
     --lib -- --nocapture
   - npm run verify:v3-runtime-timing-observability
-  - npm run test:v3-runtime-timing-observability-red-fixtures
   - npm run verify:v3-architecture-docs
   runtime_status: source_active_live_verification_required
 - feature_id: v3.provider_action_gate

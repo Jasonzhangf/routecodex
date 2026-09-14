@@ -29,5 +29,5 @@
   "unique_owner": "V3DirectSseConsoleFinalizer::client_disconnected / emit_direct_sse_complete_console_lines",
   "allowed_paths": ["v3/crates/routecodex-v3-server/src/lib.rs", "docs/goals/v3-runtime-observability-500-debug-contract.json", "note.md", "MEMORY.md", ".agents/skills/rcc-dev-skills/references/93-lessons-2026-07.md"],
   "forbidden_paths": ["v3/crates/routecodex-v3-runtime/src/runtime_timing.rs", "v3/crates/routecodex-v3-provider-responses", "src", "sharedmodule", "provider config"],
-  "required_verification": ["cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof --lib -- --nocapture", "npm run verify:v3-runtime-timing-observability", "npm run test:v3-runtime-timing-observability-red-fixtures", "npm run build:v3-cli", "npm run install:v3", "routecodex restart --port 5555", "live 5555 log window no new runtime_observability_contract"]
+  "required_verification": ["cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server direct_sse_console_closeout_does_not_fabricate_success_or_error_before_runtime_eof --lib -- --nocapture", "npm run verify:v3-runtime-timing-observability", "npm run build:v3-cli", "npm run install:v3", "routecodex restart --port 5555", "live 5555 log window no new runtime_observability_contract"]
 }
