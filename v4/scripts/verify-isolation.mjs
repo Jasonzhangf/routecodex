@@ -505,9 +505,10 @@ function checkDeclaredExecutedBinding(
   verificationMapPath,
   architectureDir,
   testScriptPath = path.join(v4Root, 'scripts/test.mjs'),
+  admissionEntrypointRoot = path.resolve(architectureDir, '..', '..'),
 ) {
   const out = [];
-  const admissionEntrypointProblems = admissionEntrypointBindingProblems(path.resolve(architectureDir, '..', '..'));
+  const admissionEntrypointProblems = admissionEntrypointBindingProblems(admissionEntrypointRoot);
   const admissionCommandExternallyBound = admissionEntrypointProblems.length === 0;
   const declaredGates = new Set();
   const declaredArchitectureCommands = new Set();
@@ -719,6 +720,46 @@ function runCommandBindingSelfTest() {
     const architectureDir = path.join(fixtureRoot, 'architecture');
     fs.mkdirSync(architectureDir, { recursive: true });
     fs.writeFileSync(path.join(architectureDir, 'verify-v4-active-link.mjs'), '');
+
+    // The build matrix must not execute strict admission, but the command stays
+    // declared active in verification-map.json. The binding path must accept it
+    // while the install/compile entrypoints execute --admission, and reject it
+    // once either entrypoint stops doing so.
+    fs.writeFileSync(
+      path.join(fixtureRoot, admissionScripts[0]),
+      "spawnSync(process.execPath, ['--admission']);\n",
+    );
+    const admissionMapPath = path.join(fixtureRoot, 'admission-verification-map.json');
+    fs.writeFileSync(admissionMapPath, JSON.stringify({
+      gates: [{
+        gate_id: 'v4_feature_layer_batch_admission',
+        status: 'active',
+        command: ADMISSION_COMMAND,
+        argv: ADMISSION_COMMAND.split(' '),
+      }],
+    }));
+    const boundAdmissionFailures = checkDeclaredExecutedBinding(
+      admissionMapPath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (boundAdmissionFailures.some((failure) => failure.includes('admission entrypoint'))) {
+      console.error('[v4 isolation] external admission binding self-test rejected bound admission entrypoints');
+      process.exit(1);
+    }
+    fs.rmSync(path.join(fixtureRoot, admissionScripts[0]));
+    const unboundAdmissionFailures = checkDeclaredExecutedBinding(
+      admissionMapPath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!unboundAdmissionFailures.some((failure) => failure.includes('admission entrypoint'))) {
+      console.error('[v4 isolation] external admission binding self-test accepted a missing entrypoint');
+      process.exit(1);
+    }
+
     const verificationMapPath = path.join(fixtureRoot, 'verification-map.json');
     fs.writeFileSync(verificationMapPath, JSON.stringify({
       gates: [{
