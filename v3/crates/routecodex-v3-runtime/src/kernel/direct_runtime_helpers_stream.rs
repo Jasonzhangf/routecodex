@@ -521,32 +521,9 @@ fn materialize_direct_responses_terminal_usage(frame: &[u8]) -> Vec<u8> {
         let Some(response_object) = response.as_object_mut() else {
             return value;
         };
-        let usage = response_object
-            .entry("usage".to_owned())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        if !usage.is_object() {
-            *usage = serde_json::Value::Object(serde_json::Map::new());
-        }
-        let usage_object = usage
-            .as_object_mut()
-            .expect("usage was normalized to an object");
-        usage_object
-            .entry("input_tokens".to_owned())
-            .or_insert(serde_json::Value::from(0));
-        usage_object
-            .entry("output_tokens".to_owned())
-            .or_insert(serde_json::Value::from(0));
-        let input = usage_object
-            .get("input_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let output = usage_object
-            .get("output_tokens")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        usage_object
-            .entry("total_tokens".to_owned())
-            .or_insert(serde_json::Value::from(input.saturating_add(output)));
+        let mut response_value = serde_json::Value::Object(std::mem::take(response_object));
+        crate::hub_v1::materialize_v3_responses_terminal_usage(&mut response_value);
+        *response = response_value;
         value
     })
 }
