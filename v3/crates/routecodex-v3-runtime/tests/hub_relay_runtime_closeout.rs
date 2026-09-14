@@ -15,8 +15,7 @@ use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_health_and_retry_policy,
     execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayLocalContinuationScope,
     V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
-    V3ProviderFailureRuntimeHealth, V3ResponsesRelayClientBody,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -2453,13 +2452,13 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
 }
 
 #[tokio::test]
-async fn provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery() {
+async fn provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging() {
     let server_id = "provider_error_terminal_closeout";
     let manifest = manifest_for_scope(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let pending = tokio::time::timeout(
-        Duration::from_millis(100),
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(10),
         execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
             &manifest,
             V3AnthropicRelayRuntimeInput {
@@ -2485,9 +2484,15 @@ async fn provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery(
         ),
     )
     .await;
-    assert!(
-        pending.is_err(),
-        "pool exhaustion must hold the client until a cooldown probe restores availability"
+    let result = outcome.expect(
+        "pool exhaustion must return a terminal failure instead of holding the client \
+         indefinitely waiting for a cooldown probe",
+    );
+    let output = result.expect("pool exhaustion must project a client-visible terminal error");
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.client_response["error"]["code"], "network_error",
+        "pool exhaustion must project an explicit network error instead of hanging, got {output:?}"
     );
 }
 
