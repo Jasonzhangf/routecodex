@@ -322,6 +322,8 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "V3ProviderResp14Raw",
         "V3Resp15ClientPayload",
         "V3Server16HttpFrame",
+        "V3Router07OpaqueTargetHitOnce",
+        "V3TargetLocalReselected",
     ] {
         assert!(log_text.contains(node), "{node}");
     }
