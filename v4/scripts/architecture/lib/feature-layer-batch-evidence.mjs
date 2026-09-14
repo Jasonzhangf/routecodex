@@ -198,21 +198,27 @@ export function validateEvidenceRef({
 }
 
 export function runRegisteredGates({ gateIds, gateMap, truth, failures, context }) {
+  const outcomes = new Map();
   for (const gateId of gateIds) {
     const gate = gateMap.get(gateId);
     if (!gate || gate.status !== 'active' || !Array.isArray(gate.argv) || gate.argv.length === 0) {
       addFailure(failures, 'REQUIRED_GATE_NOT_EXECUTABLE', `${context}: ${gateId} is not executable`);
       continue;
     }
-    let receipt;
-    try {
-      receipt = truth.runGate(gate.argv);
-    } catch (error) {
-      addFailure(failures, 'REQUIRED_GATE_EXECUTION_FAILED', `${context}: ${gateId}: ${error.message}`);
-      continue;
+    const key = JSON.stringify(gate.argv);
+    let outcome = outcomes.get(key);
+    if (!outcome) {
+      try {
+        outcome = { receipt: truth.runGate(gate.argv) };
+      } catch (error) {
+        outcome = { error };
+      }
+      outcomes.set(key, outcome);
     }
-    if (receipt.status !== 0) {
-      addFailure(failures, 'REQUIRED_GATE_FAILED', `${context}: ${gateId} exited ${receipt.status}`);
+    if (outcome.error) {
+      addFailure(failures, 'REQUIRED_GATE_EXECUTION_FAILED', `${context}: ${gateId}: ${outcome.error.message}`);
+    } else if (outcome.receipt.status !== 0) {
+      addFailure(failures, 'REQUIRED_GATE_FAILED', `${context}: ${gateId} exited ${outcome.receipt.status}`);
     }
   }
 }
