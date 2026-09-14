@@ -1113,10 +1113,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         && !is_request_local_compat_failure
         && retries_done < configured_same_candidate_retries
         && status != 400
-        // HTTP 503 is an upstream availability signal.  Do not spend a
-        // same-candidate retry budget on it; mark this candidate failed and
-        // reselect immediately.
-        && status != 503
+        // Upstream/server failures must move to another provider immediately.
+        // Retrying the same candidate holds the client request open until the
+        // residence deadline even while other providers remain healthy.
+        && status < 500
     {
         state
             .same_candidate_retries
@@ -1328,7 +1328,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         // 必然相同：同一 provider 不重试。与普通分支(874-877)对齐——default floor
         // 分支同样拦截 400，避免 asxs-grok 等 default 池成员 400 被同 provider
         // 重试多次才 terminal。
-        if *retries_done >= configured_same_candidate_retries || status == 400 {
+        if *retries_done >= configured_same_candidate_retries || status == 400 || status >= 500 {
             let decision = build_v3_relay_provider_error_05_decision(
                 &selected,
                 source_stage,
