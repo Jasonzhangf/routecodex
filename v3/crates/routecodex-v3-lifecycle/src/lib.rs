@@ -621,11 +621,9 @@ impl V3ManagedLifecycle {
         instance_dir: &Path,
         declaration: &V3ManagedInstanceDeclaration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
-        if hooks_sidecar_process_group_is_alive(instance_dir)? {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing forced stop while hooks sidecar process group is alive".to_string(),
-            ));
-        }
+        // Hooks are optional; a stale sidecar must not block recovery of the
+        // primary RouteCodex listener. Keep the identity check in diagnostics
+        // and leave ownership-sensitive sidecar cleanup to its own path.
         let force_timeout = env_duration_ms(
             &[
                 "ROUTECODEX_V3_KILL_TIMEOUT_MS",

@@ -302,7 +302,8 @@ pub(crate) async fn start_managed_hooks_sidecar(
         }
         Err(ref error @ V3LifecycleError::HooksControlValidation(ref message))
             if message.contains("identity mismatch")
-                || message.contains("identity no longer matches") =>
+                || message.contains("identity no longer matches")
+                || message.contains("previous run is still alive") =>
         {
             Ok((None, Some(format!("hooks sidecar unavailable: {error}"))))
         }
@@ -887,11 +888,18 @@ pub(crate) fn hooks_sidecar_process_group_is_alive(
     if !process_group_exists(record.process_group_id)? {
         return Ok(false);
     }
-    validate_process_group_identity(
+    if let Err(error) = validate_process_group_identity(
         record.process_group_id,
         record.leader_pid,
         &record.leader_start_token,
-    )?;
+    ) {
+        if error.to_string().contains("identity no longer matches")
+            || error.to_string().contains("identity mismatch")
+        {
+            return Ok(false);
+        }
+        return Err(error);
+    }
     Ok(true)
 }
 
