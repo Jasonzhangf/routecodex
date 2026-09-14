@@ -220,6 +220,35 @@ fn attempt_store_rejects_expired_request_before_reservation() {
 }
 
 #[test]
+fn activity_keeps_residence_budget_alive_past_original_deadline() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 8);
+    limits.residence_timeout = Duration::from_millis(1_000);
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    builder.push(vec![1]).expect("activity before idle timeout");
+    std::thread::sleep(Duration::from_millis(700));
+    builder
+        .push(vec![2])
+        .expect("active stream must outlive original absolute deadline");
+    assert_eq!(budget.request_resident_bytes(), 2);
+}
+
+#[test]
+fn inactive_residence_budget_still_expires() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 8);
+    limits.residence_timeout = Duration::from_millis(30);
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
+    std::thread::sleep(Duration::from_millis(60));
+    assert!(matches!(
+        budget.admit_transport_attempt(),
+        Err(V3AttemptStoreError::LocalResourceExhausted(_))
+    ));
+}
+
+#[test]
 fn sealed_replay_holds_reservation_until_stream_drop() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::clone(&process_bytes));

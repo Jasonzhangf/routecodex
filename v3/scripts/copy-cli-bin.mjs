@@ -46,6 +46,8 @@ const temporaryBin = path.join(
   `.${path.basename(targetBin)}.${process.pid}.${Date.now()}.tmp`,
 );
 fs.copyFileSync(sourceBin, temporaryBin);
+// Preserve executable mode on every non-Windows platform; code signing is a
+// separate macOS-only step below.
 if (process.platform !== 'win32') {
   fs.chmodSync(temporaryBin, 0o755);
 }

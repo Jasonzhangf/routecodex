@@ -47,6 +47,19 @@ fn missing_usage_gets_request_tiktoken_input_estimate() {
     assert!(response["usage"].get("total_tokens").is_none());
 }
 
+#[test]
+fn incomplete_terminal_without_usage_still_has_required_response_token_fields() {
+    let mut response = json!({
+        "id": "resp_incomplete_missing_usage",
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"}
+    });
+    materialize_v3_responses_terminal_usage(&mut response);
+    assert_eq!(response["usage"]["input_tokens"], 0);
+    assert_eq!(response["usage"]["output_tokens"], 0);
+    assert_eq!(response["usage"]["total_tokens"], 0);
+}
+
 #[tokio::test]
 async fn provider_sse_done_without_completed_is_terminal_missing() {
     let observation = V3RuntimeStreamObservation::default();
