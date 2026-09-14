@@ -300,7 +300,9 @@ pub(crate) async fn start_managed_hooks_sidecar(
                 .and_then(|sidecar| sidecar.degraded_detail.clone());
             Ok((sidecar, detail))
         }
-        Err(error @ V3LifecycleError::HooksControlValidation(_)) => Err(error),
+        Err(error @ V3LifecycleError::HooksControlValidation(_)) => {
+            Ok((None, Some(format!("hooks sidecar unavailable: {error}"))))
+        }
         Err(error @ V3LifecycleError::HooksOptionalUnavailable(_)) => {
             // Hooks are an optional integration. A broken hook supervisor
             // must not tear down the RouteCodex lifecycle control plane that
