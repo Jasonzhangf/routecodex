@@ -226,9 +226,9 @@ fn activity_keeps_residence_budget_alive_past_original_deadline() {
     limits.residence_timeout = Duration::from_millis(1_000);
     let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
     let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
-    std::thread::sleep(Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(400));
     builder.push(vec![1]).expect("activity before idle timeout");
-    std::thread::sleep(Duration::from_millis(510));
+    std::thread::sleep(Duration::from_millis(700));
     builder
         .push(vec![2])
         .expect("active stream must outlive original absolute deadline");
