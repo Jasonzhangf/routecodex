@@ -179,9 +179,7 @@ export function validateEvidenceRef({
   }
   const hashes = expectedInputHashes(candidate, sourcePaths, gateInputPaths, truth);
   const providedHashes = sortedUnique(evidence.input_hashes ?? []);
-  const hashBindingValid = sharedRuntimeLane
-    ? providedHashes.length > 0 && providedHashes.every((hash) => hashes?.includes(hash))
-    : hashes && sameOrdered(providedHashes, hashes);
+  const hashBindingValid = hashes && sameOrdered(providedHashes, hashes);
   if (!hashBindingValid) {
     addFailure(failures, 'EVIDENCE_INPUT_HASH_MISMATCH', `${context}: input hashes do not match candidate source blobs`);
   }
