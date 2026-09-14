@@ -108,8 +108,9 @@ health   started listeners on 127.0.0.1:45464/45465/45466
   receipts predated the final commit and did not bind to the exact reviewed
   candidate.
 
-Fix: all affected gates are re-run against the exact post-commit candidate
-and the contract receipt section will carry the new commit and timestamps.
+Fix: all affected gates were re-run against the exact post-commit candidate
+and the contract receipt section now carries the candidate code commit
+`5d6357ab501f4e2ab84a87edf8fcd90e14fedec2` and post-commit timestamps.
 
 ## Unchanged boundary
 
