@@ -5,11 +5,25 @@
  * matrix is owned by the positive surface (scripts/verify.mjs) and runs once
  * per verify:ci.
  */
-import { run } from './_common.mjs';
+import { runIndependent, reportIndependentFailures } from './_common.mjs';
 import { RED_SUITES } from './_gate-matrix.mjs';
 
-for (const [gate, flag] of RED_SUITES) {
-  run(`node scripts/architecture/${gate} ${flag}`);
+const regressionFailures = runIndependent([{
+  label: 'feature-layer-batch evidence regression',
+  command: 'node scripts/tests/feature-layer-batch-evidence-regression.mjs',
+}]);
+if (regressionFailures.length > 0) {
+  reportIndependentFailures('verify:red', regressionFailures);
+  process.exit(1);
+}
+
+const failures = runIndependent(RED_SUITES.map(([gate, flag]) => ({
+  label: `red:${gate} ${flag}`,
+  command: `node scripts/architecture/${gate} ${flag}`,
+})));
+if (failures.length > 0) {
+  reportIndependentFailures('verify:red', failures);
+  process.exit(1);
 }
 
 console.log(`[v4 verify:red] OK red suites=${RED_SUITES.length}`);

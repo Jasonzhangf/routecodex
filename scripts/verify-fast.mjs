@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import ts from 'typescript';
+import { GATE_SEVERITY } from './gate-policy.mjs';
 
 const root = process.cwd();
 const staged = process.env.ROUTECODEX_GATE_DIFF_MODE === 'staged';
@@ -117,6 +118,105 @@ function classifyWorkflowScope(entries) {
   return { v3, v4 };
 }
 
+function isV3RootScript(relative) {
+  const v3ArchitectureScripts = new Set([
+    'scripts/architecture/verify-v3-resource-map.mjs',
+    'scripts/architecture/architecture-wiki-lib.mjs',
+    'scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs',
+    'scripts/architecture/audit-function-map-canonical-builder-spread.mjs',
+    'scripts/architecture/audit-resource-global-coverage.mjs',
+    'scripts/architecture/compile-v3-build-admission.mjs',
+    'scripts/architecture/custom-payload-carrier-owner-queryability-lib.mjs',
+    'scripts/architecture/generate-mainline-chain-manifests.mjs',
+    'scripts/architecture/mainline-call-map-lib.mjs',
+    'scripts/architecture/render-architecture-wiki-html.mjs',
+    'scripts/architecture/render-architecture-wiki-pages.mjs',
+    'scripts/architecture/render-mainline-manifests.mjs',
+    'scripts/architecture/render-mainline-mermaid.mjs',
+    'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
+    'scripts/architecture/v3-provider-compat-module-boundary-lib.mjs',
+    'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
+    'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
+    'scripts/architecture/verify-architecture-fallback-denylist.mjs',
+    'scripts/architecture/verify-architecture-mainline-call-map.mjs',
+    'scripts/architecture/verify-architecture-mainline-manifest-sync.mjs',
+    'scripts/architecture/verify-architecture-wiki-html-sync.mjs',
+    'scripts/architecture/verify-build-script-tiering.mjs',
+    'scripts/architecture/verify-direct-semantic-classification-design.mjs',
+    'scripts/architecture/verify-error-pipeline-contract.mjs',
+    'scripts/architecture/verify-function-map-compile-gate.mjs',
+    'scripts/architecture/verify-install-release-contract.mjs',
+    'scripts/architecture/verify-internal-error-numbering.mjs',
+    'scripts/architecture/verify-internal-policy-hardcode.mjs',
+    'scripts/architecture/verify-mainline-call-map-binding-state.mjs',
+    'scripts/architecture/verify-no-fallback-diff.mjs',
+    'scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs',
+    'scripts/architecture/verify-repository-filesystem-governance.mjs',
+    'scripts/architecture/verify-responses-continuation-immutable-boundary.mjs',
+    'scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs',
+    'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs',
+    'scripts/architecture/verify-runtime-responses-provider-compat.mjs',
+    'scripts/architecture/verify-server-function-map-boundary.mjs',
+    'scripts/architecture/verify-sse-architecture-boundary.mjs',
+    'scripts/architecture/verify-v3-dependency-projection.mjs',
+    'scripts/architecture/verify-v3-provider-compat-module-boundary.mjs',
+    'scripts/architecture/verify-v3-responses-continuation-disabled.mjs',
+    'scripts/architecture/verify-v3-simplified-user-config.mjs',
+    'scripts/architecture/wiki-html-lib.mjs',
+  ]);
+  return /^scripts\/(?:run-v3-|verify-v3-)/u.test(relative)
+    || /^(?:scripts\/verify-fast|scripts\/verify-servertool-rust-only)\.mjs$/u.test(relative)
+    || v3ArchitectureScripts.has(relative)
+    || relative === 'scripts/ci/check-file-line-limit.mjs'
+    || relative === 'scripts/ci/repo-sanity.mjs'
+    || relative === 'scripts/ci/mempalace-scan-artifact-audit.mjs'
+    || relative === 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs'
+    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim)\.mjs$/u.test(relative)
+    || /^scripts\/tests\/v3-/u.test(relative)
+    || /^tests\/scripts\/(?:v3-cli-distribution|install-v3-cli-target-cleanup)\.spec\.mjs$/u.test(relative)
+    || /^scripts\/install-(?:global|release)\.sh$/u.test(relative)
+    || relative === '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md'
+    || relative === 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
+}
+
+function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
+  const scopes = new Set();
+  const add = (...names) => names.forEach((name) => scopes.add(name));
+  const sharedRootChanged = rootPackageChanged || paths.includes('scripts/verify-fast.mjs');
+  if (sharedRootChanged || workflowScope.v3 && workflowScope.v4) {
+    add(...[
+      'v3_architecture',
+      'v3_build',
+      'v3_provider',
+      'v3_session',
+      'v3_debug',
+      'v3_router',
+      'v3_tool',
+    ]);
+    return scopes;
+  }
+
+  if (workflowScope.v3 && paths.some((path) => /^\.github\/workflows\//u.test(path))) {
+    add('v3_architecture');
+  }
+
+  for (const path of paths) {
+    const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
+    if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
+        || isV3RootScript(path)) add('v3_architecture');
+    if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
+        || /^v3\/crates\//u.test(path)
+        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
+        || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
+    if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');
+    if (isV3Path && /(?:^|[\/_-])session(?:[\/_-]|$)|continuation/iu.test(path)) add('v3_session');
+    if (isV3Path && /(?:^|[\/_-])debug(?:[\/_-]|$)/iu.test(path)) add('v3_debug');
+    if (isV3Path && /(?:^|[\/_-])router(?:[\/_-]|$)|route-classifier/iu.test(path)) add('v3_router');
+    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)|servertool/iu.test(path)) add('v3_tool');
+  }
+  return scopes;
+}
+
 function writeChangedScopeOutputs(entries) {
   const outputPath = process.env.ROUTECODEX_GATE_SCOPE_OUTPUT;
   if (!outputPath) return;
@@ -124,23 +224,23 @@ function writeChangedScopeOutputs(entries) {
   const paths = [...new Set(entries.map(({ path }) => path))];
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
   const workflowScope = classifyWorkflowScope(entries);
-  const v3Scope = workflowScope.v3 || has(/^(?:v3\/|scripts\/|docs\/(?:architecture|design|goals|schemas)\/)/u)
-    || has(/^package(?:-lock)?\.json$/u);
+  const rootPackageChanged = has(/^package(?:-lock)?\.json$/u);
+  const fineScopes = classifyV3FineScopes(paths, { rootPackageChanged, workflowScope });
+  const v3Scope = fineScopes.size > 0 || workflowScope.v3 || has(/^v3\//u)
+    || paths.some((relative) => isV3RootScript(relative))
+    || has(/^docs\/(?:architecture|design|goals|schemas)\//u)
+    || rootPackageChanged;
   const values = {
     changed: paths.length > 0,
     v3: v3Scope,
-    v3_architecture: v3Scope,
-    v3_runtime: v3Scope,
-    v3_build: v3Scope,
-    v3_provider: v3Scope,
-    v3_compaction: v3Scope,
-    v3_session: v3Scope,
-    v3_timing: v3Scope,
-    v3_debug: v3Scope,
-    v3_console: v3Scope,
-    v3_router: v3Scope,
-    v3_tool: v3Scope,
-    v4: workflowScope.v4 || has(/^v4\//u),
+    v3_architecture: fineScopes.has('v3_architecture'),
+    v3_build: fineScopes.has('v3_build'),
+    v3_provider: fineScopes.has('v3_provider'),
+    v3_session: fineScopes.has('v3_session'),
+    v3_debug: fineScopes.has('v3_debug'),
+    v3_router: fineScopes.has('v3_router'),
+    v3_tool: fineScopes.has('v3_tool'),
+    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged || paths.includes('scripts/verify-fast.mjs'),
   };
 
   appendFileSync(
@@ -186,10 +286,7 @@ function affectedCargoPackages(rustFiles) {
       ),
     );
   } catch (error) {
-    process.stderr.write(
-      `[verify:fast] WARN cargo metadata unavailable; skipped affected Rust compile check: ${error.message}\n`,
-    );
-    return [];
+    fail(`required V3 Rust owner evidence unavailable; cargo metadata is required for affected compile checks: ${error.message}`);
   }
   const packages = (metadata.packages ?? []).map((pkg) => ({
     name: pkg.name,
@@ -210,7 +307,7 @@ function affectedCargoPackages(rustFiles) {
     else unmatched.push(file);
   }
   if (unmatched.length > 0) {
-    process.stderr.write(`[verify:fast] WARN Rust file(s) not owned by a v3 Cargo package: ${unmatched.join(', ')}\n`);
+    fail(`required V3 Rust owner evidence unavailable; file(s) are not owned by a V3 Cargo package: ${unmatched.join(', ')}`);
   }
   return [...affected].sort();
 }
@@ -249,7 +346,7 @@ if (deleted.length > 0) {
 
 const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relative) => /\.(?:rs|toml|yaml|yml)$/u.test(relative)))];
 if (semanticFiles.length > 0) {
-  process.stderr.write(`[verify:fast] WARN semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
+  process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
 }
 
 for (const { commit, path: relative } of entries) {

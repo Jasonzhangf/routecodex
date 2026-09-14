@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import {
   v3Root,
+  cargoMetadataFailures,
   collectIsolationFailures,
   pinnedRustToolchain,
 } from '../../scripts/verify-isolation.mjs';
@@ -98,9 +99,9 @@ const missingLocalDependency = collectIsolationFailures({
   warn: (message) => missingLocalDependencyWarnings.push(message),
 });
 assert.deepEqual(
-  missingLocalDependency,
-  [],
-  'missing local yaml is an environment condition, not a hard isolation failure',
+  missingLocalDependency.length > 0,
+  true,
+  'missing local yaml must make required isolation evidence fail',
 );
 assert(
   missingLocalDependencyWarnings.some((warning) => warning.includes('unavailable locally')),
@@ -112,21 +113,37 @@ const unavailableCargo = collectIsolationFailures({
   env: {},
   fileExists: (path) => completeFiles.has(path),
   read: validRead,
-  inspectCargo: (_env, warn) => {
-    warn('cargo metadata unavailable; skipping V3 isolation checks: spawn cargo ENOENT');
-    return [];
-  },
+  inspectCargo: (env, warn) => cargoMetadataFailures(
+    env,
+    warn,
+    () => ({ error: new Error('spawn cargo ENOENT') }),
+  ),
   resolveNodeDependency: localYaml,
   warn: (message) => unavailableCargoWarnings.push(message),
 });
 assert.deepEqual(
-  unavailableCargo,
-  [],
-  'missing cargo is an environment condition, not a hard isolation failure',
+  unavailableCargo.length > 0,
+  true,
+  'missing cargo must make required isolation evidence fail',
 );
 assert(
   unavailableCargoWarnings.some((warning) => warning.includes('cargo metadata unavailable')),
   'missing cargo must warn',
+);
+
+const invalidCargoWarnings = [];
+const invalidCargo = cargoMetadataFailures(
+  {},
+  (message) => invalidCargoWarnings.push(message),
+  () => ({ status: 0, stdout: 'not-json', stderr: '' }),
+);
+assert(
+  invalidCargo.some((failure) => failure.includes('required V3 isolation evidence unavailable')),
+  'invalid cargo metadata JSON must make required isolation evidence fail',
+);
+assert(
+  invalidCargoWarnings.some((warning) => warning.includes('not valid JSON')),
+  'invalid cargo metadata JSON must retain its diagnostic warning',
 );
 
 const floatingToolchain = collectIsolationFailures({

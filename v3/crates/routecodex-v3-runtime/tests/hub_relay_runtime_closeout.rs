@@ -2456,7 +2456,8 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
 async fn provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery() {
     let server_id = "provider_error_terminal_closeout";
     let manifest = manifest_for_scope(server_id);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest_for_tests(&manifest);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let pending = tokio::time::timeout(
         Duration::from_millis(100),
         execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
@@ -2480,7 +2481,7 @@ async fn provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery(
             },
             &ErrorTransport,
             Vec::new(),
-            provider_health,
+            provider_health.runtime_health(),
         ),
     )
     .await;

@@ -91,6 +91,8 @@ export const IMPLEMENTATION_EXTENSIONS = new Set(['.rs', '.mjs', '.js', '.cjs', 
 export const GRAPH_SOURCE_EXTENSIONS = new Set(['.rs', '.mjs', '.js', '.cjs', '.ts', '.tsx', '.toml']);
 
 const ADVISORY_CODES = new Set([
+  'CANDIDATE_GATE_INPUT_DRIFT',
+  'EVIDENCE_EXPIRED_OR_TIME_INVALID',
   'MIGRATION_HISTORY_WARNING',
   'NON_CURRENT_RECORD_WARNING',
   'REBUILDABLE_PROJECTION_WARNING',
