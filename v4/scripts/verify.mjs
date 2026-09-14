@@ -37,7 +37,6 @@ function restoreHermeticActive() {
 }
 
 run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bin routecodex-v4-plan-hash -- contracts/skeleton-plan.contract.json --check');
-run('cargo build --release --manifest-path Cargo.toml --locked');
 restoreHermeticActive();
 runBuild();
 run(RUNTIME_BIN_REGRESSION);
