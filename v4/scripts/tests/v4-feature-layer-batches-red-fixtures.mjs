@@ -239,6 +239,47 @@ function validateCargoDependencyForms() {
   return true;
 }
 
+function validateBuildGuardSeparation(canonicalInput, productionContext, validate) {
+  const input = clone(canonicalInput);
+  const guardCommit = input.manifest.integration.guard_commit;
+  if (!guardCommit) throw new Error('fixture manifest must bind a guard commit');
+
+  // Real production state: guard commit reachable, wiring observed, current
+  // guarded-surface hashes differ from the guard commit. Build guard must warn
+  // and return no blocking failure; strict admission remains the only owner of
+  // candidate/evidence enforcement.
+  const buildGuardFailures = validate(input, productionContext, {
+    mode: 'build-guard',
+    allowPendingGuard: true,
+  });
+  const blocking = buildGuardFailures.filter((item) => item.severity !== 'warning');
+  if (blocking.length > 0) {
+    throw new Error(
+      `build guard must not block on observed wiring changes: ${blocking
+        .map((item) => item.code).join(',')}`,
+    );
+  }
+
+  // Unreadable guard state (no reachable guard commit) must still block.
+  const unreadable = clone(input);
+  unreadable.manifest.integration.enforcement_binding_status = 'bound';
+  unreadable.manifest.integration.wiring_started = true;
+  const unreadableFailures = validate(unreadable, {
+    ...productionContext,
+    truth: {
+      ...productionContext.truth,
+      resolveCommit() {
+        return null;
+      },
+    },
+  }, { mode: 'build-guard', allowPendingGuard: true });
+  if (!unreadableFailures.some((item) => item.code === 'INTEGRATION_GUARD_COMMIT_INVALID'
+    && item.severity !== 'warning')) {
+    throw new Error('unreadable guard commit must remain blocking');
+  }
+  return true;
+}
+
 function validateCrossLaneSourceForms() {
   const sources = new Map([
     ['lane-a/dynamic.mjs', Buffer.from("export async function load() { return import('../lane-b/target.mjs'); }\n")],
@@ -356,6 +397,11 @@ export function runFeatureLayerBatchSelfTest({
     validateGitIdentity();
   } catch (error) {
     failures.push(failure('REAL_GIT_IDENTITY_SELF_TEST', error.message));
+  }
+  try {
+    validateBuildGuardSeparation(canonicalInput, productionContext, validate);
+  } catch (error) {
+    failures.push(failure('BUILD_GUARD_SEPARATION_SELF_TEST', error.message));
   }
   try {
     validateCargoDependencyForms();
