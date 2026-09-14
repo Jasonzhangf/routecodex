@@ -6,7 +6,7 @@
 - RouteCodex V4 is a refactor of V3 and is not connected to the production baseline.
 - RouteCodex V2 is retired completely. Do not retain or restore a V2 runtime, V2 config reader, V2 migration path, or V2 backup.
 - Runtime, routing, protocol projection, provider execution, lifecycle, and CLI live in the `v3/` Rust workspace.
-- Installed command: `rccv3`. Default authoring: `~/.rcc/config.v3.toml`.
+- Installed command: `rccv3`. Default authoring: `~/.rcc/config.toml`.
 - `routecodex` and `rcc` are compatibility shims; do not create new runtime or config ownership under them.
 
 ## Semantic Invariants

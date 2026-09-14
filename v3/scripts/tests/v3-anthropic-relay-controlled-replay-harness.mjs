@@ -116,7 +116,7 @@ async function runWithDriver(driverPath, loaded, digestValue) {
   });
   const { port } = server.address();
   const configRoot = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-relay-config-'));
-  const configPath = join(configRoot, 'config.v3.toml');
+  const configPath = join(configRoot, 'config.toml');
   writeFileSync(configPath, controlledConfig(port));
   const results = [];
   try {

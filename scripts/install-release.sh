@@ -14,7 +14,7 @@ done
 source "$SOURCE_ROOT/scripts/lib/install-lifecycle-lock.sh"
 acquire_routecodex_install_lock
 VERIFY_HOST="${ROUTECODEX_INSTALL_VERIFY_HOST:-127.0.0.1}"
-VERIFY_CONFIG="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-/Volumes/extension/.rcc/config.v3.toml}}"
+VERIFY_CONFIG="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-/Volumes/extension/.rcc/config.toml}}"
 VERIFY_PORT_OVERRIDE="${ROUTECODEX_INSTALL_VERIFY_PORT:-}"
 VERIFY_PORTS=()
 EXPECTED_VERSION="$(node -p "require('./v3/package.json').version" 2>/dev/null || true)"

@@ -114,7 +114,7 @@ verify_direct_v3_install() {
         exit 1
     fi
     echo "✅ V3 command identity: $rccv3_version"
-    rccv3 config check -c "$HOME/.rcc/config.v3.toml"
+    rccv3 config check -c "$HOME/.rcc/config.toml"
 }
 
 
@@ -124,7 +124,7 @@ restart_managed_dev_server_if_requested() {
         return
     fi
 
-    local restart_config="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-$HOME/.rcc/config.v3.toml}}"
+    local restart_config="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-$HOME/.rcc/config.toml}}"
     echo ""
     echo "🔄 尝试通过 V3 aggregate restart 刷新现有 RouteCodex 服务..."
     if routecodex restart -c "$restart_config"; then
