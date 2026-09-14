@@ -44,7 +44,8 @@ function run(command, args, options = {}) {
 }
 
 function signExecutable(filePath) {
-  if (process.platform === 'win32') return;
+  // Ad-hoc code signing is macOS-only; `codesign` is unavailable elsewhere.
+  if (process.platform !== 'darwin') return;
   run('codesign', ['-s', '-', '-f', filePath], { encoding: 'utf8' });
 }
 

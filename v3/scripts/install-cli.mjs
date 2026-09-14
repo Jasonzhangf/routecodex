@@ -267,7 +267,8 @@ function copyExecutableAtomic(sourcePath, targetPath, { sign = true } = {}) {
 }
 
 function signExecutable(targetPath) {
-  if (process.platform === 'win32') {
+  // Ad-hoc code signing is macOS-only; `codesign` is unavailable elsewhere.
+  if (process.platform !== 'darwin') {
     return;
   }
   const result = spawnSync('codesign', ['-s', '-', '-f', targetPath], {

@@ -49,8 +49,8 @@ fs.copyFileSync(sourceBin, temporaryBin);
 if (process.platform !== 'win32') {
   fs.chmodSync(temporaryBin, 0o755);
 }
-// Ad hoc signing only exists on macOS. Linux has no codesign binary, so running
-// it there fails the build gate on every change.
+// Ad-hoc code signing is a macOS concern; `codesign` does not exist on Linux,
+// so signing there would report an environment failure as a build defect.
 if (process.platform === 'darwin') {
   const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
     cwd: v3Root,
