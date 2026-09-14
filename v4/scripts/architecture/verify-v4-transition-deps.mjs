@@ -31,6 +31,27 @@ const REQUIRED_PROMOTION_RECORDS = [
   'PromotionRecord',
 ];
 
+// Prerequisites that must be present before the playground -> active release
+// boundary can be crossed. Parallel-only entries stay in the same contract so
+// removing them must not silently weaken the non-parallel release boundary.
+const REQUIRED_PROMOTION_REQUIREMENTS = [
+  'clean_worktree',
+  'baseline_reproduction',
+  'fix_candidate_verified',
+  'development_whitebox_pass',
+  'deployed_blackbox_pass',
+  'pre_review_validation_pass',
+  'architecture_review_pass',
+  'post_architecture_effectiveness_pass',
+  'scenario_composition_verified',
+  'merge_queue_admitted_when_parallel',
+  'tested_integration_verified_when_parallel',
+  'local_and_remote_mainline_receipt_when_parallel',
+  'mainline_merge_verified',
+  'compile',
+  'promotion_record',
+];
+
 const ALLOWED_RECORDS = new Set([
   ...REQUIRED_PROMOTION_RECORDS,
   'EvidenceRecord',
@@ -66,6 +87,15 @@ export function validateTransitionContract(lifecycle, zone) {
   if (!active) {
     failures.push('playground -> active transition is required');
   } else {
+    const missingRequirements = missingMembers(
+      active.requirements,
+      REQUIRED_PROMOTION_REQUIREMENTS,
+    );
+    if (missingRequirements.length > 0) {
+      failures.push(
+        `playground -> active must require full promotion prerequisites, missing: ${missingRequirements.join(', ')}`,
+      );
+    }
     const records = active.record_required;
     if (!Array.isArray(records)) {
       failures.push('playground -> active must declare record_required');
@@ -145,6 +175,10 @@ function runRedSelfTest() {
     const active = manifest.zone.transitions.find((entry) => entry.from === 'playground' && entry.to === 'active');
     delete active.record_required;
   }, 'must declare record_required');
+  expectReject((manifest) => {
+    const active = manifest.zone.transitions.find((entry) => entry.from === 'playground' && entry.to === 'active');
+    active.requirements = active.requirements.filter((requirement) => requirement !== 'clean_worktree');
+  }, 'must require full promotion prerequisites');
   expectReject((manifest) => {
     const protectedEdge = manifest.zone.transitions.find((entry) => entry.from === 'active' && entry.to === 'protected');
     protectedEdge.record_required = protectedEdge.record_required.filter((record) => record !== 'FreezeRecord');
