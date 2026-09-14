@@ -5,6 +5,84 @@ use routecodex_v3_provider_responses::{
     V3ProviderCooldownObservation, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 
+fn health_disabled_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = false, failure_threshold = 3, cooldown_ms = 900000 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn health_disabled_provider_ignores_persisted_cooldown_and_never_writes_one() {
+    let manifest = health_disabled_manifest();
+    let seeded_path = std::env::temp_dir().join(format!(
+        "routecodex-health-disabled-seeded-cooldown-{}.json",
+        std::process::id()
+    ));
+    // Seed a durable semantic cooldown for the same identity, as a real
+    // runtime instance would leave behind, then load it with health disabled.
+    let mut coordinator = V3ProviderCooldownCoordinator::new(seeded_path.clone(), 5 * 60 * 60_000);
+    coordinator
+        .record_failure(
+            "p",
+            Some("k"),
+            Some("m"),
+            V3ProviderCooldownFailureClass::Semantic,
+            1_000,
+            V3ProviderCooldownObservation::default(),
+        )
+        .unwrap();
+
+    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, seeded_path);
+    let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
+    let reader = V3ProviderSessionAvailabilityReader::new(store.clone(), scope);
+    assert!(
+        reader
+            .availability("p", Some("k"), Some("m"), 2_000)
+            .available,
+        "health.enabled=false must not inherit a persisted cooldown"
+    );
+
+    // A disabled provider must also not create a fresh durable cooldown.
+    let fresh_path = std::env::temp_dir().join(format!(
+        "routecodex-health-disabled-fresh-cooldown-{}.json",
+        std::process::id()
+    ));
+    let store =
+        V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, fresh_path.clone());
+    store
+        .record_provider_cooldown_failure("p", Some("k"), Some("m"), "timeout", 3_000, 900_000)
+        .unwrap();
+    store
+        .flush_persistence()
+        .expect("disabled provider persistence flush must succeed");
+    assert!(
+        V3ProviderCooldownCoordinator::load(fresh_path, 5 * 60 * 60_000)
+            .unwrap()
+            .persisted_entries()
+            .is_empty(),
+        "disabled provider must not persist a cooldown"
+    );
+}
+
 #[test]
 fn restart_loads_cooldown_and_startup_probe_is_the_only_recovery_path() {
     let path =
