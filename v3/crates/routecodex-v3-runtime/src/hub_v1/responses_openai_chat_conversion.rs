@@ -118,12 +118,11 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     if let Some(finish_reason) = finish_reason {
         response.insert("finish_reason".to_string(), Value::String(finish_reason));
     }
-    if let Some(usage) = payload
+    let usage = payload
         .get("usage")
         .and_then(normalize_v3_hub_responses_usage_from_openai_chat_usage)
-    {
-        response.insert("usage".to_string(), usage);
-    }
+        .unwrap_or_else(|| json!({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}));
+    response.insert("usage".to_string(), usage);
     Ok(Value::Object(response))
 }
 
@@ -286,23 +285,26 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 ) -> Option<Value> {
     let source = usage.as_object()?;
     let mut response = Map::new();
-    if let Some(value) = source
+    let input_tokens = source
         .get("input_tokens")
         .or_else(|| source.get("prompt_tokens"))
-        .cloned()
-    {
-        response.insert("input_tokens".to_string(), value);
-    }
-    if let Some(value) = source
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = source
         .get("output_tokens")
         .or_else(|| source.get("completion_tokens"))
-        .cloned()
-    {
-        response.insert("output_tokens".to_string(), value);
-    }
-    if let Some(value) = source.get("total_tokens").cloned() {
-        response.insert("total_tokens".to_string(), value);
-    }
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    response.insert("input_tokens".to_string(), Value::from(input_tokens));
+    response.insert("output_tokens".to_string(), Value::from(output_tokens));
+    response.insert(
+        "total_tokens".to_string(),
+        source
+            .get("total_tokens")
+            .and_then(Value::as_u64)
+            .map(Value::from)
+            .unwrap_or_else(|| Value::from(input_tokens + output_tokens)),
+    );
     if let Some(details) = source
         .get("input_tokens_details")
         .or_else(|| source.get("prompt_tokens_details"))
@@ -410,6 +412,25 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "execution":"client",
             "arguments":arguments
         }));
+    }
+    // OpenAI Chat providers receive deferred MCP namespace tools as flattened
+    // legal function names. Restore the namespace/name pair at this single
+    // response conversion boundary so the Responses client router can resolve
+    // the registered MCP tool instead of treating it as an unknown function.
+    if let Some(rest) = name.strip_prefix("mcp__") {
+        if let Some(separator) = rest.find("__") {
+            let namespace = format!("mcp__{}", &rest[..separator]);
+            let tool = &rest[separator + 2..];
+            if !tool.is_empty() {
+                return Ok(json!({
+                    "type":"function_call",
+                    "call_id":call_id,
+                    "namespace":namespace,
+                    "name":tool,
+                    "arguments":arguments
+                }));
+            }
+        }
     }
     if custom_tool_names.contains(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
