@@ -83,7 +83,8 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   assert.match(canonicalStack, /needs\.scope\.outputs\.v3_architecture == 'true'/);
   assert.doesNotMatch(canonicalStack, /needs\.scope\.outputs\.v3 == 'true'/);
   assert.match(workflow, /BUILD_MODE: release/);
-  assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs \+stable --workspace -- --nocapture/);
+  assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs --workspace -- --nocapture/);
+  assert.doesNotMatch(workflow, /RUSTUP_TOOLCHAIN=stable|run-v3-cargo-test\.mjs \+stable/);
   assert.ok(workflow.indexOf('npm --prefix v3 run verify:ci') < workflow.indexOf('run: npm run build:min'));
 });
 
