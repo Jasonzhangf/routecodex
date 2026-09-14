@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import { validateEvidenceRef } from '../architecture/lib/feature-layer-batch-evidence.mjs';
+import {
+  runRegisteredGates,
+  validateEvidenceRef,
+} from '../architecture/lib/feature-layer-batch-evidence.mjs';
 
 const now = Date.now();
 const candidate = {
@@ -76,5 +79,106 @@ assert(
   mismatchFailures.some((failure) => failure.code === 'EVIDENCE_PRODUCER_MISMATCH'),
   'a shared-lane projection must not satisfy the self-test evidence gate',
 );
+
+const sharedRuntimeCandidate = {
+  head_commit: candidate.head_commit,
+  scope_hash: candidate.scope_hash,
+  blobs: [
+    ...candidate.blobs,
+    {
+      path: 'crates/routecodex-v4-runtime/Cargo.toml',
+      sha256: 'sha256:123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd',
+    },
+  ],
+};
+const sharedRuntimeGate = {
+  status: 'active',
+  evidence_role: 'positive',
+  argv: ['node', 'scripts/architecture/verify-v4-runtime.mjs', '--request-port'],
+  producer: { adapter: 'node', identity: 'v4_runtime_005_request_port_positive' },
+};
+const sharedRuntimeRef = {
+  role: 'positive',
+  gate_id: 'v4_runtime_005_request_port_positive',
+  path: 'docs/evidence/feature-completion/M2/V4-RUNTIME-005/positive.json',
+};
+const incompleteSharedRuntimeFailures = [];
+validateEvidenceRef({
+  ref: sharedRuntimeRef,
+  expectedRole: 'positive',
+  expectedFeatureId: 'V4-RUNTIME-005',
+  expectedModuleIds: ['routecodex-v4-runtime'],
+  expectedGateId: sharedRuntimeRef.gate_id,
+  candidate: sharedRuntimeCandidate,
+  sourcePaths: [candidate.blobs[0].path],
+  gateInputPaths: [sharedRuntimeCandidate.blobs[1].path],
+  gateMap: new Map([[sharedRuntimeRef.gate_id, sharedRuntimeGate]]),
+  truth: {
+    ...context,
+    blobIdentity(_commit, sourcePath) {
+      return sharedRuntimeCandidate.blobs.find((blob) => blob.path === sourcePath);
+    },
+  },
+  integrationCommit: sharedRuntimeCandidate.head_commit,
+  now,
+  evidence: {
+    ...baseEvidence,
+    evidence_id: 'positive',
+    issue_id: 'V4-RUNTIME-005',
+    scope: { feature_id: 'V4-RUNTIME-005', module_id: 'routecodex-v4-runtime' },
+    producer: sharedRuntimeGate.producer,
+    command_argv: sharedRuntimeGate.argv,
+    input_hashes: [sharedRuntimeCandidate.blobs[0].sha256],
+  },
+  failures: incompleteSharedRuntimeFailures,
+});
+assert(
+  incompleteSharedRuntimeFailures.some((failure) => failure.code === 'EVIDENCE_INPUT_HASH_MISMATCH'),
+  'shared runtime evidence must bind every declared input hash',
+);
+
+const sharedArgv = ['cargo', 'test', '-p', 'fixture'];
+const distinctArgv = ['node', 'fixture/gate.mjs'];
+const gateMap = new Map([
+  ['fixture_positive', { status: 'active', argv: sharedArgv }],
+  ['fixture_red', { status: 'active', argv: [...sharedArgv] }],
+  ['fixture_boundary', { status: 'active', argv: distinctArgv }],
+]);
+const executed = [];
+const gateFailures = [];
+runRegisteredGates({
+  gateIds: ['fixture_positive', 'fixture_red', 'fixture_boundary'],
+  gateMap,
+  truth: {
+    runGate(argv) {
+      executed.push(argv);
+      return { status: 0 };
+    },
+  },
+  failures: gateFailures,
+  context: 'regression',
+});
+assert.deepEqual(executed, [sharedArgv, distinctArgv], 'identical gate argv must execute once');
+assert.equal(gateFailures.length, 0, JSON.stringify(gateFailures));
+
+const failedExecutions = [];
+const failedGateFailures = [];
+runRegisteredGates({
+  gateIds: ['fixture_positive', 'fixture_red'],
+  gateMap,
+  truth: {
+    runGate(argv) {
+      failedExecutions.push(argv);
+      return { status: 17 };
+    },
+  },
+  failures: failedGateFailures,
+  context: 'regression',
+});
+assert.equal(failedExecutions.length, 1, 'a failed identical gate must not be rerun');
+assert.deepEqual(failedGateFailures.map((failure) => failure.message), [
+  'regression: fixture_positive exited 17',
+  'regression: fixture_red exited 17',
+]);
 
 process.stdout.write('[test:feature-layer-batch-evidence-regression] PASS\n');
