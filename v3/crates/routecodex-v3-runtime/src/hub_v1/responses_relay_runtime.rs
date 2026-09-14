@@ -1338,7 +1338,7 @@ fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Valu
 /// SSE 事件级 completed/done 内嵌 response 的 item 表示投影：与
 /// `output_item.done` 事件保持一致（output_text -> message 包裹），
 /// 避免同一 SSE 流内同一 output 条目出现两种 client 语义。
-fn project_v3_responses_client_completed_response(response: &Value) -> Value {
+pub(crate) fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     let mut projected = response.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {

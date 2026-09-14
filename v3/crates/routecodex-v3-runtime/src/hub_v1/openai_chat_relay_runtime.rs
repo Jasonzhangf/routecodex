@@ -1095,6 +1095,30 @@ fn project_responses_sse_as_openai_chat_stream(
                                 .and_then(Value::as_str)
                                 .unwrap_or_default()
                                 .to_string();
+                            // Provider Responses terminals can omit usage counters.
+                            // Normalize at the shared client terminal projection before
+                            // Chat transduction so this relay path cannot leak a partial
+                            // response.completed/response.done to Codex.
+                            let event = if matches!(
+                                event_type.as_str(),
+                                "response.completed" | "response.incomplete" | "response.done"
+                            ) {
+                                let response = event
+                                    .get("response")
+                                    .cloned()
+                                    .unwrap_or_else(|| event.clone());
+                                let projected =
+                                    project_v3_responses_client_completed_response(&response);
+                                let mut normalized = event;
+                                if normalized.get("response").is_some() {
+                                    normalized["response"] = projected;
+                                } else {
+                                    normalized = projected;
+                                }
+                                normalized
+                            } else {
+                                event
+                            };
                             // 统一 usage 观测入口：Responses SSE 事件也必须写入
                             // stream_observation，避免转译为 Chat SSE 后丢失 usage。
                             stream_observation
