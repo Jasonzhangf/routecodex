@@ -915,7 +915,8 @@ fn run_due_schedules_sends_timer_back_to_registrant() {
         registrant: registrant.clone(),
         body: "wake".to_string(),
         send_mode: SendMode::IdleOnly,
-    });
+    })
+    .unwrap();
     let outcomes = core.run_due_schedules("2026-09-14T10:00:00Z");
     assert_eq!(outcomes.len(), 1);
     match outcomes.into_iter().next().unwrap().unwrap() {
@@ -990,7 +991,8 @@ fn deferred_timer_resumes_and_sends_when_target_becomes_idle() {
         registrant,
         body: "wake".to_string(),
         send_mode: SendMode::IdleOnly,
-    });
+    })
+    .unwrap();
 
     let first = core.run_due_schedules("2026-09-14T10:00:00Z");
     assert!(matches!(first[0], Ok(DispatchOutcome::Deferred { .. })));
@@ -1029,18 +1031,81 @@ fn core_timer_due_returns_only_registered_schedules_and_keeps_registrant() {
         registrant: registrant.clone(),
         body: "wake due-1".to_string(),
         send_mode: SendMode::IdleOnly,
-    });
+    })
+    .unwrap();
     core.upsert_schedule(ScheduledMessage {
         id: "later".to_string(),
         at_iso8601: "2026-09-15T09:00:00Z".to_string(),
         registrant: registrant.clone(),
         body: "not yet".to_string(),
         send_mode: SendMode::WorkingAllowed,
-    });
+    })
+    .unwrap();
     let due = core.due_schedules("2026-09-14T10:00:00Z");
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].intent_id, "timer:due-1:2026-09-14T09:00:00Z");
     assert_eq!(due[0].target, registrant);
+}
+
+#[test]
+fn timer_compares_iso8601_offsets_chronologically() {
+    let mut core = HooksSidecarCore::new(StubTransport {
+        status: SessionStatus {
+            state: SessionState::Idle,
+            input_active: false,
+        },
+    });
+    let registrant = SessionTarget {
+        namespace: Namespace::CodexTui,
+        appserver_id: "tui-appserver".to_string(),
+        scope_id: "local:offset-timer".to_string(),
+        session_id: "offset-timer".to_string(),
+        thread_id: "offset-timer".to_string(),
+    };
+    core.upsert_schedule(ScheduledMessage {
+        id: "offset-timer".to_string(),
+        at_iso8601: "2026-09-14T10:00:00-07:00".to_string(),
+        registrant,
+        body: "wake".to_string(),
+        send_mode: SendMode::IdleOnly,
+    })
+    .unwrap();
+    assert!(
+        core.due_schedules("2026-09-14T16:00:00Z").is_empty(),
+        "10:00-07:00 is 17:00Z and must not fire before UTC 17:00"
+    );
+    assert_eq!(core.due_schedules("2026-09-14T17:00:00Z").len(), 1);
+}
+
+#[test]
+fn invalid_schedule_timestamp_fails_closed_at_ingress() {
+    let mut core = HooksSidecarCore::new(StubTransport {
+        status: SessionStatus {
+            state: SessionState::Idle,
+            input_active: false,
+        },
+    });
+    let registrant = SessionTarget {
+        namespace: Namespace::CodexTui,
+        appserver_id: "tui-appserver".to_string(),
+        scope_id: "local:bad-timer".to_string(),
+        session_id: "bad-timer".to_string(),
+        thread_id: "bad-timer".to_string(),
+    };
+    let error = core
+        .upsert_schedule(ScheduledMessage {
+            id: "bad-timer".to_string(),
+            at_iso8601: "not-a-timestamp".to_string(),
+            registrant,
+            body: "wake".to_string(),
+            send_mode: SendMode::IdleOnly,
+        })
+        .expect_err("invalid schedule timestamp must fail closed");
+    assert!(
+        error.contains("invalid ISO-8601"),
+        "unexpected error: {error}"
+    );
+    assert!(core.due_schedules("2026-09-14T10:00:00Z").is_empty());
 }
 
 #[test]
@@ -1069,7 +1134,7 @@ fn schedule_pause_resume_remove_are_explicit_and_persisted() {
     };
 
     let mut core = HooksSidecarCore::with_state_file(DisabledTransport, &state_path).unwrap();
-    core.upsert_schedule(schedule);
+    core.upsert_schedule(schedule).unwrap();
     core.persist_state().unwrap();
     assert!(core.pause_schedule("pause-timer"));
     core.persist_state().unwrap();

@@ -239,7 +239,8 @@ fn timer_fires_through_core_and_sends_back_to_registrant() {
         registrant: target("target"),
         body: "wake".to_string(),
         send_mode: SendMode::IdleOnly,
-    });
+    })
+    .unwrap();
     let outcomes = core.run_due_schedules("2026-09-14T10:00:00Z");
     assert_eq!(outcomes.len(), 1);
     match outcomes.into_iter().next().unwrap().unwrap() {

@@ -140,7 +140,7 @@ AppServerTransport      -> session_status + send_message trait boundary
 ## Test evidence
 
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks`:
-  56 lib tests, 3 `binary_handler_config` tests, 1 `binary_readiness` test,
+  61 lib tests, 3 `binary_handler_config` tests, 1 `binary_readiness` test,
   and 6 `native_delivery_replay` tests pass.
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
   --test native_delivery_replay`: an end-to-end replay against a mock App
@@ -354,7 +354,7 @@ duplicate event                 -> one send
 sidecar restart                 -> unresolved in-flight not claimed success
 ```
 
-## Mapped gate receipts
+## Historical mapped gate receipts (pre-integration)
 
 Executed on branch `codex/rcc-internal-hooks-sidecar-0913` rebased onto
 `origin/main` at `7818243a8bdcf8160554353b167ab1fa70ebfefb`, after the review
@@ -365,7 +365,7 @@ for the `required_gates` declared in
 
 ```text
 exit 0  cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
-          56 lib + 3 binary_handler_config + 1 binary_readiness
+          61 lib + 3 binary_handler_config + 1 binary_readiness
           + 6 native_delivery_replay pass
 exit 0  cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle
           internal_hooksd_tests -- --nocapture
@@ -404,7 +404,7 @@ exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-lifecycle
 
 Executed in the integration worktree
 `/Users/fanzhang/Documents/github/routecodex/playground/rcc-internal-hooks-sidecar-main-0914`
-on candidate code commit `7f327065368ed55cfc710aa9e5fbd7e589fccd5b`, base
+on the exact candidate HEAD in the integration branch, base
 `origin/main` `3fe9790007f7d2abfe044dd7a466c258847c53f4`. These are real
 command exit results for the `required_gates` in
 `docs/architecture/v3-verification-map.yml`; they are source, test, gate,
@@ -413,7 +413,7 @@ production install, restart, or same-entry live replay evidence.
 
 ```text
 2026-09-14T20:35Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
-                     59 lib + 3 binary_handler_config + 1 binary_readiness
+                     61 lib + 3 binary_handler_config + 1 binary_readiness
                      + 6 native_delivery_replay pass
 2026-09-14T20:36Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
                      52 pass

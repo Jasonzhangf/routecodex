@@ -61,6 +61,125 @@ pub fn iso8601_utc_from_unix_seconds(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+fn parse_iso8601_to_epoch_nanos(input: &str) -> Result<i128, String> {
+    let trimmed = input.trim();
+    let date_end = trimmed
+        .bytes()
+        .position(|byte| byte == b'T' || byte == b' ')
+        .ok_or_else(|| format!("invalid ISO-8601 date/time: {input}"))?;
+    let date = &trimmed[..date_end];
+    let time_and_zone = &trimmed[date_end + 1..];
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 date: {date}"))?;
+    let month: u32 = date_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 date: {date}"))?;
+    let day: u32 = date_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 date: {date}"))?;
+    if date_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(format!("invalid ISO-8601 date: {date}"));
+    }
+
+    let time_len = time_and_zone
+        .bytes()
+        .position(|byte| !(byte.is_ascii_digit() || byte == b':' || byte == b'.'))
+        .unwrap_or(time_and_zone.len());
+    let time = &time_and_zone[..time_len];
+    let zone = &time_and_zone[time_len..];
+    let mut time_parts = time.split(':');
+    let hour: u32 = time_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 time: {time}"))?;
+    let minute: u32 = time_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 time: {time}"))?;
+    let second_fraction = time_parts.next().unwrap_or("0");
+    if time_parts.next().is_some() || hour > 23 || minute > 59 {
+        return Err(format!("invalid ISO-8601 time: {time}"));
+    }
+    let mut second_fraction_parts = second_fraction.split('.');
+    let second: u32 = second_fraction_parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .ok_or_else(|| format!("invalid ISO-8601 time: {time}"))?;
+    let fraction_text = second_fraction_parts.next().unwrap_or("");
+    if second_fraction_parts.next().is_some() || second > 59 || fraction_text.len() > 9 {
+        return Err(format!("invalid ISO-8601 time: {time}"));
+    }
+    let mut nanos = 0_u32;
+    for digit in fraction_text.bytes() {
+        if !digit.is_ascii_digit() {
+            return Err(format!("invalid ISO-8601 time: {time}"));
+        }
+        nanos = nanos * 10 + u32::from(digit - b'0');
+    }
+    for _ in fraction_text.len()..9 {
+        nanos *= 10;
+    }
+
+    let offset_seconds = match zone {
+        "" | "Z" | "z" => 0_i64,
+        _ => {
+            let (sign, digits) = match zone.as_bytes().first() {
+                Some(b'+') => (1_i64, &zone[1..]),
+                Some(b'-') => (-1_i64, &zone[1..]),
+                _ => return Err(format!("invalid ISO-8601 zone: {zone}")),
+            };
+            let (hour_text, minute_text) = if digits.len() == 5 && digits.as_bytes()[2] == b':' {
+                (&digits[..2], &digits[3..])
+            } else if digits.len() == 4 {
+                (&digits[..2], &digits[2..])
+            } else {
+                return Err(format!("invalid ISO-8601 zone: {zone}"));
+            };
+            let zone_hour: u32 = hour_text
+                .parse()
+                .map_err(|_| format!("invalid ISO-8601 zone: {zone}"))?;
+            let zone_minute: u32 = minute_text
+                .parse()
+                .map_err(|_| format!("invalid ISO-8601 zone: {zone}"))?;
+            if zone_hour > 23 || zone_minute > 59 {
+                return Err(format!("invalid ISO-8601 zone: {zone}"));
+            }
+            sign * (i64::from(zone_hour) * 3_600 + i64::from(zone_minute) * 60)
+        }
+    };
+
+    let days = days_from_civil(year, month, day);
+    let seconds =
+        days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second)
+            - offset_seconds;
+    Ok(i128::from(seconds) * 1_000_000_000 + i128::from(nanos))
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = i64::from(if month > 2 { month - 3 } else { month + 9 });
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn iso8601_schedule_is_due(at_iso8601: &str, now_iso8601: &str) -> bool {
+    matches!(
+        (
+            parse_iso8601_to_epoch_nanos(at_iso8601),
+            parse_iso8601_to_epoch_nanos(now_iso8601)
+        ),
+        (Ok(at), Ok(now)) if at <= now
+    )
+}
+
 fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
     let z = days_since_epoch + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
@@ -627,9 +746,11 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
         self.handlers.push(config);
     }
 
-    pub fn upsert_schedule(&mut self, schedule: ScheduledMessage) {
+    pub fn upsert_schedule(&mut self, schedule: ScheduledMessage) -> Result<(), String> {
+        parse_iso8601_to_epoch_nanos(&schedule.at_iso8601)?;
         self.paused_schedule_ids.remove(&schedule.id);
         self.schedules.insert(schedule.id.clone(), schedule);
+        Ok(())
     }
 
     pub fn due_schedules(&self, now_iso8601: &str) -> Vec<MessageIntent> {
@@ -637,7 +758,7 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
             .values()
             .filter(|schedule| {
                 !self.paused_schedule_ids.contains(&schedule.id)
-                    && schedule.at_iso8601.as_str() <= now_iso8601
+                    && iso8601_schedule_is_due(&schedule.at_iso8601, now_iso8601)
             })
             .map(|schedule| {
                 schedule
@@ -753,7 +874,7 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
             .iter()
             .filter(|(id, schedule)| {
                 !self.paused_schedule_ids.contains(*id)
-                    && schedule.at_iso8601.as_str() <= now_iso8601
+                    && iso8601_schedule_is_due(&schedule.at_iso8601, now_iso8601)
             })
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();

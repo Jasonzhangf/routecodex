@@ -197,13 +197,13 @@ pub fn handle_control_request<T: AppServerTransport>(
                 Err(error) => ControlResponse::err(error.to_string()),
             }
         }
-        ControlRequest::ScheduleUpsert { schedule } => {
-            core.upsert_schedule(*schedule);
-            match core.persist_state() {
+        ControlRequest::ScheduleUpsert { schedule } => match core.upsert_schedule(*schedule) {
+            Ok(()) => match core.persist_state() {
                 Ok(()) => ControlResponse::ok(json!({ "scheduled": true })),
                 Err(error) => ControlResponse::err(error.to_string()),
-            }
-        }
+            },
+            Err(error) => ControlResponse::err(error),
+        },
         ControlRequest::SchedulePause { schedule_id } => {
             if !core.pause_schedule(&schedule_id) {
                 return ControlResponse::err(format!("schedule not found: {schedule_id}"));
@@ -579,7 +579,8 @@ mod tests {
             registrant: target("a"),
             body: "wake".to_string(),
             send_mode: SendMode::WorkingAllowed,
-        });
+        })
+        .unwrap();
         let response = handle_control_request(
             &mut core,
             ControlRequest::RunDueSchedules {
