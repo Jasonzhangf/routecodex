@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     sync::{mpsc, oneshot},
@@ -23,6 +23,12 @@ use tokio::{
 #[path = "../../../tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
+
+/// Budget for a foreground CLI server to answer `/health` on a cold start.
+/// Generous on purpose: managed startup (config load, hooks sidecar, aggregate
+/// bind) has been measured at over 10s on a loaded host, and a slow host is not
+/// a broken server.
+const HEALTH_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
 const H2_SCENARIOS: &[&str] = &[
     "json_baseline",
@@ -164,9 +170,18 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert!(sse_body.contains(
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}"
     ));
-    assert!(sse_body.contains(
-        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}"
-    ));
+    // The terminal event carries the materialized usage counters, and JSON key
+    // order is not part of the protocol, so compare the decoded payload instead
+    // of a byte-exact line. output_tokens must be present: a client that cannot
+    // parse it retries the stream instead of seeing a valid terminal response.
+    let completed = sse_data_payload(&sse_body, "response.completed");
+    assert_eq!(completed["type"], json!("response.completed"));
+    assert_eq!(completed["response"]["id"], json!("h2_sse"));
+    assert_eq!(completed["response"]["status"], json!("completed"));
+    assert!(
+        completed["response"]["usage"]["output_tokens"].is_u64(),
+        "terminal event must materialize numeric usage: {completed}"
+    );
     assert!(!sse_body.contains("data: [DONE]"), "{sse_body}");
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
     assert_eq!(sse_capture.accept.as_deref(), Some("text/event-stream"));
@@ -485,6 +500,24 @@ fn free_port() -> u16 {
         .port()
 }
 
+/// Return the decoded `data:` payload for the named SSE event.
+fn sse_data_payload(body: &str, event: &str) -> Value {
+    let header = format!("event: {event}\n");
+    let start = body
+        .find(&header)
+        .unwrap_or_else(|| panic!("missing SSE event {event} in {body}"));
+    let rest = &body[start + header.len()..];
+    let data = rest
+        .strip_prefix("data: ")
+        .unwrap_or_else(|| panic!("event {event} has no data line in {body}"));
+    let line = data
+        .split('\n')
+        .next()
+        .expect("data line is terminated by a newline");
+    serde_json::from_str(line)
+        .unwrap_or_else(|error| panic!("event {event} data is not JSON: {error}; {line}"))
+}
+
 fn write_h2_config(
     ports: &H2Ports,
     success: &ControlledUpstream,
@@ -694,8 +727,13 @@ async fn wait_for_health(
     port: u16,
     server_id: &str,
 ) {
-    let mut last_observation = String::from("no health attempt");
-    for _ in 0..80 {
+    // A fixed iteration count made this a wall-clock budget under 8s, which a
+    // loaded machine exceeds: startup has been measured at 10.46s while the
+    // server is healthy throughout. Wait on a deadline instead so slow hosts
+    // are not reported as broken servers.
+    let mut last_observation;
+    let deadline = Instant::now() + HEALTH_READY_TIMEOUT;
+    loop {
         if let Some(status) = cli.child.try_wait().unwrap() {
             panic!("rccv3 CLI exited before health on {port}: {status}");
         }
@@ -717,12 +755,15 @@ async fn wait_for_health(
                 last_observation = error.to_string();
             }
         }
+        if Instant::now() >= deadline {
+            panic!(
+                "rccv3 CLI health did not become ready on {port} within {:?}; pid={}; last={last_observation}",
+                HEALTH_READY_TIMEOUT,
+                cli.child.id()
+            );
+        }
         sleep(Duration::from_millis(100)).await;
     }
-    panic!(
-        "rccv3 CLI health did not become ready on {port}; pid={}; last={last_observation}",
-        cli.child.id()
-    );
 }
 
 async fn next_capture(

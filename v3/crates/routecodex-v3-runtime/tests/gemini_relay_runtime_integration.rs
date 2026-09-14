@@ -873,6 +873,45 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
+        // Thresholded recoverable failures stay schedulable until the typed
+        // consecutive-failure threshold is reached, so one SSE failure must
+        // not by itself create a global cooldown. Assert the absence of a
+        // probe instead of sending a success, which would reset the streak.
+        assert!(
+            provider_health
+                .store()
+                .provider_cooldown_probe_keys_due(u64::MAX)
+                .expect("provider cooldown probe inventory")
+                .is_empty(),
+            "{case} one recoverable failure must not create a provider cooldown"
+        );
+
+        // Broker 内完成的 provider-attempt 失败必须关闭本次 action lane，
+        // 连续失败达到阈值后保留 provider cooldown；Front 不参与错误判定。
+        for _ in 0..2 {
+            execute_v3_gemini_relay_runtime_with_provider_health(
+                &manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: server_id.into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: format!("req-gemini-threshold-failure-{case}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                        "stream":true
+                    }),
+                },
+                &failing,
+                provider_health.runtime_health(),
+            )
+            .await
+            .expect("provider attempt failure must reach terminal Error06");
+        }
         let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
             &manifest,
             V3GeminiRelayRuntimeInput {
@@ -1450,15 +1489,20 @@ async fn revive_cooled_provider(
     let store = provider_health.store();
     let auth_alias = Some(provider_id);
     let model_id = Some("gemini-wire");
+    let probe_keys = store
+        .provider_cooldown_probe_keys_due(u64::MAX)
+        .expect("provider cooldown probe inventory");
+    // A recoverable failure below the typed threshold leaves no cooldown to
+    // revive; the probe inventory is then empty.
+    if probe_keys.is_empty() {
+        return;
+    }
     assert!(
-        store
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .expect("provider cooldown probe inventory")
-            .contains(&(
-                provider_id.to_string(),
-                auth_alias.map(str::to_string),
-                model_id.map(str::to_string),
-            )),
+        probe_keys.contains(&(
+            provider_id.to_string(),
+            auth_alias.map(str::to_string),
+            model_id.map(str::to_string),
+        )),
         "provider cooldown must require an explicit probe"
     );
     provider_health

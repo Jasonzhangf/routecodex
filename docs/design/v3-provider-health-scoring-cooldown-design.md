@@ -47,7 +47,7 @@
 | Gap | 当前 main | 目标 |
 | --- | --- | --- |
 | 分类到恢复策略 | failure class 存在；分类、scope、cooldown action、score delta 未统一为一个 typed action | `V3ProviderFailureAction` 唯一策略产物 |
-| 不可恢复/可恢复边界 | global cooldown 与 threshold 路径存在，但组合合同需显式锁定 | 401/403 按 -20 计分；其他可恢复错误（含 502）按 -5 计分；health-neutral 不计入；score=0 才 cooldown |
+| 不可恢复/可恢复边界 | global cooldown 与 threshold 路径存在，但组合合同需显式锁定 | 401/403 按 -20 计分；其他可恢复错误（含 502）按 -5 计分；health-neutral 不计入；带阈值按连击阈值，无阈值可恢复按 score=0，无阈值不可恢复立即 cooldown |
 | key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..150 score，configured priority 为基线 |
 | 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | HTTP 响应正常按 +1 计分；probe success 原子恢复到 configured priority |
 | score 持久化 | adaptive score/generation 仅保存在进程内 | 重启开启新的 transient health epoch，不从 cooldown 诊断记录重建 score |
@@ -143,7 +143,7 @@ scope 由分类动作决定：
 | --- | --- | --- |
 | Auth / Quota | provider + auth key + model | 只有该模型的上游配额/鉴权状态受影响 |
 | RateLimit | provider + auth key + model | 按 provider/key/model 计分；同一 key 的其他模型保持可用 |
-| Transport | 按 typed action 计入 provider+auth key+model 健康窗口，score=0 才进入 global policy | 避免单请求瞬态污染所有 session |
+| Transport | 按 typed action 计入 provider+auth key+model 健康窗口，带阈值按连击阈值进入 global policy；无阈值可恢复按 score=0 | 避免单请求瞬态污染所有 session |
 | Semantic / Protocol | provider + auth key + model | 只阻断确定受影响的模型，不扩散到同 key 其他模型 |
 | ClientDisconnect | none | health-neutral |
 | Session-local invalid state | session + provider key 或 session-only | 不得提升为 provider global |
@@ -268,7 +268,7 @@ baseline = configured_priority
 | --- | ---: | --- |
 | ordinary success | +1 | failure_streak=0 |
 | recoverable failure（含 502） | -5 | failure_streak += 1 |
-| account error（401/403） | -20 | 只有 score 到 0 才 cooldown |
+| account error（401/403） | -20 | 带阈值按连击阈值；无阈值时立即 cooldown |
 | probe failure | -5 | 保持 cooldown，reschedule |
 | probe success | reset to configured priority | 清 delta window、cooldown、failure streak 和 probe backoff，开启新 generation |
 | health-neutral | 0 | 可写 request-local bypass |
@@ -368,7 +368,7 @@ deterministic round-robin cursor
 6. tie-break by stable key order/cursor
 ```
 
-`score_milli` 不改变 priority 桶；它只作为同一 configured priority 桶内的权重信号。`effective_weight_milli = max(base_weight, 1) * max(score, 1)`；cooldown key 不进入权重计算。provider 从 cooldown 经 probe success 恢复后，立即重新获得 configured priority。
+`score_milli` 不改变 priority 桶，也不决定 availability；它只作为同一 configured priority 桶内的权重信号。`effective_weight_milli = max(base_weight, 1) * max(score, 1)`；只有 typed action 产生的 cooldown/probe 状态才把 key 排除出 selection。provider 从 cooldown 经 probe success 恢复后，立即重新获得 configured priority。
 
 ## 9. State machine
 
@@ -378,11 +378,12 @@ Healthy(score=S, streak=0)
   recoverable failure -> Degraded(score from rolling delta window with -5, streak+1)
   account error -> Degraded(score from rolling delta window with -20)
 
-Degraded(score>0)
+Degraded(score>=0)
   success -> Healthy(score up, streak=0)
   recoverable failure ->
-      score>0: Degraded
-      score=0: Cooldown
+      failure_streak<threshold: Degraded
+      failure_streak>=threshold: Cooldown
+      no threshold and score=0: Cooldown
 
 Cooldown(blocked_until, probe_due)
   ordinary request -> unavailable
@@ -430,7 +431,7 @@ HealthNeutral
 - classification produces exactly one recovery kind;
 - irrecoverable action immediately creates global cooldown;
 - one recoverable failure (including 502) subtracts 5 and does not by itself cooldown;
-- cooldown occurs only when the rolling score reaches 0;
+- a thresholded recoverable action cools only after its consecutive failure threshold; a thresholdless recoverable action cools when the rolling score reaches 0;
 - health-neutral event changes neither score nor streak;
 - success adds +1 in the rolling score epoch and clears failure streak;
 - score clamps at 0/150;
