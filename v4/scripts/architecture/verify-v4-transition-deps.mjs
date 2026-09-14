@@ -148,6 +148,12 @@ export function validateTransitionContract(lifecycle, zone, recordGraph) {
           `playground -> active must require full promotion prerequisites, missing: ${missingRequirements.join(', ')}`,
         );
       }
+      const underivableRequirements = missingMembers(promotionRequirements, active.requirements);
+      if (underivableRequirements.length > 0) {
+        failures.push(
+          `playground -> active requirements must be derivable from record graph or declared additions, missing: ${underivableRequirements.join(', ')}`,
+        );
+      }
     }
     const records = active.record_required;
     if (!Array.isArray(records)) {
@@ -243,6 +249,16 @@ function runRedSelfTest() {
       'security_review_pass',
     ];
   }, 'must map to zone requirements');
+  expectReject((manifest) => {
+    manifest.recordGraph.properties.fix_lifecycle.properties.single_order.const =
+      manifest.recordGraph.properties.fix_lifecycle.properties.single_order.const.filter((step) => step !== 'clean_worktree');
+    manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const =
+      manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const.filter((step) => step !== 'clean_worktree');
+  }, 'must be derivable from record graph');
+  expectReject((manifest) => {
+    manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const =
+      manifest.recordGraph.properties.fix_lifecycle.properties.parallel_order.const.filter((step) => step !== 'integration_verified');
+  }, 'must be derivable from record graph');
   expectReject((manifest) => {
     const protectedEdge = manifest.zone.transitions.find((entry) => entry.from === 'active' && entry.to === 'protected');
     protectedEdge.record_required = protectedEdge.record_required.filter((record) => record !== 'FreezeRecord');
