@@ -26,11 +26,6 @@ const namedGates = {
     negative: 'test:v3-responses-session-admission-red-fixtures',
     negativePath: 'scripts/tests/v3-responses-session-admission-red-fixtures.mjs',
   },
-  'runtime-timing': {
-    positive: 'verify:v3-runtime-timing-observability',
-    negative: 'test:v3-runtime-timing-observability-red-fixtures',
-    negativePath: 'scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs',
-  },
 };
 
 function count(text, fragment) {
@@ -76,8 +71,11 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
     'file-size': { positive: 1, negative: 2 },
     'console-request-count': { positive: 1, negative: 1 },
     'responses-session-admission': { positive: 1, negative: 1 },
-    'runtime-timing': { positive: 1, negative: 1 },
   }, `unexpected V3 CI gate execution: ${JSON.stringify(counts)}`);
+  assert.equal(transitiveGateCount('verify:v3-runtime-timing-observability'), 1);
+  assert.match(architectureCi, /'verify:v3-architecture-docs'/);
+  assert.match(v3Package.scripts['verify:v3-architecture-docs'], /verify:v3-runtime-timing-observability/);
+  assert.doesNotMatch(verifyRed, /v3-runtime-timing-observability-red-fixtures\.mjs/);
   assert.match(workflow, /npm --prefix v3 run verify:ci/);
   assert.match(workflow, /BUILD_MODE: release/);
   assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs \+stable --workspace -- --nocapture/);

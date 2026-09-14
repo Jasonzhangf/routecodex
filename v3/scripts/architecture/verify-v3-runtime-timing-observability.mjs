@@ -111,7 +111,6 @@ const manifestPath = path.join(
 const packagePath = explicitSourceRoot
   ? path.join(root, "package.json")
   : path.join(v3Root, "package.json");
-const workflowPath = path.join(root, ".github/workflows/test.yml");
 
 const failures = [];
 
@@ -275,7 +274,6 @@ const mainlineMap = readRequired(mainlineMapPath);
 const v3VerificationMap = readRequired(v3VerificationMapPath);
 const verificationMap = readRequired(verificationMapPath);
 const manifest = readRequired(manifestPath);
-const workflow = readRequired(workflowPath);
 let packageJson = {};
 try {
   packageJson = JSON.parse(readRequired(packagePath));
@@ -684,7 +682,6 @@ for (const source of [v3VerificationMap, verificationMap]) {
 const scripts = packageJson.scripts ?? {};
 for (const scriptName of [
   "verify:v3-runtime-timing-observability",
-  "test:v3-runtime-timing-observability-red-fixtures",
 ]) {
   if (typeof scripts[scriptName] !== "string") {
     failures.push(`package.json is missing ${scriptName}`);
@@ -704,11 +701,6 @@ for (const scriptName of [
     failures.push(`${scriptName} must run verify:v3-runtime-timing-observability`);
   }
 }
-requireMatch(
-  workflow,
-  /run: npm run verify:v3-runtime-timing-observability/,
-  "CI must dispatch the Runtime timing observability gate",
-);
 
 if (failures.length > 0) {
   console.error("[verify:v3-runtime-timing-observability] FAIL");

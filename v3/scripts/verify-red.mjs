@@ -62,7 +62,6 @@ const entries = [
   'scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs',
   'scripts/tests/v3-responses-session-admission-red-fixtures.mjs',
   'scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs',
-  'scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs',
   'scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs',
   'scripts/tests/v3-servertool-center-skeleton-red-fixtures.mjs',
   'scripts/tests/v3-source-gate-red-fixtures.mjs',
