@@ -133,7 +133,11 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
     let socket_path = root.path().join("routecodex-control.sock");
     fs::create_dir(&instance_dir).unwrap();
     fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
+    let codexapp_binary = bin_directory.join("rccv3-codexapp");
+    fs::write(&codexapp_binary, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut codexapp_permissions = fs::metadata(&codexapp_binary).unwrap().permissions();
+    codexapp_permissions.set_mode(0o755);
+    fs::set_permissions(&codexapp_binary, codexapp_permissions).unwrap();
     fs::write(&daemon_config, "{}").unwrap();
     fs::write(
         &supervisor_wrapper,
