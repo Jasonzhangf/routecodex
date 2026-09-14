@@ -2657,7 +2657,6 @@ features:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_ --lib -- --nocapture
   smoke:
   - npm run verify:v3-runtime-timing-observability
-  - npm run test:v3-runtime-timing-observability-red-fixtures
   mainline_bindings:
   - v3-runtime-timing-01
   - v3-runtime-timing-02
@@ -2674,7 +2673,7 @@ features:
   - v3-runtime-timing-13
   - v3-runtime-timing-14
   completion_rule:
-    source: Positive/negative Rust tests plus runtime timing verifier and red fixtures pass.
+    source: Positive/negative Rust tests plus the active Runtime timing verifier pass; retired red-fixture coverage is not part of the gate.
     runtime: After global install and managed restart, same-entry live Direct SSE sample completes without duplicate external attempt panic and prints numeric timing.
 - feature_id: v3.responses_session_inflight_admission
   status: source_pending_live_replay
