@@ -24,11 +24,45 @@ pub fn flatten_namespace_tool_for_provider(
             format!("provider namespace tool {namespace_name} requires non-empty tools")
         })?;
 
+    flatten_namespace_children(protocol, namespace_name, children)
+}
+
+fn flatten_namespace_children(
+    protocol: &str,
+    namespace_name: &str,
+    children: &[Value],
+) -> Result<Option<Vec<Value>>, String> {
     let mut flattened = Vec::with_capacity(children.len());
     for (index, child) in children.iter().enumerate() {
         let child = child.as_object().ok_or_else(|| {
             format!("provider namespace tool {namespace_name}.tools[{index}] must be an object")
         })?;
+        if child.get("type").and_then(Value::as_str) == Some("namespace") {
+            let nested_name = child
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    format!("provider namespace tool {namespace_name}.tools[{index}] requires a non-empty name")
+                })?;
+            let nested_tools = child
+                .get("tools")
+                .and_then(Value::as_array)
+                .filter(|tools| !tools.is_empty())
+                .ok_or_else(|| {
+                    format!("provider namespace tool {namespace_name}.tools[{index}] requires non-empty tools")
+                })?;
+            let qualified = if namespace_name == "functions" {
+                nested_name.to_owned()
+            } else {
+                format!("{namespace_name}__{nested_name}")
+            };
+            if let Some(nested) = flatten_namespace_children(protocol, &qualified, nested_tools)? {
+                flattened.extend(nested);
+            }
+            continue;
+        }
         if child.get("type").and_then(Value::as_str) != Some("function") {
             return Err(format!(
                 "provider namespace tool {namespace_name}.tools[{index}].type must be function"
@@ -198,6 +232,26 @@ mod tests {
         assert!(flattened
             .iter()
             .all(|tool| tool["function"]["name"] != "mcp__mcpx"));
+    }
+
+    #[test]
+    fn flattens_nested_functions_namespace_without_losing_qualified_name() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "anthropic",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "tools":[{
+                    "type":"namespace",
+                    "name":"mcp__mcpx",
+                    "tools":[{"type":"function","name":"workspace","parameters":{"type":"object"}}]
+                }]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened.len(), 1);
+        assert_eq!(flattened[0]["function"]["name"], "mcp__mcpx__workspace");
     }
 
     #[test]
