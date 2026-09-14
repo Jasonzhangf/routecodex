@@ -1138,6 +1138,29 @@ fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
 }
 
 #[test]
+fn openai_chat_provider_preserves_tool_search_control_history_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "search_1",
+                "type": "function",
+                "function": {"name": "mcp__mcpx.workspace", "arguments": "{}"}
+            }],
+            "routecodex_chat_extension": {
+                "responses_tool_call_type": "tool_search_call"
+            }
+        }]
+    }))
+    .expect("tool_search history must remain projectable");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx.workspace"
+    );
+}
+
+#[test]
 fn responses_openai_chat_field_parity_responses_wire_preserves_include_projection() {
     let payload = json!({
         "model": "gpt-test",

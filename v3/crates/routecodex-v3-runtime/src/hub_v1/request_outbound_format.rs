@@ -1585,6 +1585,25 @@ fn normalize_openai_chat_messages_payload(
 }
 
 fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
+    // Responses control-plane history is carried through Chat extensions. Its
+    // tool_search call/output records are protocol history, not provider
+    // function declarations; changing their names here makes the next
+    // round-trip lose the native ToolSearch semantics.
+    let responses_extension = message
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object);
+    if responses_extension.is_some_and(|extension| {
+        extension
+            .get("responses_tool_call_type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| matches!(kind, "tool_search_call" | "tool_search_output"))
+            || extension
+                .get("responses_tool_output_type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind == "tool_search_output")
+    }) {
+        return;
+    }
     let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
         return;
     };
