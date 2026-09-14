@@ -824,6 +824,24 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
 }
 
 #[test]
+fn openai_chat_flattened_mcpx_function_call_restores_namespace_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_mcpx_call",
+            "choices":[{"message":{"role":"assistant","tool_calls":[{
+                "id":"call_mcpx",
+                "type":"function",
+                "function":{"name":"mcp__mcpx__workspace","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"mcp__mcpx","tools":[{"type":"function","name":"workspace","parameters":{"type":"object"}}]}]}),
+    ).expect("flattened MCPX call must project");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
+    assert_eq!(response["output"][0]["name"], "workspace");
+}
+
+#[test]
 fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
@@ -1390,4 +1408,20 @@ fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
             response["usage"].get("completion_tokens").is_none(),
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
         );
+}
+
+#[test]
+fn openai_chat_provider_partial_usage_is_complete_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_partial_usage",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 11}
+        }),
+        &json!({"tools": []}),
+    ).expect("partial provider usage must project");
+
+    assert_eq!(response["usage"]["input_tokens"], 11);
+    assert_eq!(response["usage"]["output_tokens"], 0);
+    assert_eq!(response["usage"]["total_tokens"], 11);
 }
