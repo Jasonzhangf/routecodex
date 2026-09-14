@@ -518,7 +518,7 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failure() {
+async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exhausted() {
     let transport = AnthropicCyberRefusalThenSuccessTransport {
         attempts: Mutex::new(0),
     };
@@ -548,8 +548,8 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     .await
     .unwrap();
 
-    assert_eq!(*transport.attempts.lock().unwrap(), 2);
-    assert_eq!(output.status, 200);
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert_eq!(output.status, 502);
     let observability = output.observability.as_ref().expect("observability");
     assert_eq!(observability.provider_failure_events.len(), 1);
     let failure = &observability.provider_failure_events[0];
