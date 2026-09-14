@@ -128,7 +128,7 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run test:v3-debug-payload-budget-red-fixtures
       - name: V3 canonical verification stack
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: npm --prefix v3 run verify:ci
       - name: V3 route-classifier semantic gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}

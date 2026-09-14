@@ -254,6 +254,32 @@ fn manifest_contains_secret_handle_not_secret_material() {
 }
 
 #[test]
+fn codex_sample_authorization_is_published_by_v4_manifest() {
+    let source = format!(
+        "{VALID}\n[codex_sample]\nmanaged_instance_id = \"v4-main\"\ncodex_samples_enabled = true\ndirect_snapshots_enabled = true\nsnapshot_stages = [\"resp_outbound\", \"req_chatprocess\", \"req_chatprocess\"]\n"
+    );
+    let manifest = compile_authoring(&source).expect("codex sample authorization must compile");
+    let authorization = manifest
+        .codex_sample_authorization()
+        .expect("V4 manifest must publish codex sample authorization");
+    assert_eq!(authorization.managed_instance_id, "v4-main");
+    assert!(authorization.should_capture_snapshot_stage("req_chatprocess"));
+    assert!(authorization.should_capture_snapshot_stage("resp_outbound"));
+    assert_eq!(authorization.snapshot_stages, ["req_chatprocess", "resp_outbound"]);
+}
+
+#[test]
+fn codex_sample_authorization_rejects_unknown_fields() {
+    let source = format!(
+        "{VALID}\n[codex_sample]\nmanaged_instance_id = \"v4-main\"\nunknown = true\n"
+    );
+    assert!(matches!(
+        compile_authoring(&source),
+        Err(ConfigError::Parse(_))
+    ));
+}
+
+#[test]
 fn config_rejects_payload_resource_binding() {
     let invalid = replace_once(
         VALID,

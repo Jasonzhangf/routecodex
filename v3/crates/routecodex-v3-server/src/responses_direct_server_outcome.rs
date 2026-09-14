@@ -25,6 +25,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_direct_continuation_scope(
         request_headers,
+        Some(&payload),
         &request_id,
         &state.server,
         &path,
@@ -49,6 +50,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     };
     let relay_continuation_scope = match build_responses_relay_local_continuation_scope(
         request_headers,
+        Some(&payload),
         &request_id,
         &state.server,
         &path,

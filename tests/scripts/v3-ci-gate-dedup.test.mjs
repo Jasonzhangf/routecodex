@@ -77,6 +77,11 @@ test('V3 CI keeps named gate wiring within canonical V3 verification', () => {
   assert.match(v3Package.scripts['verify:v3-architecture-docs'], /verify:v3-runtime-timing-observability/);
   assert.doesNotMatch(verifyRed, /v3-runtime-timing-observability-red-fixtures\.mjs/);
   assert.match(workflow, /npm --prefix v3 run verify:ci/);
+  const canonicalStackStart = workflow.indexOf('      - name: V3 canonical verification stack\n');
+  const canonicalStackEnd = workflow.indexOf('\n      - name: ', canonicalStackStart + 1);
+  const canonicalStack = workflow.slice(canonicalStackStart, canonicalStackEnd);
+  assert.match(canonicalStack, /needs\.scope\.outputs\.v3_architecture == 'true'/);
+  assert.doesNotMatch(canonicalStack, /needs\.scope\.outputs\.v3 == 'true'/);
   assert.match(workflow, /BUILD_MODE: release/);
   assert.match(workflow, /node v3\/scripts\/run-v3-cargo-test\.mjs \+stable --workspace -- --nocapture/);
   assert.ok(workflow.indexOf('npm --prefix v3 run verify:ci') < workflow.indexOf('run: npm run build:min'));

@@ -100,6 +100,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let owner_resolution_context =
             match build_responses_previous_response_owner_resolution_context(
                 &request_headers,
+                Some(&payload),
                 &request_id,
                 &state.server,
                 &path,
@@ -425,6 +426,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     {
         let continuation_scope = match build_responses_relay_local_continuation_scope(
             &request_headers,
+            Some(&payload),
             &request_id,
             &state.server,
             &path,
@@ -903,6 +905,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
         let continuation_scope = match build_responses_relay_local_continuation_scope(
             &request_headers,
+            Some(&payload),
             &request_id,
             &state.server,
             &path,

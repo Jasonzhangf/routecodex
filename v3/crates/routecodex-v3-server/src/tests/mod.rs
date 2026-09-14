@@ -2018,7 +2018,7 @@ fn responses_continuation_scope_reads_codex_turn_metadata_header() {
     );
 
     let (session_id, conversation_id) =
-        responses_control_scope_headers(&headers).expect("codex turn metadata header");
+        responses_control_scope_headers(&headers, None).expect("codex turn metadata header");
 
     assert_eq!(session_id.as_deref(), Some("codex-session"));
     assert_eq!(conversation_id.as_deref(), Some("codex-thread"));
@@ -2037,7 +2037,7 @@ fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadat
     );
 
     let (session_id, conversation_id) =
-        responses_control_scope_headers(&headers).expect("explicit continuation headers");
+        responses_control_scope_headers(&headers, None).expect("explicit continuation headers");
 
     assert_eq!(session_id.as_deref(), Some("explicit-session"));
     assert_eq!(conversation_id.as_deref(), Some("explicit-thread"));
@@ -2052,7 +2052,7 @@ fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
         HeaderValue::from_static("plugin-request"),
     );
 
-    let scope = request_local_continuation_scope(&headers, false, "req-fresh")
+    let scope = request_local_continuation_scope(&headers, None, false, "req-fresh")
         .expect("fresh request must not require a conversation header");
 
     assert_eq!(
@@ -2061,6 +2061,42 @@ fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
             "request:req-fresh".to_string(),
             "request:req-fresh".to_string()
         )
+    );
+}
+
+#[test]
+fn responses_continuation_scope_accepts_body_client_metadata_as_fallback() {
+    let headers = HeaderMap::new();
+    let payload = json!({
+        "input":[{"type":"function_call_output","call_id":"call-1","output":"{\"ok\":true}"}],
+        "client_metadata":{"session_id":"zcode-session","thread_id":"zcode-thread"}
+    });
+
+    let scope = request_local_continuation_scope(&headers, Some(&payload), true, "req-body-scope")
+        .expect("body client_metadata must construct continuation control identity as a fallback");
+
+    assert_eq!(
+        scope,
+        ("zcode-session".to_string(), "zcode-thread".to_string())
+    );
+}
+
+#[test]
+fn responses_continuation_scope_prefers_headers_over_body_client_metadata() {
+    let mut headers = HeaderMap::new();
+    headers.insert("session-id", HeaderValue::from_static("header-session"));
+    headers.insert("thread-id", HeaderValue::from_static("header-thread"));
+    let payload = json!({
+        "previous_response_id":"resp-1",
+        "client_metadata":{"session_id":"body-session","thread_id":"body-thread"}
+    });
+
+    let scope = request_local_continuation_scope(&headers, Some(&payload), true, "req-precedence")
+        .expect("typed control headers must keep precedence over body client_metadata");
+
+    assert_eq!(
+        scope,
+        ("header-session".to_string(), "header-thread".to_string())
     );
 }
 

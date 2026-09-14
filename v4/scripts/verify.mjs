@@ -16,6 +16,7 @@ import {
   ARCHITECTURE_GATES,
   CONSUMER_REGRESSIONS,
   RUNTIME_BIN_REGRESSION,
+  MODULE_REGRESSIONS,
   architectureCommand,
   consumerCommand,
 } from './_gate-matrix.mjs';
@@ -53,7 +54,9 @@ const consumerFailures = runIndependent(CONSUMER_REGRESSIONS.map((entry) => ({
   command: consumerCommand(entry),
 })));
 
-const matrixFailures = [...architectureFailures, ...consumerFailures];
+const moduleFailures = runIndependent(MODULE_REGRESSIONS);
+
+const matrixFailures = [...architectureFailures, ...consumerFailures, ...moduleFailures];
 if (matrixFailures.length > 0) {
   reportIndependentFailures('verify', matrixFailures);
   process.exit(1);

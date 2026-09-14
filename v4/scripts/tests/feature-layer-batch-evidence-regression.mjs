@@ -4,6 +4,8 @@ import {
   runRegisteredGates,
   validateEvidenceRef,
 } from '../architecture/lib/feature-layer-batch-evidence.mjs';
+import { validateRegistryBindings } from '../architecture/lib/feature-layer-batch-registry.mjs';
+import { loadCanonicalInput } from '../architecture/verify-v4-feature-layer-batches.mjs';
 
 const now = Date.now();
 const candidate = {
@@ -180,5 +182,41 @@ assert.deepEqual(failedGateFailures.map((failure) => failure.message), [
   'regression: fixture_positive exited 17',
   'regression: fixture_red exited 17',
 ]);
+
+const zeroMatchFailures = [];
+runRegisteredGates({
+  gateIds: ['fixture_red_checked'],
+  gateMap: new Map([['fixture_red_checked', {
+    status: 'active',
+    evidence_role: 'red_gate',
+    test_name: 'negative_case',
+    argv: ['cargo', 'test', 'negative_case'],
+  }]]),
+  truth: {
+    runGate() {
+      return { status: 0, stdout: 'running 0 tests\ntest result: ok. 0 passed\n' };
+    },
+  },
+  failures: zeroMatchFailures,
+  context: 'regression',
+});
+assert(
+  zeroMatchFailures.some((failure) => failure.code === 'REQUIRED_GATE_TEST_NOT_RUN'),
+  'a red gate must not pass when its filtered test did not run',
+);
+
+const registryInput = loadCanonicalInput();
+const registryPositive = registryInput.verificationMap.gates
+  .find((entry) => entry.gate_id === 'v4_runtime_003_plan_bundle_positive');
+const registryRed = registryInput.verificationMap.gates
+  .find((entry) => entry.gate_id === 'v4_runtime_003_plan_bundle_red');
+registryRed.argv = [...registryPositive.argv];
+registryRed.command = registryPositive.command;
+const registryFailures = [];
+validateRegistryBindings(registryInput, registryFailures);
+assert(
+  registryFailures.some((failure) => failure.code === 'RED_GATE_DUPLICATES_POSITIVE'),
+  'a red gate must not reuse its owner feature positive command',
+);
 
 process.stdout.write('[test:feature-layer-batch-evidence-regression] PASS\n');
