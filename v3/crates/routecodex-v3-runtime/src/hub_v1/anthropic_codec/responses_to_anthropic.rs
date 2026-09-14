@@ -144,16 +144,30 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         Some(value) => value.to_owned(),
         None => json!({}),
     };
+    let name = function
+        .and_then(|function| function.get("name"))
+        .or_else(|| object.get("name"))
+        .cloned()
+        .map(|value| {
+            value.as_str().map_or(value.clone(), |name| {
+                Value::String(qualify_mcp_provider_tool_name(name))
+            })
+        })
+        .unwrap_or(Value::Null);
     Ok(json!({
         "type":"tool_use",
         "id": object.get("id").cloned().unwrap_or(Value::Null),
-        "name": function
-            .and_then(|function| function.get("name"))
-            .or_else(|| object.get("name"))
-            .cloned()
-            .unwrap_or(Value::Null),
+        "name": name,
         "input": input
     }))
+}
+
+fn qualify_mcp_provider_tool_name(name: &str) -> String {
+    if name.starts_with("mcp__") {
+        name.replace('.', "__")
+    } else {
+        name.to_owned()
+    }
 }
 
 pub(super) fn responses_input_array_as_anthropic_messages(
@@ -1261,6 +1275,20 @@ mod tests {
             tool_use["input"],
             json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
         );
+    }
+
+    #[test]
+    fn openai_chat_mcp_tool_call_dotted_name_is_qualified_for_anthropic() {
+        let tool_use = openai_chat_tool_call_as_anthropic_tool_use(&json!({
+            "id": "call_workspace",
+            "type": "function",
+            "function": {
+                "name": "mcp__mcpx.workspace",
+                "arguments": "{\"path\":\".\"}"
+            }
+        }))
+        .expect("MCP tool call must project to Anthropic");
+        assert_eq!(tool_use["name"], "mcp__mcpx__workspace");
     }
 
     #[test]

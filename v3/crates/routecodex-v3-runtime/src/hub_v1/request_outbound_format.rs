@@ -1561,6 +1561,7 @@ fn normalize_openai_chat_messages_payload(
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
+        normalize_openai_chat_message_tool_call_names(message_row);
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         let Some(content) = message_row.get_mut("content") else {
             continue;
@@ -1581,6 +1582,27 @@ fn normalize_openai_chat_messages_payload(
     )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
+}
+
+fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
+    let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for call in tool_calls {
+        let Some(call) = call.as_object_mut() else {
+            continue;
+        };
+        if let Some(name) = call.get("name").and_then(Value::as_str) {
+            let normalized = provider_function_name(name);
+            call.insert("name".to_string(), Value::String(normalized));
+        }
+        if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(name) = function.get("name").and_then(Value::as_str) {
+                let normalized = provider_function_name(name);
+                function.insert("name".to_string(), Value::String(normalized));
+            }
+        }
+    }
 }
 
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
