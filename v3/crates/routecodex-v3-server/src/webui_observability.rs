@@ -262,10 +262,10 @@ struct V3WebuiObservabilityPersistenceWriter {
 }
 
 impl V3WebuiObservabilityPersistenceWriter {
-    fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Self {
+    fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Option<Self> {
         let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
         let writer_alarm = Arc::clone(&alarm);
-        std::thread::Builder::new()
+        let spawn = std::thread::Builder::new()
             .name("v3-webui-observability-writer".to_string())
             .spawn(move || {
                 while let Ok(command) = receiver.recv() {
@@ -296,11 +296,17 @@ impl V3WebuiObservabilityPersistenceWriter {
                         }
                     }
                 }
-            })
-            .unwrap_or_else(|error| {
-                panic!("observability persistence writer start failed: {error}")
             });
-        Self { sender, alarm }
+        match spawn {
+            Ok(_) => Some(Self { sender, alarm }),
+            Err(error) => {
+                set_v3_webui_observability_alarm(
+                    &alarm,
+                    format!("observability persistence writer start failed: {error}"),
+                );
+                None
+            }
+        }
     }
 
     fn enqueue(&self, row: V3ObsRequestRow) {
@@ -347,7 +353,7 @@ impl V3WebuiObservability {
 
     pub(crate) fn with_persistence_path(path: Option<std::path::PathBuf>) -> Self {
         let alarm = Arc::new(RwLock::new(None));
-        let persistence_writer = path.as_ref().map(|path| {
+        let persistence_writer = path.as_ref().and_then(|path| {
             V3WebuiObservabilityPersistenceWriter::start(path.clone(), Arc::clone(&alarm))
         });
         Self {
