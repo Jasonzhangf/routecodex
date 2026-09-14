@@ -2,7 +2,7 @@ use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -140,7 +140,9 @@ struct V3AttemptBudgetInner {
     transport_attempts: AtomicUsize,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
-    deadline: Instant,
+    /// Sliding idle deadline. Successful activity extends it; inactivity
+    /// still expires the request and releases its bounded reservations.
+    deadline: Mutex<Instant>,
 }
 
 enum V3ProcessResidentBytes {
@@ -208,7 +210,7 @@ impl V3AttemptBudget {
                 transport_attempts: AtomicUsize::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
-                deadline: Instant::now() + limits.residence_timeout,
+                deadline: Mutex::new(Instant::now() + limits.residence_timeout),
             }),
         }
     }
@@ -225,7 +227,12 @@ impl V3AttemptBudget {
     }
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
-        if Instant::now() >= self.inner.deadline {
+        let deadline = self.inner.deadline.lock().map_err(|_| {
+            V3AttemptStoreError::InvalidAttemptState(
+                "request residence deadline state is poisoned".to_string(),
+            )
+        })?;
+        if Instant::now() >= *deadline {
             return Err(V3AttemptStoreError::LocalResourceExhausted(
                 "provider SSE attempt exceeded the request residence deadline".to_string(),
             ));
@@ -233,9 +240,20 @@ impl V3AttemptBudget {
         Ok(())
     }
 
+    fn record_activity(&self) -> Result<(), V3AttemptStoreError> {
+        let mut deadline = self.inner.deadline.lock().map_err(|_| {
+            V3AttemptStoreError::InvalidAttemptState(
+                "request residence deadline state is poisoned".to_string(),
+            )
+        })?;
+        *deadline = Instant::now() + self.inner.limits.residence_timeout;
+        Ok(())
+    }
+
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
-        self.inner
+        let attempt = self
+            .inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 (current < self.inner.limits.request_max_attempts).then_some(current + 1)
@@ -246,7 +264,9 @@ impl V3AttemptBudget {
                     "request provider transport attempt limit {} exhausted",
                     self.inner.limits.request_max_attempts
                 ))
-            })
+            })?;
+        self.record_activity()?;
+        Ok(attempt)
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {
@@ -267,6 +287,16 @@ impl V3AttemptBudget {
             self.inner.limits.request_max_bytes,
             "request provider SSE resident byte limit",
         ) {
+            self.inner
+                .process_resident_bytes
+                .counter()
+                .fetch_sub(bytes, Ordering::AcqRel);
+            return Err(error);
+        }
+        if let Err(error) = self.record_activity() {
+            self.inner
+                .request_resident_bytes
+                .fetch_sub(bytes, Ordering::AcqRel);
             self.inner
                 .process_resident_bytes
                 .counter()
