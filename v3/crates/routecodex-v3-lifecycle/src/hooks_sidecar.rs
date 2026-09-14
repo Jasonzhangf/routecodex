@@ -23,9 +23,11 @@ struct V3HooksSidecarProcessRecord {
     process_group_id: libc::pid_t,
     leader_pid: u32,
     leader_start_token: String,
+    #[serde(default)]
+    control_socket_identity: Option<CodexAppSocketIdentity>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct CodexAppSocketIdentity {
     device: u64,
     inode: u64,
@@ -48,6 +50,7 @@ pub(crate) struct V3HooksSidecarProcess {
     leader_start_token: String,
     process_record_path: PathBuf,
     control_socket_path: Option<PathBuf>,
+    control_socket_identity: Option<CodexAppSocketIdentity>,
     degraded_detail: Option<String>,
     socket_cleanup: Option<CodexAppSocketCleanup>,
 }
@@ -105,6 +108,7 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
     }
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
     let mut stale_process_group_confirmed_dead = false;
+    let mut stale_control_socket_identity = None;
     if process_record_path.exists() {
         if hooks_sidecar_process_group_is_alive(instance_dir)? {
             return Err(optional_hooks_error(
@@ -113,6 +117,10 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
                 ),
             ));
         }
+        stale_control_socket_identity =
+            read_json::<V3HooksSidecarProcessRecord>(&process_record_path)
+                .ok()
+                .and_then(|record| record.control_socket_identity);
         fs::remove_file(&process_record_path)?;
         stale_process_group_confirmed_dead = true;
     }
@@ -173,7 +181,9 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         // this owned instance directory can therefore be removed without the
         // control-server owner ever unlinking a path it cannot verify.
         if control_socket.exists() && stale_process_group_confirmed_dead {
-            fs::remove_file(&control_socket)?;
+            if let Some(identity) = stale_control_socket_identity {
+                remove_file_if_identity_matches(&control_socket, identity)?;
+            }
         }
     }
     let appserver_socket = if internal_hooksd.is_some() {
@@ -332,6 +342,7 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
             process_group_id,
             leader_pid,
             leader_start_token: leader_start_token.clone(),
+            control_socket_identity: None,
         },
     ) {
         return finish_sidecar_start_failure(
@@ -436,6 +447,16 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         )
         .await;
     }
+    let control_socket_identity = internal_hooksd.as_ref().and_then(|_| {
+        fs::symlink_metadata(&control_socket)
+            .ok()
+            .map(|metadata| codexapp_socket_identity(&metadata))
+    });
+    if internal_hooksd.is_some() {
+        let mut record: V3HooksSidecarProcessRecord = read_json(&process_record_path)?;
+        record.control_socket_identity = control_socket_identity;
+        write_json_atomic(&process_record_path, &record)?;
+    }
     tokio::spawn(async move {
         let mut lines = reader.lines();
         while lines.next_line().await.ok().flatten().is_some() {}
@@ -448,6 +469,7 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         leader_start_token,
         process_record_path,
         control_socket_path: internal_hooksd.as_ref().map(|_| control_socket.clone()),
+        control_socket_identity,
         degraded_detail: None,
         socket_cleanup,
     }))
@@ -518,6 +540,11 @@ async fn finish_sidecar_start_failure(
     control_socket_path: Option<&Path>,
     mut socket_cleanup: Option<CodexAppSocketCleanup>,
 ) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
+    let control_socket_identity = control_socket_path.and_then(|path| {
+        fs::symlink_metadata(path)
+            .ok()
+            .map(|metadata| codexapp_socket_identity(&metadata))
+    });
     if let Some(cleanup) = socket_cleanup.as_mut() {
         cleanup.startup_identity = match fs::symlink_metadata(&cleanup.path) {
             Ok(metadata) => Some(codexapp_socket_identity(&metadata)),
@@ -543,7 +570,18 @@ async fn finish_sidecar_start_failure(
                 ));
             }
             if let Some(control_socket_path) = control_socket_path {
-                if let Err(error) = remove_file_if_present(control_socket_path) {
+                if let Some(identity) = control_socket_identity {
+                    if let Err(error) = remove_file_if_identity_matches(control_socket_path, identity) {
+                        let detail = format!(
+                            "hooks sidecar control socket cleanup failed: {}; {error}",
+                            control_socket_path.display()
+                        );
+                        cleanup_failure = Some(match cleanup_failure {
+                            Some(existing) => format!("{existing}; {detail}"),
+                            None => detail,
+                        });
+                    }
+                } else if let Err(error) = remove_file_if_present(control_socket_path) {
                     let detail = format!(
                         "hooks sidecar control socket cleanup failed: {}; {error}",
                         control_socket_path.display()
@@ -576,6 +614,7 @@ async fn finish_sidecar_start_failure(
                 leader_start_token: leader_start_token.to_string(),
                 process_record_path: process_record_path.to_path_buf(),
                 control_socket_path: None,
+                control_socket_identity: None,
                 degraded_detail: Some(format!(
                     "hooks sidecar unavailable: {startup}; cleanup: {cleanup}"
                 )),
@@ -596,6 +635,21 @@ fn remove_file_if_present(path: &Path) -> Result<(), V3LifecycleError> {
     }
 }
 
+fn remove_file_if_identity_matches(
+    path: &Path,
+    identity: CodexAppSocketIdentity,
+) -> Result<(), V3LifecycleError> {
+    let current = match fs::symlink_metadata(path) {
+        Ok(metadata) => codexapp_socket_identity(&metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if current != identity {
+        return Ok(());
+    }
+    remove_file_if_present(path)
+}
+
 impl V3HooksSidecarProcess {
     #[cfg(test)]
     pub(crate) fn for_test(
@@ -614,6 +668,7 @@ impl V3HooksSidecarProcess {
                 .unwrap_or_default(),
             process_record_path,
             control_socket_path: None,
+            control_socket_identity: None,
             degraded_detail: None,
             socket_cleanup: None,
         }
@@ -641,6 +696,7 @@ impl V3HooksSidecarProcess {
                 .unwrap_or_default(),
             process_record_path,
             control_socket_path: None,
+            control_socket_identity: None,
             degraded_detail: Some("initial termination failed".to_string()),
             socket_cleanup: Some(CodexAppSocketCleanup {
                 path: socket_path,
@@ -681,12 +737,9 @@ impl V3HooksSidecarProcess {
             cleanup_codexapp_socket(cleanup)?;
         }
         if let Some(control_socket_path) = self.control_socket_path.as_ref() {
-            // The owned process group is confirmed stopped above, so removing
-            // the control socket here cannot unlink a live daemon's path.
-            match fs::remove_file(control_socket_path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
+            match self.control_socket_identity {
+                Some(identity) => remove_file_if_identity_matches(control_socket_path, identity)?,
+                None => remove_file_if_present(control_socket_path)?,
             }
         }
         if self.process_record_path.exists() {
