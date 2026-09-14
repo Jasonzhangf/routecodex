@@ -141,7 +141,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/verify-architecture-mainline-call-map.mjs',
     'scripts/architecture/verify-architecture-mainline-manifest-sync.mjs',
     'scripts/architecture/verify-architecture-wiki-html-sync.mjs',
-    'scripts/architecture/verify-build-script-tiering.mjs',
     'scripts/architecture/verify-direct-semantic-classification-design.mjs',
     'scripts/architecture/verify-error-pipeline-contract.mjs',
     'scripts/architecture/verify-function-map-compile-gate.mjs',

@@ -1,5 +1,7 @@
 # Hub Pipeline 架构门禁补强计划
 
+> 历史计划记录：`verify-build-script-tiering` 已从当前 V3 执行链移除；本文中的 gate 名称仅保留用于还原当时方案，不是现行 gate 真源。
+
 ## 目标
 补强 7 个已识别的架构门禁缺口，锁住 hub pipeline 工程质量，防止流程漂移。
 
