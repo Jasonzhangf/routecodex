@@ -486,12 +486,29 @@ function checkCIRunnerArch(ci, arch) {
     : [`CI node process arch=${arch}; Active artifacts are aarch64-apple-darwin, so V4 verify:ci must run on an arm64 runner`];
 }
 
+function admissionEntrypointBindingProblems(root) {
+  const entrypoints = [
+    'scripts/install-rccv4.mjs',
+    'scripts/compile-real-runtime-manifest.mjs',
+  ];
+  return entrypoints.flatMap((relativePath) => {
+    const file = path.join(root, relativePath);
+    if (!fs.existsSync(file)) return [`admission entrypoint missing: ${relativePath}`];
+    const source = fs.readFileSync(file, 'utf8');
+    return source.includes("'--admission'")
+      ? []
+      : [`admission entrypoint does not execute --admission: ${relativePath}`];
+  });
+}
+
 function checkDeclaredExecutedBinding(
   verificationMapPath,
   architectureDir,
   testScriptPath = path.join(v4Root, 'scripts/test.mjs'),
 ) {
   const out = [];
+  const admissionEntrypointProblems = admissionEntrypointBindingProblems(path.resolve(architectureDir, '..', '..'));
+  const admissionCommandExternallyBound = admissionEntrypointProblems.length === 0;
   const declaredGates = new Set();
   const declaredArchitectureCommands = new Set();
   const declaredConsumers = new Set();
@@ -548,7 +565,6 @@ function checkDeclaredExecutedBinding(
     ...RED_SUITES.map(([gate, flag]) => architectureCommand(gate, flag)),
     BUILD_GUARD_COMMAND,
     SELF_TEST_COMMAND,
-    ADMISSION_COMMAND,
     BOUNDARY_COMMAND,
   ]);
   const executedStandaloneCommands = new Set([
@@ -579,6 +595,7 @@ function checkDeclaredExecutedBinding(
   }
   for (const command of declaredArchitectureCommands) {
     if (!executedArchitectureCommands.has(command)) {
+      if (command === ADMISSION_COMMAND && admissionCommandExternallyBound) continue;
       const [, gate] = command.match(/^node scripts\/architecture\/([^ ]+)/) ?? [];
       out.push(`architecture gate ${gate} declared command arguments ${JSON.stringify(command)} != executed matrix`);
     }
@@ -610,9 +627,13 @@ function checkDeclaredExecutedBinding(
   for (const gate of map.gates ?? []) {
     if (gate.status !== 'active') continue;
     const command = String(gate.command ?? '').trim();
-    if (!executedStandaloneCommands.has(command)) {
+    if (!executedStandaloneCommands.has(command)
+        && !(command === ADMISSION_COMMAND && admissionCommandExternallyBound)) {
       out.push(`active gate ${gate.gate_id} command is not registered in canonical matrix: ${command}`);
     }
+  }
+  if (declaredArchitectureCommands.has(ADMISSION_COMMAND) && !admissionCommandExternallyBound) {
+    out.push(...admissionEntrypointProblems);
   }
   for (const { command } of MODULE_REGRESSIONS) {
     if (!declaredActiveCommands.has(command)) {
@@ -672,6 +693,29 @@ function checkDeclaredExecutedBinding(
 function runCommandBindingSelfTest() {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-isolation-command-binding-'));
   try {
+    if (MODULE_REGRESSIONS.some(({ command }) => command === ADMISSION_COMMAND)) {
+      console.error('[v4 isolation] build matrix must not execute strict feature-layer admission');
+      process.exit(1);
+    }
+    const admissionScripts = [
+      'scripts/install-rccv4.mjs',
+      'scripts/compile-real-runtime-manifest.mjs',
+    ];
+    for (const relativePath of admissionScripts) {
+      const file = path.join(fixtureRoot, relativePath);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, "spawnSync(process.execPath, ['--admission']);\n");
+    }
+    if (admissionEntrypointBindingProblems(fixtureRoot).length > 0) {
+      console.error('[v4 isolation] admission entrypoint binding self-test rejected explicit entrypoints');
+      process.exit(1);
+    }
+    fs.rmSync(path.join(fixtureRoot, admissionScripts[0]));
+    if (admissionEntrypointBindingProblems(fixtureRoot).length === 0) {
+      console.error('[v4 isolation] admission entrypoint binding self-test accepted a missing entrypoint');
+      process.exit(1);
+    }
+
     const architectureDir = path.join(fixtureRoot, 'architecture');
     fs.mkdirSync(architectureDir, { recursive: true });
     fs.writeFileSync(path.join(architectureDir, 'verify-v4-active-link.mjs'), '');
