@@ -917,8 +917,8 @@
     {
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
-      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs", "--red-self-test"],
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission"
       ]
