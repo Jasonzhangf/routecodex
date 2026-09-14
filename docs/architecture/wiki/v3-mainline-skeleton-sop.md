@@ -72,7 +72,7 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 Use this SOP for V3 native live surfaces served by `config.v3.toml`, including 4444/5555.
 
 1. Build and install the native V3 binary:
-   - `RUSTUP_TOOLCHAIN=stable npm run install:v3`
+   - `npm run install:v3`
 2. Validate the active V3 config:
    - `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml`
 3. Restart the V3 instance with rccv3:
