@@ -203,6 +203,9 @@ function verifyManifest(parsed) {
     if (!['direct', 'relay', 'pending_not_implemented'].includes(binding.execution_mode)) {
       failures.push(`${files.manifest}: ${protocol} has invalid execution_mode ${binding.execution_mode}`);
     }
+    if (protocol === 'anthropic' && binding.execution_mode !== 'direct') {
+      failures.push(`${files.manifest}: anthropic same-protocol default must use execution_mode direct`);
+    }
     if (implementedProtocols.has(protocol) && binding.implementation_status !== 'implemented') {
       failures.push(`${files.manifest}: ${protocol} must be implemented in this binding surface`);
     }

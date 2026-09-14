@@ -305,6 +305,7 @@ resources:
     identity: [requestId, targetId, providerId, modelId, entryProtocol, selectedProviderProtocol, responsesProcess, executionMode]
     semantic_contract:
       single_decision_owner: protocol execution planning writes the Direct-or-Relay decision once into the MetadataCenter side-channel before dispatch
+      entry_protocol_rule: same-protocol Anthropic /v1/messages targets default to Direct; a provider protocol mismatch selects the existing Hub Relay branch
       downstream_contract: Direct and Relay runtimes consume the selected executionMode; target-local provider-failure reselection may emit only a typed Direct/Relay handoff for the newly selected Target10, carrying the complete request-local failed-candidate exclusion set without payload reconstruction
     allowed_writers: [V3Execution11ProtocolDecision]
     allowed_readers: [V3ResponsesDirect11Policy, routecodex-v3-server]

@@ -52,12 +52,12 @@ entry_protocol_bindings:
     forbidden_fallback_behavior: "Responses endpoint must enter same-protocol Direct runtime and must not fall through to Relay or generic foundation pending."
   - entry_protocol: anthropic
     endpoint_patterns: [/v1/messages]
-    execution_mode: relay
+    execution_mode: direct
     implementation_status: implemented
     owner_feature_id: v3.anthropic_relay_runtime_integration
     runtime_owner_symbol: execute_v3_anthropic_relay_runtime_with_default_transport
     runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    forbidden_fallback_behavior: "Anthropic endpoint must not fall through to generic foundation pending."
+    forbidden_fallback_behavior: "Anthropic endpoint must use the unified V3Execution11ProtocolDecision: same-protocol targets default to Direct, cross-protocol targets use the existing Relay owner, and neither path may fall through to generic foundation pending."
   - entry_protocol: openai_chat
     endpoint_patterns: [/v1/chat/completions]
     execution_mode: relay

@@ -6,7 +6,7 @@
 
 验收标准：
 
-- Server `/v1/messages` 只进入固定 Hub v1 Relay nodes，不直连 Provider、不扩展 P6。
+- Server `/v1/messages` 先进入统一 typed `V3Execution11ProtocolDecision`；同协议 Anthropic target 默认走 Direct，跨协议 target 进入固定 Hub v1 Relay nodes，不直连 Provider、不扩展 P6。
 - request/response 每条相邻边真实 anchored；完整 node trace 只有一个 Runtime lifecycle 和一个 response exit。
 - JSON/SSE、thinking/reasoning、tool_use/function_call、provider error、side-channel isolation 四类 fixture 全绿。
 - SSE Transport 只作为基础能力调用；本任务不实现第二套 parser/writer。

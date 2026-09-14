@@ -2110,6 +2110,7 @@ features:
   - current managed 5555 real JSON/SSE/client-WS two-turn success after authorized
     live config and restart
 - feature_id: v3.anthropic_relay_runtime_integration
+  owner_scope: Existing Anthropic Relay runtime owner for cross-protocol /v1/messages execution; same-protocol execution is selected by the unified V3Execution11ProtocolDecision and uses the Direct owner.
   owner_crates:
   - routecodex-v3-runtime
   - routecodex-v3-server
@@ -2927,7 +2928,9 @@ features:
   required_contract:
   - responses binds only /v1/responses and V2/default projection points at Responses
     Direct; explicit Relay remains a controlled runtime binding, not the default
-  - anthropic binds only /v1/messages to relay implemented runtime owner
+  - anthropic binds only /v1/messages to the unified V3Execution11ProtocolDecision;
+    same-protocol Anthropic targets default to Direct, while cross-protocol targets
+    use the existing Anthropic Relay runtime owner
   - openai_chat binds only /v1/chat/completions to relay implemented runtime owner
   - gemini binds /v1beta/models/:model/generateContent to relay implemented Gemini
     runtime owner

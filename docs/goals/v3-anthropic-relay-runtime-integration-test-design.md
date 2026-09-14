@@ -4,14 +4,17 @@
 
 ```text
 Server /v1/messages
+  -> V3Execution11ProtocolDecision
+  -> same-protocol Direct OR cross-protocol Hub Relay
   -> V3HubReqInbound01ClientRaw .. V3ProviderReqOutbound09TransportRequest
-  -> controlled Responses upstream (exactly one request)
+  -> controlled upstream (exactly one request)
   -> V3ProviderRespInbound01Raw .. V3ServerRespOutbound06ClientFrame
 ```
 
-The Runtime is the only lifecycle. Anthropic request/response differences are owned by the entry/exit
-codec. The Hub request/response Chat Process remains provider-neutral. The Responses provider owns
-HTTP and consumes the shared structured SSE Transport contract.
+The Runtime is the only lifecycle. `V3Execution11ProtocolDecision` selects Direct for a same-protocol
+Anthropic target and the existing Hub Relay branch for a cross-protocol target. Anthropic
+request/response differences are owned by the entry/exit codec. The Hub request/response Chat Process
+remains provider-neutral. Provider transport owns HTTP and consumes the shared structured SSE contract.
 
 The machine-readable lifecycle is
 `docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml`. Its node and
@@ -45,7 +48,7 @@ provider failure projected as success must remain red.
 
 ## Completion boundary
 
-Passing proves only Anthropic Relay controlled Runtime integration through the Server-owned
-`/v1/messages` entry, single Hub v1 lifecycle, generic Responses provider transport, and controlled
-upstream. It does not prove live 5555, continuation E2E, P6 deletion, global installation, restart,
-release, real-provider compatibility, or production cutover.
+Passing proves only Anthropic `/v1/messages` protocol decision and the controlled Runtime branch
+under test (Direct for same-protocol or Relay for cross-protocol), single lifecycle, generic provider
+transport, and controlled upstream. It does not prove live 5555, continuation E2E, P6 deletion, global
+installation, restart, release, real-provider compatibility, or production cutover.

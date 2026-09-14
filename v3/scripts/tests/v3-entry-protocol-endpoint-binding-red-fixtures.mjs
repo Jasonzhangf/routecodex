@@ -99,6 +99,15 @@ const cases = [
     ),
     diagnostic: /fresh Responses execution mode must preserve Config-owned PendingNotImplemented/u,
   },
+  {
+    name: 'force Anthropic default binding to Relay',
+    path: 'docs/architecture/manifests/v3.entry_protocol_endpoint_binding.mainline.yml',
+    mutate: (source) => source.replace(
+      '  - entry_protocol: anthropic\n    endpoint_patterns: [/v1/messages]\n    execution_mode: direct',
+      '  - entry_protocol: anthropic\n    endpoint_patterns: [/v1/messages]\n    execution_mode: relay',
+    ),
+    diagnostic: /anthropic same-protocol default must use execution_mode direct/u,
+  },
 ];
 
 const failures = [];

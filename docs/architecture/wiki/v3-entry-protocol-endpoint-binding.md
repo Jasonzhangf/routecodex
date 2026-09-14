@@ -12,7 +12,7 @@ The required review phrase is endpoint binding complete only when the binding re
 
 ## Main Rule
 
-Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry to decide the entry protocol, execution mode, implementation status, and Runtime owner. Responses Direct and Gemini relay implemented mean the registry points to their separately owned runtime features; explicit Responses Relay remains separately test-bound and does not mean default/live/global/prod cutover.
+Server must not own a second protocol registry. It may expose endpoint routes, but it must consume the Config-published binding registry and the typed `V3Execution11ProtocolDecision` to decide the entry protocol, execution mode, implementation status, and Runtime owner. Same-protocol Anthropic targets default to Direct; cross-protocol targets use the existing Anthropic Relay owner. Explicit Relay remains separately test-bound and does not mean default/live/global/prod cutover.
 
 Binding resources are side-channel governance truth. They may not enter provider body, client body, metadata payload, debug payload, provider runtime state, or request payload. live/global/prod not claimed by this source slice.
 
@@ -31,7 +31,7 @@ flowchart TD
 | Entry protocol | Endpoint pattern | Execution mode | Implementation status | Owner |
 | --- | --- | --- | --- | --- |
 | responses | `/v1/responses` | relay | implemented | `execute_v3_responses_relay_runtime_with_default_transport` |
-| anthropic | `/v1/messages` | relay | implemented | `execute_v3_anthropic_relay_runtime_with_default_transport` |
+| anthropic | `/v1/messages` | direct by protocol decision; relay for cross-protocol target | implemented | `V3Execution11ProtocolDecision` → existing Anthropic Relay owner |
 | openai_chat | `/v1/chat/completions` | relay | implemented | `execute_v3_openai_chat_relay_runtime_with_default_transport` |
 | gemini | `/v1beta/models/:model/generateContent` | relay | implemented | `execute_v3_gemini_relay_runtime_with_default_transport` |
 
@@ -49,7 +49,7 @@ flowchart TD
 - Every exposed `/v1/*` or `/v1beta/*` business endpoint has exactly one binding.
 - Config allowed protocols, manifest declarations, and Server endpoint exposure are equal.
 - Server has no `endpoint_protocol()` duplicate registry and no raw path runtime bypass.
-- Responses Direct is the V2/default `/v1/responses` projection and is bound to `v3.responses_direct_mvp_architecture`; Responses Relay remains an explicit controlled binding for `v3.hub_relay_runtime_closeout`, not the default projection.
+- Responses Direct is the V2/default `/v1/responses` projection and is bound to `v3.responses_direct_mvp_architecture`; Anthropic same-protocol targets use Direct by protocol decision, while cross-protocol targets use its existing controlled Relay owner.
 - Gemini relay implemented is explicit and bound to `v3.gemini_relay_runtime_integration`.
 - No unbound endpoint can fall through to generic foundation pending.
 - Binding resources are forbidden from provider/client body.

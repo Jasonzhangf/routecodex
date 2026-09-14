@@ -1185,7 +1185,7 @@ features:
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
-  - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
+  - Debug response dry-run dispatches /v1/responses and same-protocol /v1/messages to Direct, while cross-protocol /v1/messages uses the Anthropic Relay branch selected by V3Execution11ProtocolDecision, without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
   - Direct shared-health blackbox proves three cross-request failures cool the first provider before network send
   - Direct dry-run blackbox proves provider-request dry-run does not clear shared provider cooldown
@@ -1379,7 +1379,7 @@ features:
   status: controlled_runtime_integration_verified
   change_risk: critical
   owner_kind: rust_project_v3_controlled_runtime_integration
-  owner_scope: Anthropic /v1/messages controlled Relay through the sole Hub v1 request/response lifecycle and generic Responses provider transport
+  owner_scope: Anthropic /v1/messages protocol execution through the unified V3Execution11ProtocolDecision; same-protocol targets use Direct by default and cross-protocol targets use the sole Hub v1 Relay lifecycle and generic Responses provider transport
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -1396,7 +1396,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
   required_contract:
-  - Server /v1/messages enters the Server-owned wrapper and the sole Hub v1 Relay runtime; no Server to Provider shortcut exists
+  - Server /v1/messages enters the Server-owned wrapper and the unified typed V3Execution11ProtocolDecision; same-protocol Anthropic targets use Direct by default, cross-protocol targets enter the existing sole Hub v1 Relay runtime, and no Server to Provider shortcut exists
   - Req01 through Req09 and Resp01 through Resp06 execute in fixed order and each trace node is appended only after its owning action
   - Req05 precedes real Virtual Router and Target selection; Req06 carries the selected provider target
   - Req08 owns the real Responses wire payload and Req09 owns the real HTTP transport request before the single upstream send
@@ -2052,7 +2052,7 @@ features:
   - OpenAI Chat provider SSE treats a different non-empty tool_call id on an occupied wire index as a new materialized call, preserving first-seen order and independent JSON argument streams
   - OpenAI Chat provider SSE keeps same-id and id-less deltas attached to the active call for their wire index, while ordinary parallel indices remain distinct
   - OpenAI Chat provider SSE reattaches a previously seen tool_call id to its original materialized call after the same wire index is reused, while preserving cross-index duplicate ids for Resp03 rejection
-  - provider-request dry-run uses the shared no-network transport terminal effect for Responses Relay and Anthropic Messages Relay
+  - provider-request dry-run uses the shared no-network transport terminal effect for Responses Relay, same-protocol Anthropic Direct, and cross-protocol Anthropic Messages Relay
   - Responses Relay last default retries exactly twice with fixed 5s delay and projects on the third failure
   - provider/client payloads do not leak session continuation metadata_center resource or routecodex control fields
   required_gates:
