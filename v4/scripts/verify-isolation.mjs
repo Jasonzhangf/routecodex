@@ -34,6 +34,8 @@ import {
   ARCHITECTURE_GATES,
   RED_SUITES,
   CONSUMER_REGRESSIONS,
+  MODULE_REGRESSIONS,
+  ISOLATION_COMMAND,
   RUNTIME_BIN_REGRESSION,
   architectureCommand,
   consumerCommand,
@@ -483,6 +485,9 @@ function checkDeclaredExecutedBinding(
   const declaredFunctionalTests = new Set();
   const declaredConsumerDetails = new Map();
   const map = JSON.parse(fs.readFileSync(verificationMapPath, 'utf8'));
+  const declaredActiveCommands = new Set((map.gates ?? [])
+    .filter((gate) => gate.status === 'active')
+    .map((gate) => String(gate.command ?? '').trim()));
   const seenGateIds = new Set();
   for (const gate of map.gates ?? []) {
     if (seenGateIds.has(gate.gate_id)) {
@@ -530,6 +535,11 @@ function checkDeclaredExecutedBinding(
     SELF_TEST_COMMAND,
     ADMISSION_COMMAND,
     BOUNDARY_COMMAND,
+  ]);
+  const executedStandaloneCommands = new Set([
+    ...executedArchitectureCommands,
+    ...MODULE_REGRESSIONS.map(({ command }) => command),
+    ISOLATION_COMMAND,
   ]);
   const executedConsumers = new Set(CONSUMER_REGRESSIONS.map(([consumer]) => consumer));
   const executedConsumerDetails = new Map();
@@ -579,6 +589,21 @@ function checkDeclaredExecutedBinding(
     }
   }
   const executedConsumerCommands = new Set(CONSUMER_REGRESSIONS.map((entry) => consumerCommand(entry)));
+  executedStandaloneCommands.add(RUNTIME_BIN_REGRESSION);
+  for (const command of executedConsumerCommands) executedStandaloneCommands.add(command);
+
+  for (const gate of map.gates ?? []) {
+    if (gate.status !== 'active') continue;
+    const command = String(gate.command ?? '').trim();
+    if (!executedStandaloneCommands.has(command)) {
+      out.push(`active gate ${gate.gate_id} command is not registered in canonical matrix: ${command}`);
+    }
+  }
+  for (const { command } of MODULE_REGRESSIONS) {
+    if (!declaredActiveCommands.has(command)) {
+      out.push(`canonical module command is not declared active in verification-map.json: ${command}`);
+    }
+  }
   for (const command of declaredConsumerCommands) {
     if (!executedConsumerCommands.has(command)) {
       const consumer = command.match(/--consumer\s+([a-z0-9-]+)/)?.[1] ?? '(unknown)';
@@ -647,6 +672,29 @@ function runCommandBindingSelfTest() {
     if (!failures.some((failure) => failure.includes('command arguments'))
         || !failures.some((failure) => failure.includes('command and argv are not exact'))) {
       console.error('[v4 isolation] command binding self-test did not reject argument drift');
+      process.exit(1);
+    }
+
+    const activeFixturePath = path.join(fixtureRoot, 'active-verification-map.json');
+    fs.writeFileSync(activeFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g1',
+        status: 'active',
+        command: 'node scripts/architecture/verify-v4-declared-only.mjs',
+        argv: ['node', 'scripts/architecture/verify-v4-declared-only.mjs'],
+      }],
+    }));
+    const activeFailures = checkDeclaredExecutedBinding(activeFixturePath, architectureDir);
+    if (!activeFailures.some((failure) => failure.includes('active gate g1 command is not registered in canonical matrix'))) {
+      console.error('[v4 isolation] active command binding self-test did not reject an unregistered active gate');
+      process.exit(1);
+    }
+
+    const missingModuleFixturePath = path.join(fixtureRoot, 'missing-module-verification-map.json');
+    fs.writeFileSync(missingModuleFixturePath, JSON.stringify({ gates: [] }));
+    const missingModuleFailures = checkDeclaredExecutedBinding(missingModuleFixturePath, architectureDir);
+    if (!missingModuleFailures.some((failure) => failure.includes('canonical module command is not declared active'))) {
+      console.error('[v4 isolation] active command binding self-test did not reject an undeclared canonical module command');
       process.exit(1);
     }
     console.log('[v4 isolation] command binding self-test OK');

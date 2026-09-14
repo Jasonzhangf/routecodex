@@ -201,7 +201,7 @@ for (const phrase of [
   'controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit',
   'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
   'local_continuation_servertool_roundtrip_is_runtime_e2e',
-  'provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery',
+  'provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging',
   'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile',
   'execute_v3_responses_relay_runtime',
   'servertool.exec',

@@ -16,6 +16,9 @@ include!("provider_action_gate_tests.rs");
 #[path = "classified_global_tests.rs"]
 mod classified_global;
 
+#[path = "tests/cooldown_exhaustion.rs"]
+mod cooldown_exhaustion;
+
 #[path = "auth_key_policy_tests.rs"]
 mod auth_key_policy;
 
@@ -485,34 +488,6 @@ fn exhaustion_rescue_identity_is_model_scoped() {
     assert!(identities.insert(("opencode-go-zen", "key1", "mimo-v2.5-free",)));
     assert!(identities.insert(("opencode-go-zen", "key1", "hy3-free")));
     assert!(!identities.insert(("opencode-go-zen", "key1", "mimo-v2.5-free",)));
-}
-
-#[test]
-fn exhaustion_wait_allows_only_cooldown_recovery_scopes() {
-    let projection = |blocked: &[&str]| V3ProviderAvailabilityProjection {
-        provider_id: "provider-a".to_string(),
-        auth_alias: Some("key-a".to_string()),
-        model_id: Some("model-a".to_string()),
-        available: blocked.is_empty(),
-        blocked_scopes: blocked.iter().map(|scope| (*scope).to_string()).collect(),
-    };
-
-    assert!(availability_is_cooldown_recovery_only(&projection(&[
-        "provider_cooldown_probe_pending",
-    ])));
-    assert!(availability_is_cooldown_recovery_only(&projection(&[
-        "provider_cooldown_probe_pending",
-        "auth_key:provider-a:key-a",
-    ])));
-    assert!(!availability_is_cooldown_recovery_only(&projection(&[
-        "provider_cooldown_probe_pending",
-        "configured_disabled:provider_instance:provider-a",
-    ])));
-    assert!(!availability_is_cooldown_recovery_only(&projection(&[
-        "provider_cooldown_probe_pending",
-        "quota:provider_instance:provider-a",
-    ])));
-    assert!(!availability_is_cooldown_recovery_only(&projection(&[])));
 }
 
 fn assert_resolution_failure(

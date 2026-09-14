@@ -917,8 +917,8 @@
     {
       "gate_id": "v4_real_runtime_admission_red",
       "status": "active",
-      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs",
-      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs"],
+      "command": "node scripts/architecture/verify-v4-real-runtime-admission.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-real-runtime-admission.mjs", "--red-self-test"],
       "required_for": [
         "routecodex-v4-governance:real_runtime_admission"
       ]
@@ -1135,6 +1135,18 @@
       "required_for": ["source_green"]
     },
     {
+      "gate_id": "v4_parity_differential_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-PARITY-HARNESS-001"],
+      "command": "node scripts/architecture/verify-v4-product-differential.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-product-differential.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_parity_differential_red"},
+      "evidence_role": "red_gate",
+      "input_paths": ["scripts/architecture/verify-v4-product-differential.mjs", "docs/architecture/v3-v4-semantic-parity-map.yml"],
+      "required_for": ["source_green"]
+    },
+    {
       "gate_id": "v4_parity_ledger_positive",
       "status": "active",
       "owner_module_id": "routecodex-v4-governance",
@@ -1159,6 +1171,18 @@
       "required_for": ["source_green"]
     },
     {
+      "gate_id": "v4_parity_status_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-PARITY-001", "V4-PARITY-002", "V4-PARITY-003", "V4-PARITY-HARNESS-001"],
+      "command": "node scripts/architecture/verify-v4-product-parity-status.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-product-parity-status.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_parity_status_red"},
+      "evidence_role": "red_gate",
+      "input_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs", "docs/architecture/v3-v4-product-parity-ledger.yml"],
+      "required_for": ["source_green"]
+    },
+    {
       "gate_id": "v4_parity_ledger_boundary",
       "status": "active",
       "owner_module_id": "routecodex-v4-governance",
@@ -1168,6 +1192,18 @@
       "producer": {"adapter": "node", "identity": "v4_parity_ledger_boundary"},
       "evidence_role": "boundary_audit",
       "input_paths": ["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
+      "required_for": ["source_green"]
+    },
+    {
+      "gate_id": "v4_parity_ledger_boundary_red",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-governance",
+      "feature_ids": ["V4-PARITY-001", "V4-PARITY-002", "V4-PARITY-003", "V4-PARITY-HARNESS-001"],
+      "command": "node scripts/architecture/verify-v4-v3-baseline-delta.mjs --red-self-test",
+      "argv": ["node", "scripts/architecture/verify-v4-v3-baseline-delta.mjs", "--red-self-test"],
+      "producer": {"adapter": "node", "identity": "v4_parity_ledger_boundary_red"},
+      "evidence_role": "red_gate",
+      "input_paths": ["scripts/architecture/verify-v4-v3-baseline-delta.mjs", "docs/architecture/v3-v4-semantic-parity-map.yml"],
       "required_for": ["source_green"]
     },
     {
