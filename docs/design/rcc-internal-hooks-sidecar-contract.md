@@ -432,18 +432,22 @@ Review findings and their fixes are recorded in
 `docs/design/rcc-internal-hooks-sidecar-review-0914.md`, including the red
 evidence for each fix.
 
-### Live replay gap (unchanged)
+### Live replay gap
 
-The declared `live_required` items are still not closed:
+The declared `live_required` items:
 
 - No real TUI/TUI or TUI/Desktop same-entry replay has produced native
   `delivered/replied/read` evidence on the current candidate. The only real
   App Server history-read attempt on the default Desktop daemon returned
   `list_turns is not supported yet`, and no cursor was available, so no `read`
   observation exists.
-- No real sidecar failure injection has been run against an installed
-  production binary; the missing/crash/timeout cases are contract and unit
-  level only.
+- Real installed-binary sidecar failure injection is closed for the crashed
+  before readiness case: the actual `rccv3` lifecycle entrypoint started the
+  listeners, the process stayed `running`, and `rccv3 status` reported
+  `hooks_unavailable:crashed: managed lifecycle validation failed: hooks sidecar exited before readiness`.
+  The missing and timeout cases remain contract/unit level because they are
+  covered by the lifecycle tests, but they have not been repeated through the
+  installed production binary.
 
 Install, restart, merge, and push remain explicitly unauthorized and are owned
 by the supervisor.

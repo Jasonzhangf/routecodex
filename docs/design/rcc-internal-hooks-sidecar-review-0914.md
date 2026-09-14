@@ -62,6 +62,55 @@ integration gate receipts with timestamps, and this file records the review
 rounds. The `live_required` items remain open and are restated in the contract
 as an explicit highest-layer capability gap rather than being claimed.
 
+## Round 3: commit `dd0b9cb29`, task `rcc-internal-hooks-sidecar-integration-0914-r3`
+
+Verdict: `fail / code_failure`, three P1.
+
+- P1 `v3/crates/routecodex-v3-hooks/src/control.rs:418`: shutdown removed the
+  control socket pathname without verifying the inode it owned, so a foreign
+  replacement socket on the same pathname could be deleted.
+
+Fix: `ControlServer` records the bound socket identity (`dev`, `ino`,
+`is_socket`) at bind time and `serve_forever` unlinks the path only when the
+current path still matches that identity. A replacement socket survives
+shutdown.
+
+Red evidence (identity guard neutralized):
+
+```text
+exit 1  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks --lib control_server_shutdown_never
+          panicked at crates/routecodex-v3-hooks/src/control.rs:809:
+          replacement must survive: Os { code: 2, kind: NotFound, ... }
+```
+
+- P1 `docs/design/rcc-internal-hooks-sidecar-contract.md:445`: the committed
+  contract did not close the declared real installed-binary sidecar failure
+  injection.
+
+Fix: the live failure injection was run with the actual `rccv3` entrypoint,
+  an isolated config, and a real installed `rccv3-hooksd` path that exits
+  before readiness. The server stayed `running` and status reported
+  `hooks_unavailable:crashed`.
+
+Evidence:
+
+```text
+command  ROUTECODEX_HOOKS_INSTALL_RECORD=$ROOT/install.json \
+           v3/target/debug/rccv3 start --config $ROOT/config.v3.toml --snap
+status   rccv3 status --config $ROOT/config.v3.toml
+detail   hooks sidecar unavailable: hooks_unavailable:crashed:
+         managed lifecycle validation failed: hooks sidecar exited before readiness
+state    running
+health   started listeners on 127.0.0.1:45464/45465/45466
+```
+
+- P1 `docs/design/rcc-internal-hooks-sidecar-contract.md:413`: the gate
+  receipts predated the final commit and did not bind to the exact reviewed
+  candidate.
+
+Fix: all affected gates are re-run against the exact post-commit candidate
+and the contract receipt section will carry the new commit and timestamps.
+
 ## Unchanged boundary
 
 Install, production restart, merge, and push are not authorized and have not

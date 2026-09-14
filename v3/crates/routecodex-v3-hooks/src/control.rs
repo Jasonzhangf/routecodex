@@ -2,12 +2,34 @@ use crate::*;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Identity of the control socket this server bound. Cleanup compares it
+/// against the current path so shutdown can never unlink a replacement that
+/// another process created after this server bound the pathname.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ControlSocketIdentity {
+    device: u64,
+    inode: u64,
+    is_socket: bool,
+}
+
+fn control_socket_identity(path: &Path) -> Option<ControlSocketIdentity> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    let file_type = metadata.file_type();
+    Some(ControlSocketIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        is_socket: file_type.is_socket(),
+    })
+}
 
 /// Bind the control socket owner-only. The control boundary exposes handler
 /// mounting, message forwarding, schedule mutation, delivery evidence, and
@@ -258,6 +280,7 @@ pub fn handle_control_request<T: AppServerTransport>(
 pub struct ControlServer {
     listener: UnixListener,
     socket_path: std::path::PathBuf,
+    socket_identity: ControlSocketIdentity,
     core: Arc<Mutex<HooksSidecarCore<AnyAppServerTransport>>>,
 }
 
@@ -276,6 +299,12 @@ impl ControlServer {
         Ok(Self {
             listener: bind_control_socket(socket_path)?,
             socket_path: socket_path.to_path_buf(),
+            socket_identity: control_socket_identity(socket_path).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "bound control socket identity is unavailable",
+                )
+            })?,
             core: Arc::new(Mutex::new(core)),
         })
     }
@@ -357,6 +386,12 @@ impl ControlServer {
         Ok(Self {
             listener: bind_control_socket(socket_path)?,
             socket_path: socket_path.to_path_buf(),
+            socket_identity: control_socket_identity(socket_path).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "bound control socket identity is unavailable",
+                )
+            })?,
             core: Arc::new(Mutex::new(core)),
         })
     }
@@ -414,13 +449,21 @@ impl ControlServer {
         let _ = timer.join();
         // The server owns this path. Removing it after the loop exits keeps a
         // clean restart from failing with AddrInUse on a stale socket left by
-        // an explicit shutdown.
-        remove_control_socket(&self.socket_path)?;
+        // an explicit shutdown. The identity check keeps shutdown from
+        // unlinking a replacement socket another process created on the same
+        // pathname while this server was running.
+        remove_owned_control_socket(&self.socket_path, self.socket_identity)?;
         result
     }
 }
 
-fn remove_control_socket(socket_path: &Path) -> std::io::Result<()> {
+fn remove_owned_control_socket(
+    socket_path: &Path,
+    identity: ControlSocketIdentity,
+) -> std::io::Result<()> {
+    if control_socket_identity(socket_path) != Some(identity) {
+        return Ok(());
+    }
     match std::fs::remove_file(socket_path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -705,6 +748,71 @@ mod tests {
         ControlServer::new(&socket_path).expect("rebind after shutdown");
         let rebound = std::fs::metadata(&socket_path);
         assert!(rebound.is_ok(), "rebound control socket must exist");
+        let _ = std::fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn control_server_shutdown_never_unlinks_a_replacement_socket() {
+        let socket_path = std::env::temp_dir().join(format!(
+            "rccv3-hooksd-replaced-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let server_path = socket_path.clone();
+        let server = std::thread::spawn(move || {
+            ControlServer::new(&server_path)
+                .expect("bind control socket")
+                .serve_forever()
+                .expect("serve control requests")
+        });
+
+        let mut stream = None;
+        for _ in 0..100 {
+            match UnixStream::connect(&socket_path) {
+                Ok(connected) => {
+                    stream = Some(connected);
+                    break;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                    ) =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(error) => panic!("connect to control socket: {error}"),
+            }
+        }
+        let mut stream = stream.expect("connect to control socket within bounded retries");
+
+        // Replace the pathname with a different socket while the daemon runs.
+        std::fs::remove_file(&socket_path).expect("remove original socket path");
+        let replacement = UnixListener::bind(&socket_path).expect("bind replacement socket");
+        let replacement_identity =
+            std::fs::symlink_metadata(&socket_path).expect("replacement metadata");
+
+        writeln!(stream, "{{\"method\":\"shutdown\"}}").unwrap();
+        let mut shutdown_response = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut shutdown_response)
+            .unwrap();
+        let shutdown: ControlResponse = serde_json::from_str(&shutdown_response).unwrap();
+        assert!(shutdown.ok);
+        server
+            .join()
+            .expect("control server should exit gracefully");
+
+        let after = std::fs::symlink_metadata(&socket_path).expect("replacement must survive");
+        assert_eq!(
+            after.ino(),
+            replacement_identity.ino(),
+            "shutdown must not unlink a replacement socket"
+        );
+        drop(replacement);
         let _ = std::fs::remove_file(socket_path);
     }
 
