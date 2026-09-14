@@ -76,9 +76,9 @@ fn native_transport_resolves_receipt_and_reply_over_unix_websocket() {
 
     let evidence = transport.delivery_evidence(&intent, &[]).unwrap();
     assert_eq!(evidence.intent_id, "intent-native-1");
-    assert_eq!(evidence.state, routecodex_v3_hooks::DeliveryState::Read);
-    assert_eq!(evidence.read_item_id.as_deref(), Some("reply-1"));
-    assert_eq!(evidence.cursor.as_deref(), Some("cursor-1"));
+    assert_eq!(evidence.state, routecodex_v3_hooks::DeliveryState::Replied);
+    assert!(evidence.read_item_id.is_none());
+    assert!(evidence.cursor.is_none());
 
     stop.store(true, Ordering::Relaxed);
     server.join().unwrap();
@@ -214,9 +214,9 @@ fn native_transport_falls_back_to_history_lists_when_thread_read_turns_is_unsupp
         )]
     );
     let evidence = transport.delivery_evidence(&intent, &[]).unwrap();
-    assert_eq!(evidence.state, routecodex_v3_hooks::DeliveryState::Read);
-    assert_eq!(evidence.read_item_id.as_deref(), Some("reply-1"));
-    assert_eq!(evidence.cursor.as_deref(), Some("cursor-1"));
+    assert_eq!(evidence.state, routecodex_v3_hooks::DeliveryState::Replied);
+    assert!(evidence.read_item_id.is_none());
+    assert!(evidence.cursor.is_none());
 
     stop.store(true, Ordering::Relaxed);
     server.join().unwrap();

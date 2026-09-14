@@ -48,8 +48,6 @@ pub struct NativeBaselineSnapshot {
     #[serde(default)]
     pub items: Vec<NativeThreadItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
@@ -358,7 +356,6 @@ impl NativeAppServerTransport {
             return Ok(NativeBaselineSnapshot {
                 state: NativeBaselineState::Read,
                 items,
-                cursor: None,
                 reason: None,
             });
         }
@@ -388,7 +385,6 @@ impl NativeAppServerTransport {
                             Ok(NativeBaselineSnapshot {
                                 state: NativeBaselineState::Empty,
                                 items: Vec::new(),
-                                cursor: None,
                                 reason: Some(reason),
                             })
                         } else {
@@ -418,12 +414,7 @@ impl NativeAppServerTransport {
         } else {
             baseline.to_vec()
         };
-        correlate_delivery_evidence(
-            &intent.intent_id,
-            &baseline_for_intent,
-            &snapshot.items,
-            snapshot.cursor.as_deref(),
-        )
+        correlate_delivery_evidence(&intent.intent_id, &baseline_for_intent, &snapshot.items)
     }
 }
 
@@ -435,15 +426,9 @@ fn snapshot_from_history_page(
         .get("data")
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| AppServerError::Transport(format!("{method} returned no data array")))?;
-    let cursor = result
-        .get("backwardsCursor")
-        .or_else(|| result.get("nextCursor"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
     Ok(NativeBaselineSnapshot {
         state: NativeBaselineState::Read,
         items: data.iter().map(NativeThreadItem::from_entry).collect(),
-        cursor,
         reason: None,
     })
 }
@@ -534,12 +519,7 @@ impl AppServerTransport for NativeAppServerTransport {
                 })?,
         };
         let snapshot = self.snapshot_items(intent.target.namespace, &intent.target.thread_id)?;
-        correlate_delivery_evidence(
-            &intent.intent_id,
-            &baseline_for_intent,
-            &snapshot.items,
-            snapshot.cursor.as_deref(),
-        )
+        correlate_delivery_evidence(&intent.intent_id, &baseline_for_intent, &snapshot.items)
     }
 }
 
@@ -547,7 +527,6 @@ pub fn correlate_delivery_evidence(
     intent_id: &str,
     baseline: &[String],
     items: &[NativeThreadItem],
-    cursor: Option<&str>,
 ) -> Result<DeliveryEvidenceRecord, AppServerError> {
     let baseline_set = baseline.iter().collect::<std::collections::HashSet<_>>();
     let receipt = items.iter().find(|item| {
@@ -576,22 +555,16 @@ pub fn correlate_delivery_evidence(
         )));
     };
     let message_id = receipt.id.clone().unwrap_or_else(|| intent_id.to_string());
-    let cursor = cursor.filter(|cursor| !cursor.is_empty());
-    let (state, cursor, read_item_id) = match (reply, cursor) {
-        (Some(reply), Some(cursor)) => (
-            DeliveryState::Read,
-            Some(cursor.to_string()),
-            reply.id.clone(),
-        ),
-        (Some(_), None) => (DeliveryState::Replied, None, None),
-        (None, _) => (DeliveryState::Delivered, None, None),
+    let state = match reply {
+        Some(_) => DeliveryState::Replied,
+        None => DeliveryState::Delivered,
     };
     Ok(DeliveryEvidenceRecord {
         intent_id: intent_id.to_string(),
         message_id,
         state,
-        cursor,
-        read_item_id,
+        cursor: None,
+        read_item_id: None,
     })
 }
 
@@ -1011,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn delivery_evidence_maps_receipt_reply_and_read_without_promoting_baseline() {
+    fn delivery_evidence_maps_receipt_and_reply_without_promoting_baseline_to_read() {
         let intent_id = "intent-1";
         let baseline = vec!["old-user".to_string(), "old-agent".to_string()];
         let items = vec![
@@ -1037,35 +1010,36 @@ mod tests {
                 text: Some("reply".to_string()),
             },
         ];
-        let evidence =
-            correlate_delivery_evidence(intent_id, &baseline, &items, Some("cursor-1")).unwrap();
-        assert_eq!(evidence.state, DeliveryState::Read);
+        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items).unwrap();
+        assert_eq!(evidence.state, DeliveryState::Replied);
         assert_eq!(evidence.message_id, "receipt-1");
-        assert_eq!(evidence.cursor.as_deref(), Some("cursor-1"));
-        assert_eq!(evidence.read_item_id.as_deref(), Some("reply-1"));
+        assert!(evidence.cursor.is_none());
+        assert!(evidence.read_item_id.is_none());
     }
 
     #[test]
-    fn delivery_evidence_does_not_claim_read_without_cursor() {
-        let intent_id = "intent-no-cursor";
-        let baseline = vec![];
-        let items = vec![
-            NativeThreadItem {
-                id: Some("receipt-no-cursor".to_string()),
-                kind: Some("userMessage".to_string()),
-                client_user_message_id: Some(intent_id.to_string()),
-                turn_id: Some("turn-no-cursor".to_string()),
-                text: Some("probe".to_string()),
-            },
-            NativeThreadItem {
-                id: Some("reply-no-cursor".to_string()),
-                kind: Some("agentMessage".to_string()),
-                client_user_message_id: None,
-                turn_id: Some("turn-no-cursor".to_string()),
-                text: Some("reply".to_string()),
-            },
-        ];
-        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items, None).unwrap();
+    fn delivery_evidence_does_not_promote_pagination_cursor_to_read() {
+        let intent_id = "intent-page";
+        let page = json!({
+            "data": [
+                {
+                    "id": "receipt-page",
+                    "type": "userMessage",
+                    "clientUserMessageId": intent_id,
+                    "turnId": "turn-page",
+                    "text": "probe"
+                },
+                {
+                    "id": "reply-page",
+                    "type": "agentMessage",
+                    "turnId": "turn-page",
+                    "text": "reply"
+                }
+            ],
+            "backwardsCursor": "cursor-page"
+        });
+        let snapshot = snapshot_from_history_page(&page, "thread/items/list").unwrap();
+        let evidence = correlate_delivery_evidence(intent_id, &[], &snapshot.items).unwrap();
         assert_eq!(evidence.state, DeliveryState::Replied);
         assert!(evidence.cursor.is_none());
         assert!(evidence.read_item_id.is_none());
@@ -1082,8 +1056,7 @@ mod tests {
             turn_id: Some("turn-no-reply".to_string()),
             text: Some("probe".to_string()),
         }];
-        let evidence =
-            correlate_delivery_evidence(intent_id, &baseline, &items, Some("cursor-1")).unwrap();
+        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items).unwrap();
         assert_eq!(evidence.state, DeliveryState::Delivered);
         assert!(evidence.cursor.is_none());
         assert!(evidence.read_item_id.is_none());
@@ -1100,7 +1073,7 @@ mod tests {
             turn_id: Some("turn-2".to_string()),
             text: Some("probe".to_string()),
         }];
-        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items, None).unwrap();
+        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items).unwrap();
         assert_eq!(evidence.state, DeliveryState::Delivered);
         assert!(evidence.cursor.is_none());
         assert!(evidence.read_item_id.is_none());
@@ -1126,7 +1099,7 @@ mod tests {
                 text: Some("tool output".to_string()),
             },
         ];
-        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items, None).unwrap();
+        let evidence = correlate_delivery_evidence(intent_id, &baseline, &items).unwrap();
         assert_eq!(
             evidence.state,
             DeliveryState::Delivered,
@@ -1146,7 +1119,7 @@ mod tests {
             text: Some("other".to_string()),
         }];
         assert_eq!(
-            correlate_delivery_evidence(intent_id, &baseline, &items, None)
+            correlate_delivery_evidence(intent_id, &baseline, &items)
                 .unwrap_err()
                 .to_string(),
             "delivery unresolved: no native receipt found for intent-missing"

@@ -112,6 +112,34 @@ Fix: all affected gates were re-run against the exact post-commit candidate
 and the contract receipt section now carries the candidate code commit
 `7f327065368ed55cfc710aa9e5fbd7e589fccd5b` and post-commit timestamps.
 
+## Round 13: merged candidate `1b408a085`, task `rcc-internal-hooks-sidecar-main-0914-r13`
+
+Verdict: `fail / code_failure`, one P1.
+
+- P1 `v3/crates/routecodex-v3-hooks/src/appserver.rs:580`: the native transport
+  treated any non-empty `backwardsCursor`/`nextCursor` from
+  `thread/items/list` or `thread/turns/list` as proof that the target read the
+  reply. A pagination cursor is not a read receipt, so a normal history page
+  containing an assistant reply could be promoted from `replied` to `read`.
+
+Fix: removed the pagination cursor from `NativeBaselineSnapshot` and from
+`correlate_delivery_evidence`. Receipt plus correlated assistant reply now
+stops at `replied`; `cursor` and `read_item_id` remain unset until an explicit
+native read observation exists. Added the regression
+`delivery_evidence_does_not_promote_pagination_cursor_to_read`, which feeds a
+page containing a receipt, same-turn reply, and `backwardsCursor` and asserts
+the result remains `replied`.
+
+Verification after the fix:
+
+```text
+CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
+  61 lib + 3 binary_handler_config + 1 binary_readiness + 6 native_delivery_replay pass
+```
+
+The prior P1 is fixed but this merge candidate requires a new independent
+review after the fix commit.
+
 ## Unchanged boundary
 
 Install, production restart, merge, and push are not authorized and have not

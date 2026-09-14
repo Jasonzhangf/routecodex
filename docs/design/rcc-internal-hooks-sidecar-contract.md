@@ -86,11 +86,11 @@ AppServerTransport      -> session_status + send_message trait boundary
   through the standard send gate instead of bypassing message delivery.
 - Delivery evidence records only states the transport actually observed.
   Receipt correlation yields `delivered`; a correlated assistant reply yields
-  `replied`; `read` requires both that reply and a non-empty continuation
-  cursor/page from the native history response. Missing either condition keeps
-  the highest justified lower state. The current transport does not synthesize
-  `executed`; a `toolMessage` remains execution evidence only and cannot
-  promote an intent.
+  `replied`; history pagination cursors are not read observations, so a normal
+  history page cannot promote the intent to `read`. `read` requires an explicit
+  native read receipt tied to the reply; the current native transport does not
+  synthesize either that receipt or `executed`. A `toolMessage` remains
+  execution evidence only and cannot promote an intent.
 - Native App Server request shapes are captured in Rust:
   `initialize`, `thread/read`, `thread/loaded/list`, `thread/queue/add`,
   `thread/items/list`.
@@ -144,14 +144,14 @@ AppServerTransport      -> session_status + send_message trait boundary
   and 6 `native_delivery_replay` tests pass.
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
   --test native_delivery_replay`: an end-to-end replay against a mock App
-  Server that speaks the real Unix WebSocket JSON-RPC protocol proves
+Server that speaks the real Unix WebSocket JSON-RPC protocol proves
   `thread/queue/add` acceptance -> `thread/items/list` receipt/reply
-  correlation -> `read` evidence when the page supplies a cursor, proves a
-  reply without a cursor stops at `replied`, proves the timer fires through the
-  core and sends back to the registrant, and proves the running control
-  server's timer tick delivers a due schedule through the native transport.
-  The mock is a protocol fixture only; production still talks only to the
-  Codex default TUI/Desktop App Server.
+  correlation, proves a normal pagination cursor does not promote the state
+  beyond `replied`, proves a receipt without a reply stops at `delivered`,
+  proves the timer fires through the core and sends back to the registrant,
+  and proves the running control server's timer tick delivers a due schedule
+  through the native transport. The mock is a protocol fixture only;
+  production still talks only to the Codex default TUI/Desktop App Server.
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib`:
   52 tests pass, including internal `rccv3-hooksd` missing/crash/timeout
   degradation and stale/identity-mismatched hooks record handling. Startup
@@ -265,9 +265,9 @@ delivery, execution, reply, or read closure.
   `RCC_HOOKS_LIVE_TUI_OK_2`. The original replay used the old correlation
   implementation, which stopped at `accepted -> replied` with native message
   id `01a09f1d-909d-7a41-a132-a0b74343edc7` and did not retain a cursor; that
-  historical run does not claim `read`. The current correlation path requires
-  a non-empty native history cursor and is covered by the positive and negative
-  native replay tests above.
+  historical run does not claim `read`. The current correlation path also
+  refuses to promote a history pagination cursor to `read`, and that boundary
+  is covered by the native replay tests above.
 - TUI -> Desktop queue submission was attempted through the same default App
   Server socket and failed before queue acceptance with the exact capability
   gap:
@@ -315,9 +315,8 @@ failure paths
   missing app server socket    -> fail closed: app server socket missing ... No such file or directory
 ```
 
-Each reply was confirmed in the target TUI pane. These historical rows predate
-the cursor-based `read` correlation and therefore record only
-`accepted -> replied`; they do not claim live `read` evidence. A
+Each reply was confirmed in the target TUI pane. These historical rows record
+only `accepted -> replied`; they do not claim live `read` evidence. A
 `working + idle_only -> deferred` trace was not captured in this session: the
 shared App Server reported the target as `idle` while a `sleep` tool call was
 in flight, so the deferred branch could not be triggered against a real target
@@ -328,10 +327,10 @@ On the 2026-09-14 follow-up, the default daemon socket remained probeable and
 returned only the existing Desktop thread
 `01a09634-4031-73f0-90df-11a03e0325eb`. A fresh CLI 0.154.0 TUI attached to
 that daemon but did not register a new thread; the daemon binary is 0.153.4.
-No live `read` cursor was produced by this environment. The cursor-aware
-correlation is therefore proven at the native protocol replay layer, while
-live TUI `read` remains unverified until a compatible default daemon exposes a
-fresh TUI thread.
+No native read observation was produced by this environment. The negative
+cursor-to-read boundary is proven at the native protocol replay layer, while
+live TUI `read` remains unverified until a compatible default daemon exposes
+an explicit read receipt.
 
 ## Install record decision
 
@@ -449,8 +448,8 @@ The declared `live_required` items:
 - No real TUI/TUI or TUI/Desktop same-entry replay has produced native
   `delivered/replied/read` evidence on the current candidate. The only real
   App Server history-read attempt on the default Desktop daemon returned
-  `list_turns is not supported yet`, and no cursor was available, so no `read`
-  observation exists.
+  `list_turns is not supported yet`, and history pagination alone is not read
+  evidence, so no `read` observation exists.
 - Real installed-binary sidecar failure injection is closed for the crashed
   before readiness case: the actual `rccv3` lifecycle entrypoint started the
   listeners, the process stayed `running`, and `rccv3 status` reported
