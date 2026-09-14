@@ -68,14 +68,14 @@ test('historical over-limit file without growth is warning-only', () => {
   }
 });
 
-test('new growth in an over-limit file remains blocking', () => {
+test('new growth in an already over-limit file is warning-only', () => {
   const tempRoot = createRepo(6, 'a\nb\nc\nd\ne\n');
   try {
     commitChange(tempRoot, 'tracked.mjs', 'a\nb\nc\nd\ne\nf\n');
     const result = runChecker(tempRoot);
     const output = `${result.stdout}\n${result.stderr}`;
-    if (result.status !== 1 || !output.includes('modified-file-over-limit')) {
-      throw new Error(`expected blocking result, got status=${result.status}\n${output}`);
+    if (result.status !== 0 || !output.includes('[file-line-limit] warn') || !output.includes('modified-file-over-limit')) {
+      throw new Error(`expected warning-only result, got status=${result.status}\n${output}`);
     }
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
