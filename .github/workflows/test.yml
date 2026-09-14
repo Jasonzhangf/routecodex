@@ -151,7 +151,7 @@ jobs:
         run: npm run fix:cli-shim
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
-        run: node v3/scripts/run-v3-cargo-test.mjs +stable --workspace -- --nocapture
+        run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
 
   v4-build:
     needs: scope

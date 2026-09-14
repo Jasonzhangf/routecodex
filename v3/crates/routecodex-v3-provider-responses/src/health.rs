@@ -1245,11 +1245,26 @@ impl V3ProviderHealthStore {
             // history (attempts/failures/EWMA above) stays diagnostic and
             // never reschedules the cadence.
             let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
-            // 阻塞条件：自适应分数归零，或连击达到盖章阈值（全局策略表
-            // 429/5xx=3、401/403=2、默认 3）。
-            let should_block = history.score_milli == 0
-                || (action.failure_threshold > 0
-                    && history.failure_streak >= action.failure_threshold);
+            // 阻塞条件由 typed action 唯一决定：带阈值的 action 按连击阈值；
+            // 无阈值的不可恢复 action 立即阻断；无阈值的可恢复 action 仍按
+            // score 归零阻断。score 基线是 configured priority，因此低优先级
+            // key 的一次 -5 不能绕过可恢复阈值直接进入 cooldown。
+            let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
+                && match action.recovery {
+                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+                        if action.failure_threshold == 0 =>
+                    {
+                        true
+                    }
+                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+                    | V3ProviderRecoveryKind::RecoverableCounted
+                        if action.failure_threshold > 0 =>
+                    {
+                        history.failure_streak >= action.failure_threshold
+                    }
+                    V3ProviderRecoveryKind::RecoverableCounted => history.score_milli == 0,
+                    _ => false,
+                };
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
                     &mut state,
@@ -1297,8 +1312,6 @@ impl V3ProviderHealthStore {
                 history.probe_failure_count = 0;
                 history.score_generation = history.score_generation.saturating_add(1);
             }
-            state.auth_key_cooldowns.remove(&key);
-            state.auth_key_consecutive_failures.remove(&key);
         } else {
             let history = state.adaptive_history.entry(key.clone()).or_default();
             record_health_delta(history, 1);
@@ -1306,8 +1319,9 @@ impl V3ProviderHealthStore {
             history.success_streak = history.success_streak.saturating_add(1);
             history.last_success_at_ms = Some(now_ms);
             history.score_generation = history.score_generation.saturating_add(1);
-            state.auth_key_consecutive_failures.remove(&key);
         }
+        let auth_key = provider_cooldown_probe_key(provider_id, Some(auth_alias), None);
+        state.auth_key_consecutive_failures.remove(&auth_key);
         if let Some(completion) = completion {
             let _ = completion.send_replace(true);
         }
@@ -1412,13 +1426,15 @@ impl V3ProviderHealthStore {
                     || probe.next_probe_at_ms.is_some()
                     || probe.blocked_until_ms.is_some_and(|until| until > _now_ms)
             });
-        let available = score_milli > 0
-            && state
-                .provider_cooldown_probes
-                .get(&key)
-                .map_or(true, |probe| {
-                    !probe.probe_in_flight && probe.blocked_until_ms.is_none()
-                })
+        // score 是同一 configured priority bucket 内的调度权重，不是可用性。
+        // 低优先级 key 在一次 -5 后可能已经 score=0，但只有连击达到阈值后
+        // 创建的 cooldown/probe 状态才允许把候选从 Target selection 中移除。
+        let available = state
+            .provider_cooldown_probes
+            .get(&key)
+            .map_or(true, |probe| {
+                !probe.probe_in_flight && probe.blocked_until_ms.is_none()
+            })
             && !auth_key_cooldown
             && !auth_key_probe;
         Ok(V3ProviderSchedulingProjection {
@@ -1434,8 +1450,6 @@ impl V3ProviderHealthStore {
             available,
             blocked_scopes: if available {
                 Vec::new()
-            } else if score_milli == 0 {
-                vec!["provider_key_health_score_zero".to_string()]
             } else {
                 vec!["provider_key_health_cooldown".to_string()]
             },

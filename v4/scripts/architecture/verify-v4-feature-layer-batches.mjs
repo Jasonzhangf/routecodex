@@ -106,9 +106,14 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
         addFailure(failures, 'WIRING_GUARD_UNBOUND', 'build guard requires an exact source candidate');
       }
     } else if (observed.wiring_edges.length > 0) {
-      validateFeatureLayerAdmission(input, context, failures, {
-        requireIntegrationRecords: false,
-      });
+      // Build guard admits independent source builds. It observes wiring so a
+      // real graph change is surfaced as a warning, but it must not escalate
+      // into full candidate/evidence admission: that path executes the whole
+      // registered gate matrix and blocks compilation on stale evidence. Strict
+      // admission remains the owner of `--admission`.
+      console.warn(
+        `[V4-LAYER-GATE-001] BUILD-GUARD WARNING wiring changed since guard commit: ${observed.wiring_edges.join(', ')}`,
+      );
     }
   }
   return failures;

@@ -1069,7 +1069,7 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   required_live:
-  - RUSTUP_TOOLCHAIN=stable npm run install:v3
+  - npm run install:v3
   - rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml
   - rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml
   - 4444 and 5555 health version must match the installed rccv3 artifact

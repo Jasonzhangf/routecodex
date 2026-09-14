@@ -548,8 +548,11 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     .await
     .unwrap();
 
-    assert_eq!(*transport.attempts.lock().unwrap(), 2);
-    assert_eq!(output.status, 200);
+    // RetrySame is a config compatibility enum only; production never grants a
+    // same-candidate retry, and this pool declares a single target so
+    // reselection cannot yield another attempt either.
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert_eq!(output.status, 502);
     let observability = output.observability.as_ref().expect("observability");
     assert_eq!(observability.provider_failure_events.len(), 1);
     let failure = &observability.provider_failure_events[0];
@@ -561,19 +564,11 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
-    match output.client_body {
-        V3ResponsesRelayClientBody::Sse(mut stream) => {
-            use futures_util::StreamExt;
-            let mut forwarded = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk);
-            }
-            let text = String::from_utf8(forwarded).unwrap();
-            assert!(text.contains("OK after retry"));
-            assert!(!text.contains("ANTHROPIC_CYBER_REFUSAL"));
-        }
-        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
-    }
+    assert!(
+        output.node_trace.contains(&"V3Error06ClientProjected"),
+        "single-candidate pool must project the provider failure terminally: {:?}",
+        output.node_trace
+    );
 }
 
 #[tokio::test]

@@ -150,7 +150,7 @@ flowchart TD
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>RUSTUP_TOOLCHAIN=stable npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
           <tr><td>Config/restart</td><td><code>rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml</code>, then <code>rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml</code>. Legacy <code>routecodex restart --port</code> is not authoritative for this V3 instance.</td></tr>
           <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for all member ports, including 4444 and 5555.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>

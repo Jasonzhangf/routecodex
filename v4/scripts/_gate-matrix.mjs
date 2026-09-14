@@ -85,6 +85,8 @@ export const CONSUMER_REGRESSIONS = [
 // These are the unique active map commands that are not architecture or
 // build-link consumer commands. A shared command runs once and can project
 // into several map roles; it must not be copied into one entry per role.
+// Strict feature-layer admission is intentionally not part of this build
+// matrix: install/compile entrypoints and the dedicated admission job own it.
 export const MODULE_REGRESSIONS = [
   { label: 'module:routecodex-v4-plugin-plan', command: 'cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-cordis-bridge', command: 'cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked' },
@@ -94,7 +96,6 @@ export const MODULE_REGRESSIONS = [
   { label: 'module:routecodex-v4-lifecycle', command: 'cargo test -p routecodex-v4-lifecycle --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-servertool', command: 'cargo test -p routecodex-v4-servertool --test l2_servertool --manifest-path Cargo.toml --locked' },
   { label: 'module:feature-layer-self-test', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --self-test' },
-  { label: 'module:feature-layer-admission', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission' },
   { label: 'module:feature-layer-boundary', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --boundary-self-test' },
   { label: 'module:standard-plugins-request', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked' },
   { label: 'module:standard-plugins-response', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_inbound_outbound --manifest-path Cargo.toml --locked' },
