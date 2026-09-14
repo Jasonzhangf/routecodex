@@ -13,6 +13,7 @@ const server = 'v3/crates/routecodex-v3-server/src/executors.rs';
 const driver = 'v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs';
 const manifest = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const callMap = 'docs/architecture/v3-mainline-call-map.yml';
+const functionMap = 'docs/architecture/v3-function-map.yml';
 const cases = [
   ['missing Req06 edge', runtime, '    trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
   ['fabricated static trace', runtime, '    let mut trace = Vec::with_capacity(17);', '    const SUCCESS_TRACE: [&str; 0] = [];\n    let mut trace = Vec::with_capacity(17);', /SUCCESS_TRACE/],
@@ -39,13 +40,20 @@ const cases = [
     'step_id: v3-anthropic-relay-16\n    from_node: V3HubRespContinuation04Committed\n    to_node: V3HubRespOutbound05ClientSemantic\n    caller_symbol: execute_v3_anthropic_relay_runtime\n    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs\n    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload_removed',
     /v3-anthropic-relay-16 must call/,
   ],
+  [
+    'Anthropic protocol decision contract drift',
+    functionMap,
+    'Same-protocol Anthropic targets select Direct; cross-protocol targets select Relay.',
+    'Same-protocol Anthropic targets select Relay; cross-protocol targets select Relay.',
+    /missing Anthropic protocol decision contract/,
+  ],
 ];
 
 const failures = [];
 for (const [name, relative, from, to, diagnostic] of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-anthropic-relay-runtime-red-'));
   try {
-    for (const path of [runtime, 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs', server, driver, 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs', 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md', manifest, callMap]) {
+    for (const path of [runtime, 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs', 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs', server, driver, 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs', 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md', manifest, callMap, functionMap]) {
       cpSync(resolve(repo, path), resolve(root, path), { recursive: true });
     }
     cpSync(

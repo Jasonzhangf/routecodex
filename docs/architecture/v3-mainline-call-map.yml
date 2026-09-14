@@ -2983,7 +2983,10 @@ chains:
     status: anchored
 - chain_id: v3.anthropic_relay.controlled_runtime
   owner_feature_id: v3.anthropic_relay_runtime_integration
-  summary: Controlled Anthropic /v1/messages Relay request through the sole Hub v1 lifecycle, generic Responses transport, Error01-06, and the sole Anthropic client projection exit.
+  summary: Controlled Anthropic /v1/messages request through the sole Hub v1 lifecycle. Typed
+    protocol execution planning selects Direct for same-protocol targets and Relay for
+    cross-protocol targets; Relay uses the generic Responses transport, Error01-06, and the
+    sole Anthropic client projection exit.
   edges:
   - step_id: v3-anthropic-relay-01
     from_node: V3ServerValidatedMessagesRequest

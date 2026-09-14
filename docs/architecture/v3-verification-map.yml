@@ -1402,6 +1402,11 @@ features:
   - Req08 owns the real Responses wire payload and Req09 owns the real HTTP transport request before the single upstream send
   - Anthropic protocol differences remain in the entry and exit codec; Chat Process and Virtual Router contain no provider-specific branch
   - provider HTTP and runtime failures enter Error01 through Error06 and never enter the successful response node chain
+  - Anthropic /v1/messages computes the typed protocol decision before dispatch: same-protocol
+    targets use Direct and cross-protocol targets use Relay; no Anthropic runtime-local decision
+    or fallback is permitted
+  - the decision remains control-plane state and is not copied into the Anthropic request,
+    provider wire body, client response, or SSE text
   - structured SSE decoding preserves arbitrary chunk boundaries and reasoning tool terminal ordering without a second framing parser
   - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
   - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth

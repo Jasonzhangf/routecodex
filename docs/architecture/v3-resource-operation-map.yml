@@ -307,7 +307,7 @@ resources:
       single_decision_owner: protocol execution planning writes the Direct-or-Relay decision once into the MetadataCenter side-channel before dispatch
       downstream_contract: Direct and Relay runtimes consume the selected executionMode; target-local provider-failure reselection may emit only a typed Direct/Relay handoff for the newly selected Target10, carrying the complete request-local failed-candidate exclusion set without payload reconstruction
     allowed_writers: [V3Execution11ProtocolDecision]
-    allowed_readers: [V3ResponsesDirect11Policy, routecodex-v3-server]
+    allowed_readers: [V3ResponsesDirect11Policy, routecodex-v3-server, execute_v3_anthropic_relay_runtime]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3ResponsesDirect11Policy, V3Resp15ClientPayload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -634,7 +634,7 @@ resources:
     owner_node: V3HubReqExecution05Planned
     identity: [requestId, executionMode, targetResolutionMode]
     allowed_writers: [V3HubReqExecution05Planned]
-    allowed_readers: [V3HubReqTarget06Resolved, V3HubReqOutbound07ProviderSemantic, V3HubRespChatProcess03Governed]
+    allowed_readers: [V3HubReqTarget06Resolved, V3HubReqOutbound07ProviderSemantic, V3HubRespChatProcess03Governed, execute_v3_anthropic_relay_runtime]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false

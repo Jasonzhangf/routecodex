@@ -25,6 +25,7 @@ const testPath = 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_
 const designPath = 'docs/goals/v3-anthropic-relay-runtime-integration-test-design.md';
 const manifestPath = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const callMapPath = 'docs/architecture/v3-mainline-call-map.yml';
+const functionMapPath = 'docs/architecture/v3-function-map.yml';
 const runtime = readRepo(runtimePath);
 const hub = readRepo(hubPath);
 const requestNodeSurface = [
@@ -42,7 +43,16 @@ const tests = readRepo(testPath);
 const design = readRepo(designPath);
 const manifest = YAML.parse(readRepo(manifestPath));
 const callMap = YAML.parse(readRepo(callMapPath));
+const functionMap = readRepo(functionMapPath);
 const failures = [];
+for (const phrase of [
+  'Anthropic /v1/messages uses the typed V3Execution11ProtocolDecision before dispatch.',
+  'Same-protocol Anthropic targets select Direct; cross-protocol targets select Relay.',
+  'plan_v3_responses_protocol_execution_with_provider_health',
+  'build_v3_execution_11_protocol_decision_from_v3_target_10',
+]) {
+  if (!functionMap.includes(phrase)) failures.push(`${functionMapPath}: missing Anthropic protocol decision contract ${phrase}`);
+}
 const expectedManifestNodes = [
   'V3ServerValidatedMessagesRequest',
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',

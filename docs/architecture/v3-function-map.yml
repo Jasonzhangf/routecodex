@@ -2114,6 +2114,8 @@ features:
   - routecodex-v3-runtime
   - routecodex-v3-server
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs
+  - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -2155,6 +2157,8 @@ features:
   - v3-anthropic-relay-16
   - v3-anthropic-relay-17
   entry_symbols:
+  - plan_v3_responses_protocol_execution_with_provider_health
+  - build_v3_execution_11_protocol_decision_from_v3_target_10
   - execute_v3_anthropic_messages_request
   - execute_v3_anthropic_relay_runtime
   - run_v3_anthropic_relay_runtime_req_inbound
@@ -2201,6 +2205,13 @@ features:
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
+  required_contract:
+  - Anthropic /v1/messages uses the typed V3Execution11ProtocolDecision before dispatch.
+  - Same-protocol Anthropic targets select Direct; cross-protocol targets select Relay.
+  - The decision is owned by protocol execution planning and is consumed by the selected
+    runtime; Anthropic relay code must not recreate or override it.
+  - The entry and exit codecs remain protocol-specific, while Direct preserves the canonical
+    request/response meaning and Relay performs the declared cross-protocol projection.
   runtime_status: controlled_runtime_integration_verified
   pending_runtime:
   - live 5555 validation and cutover
