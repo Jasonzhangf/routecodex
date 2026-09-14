@@ -154,11 +154,12 @@ function main() {
     }
     const violationType = entry.status === 'A' ? 'new-file-over-limit' : 'modified-file-over-limit';
     if (entry.status !== 'A') {
+      // A historical file already over the limit is advisory: it may grow while
+      // being repaired. Only newly added files are hard-blocked, so a line-count
+      // signal never blocks fixing an over-limit gate.
       const baselineLines = countLinesAtRevision(baseRevision, entry.basePath || filePath);
-      if (baselineLines !== null && lines <= baselineLines) {
-        warnings.push({ type: violationType, path: filePath, lines, baselineLines });
-        continue;
-      }
+      warnings.push({ type: violationType, path: filePath, lines, baselineLines });
+      continue;
     }
     violations.push({ type: violationType, path: filePath, lines });
   }
@@ -166,9 +167,10 @@ function main() {
   if (warnings.length) {
     console.warn(`[file-line-limit] warn (limit=${policy.limit}, range=${range || 'HEAD'})`);
     for (const warning of warnings) {
-      console.warn(
-        `- ${warning.type}: ${warning.path} (${warning.lines} lines; baseline ${warning.baselineLines}; no growth)`
-      );
+      const baseline = warning.baselineLines === null ? 'unknown' : warning.baselineLines;
+      const delta = warning.baselineLines === null ? null : warning.lines - warning.baselineLines;
+      const change = delta === null ? '' : (delta > 0 ? `; growth +${delta}` : '; no growth');
+      console.warn(`- ${warning.type}: ${warning.path} (${warning.lines} lines; baseline ${baseline}${change})`);
     }
   }
 
