@@ -42,6 +42,7 @@ export const RED_SUITES = [
   ['verify-v4-execution-binding.mjs', '--red-self-test'],
   ['verify-v4-feature-layer-batches.mjs', '--red-self-test'],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
+  ['verify-v4-product-parity-ledger.mjs', '--red-self-test'],
   ['verify-v4-infrastructure.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-plane-isolation.mjs', '--red-self-test'],
@@ -77,3 +78,17 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-standard-plugins', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container'],
   ['routecodex-v4-cli-plugin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-standard-plugins'],
 ];
+
+export const RUNTIME_BIN_REGRESSION = 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests';
+
+export function architectureCommand(gate, flag) {
+  return ['node', `scripts/architecture/${gate}`, flag].filter(Boolean).join(' ');
+}
+
+export function consumerCommand([consumer, deps, ...extra]) {
+  return [
+    'cargo', 'run', '--quiet', '--release', '--manifest-path', 'Cargo.toml',
+    '-p', 'routecodex-v4-build-link', '--', 'test-consumer', '--root', '.',
+    '--consumer', consumer, '--deps', deps, ...extra,
+  ].join(' ');
+}

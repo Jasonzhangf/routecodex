@@ -6,11 +6,14 @@
  * per verify:ci.
  */
 import { runIndependent, reportIndependentFailures } from './_common.mjs';
-import { RED_SUITES } from './_gate-matrix.mjs';
+import { RED_SUITES, architectureCommand } from './_gate-matrix.mjs';
 
 const regressionFailures = runIndependent([{
   label: 'feature-layer-batch evidence regression',
   command: 'node scripts/tests/feature-layer-batch-evidence-regression.mjs',
+}, {
+  label: 'isolation command binding regression',
+  command: 'node scripts/verify-isolation.mjs --command-binding-self-test',
 }]);
 if (regressionFailures.length > 0) {
   reportIndependentFailures('verify:red', regressionFailures);
@@ -19,7 +22,7 @@ if (regressionFailures.length > 0) {
 
 const failures = runIndependent(RED_SUITES.map(([gate, flag]) => ({
   label: `red:${gate} ${flag}`,
-  command: `node scripts/architecture/${gate} ${flag}`,
+  command: architectureCommand(gate, flag),
 })));
 if (failures.length > 0) {
   reportIndependentFailures('verify:red', failures);
