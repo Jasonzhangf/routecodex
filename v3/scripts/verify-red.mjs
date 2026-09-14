@@ -6,21 +6,25 @@ const entries = [
     label: 'independent-build-isolation-red-fixtures',
     command: 'node',
     args: ['tests/scripts/v3-independent-build-isolation-red-fixtures.mjs'],
+    severity: 'BLOCK',
   },
   {
     label: 'aggregate-environment-availability-regression',
     command: 'node',
     args: ['scripts/tests/v3-aggregate-environment-availability-regression.mjs'],
+    severity: 'BLOCK',
   },
   {
     label: 'architecture-admission-red-fixtures',
     command: 'node',
     args: ['tests/scripts/v3-architecture-admission-red-fixtures.mjs'],
+    severity: 'BLOCK',
   },
   {
     label: 'build-test-artifact-budget-red-fixtures',
     command: 'node',
     args: ['tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs'],
+    severity: 'BLOCK',
   },
   ...[
   'scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs',
@@ -70,6 +74,7 @@ const entries = [
     label: fixture,
     command: 'node',
     args: ['scripts/run-admission-gate.mjs', fixture],
+    severity: 'BLOCK',
   })),
 ];
 

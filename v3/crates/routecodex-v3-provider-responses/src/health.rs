@@ -423,6 +423,11 @@ impl V3ProviderHealthStore {
                 if key.failure_class != V3ProviderCooldownFailureClass::Semantic {
                     continue;
                 }
+                if state.health_disabled.contains(&key.provider_id)
+                    || state.configured_disabled.contains(&key.provider_id)
+                {
+                    continue;
+                }
                 let probe_key = provider_cooldown_probe_key(
                     &key.provider_id,
                     key.auth_alias.as_deref(),
@@ -841,6 +846,9 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(());
+        }
         upsert_provider_cooldown_probe(
             &mut state,
             provider_id,

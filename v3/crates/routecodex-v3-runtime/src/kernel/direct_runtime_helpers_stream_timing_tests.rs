@@ -556,3 +556,16 @@ async fn clean_eof_finishes_runtime_and_publishes_typed_timing() {
         Some(timing.runtime_total)
     );
 }
+
+#[test]
+fn direct_responses_terminal_without_usage_materializes_required_counters() {
+    let frame = br#"data: {"type":"response.completed","response":{"status":"completed"}}
+
+"#;
+    let output = String::from_utf8(materialize_direct_responses_terminal_usage(frame)).unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(output.strip_prefix("data: ").unwrap().trim_end()).unwrap();
+    assert_eq!(value["response"]["usage"]["input_tokens"], 0);
+    assert_eq!(value["response"]["usage"]["output_tokens"], 0);
+    assert_eq!(value["response"]["usage"]["total_tokens"], 0);
+}

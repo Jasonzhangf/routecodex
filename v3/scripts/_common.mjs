@@ -88,7 +88,13 @@ export async function runAll(entries) {
   const warnings = [];
   for (const entry of entries) {
     const label = entry.label ?? `${entry.command} ${(entry.args ?? []).join(' ')}`;
-    const severity = severityForGate(entry);
+    let severity;
+    try {
+      severity = severityForGate(entry);
+    } catch (error) {
+      failures.push(`${label}: ${error.message}; gate not run`);
+      continue;
+    }
     try {
       await run(entry.command, entry.args ?? [], entry);
     } catch (error) {

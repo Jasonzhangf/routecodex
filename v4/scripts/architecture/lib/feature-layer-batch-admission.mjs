@@ -14,6 +14,7 @@ import {
 import { validateEvidenceRecordShape, runRegisteredGates } from './feature-layer-batch-evidence.mjs';
 import { validateObservedWiring } from './feature-layer-batch-graph.mjs';
 import { validateIntegrationRecords } from './feature-layer-batch-integration.mjs';
+import { validateSourceGreenClaims } from './feature-layer-batch-source.mjs';
 import { canonicalJson, sha256 } from './feature-layer-batch-git.mjs';
 
 function readJsonAt(truth, commit, relativePath, failures, code) {
@@ -211,6 +212,7 @@ export function validateFeatureLayerAdmission(input, context, failures, options 
   validateBaseline(input, context, failures, gateIds);
   validateClosure(input, context, failures, gateIds);
   validateBatchReadiness(input.manifest, failures);
+  validateSourceGreenClaims(input, context, failures);
   validateObservedWiring(input.manifest, context, failures);
   for (const batch of input.manifest.batches) {
     for (const task of batch.tasks) {

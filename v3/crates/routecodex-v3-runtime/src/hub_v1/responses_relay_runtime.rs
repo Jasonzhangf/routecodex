@@ -1052,10 +1052,11 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
 }
 
 pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
-    response: Value,
+    mut response: Value,
     attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<V3ResponsesRelayClientStream, String> {
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
+    materialize_v3_responses_terminal_usage(&mut response);
     let status = response.get("status").and_then(Value::as_str);
     // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
     // content_filter 触发）：必须按协议投影 response.created + output_item.done
@@ -1157,6 +1158,38 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
     committed
         .seal_after_validated_terminal()
         .map_err(|error| error.to_string())
+}
+
+pub(crate) fn materialize_v3_responses_terminal_usage(response: &mut Value) {
+    let Some(object) = response.as_object_mut() else {
+        return;
+    };
+    let usage = object
+        .entry("usage".to_owned())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !usage.is_object() {
+        *usage = Value::Object(serde_json::Map::new());
+    }
+    let usage = usage
+        .as_object_mut()
+        .expect("usage was normalized to an object");
+    usage
+        .entry("input_tokens".to_owned())
+        .or_insert(Value::from(0));
+    usage
+        .entry("output_tokens".to_owned())
+        .or_insert(Value::from(0));
+    let input = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    usage
+        .entry("total_tokens".to_owned())
+        .or_insert(Value::from(input.saturating_add(output)));
 }
 
 fn append_v3_responses_client_reasoning_progress_frames(

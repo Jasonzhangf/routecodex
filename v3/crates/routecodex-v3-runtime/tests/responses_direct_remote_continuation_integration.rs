@@ -66,6 +66,7 @@ type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "m"
 auth = {{ type = "api_key", entries = [{{ alias = "a", env = "TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 3, cooldown_ms = 900000 }}
 responses = {{ process = "direct", streaming = "always", transport = "http" }}
 [providers.p.models.m]
 wire_name = "wire-m"
