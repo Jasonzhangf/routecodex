@@ -100,6 +100,12 @@ export const MODULE_REGRESSIONS = [
   { label: 'module:standard-plugins-response', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_inbound_outbound --manifest-path Cargo.toml --locked' },
   { label: 'module:standard-plugins-response-chat-process', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_chat_process_plugins --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-runtime-l2-ports', command: 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked' },
+  { label: 'red:v4_runtime_003_plan_bundle', command: 'cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked --lib rejected' },
+  { label: 'red:v4_runtime_004_mount', command: 'cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked --test l2_bridge negative_execution_input_rejects_undeclared_fields' },
+  { label: 'red:v4_node_container_epoch', command: 'cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked --test l2_epoch candidate_identity_failure_cannot_replace_active_epoch' },
+  { label: 'red:v4_plugin_request', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked negative_request_plugins_reject_control_leakage_and_invalid_shapes' },
+  { label: 'red:v4_runtime_005_request_port', command: 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked request_admission_rejects_plan_epoch_drift_before_response_port' },
+  { label: 'red:v4_runtime_006_response_error', command: 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked error_port_rejects_binding_drift' },
 ];
 
 export const ISOLATION_COMMAND = 'node scripts/verify-isolation.mjs';
