@@ -82,7 +82,10 @@ fn parse_iso8601_to_epoch_nanos(input: &str) -> Result<i128, String> {
         .next()
         .and_then(|part| part.parse().ok())
         .ok_or_else(|| format!("invalid ISO-8601 date: {date}"))?;
-    if date_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if date_parts.next().is_some() || !(1..=12).contains(&month) {
+        return Err(format!("invalid ISO-8601 date: {date}"));
+    }
+    if day < 1 || day > days_in_month(year, month) {
         return Err(format!("invalid ISO-8601 date: {date}"));
     }
 
@@ -158,6 +161,21 @@ fn parse_iso8601_to_epoch_nanos(input: &str) -> Result<i128, String> {
         days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second)
             - offset_seconds;
     Ok(i128::from(seconds) * 1_000_000_000 + i128::from(nanos))
+}
+
+fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 0,
+    }
 }
 
 fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {

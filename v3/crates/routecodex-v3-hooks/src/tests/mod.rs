@@ -1092,19 +1092,30 @@ fn invalid_schedule_timestamp_fails_closed_at_ingress() {
         session_id: "bad-timer".to_string(),
         thread_id: "bad-timer".to_string(),
     };
-    let error = core
-        .upsert_schedule(ScheduledMessage {
-            id: "bad-timer".to_string(),
-            at_iso8601: "not-a-timestamp".to_string(),
-            registrant,
-            body: "wake".to_string(),
-            send_mode: SendMode::IdleOnly,
-        })
-        .expect_err("invalid schedule timestamp must fail closed");
-    assert!(
-        error.contains("invalid ISO-8601"),
-        "unexpected error: {error}"
-    );
+    for (index, bad) in [
+        "not-a-timestamp",
+        "2026-02-30T09:00:00Z",
+        "2026-02-31T09:00:00Z",
+        "2026-04-31T09:00:00Z",
+        "2025-02-29T09:00:00Z",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let error = core
+            .upsert_schedule(ScheduledMessage {
+                id: format!("bad-timer-{index}"),
+                at_iso8601: bad.to_string(),
+                registrant: registrant.clone(),
+                body: "wake".to_string(),
+                send_mode: SendMode::IdleOnly,
+            })
+            .expect_err("invalid schedule timestamp must fail closed");
+        assert!(
+            error.contains("invalid ISO-8601"),
+            "unexpected error: {error}"
+        );
+    }
     assert!(core.due_schedules("2026-09-14T10:00:00Z").is_empty());
 }
 
