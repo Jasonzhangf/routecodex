@@ -1,0 +1,16 @@
+{
+  "base_commit": "66577ecc5defe80efc5f84d0264572e5bc39d27a",
+  "base_ref": "origin/v4-cordis",
+  "branch": "codex/v4-cordis-owner-r2-admission",
+  "created_at": "2026-09-14T00:29:20.538310+00:00",
+  "final_clean": true,
+  "goal_issue_binding": "sha256:437a74396dbb2326e33e62b03be394ba75548612a71ce93f38240f2935517420",
+  "goal_issue_id": "routecodex-v4-feature-completion-20260904",
+  "head_commit": "e0f602750101eb1b320959e6b0f11aed84b039aa",
+  "initial_clean": true,
+  "isolation_mode": "isolated_worktree",
+  "issue_id": "legacy-v4-cli-governance-closeout",
+  "module_id": "routecodex-v4-cli-plugin",
+  "scope_hash": "sha256:71da077f03cb380962872587260043ce012632708b6046e3788ba6b4b2686347",
+  "worktree_id": "worktree-09ae6ea2ef82cadf243bae4972466fd4b538f26cbe19b44dcd61a60aa7f0a4f1"
+}
