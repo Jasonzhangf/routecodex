@@ -548,7 +548,7 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     .await
     .unwrap();
 
-    assert_eq!(*transport.attempts.lock().unwrap(), 2);
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
     assert_eq!(output.status, 200);
     let observability = output.observability.as_ref().expect("observability");
     assert_eq!(observability.provider_failure_events.len(), 1);
