@@ -1,9 +1,9 @@
 // feature_id: v3.admin_api_integration
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
+use reqwest::StatusCode;
 use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
-use reqwest::StatusCode;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
