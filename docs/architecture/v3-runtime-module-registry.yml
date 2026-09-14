@@ -30,6 +30,10 @@ modules:
     owner_feature_id: v3.managed_server_lifecycle
     owned_paths:
       - v3/crates/routecodex-v3-lifecycle/**
+  - module_id: v3.hooks_sidecar
+    owner_feature_id: v3.managed_server_lifecycle
+    owned_paths:
+      - v3/crates/routecodex-v3-hooks/**
   - module_id: v3.provider_responses
     owner_feature_id: v3.responses_direct_mvp_architecture
     owned_paths:

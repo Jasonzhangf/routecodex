@@ -1,9 +1,15 @@
 use super::*;
+use routecodex_v3_hooks::{
+    hooks_unavailable, HooksUnavailableReason, PROTOCOL as RCC_HOOKS_SIDECAR_PROTOCOL,
+};
 use serde_json::Value;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::process::Stdio;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio::process::{Child, Command as TokioCommand};
+
+mod hooks_install;
+use hooks_install::*;
 
 const HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 const HOOKS_INSTALL_RECORD_RELATIVE: &str = ".codex/routecodex-hooks/install.json";
@@ -41,6 +47,7 @@ pub(crate) struct V3HooksSidecarProcess {
     leader_pid: u32,
     leader_start_token: String,
     process_record_path: PathBuf,
+    control_socket_path: Option<PathBuf>,
     degraded_detail: Option<String>,
     socket_cleanup: Option<CodexAppSocketCleanup>,
 }
@@ -48,34 +55,147 @@ pub(crate) struct V3HooksSidecarProcess {
 pub(crate) async fn start_configured_hooks_sidecar(
     instance_dir: &Path,
 ) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
-    let Some(record_path) = hooks_install_record_path().map_err(optional_hooks_error)? else {
+    start_configured_hooks_sidecar_with_timeout(instance_dir, SIDECAR_START_TIMEOUT).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HooksRuntimeMode {
+    InternalHooksd,
+    LegacySupervisor,
+}
+
+fn hooks_runtime_mode(
+    record: &Value,
+    record_path: &Path,
+) -> Result<HooksRuntimeMode, V3LifecycleError> {
+    let mode = record
+        .get("hooks_runtime")
+        .and_then(Value::as_str)
+        .unwrap_or("internal_hooksd");
+    match mode {
+        "internal_hooksd" => Ok(HooksRuntimeMode::InternalHooksd),
+        // The legacy external supervisor is reachable only through an explicit
+        // install-record declaration; runtime selection must not be inferred
+        // from which binary happens to exist in the bin directory.
+        "legacy_supervisor" => Ok(HooksRuntimeMode::LegacySupervisor),
+        other => Err(V3LifecycleError::Validation(format!(
+            "hooks install record {} declares unsupported hooks_runtime {other}",
+            record_path.display()
+        ))),
+    }
+}
+
+pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
+    instance_dir: &Path,
+    start_timeout: Duration,
+) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
+    let Some(record_path) = hooks_install_record_path()
+        .map_err(|error| optional_hooks_error_reason(HooksUnavailableReason::Missing, error))?
+    else {
         return Ok(None);
     };
-    let record_bytes =
-        fs::read(&record_path).map_err(|error| optional_hooks_error(error.into()))?;
-    let record: Value = serde_json::from_slice(&record_bytes)
-        .map_err(|error| optional_hooks_error(error.into()))?;
+    let record_bytes = fs::read(&record_path).map_err(|error| {
+        optional_hooks_error_reason(HooksUnavailableReason::Missing, error.into())
+    })?;
+    let record: Value = serde_json::from_slice(&record_bytes).map_err(|error| {
+        optional_hooks_error_reason(HooksUnavailableReason::InvalidReadiness, error.into())
+    })?;
     if record.get("supervisor_enabled").and_then(Value::as_bool) != Some(true) {
         return Ok(None);
     }
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    let mut stale_process_group_confirmed_dead = false;
     if process_record_path.exists() {
         if hooks_sidecar_process_group_is_alive(instance_dir)? {
-            return Err(V3LifecycleError::HooksControlValidation(
-                "hooks sidecar process group from a previous run is still alive".to_string(),
+            return Err(optional_hooks_error(
+                V3LifecycleError::HooksControlValidation(
+                    "hooks sidecar process group from a previous run is still alive".to_string(),
+                ),
             ));
         }
         fs::remove_file(&process_record_path)?;
+        stale_process_group_confirmed_dead = true;
     }
-    let wrapper = required_record_path(&record, "supervisor_wrapper", &record_path)
-        .map_err(optional_hooks_error)?;
-    let daemon_config = required_record_path(&record, "daemon_config", &record_path)
-        .map_err(optional_hooks_error)?;
-    let mut socket_cleanup = prepare_codexapp_socket_cleanup(&record, &daemon_config, &record_path)
-        .map_err(optionalize_hooks_setup_error)?;
+    let runtime_mode = hooks_runtime_mode(&record, &record_path)
+        .map_err(|error| optional_hooks_error_reason(HooksUnavailableReason::Missing, error))?;
+    let internal_hooksd = match runtime_mode {
+        HooksRuntimeMode::InternalHooksd => Some(
+            internal_hooksd_binary_from_record(&record, &record_path).map_err(|error| {
+                optional_hooks_error_reason(HooksUnavailableReason::Missing, error)
+            })?,
+        ),
+        HooksRuntimeMode::LegacySupervisor => None,
+    };
+    let wrapper = if internal_hooksd.is_none() {
+        Some(
+            required_record_path(&record, "supervisor_wrapper", &record_path).map_err(|error| {
+                optional_hooks_error_reason(HooksUnavailableReason::Missing, error)
+            })?,
+        )
+    } else {
+        None
+    };
+    let daemon_config = if internal_hooksd.is_none() {
+        Some(
+            required_record_path(&record, "daemon_config", &record_path).map_err(|error| {
+                optional_hooks_error_reason(HooksUnavailableReason::Missing, error)
+            })?,
+        )
+    } else {
+        None
+    };
+    let mut socket_cleanup = match internal_hooksd.as_ref() {
+        Some(_) => None,
+        None => {
+            let daemon_config = daemon_config
+                .as_deref()
+                .expect("external sidecar has daemon config");
+            prepare_codexapp_socket_cleanup(&record, daemon_config, &record_path)
+                .map_err(optionalize_hooks_setup_error)?
+        }
+    };
     let sidecar_stderr = stderr_capture(instance_dir).map_err(optional_hooks_error)?;
-    let codexapp_binary =
-        codexapp_binary_from_record(&record, &record_path).map_err(optional_hooks_error)?;
+    let codexapp_binary = if internal_hooksd.is_none() {
+        Some(
+            codexapp_binary_from_record(&record, &record_path).map_err(|error| {
+                optional_hooks_error_reason(HooksUnavailableReason::Missing, error)
+            })?,
+        )
+    } else {
+        None
+    };
+    let control_socket = instance_dir.join("hooks-sidecar.sock");
+    if internal_hooksd.is_some() {
+        // Stale-socket cleanup belongs to the lifecycle owner, which has just
+        // verified the persisted process-group identity: a record that exists
+        // and is still alive already returned above, and an unverifiable
+        // record propagates before this point. A leftover control socket in
+        // this owned instance directory can therefore be removed without the
+        // control-server owner ever unlinking a path it cannot verify.
+        if control_socket.exists() && stale_process_group_confirmed_dead {
+            fs::remove_file(&control_socket)?;
+        }
+    }
+    let appserver_socket = if internal_hooksd.is_some() {
+        optional_record_path(&record, "appserver_socket").map_err(optional_hooks_error)?
+    } else {
+        None
+    };
+    let tui_appserver_socket = if internal_hooksd.is_some() {
+        optional_record_path(&record, "tui_appserver_socket").map_err(optional_hooks_error)?
+    } else {
+        None
+    };
+    let desktop_appserver_socket = if internal_hooksd.is_some() {
+        optional_record_path(&record, "desktop_appserver_socket").map_err(optional_hooks_error)?
+    } else {
+        None
+    };
+    let handlers_config = if internal_hooksd.is_some() {
+        optional_record_path(&record, "hooks_handlers_config").map_err(optional_hooks_error)?
+    } else {
+        None
+    };
     // Keep a lifecycle-owned process as the process-group leader. The
     // supervisor wrapper may exit before readiness while its descendants
     // remain alive; the anchor keeps the group identity verifiable until the
@@ -114,6 +234,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
                 leader_pid,
                 "",
                 &process_record_path,
+                internal_hooksd.as_ref().map(|_| control_socket.as_path()),
                 socket_cleanup,
             )
             .await;
@@ -127,33 +248,68 @@ pub(crate) async fn start_configured_hooks_sidecar(
                 leader_pid,
                 "",
                 &process_record_path,
+                internal_hooksd.as_ref().map(|_| control_socket.as_path()),
                 socket_cleanup,
             )
             .await;
         }
     };
-    let mut sidecar_command = TokioCommand::new(&wrapper);
+    let mut sidecar_command = if let Some(binary) = internal_hooksd.as_deref() {
+        let mut command = TokioCommand::new(binary);
+        command.arg("--socket").arg(&control_socket);
+        if let Some(socket) = appserver_socket.as_deref() {
+            command.arg("--appserver-socket").arg(socket);
+        }
+        if let Some(socket) = tui_appserver_socket.as_deref() {
+            command.arg("--tui-appserver-socket").arg(socket);
+        }
+        if let Some(socket) = desktop_appserver_socket.as_deref() {
+            command.arg("--desktop-appserver-socket").arg(socket);
+        }
+        if let Some(config) = handlers_config.as_deref() {
+            command.arg("--handlers-config").arg(config);
+        }
+        command
+            .arg("--state-file")
+            .arg(instance_dir.join("hooks-sidecar-state.json"));
+        command
+    } else {
+        let wrapper = wrapper
+            .as_deref()
+            .expect("external sidecar has supervisor wrapper");
+        let daemon_config = daemon_config
+            .as_deref()
+            .expect("external sidecar has daemon config");
+        let codexapp_binary = codexapp_binary
+            .as_deref()
+            .expect("external sidecar has codexapp binary");
+        let mut command = TokioCommand::new(wrapper);
+        command.arg("--config").arg(daemon_config);
+        // d7cb31f：supervisor 需要 internal codexapp 可执行文件路径；
+        // lifecycle 从 install record 的 bin_directory 解析并注入，
+        // 不再依赖外部 shell 预先导出 ROUTECODEX_V3_CODEXAPP_BINARY。
+        command.env("ROUTECODEX_V3_CODEXAPP_BINARY", codexapp_binary);
+        command
+    };
     sidecar_command
-        .arg("--config")
-        .arg(&daemon_config)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         // d7cb31f：sidecar stderr 落到实例目录诊断文件，退出原因可追溯
         //（此前 Stdio::null 吞掉了 codexapp AddrInUse 等全部失败原因）。
         .stderr(sidecar_stderr)
-        // d7cb31f：supervisor 需要 internal codexapp 可执行文件路径；
-        // lifecycle 从 install record 的 bin_directory 解析并注入，
-        // 不再依赖外部 shell 预先导出 ROUTECODEX_V3_CODEXAPP_BINARY。
-        .env("ROUTECODEX_V3_CODEXAPP_BINARY", codexapp_binary)
         // Join the lifecycle-owned process group; the anchor remains the
         // persisted identity even if this wrapper exits early.
         .process_group(process_group_id);
+    let command_label = internal_hooksd
+        .as_ref()
+        .or(wrapper.as_ref())
+        .expect("hooks sidecar has an internal binary or supervisor wrapper");
     let mut child = match sidecar_command.spawn() {
         Ok(child) => child,
         Err(error) => {
             let startup = V3LifecycleError::Validation(format!(
                 "hooks sidecar failed to spawn {}: {error}",
-                wrapper.display()
+                command_label.display()
             ));
             return finish_sidecar_start_failure(
                 optional_hooks_error(startup),
@@ -163,6 +319,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
                 leader_pid,
                 &leader_start_token,
                 &process_record_path,
+                internal_hooksd.as_ref().map(|_| control_socket.as_path()),
                 socket_cleanup,
             )
             .await;
@@ -185,6 +342,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
             leader_pid,
             &leader_start_token,
             &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
             socket_cleanup,
         )
         .await;
@@ -200,60 +358,66 @@ pub(crate) async fn start_configured_hooks_sidecar(
             leader_pid,
             &leader_start_token,
             &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
             socket_cleanup,
         )
         .await;
     };
     let mut reader = tokio::io::BufReader::new(stdout);
-    let readiness = match tokio::time::timeout(
-        SIDECAR_START_TIMEOUT,
-        read_sidecar_readiness(&mut reader),
-    )
-    .await
-    {
-        Ok(Ok(readiness)) => readiness,
-        Ok(Err(error)) => {
-            return finish_sidecar_start_failure(
-                optional_hooks_error(error),
-                Some(child),
-                group_leader,
-                process_group_id,
-                leader_pid,
-                &leader_start_token,
-                &process_record_path,
-                socket_cleanup,
-            )
-            .await;
-        }
-        Err(_) => {
-            return finish_sidecar_start_failure(
-                optional_hooks_error(V3LifecycleError::Timeout(
-                    "hooks sidecar readiness".to_string(),
-                )),
-                Some(child),
-                group_leader,
-                process_group_id,
-                leader_pid,
-                &leader_start_token,
-                &process_record_path,
-                socket_cleanup,
-            )
-            .await;
-        }
-    };
-    if readiness.get("protocol").and_then(Value::as_str) != Some("routecodex-hooks-supervisor/v1")
+    let readiness =
+        match tokio::time::timeout(start_timeout, read_sidecar_readiness(&mut reader)).await {
+            Ok(Ok(readiness)) => readiness,
+            Ok(Err(error)) => {
+                return finish_sidecar_start_failure(
+                    optional_hooks_error(error),
+                    Some(child),
+                    group_leader,
+                    process_group_id,
+                    leader_pid,
+                    &leader_start_token,
+                    &process_record_path,
+                    internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+                    socket_cleanup,
+                )
+                .await;
+            }
+            Err(_) => {
+                return finish_sidecar_start_failure(
+                    optional_hooks_error_reason(
+                        HooksUnavailableReason::Timeout,
+                        V3LifecycleError::Timeout("hooks sidecar readiness".to_string()),
+                    ),
+                    Some(child),
+                    group_leader,
+                    process_group_id,
+                    leader_pid,
+                    &leader_start_token,
+                    &process_record_path,
+                    internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+                    socket_cleanup,
+                )
+                .await;
+            }
+        };
+    let readiness_protocol = readiness.get("protocol").and_then(Value::as_str);
+    if (readiness_protocol != Some("routecodex-hooks-supervisor/v1")
+        && readiness_protocol != Some(RCC_HOOKS_SIDECAR_PROTOCOL))
         || readiness.get("ready").and_then(Value::as_bool) != Some(true)
     {
         return finish_sidecar_start_failure(
-            optional_hooks_error(V3LifecycleError::Validation(
-                "hooks sidecar returned an invalid readiness record".to_string(),
-            )),
+            optional_hooks_error_reason(
+                HooksUnavailableReason::InvalidReadiness,
+                V3LifecycleError::Validation(format!(
+                    "hooks sidecar returned an invalid readiness record: {readiness}"
+                )),
+            ),
             Some(child),
             group_leader,
             process_group_id,
             leader_pid,
             &leader_start_token,
             &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
             socket_cleanup,
         )
         .await;
@@ -267,6 +431,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
             leader_pid,
             &leader_start_token,
             &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
             socket_cleanup,
         )
         .await;
@@ -282,6 +447,7 @@ pub(crate) async fn start_configured_hooks_sidecar(
         leader_pid,
         leader_start_token,
         process_record_path,
+        control_socket_path: internal_hooksd.as_ref().map(|_| control_socket.clone()),
         degraded_detail: None,
         socket_cleanup,
     }))
@@ -297,7 +463,6 @@ pub(crate) async fn start_managed_hooks_sidecar(
                 .and_then(|sidecar| sidecar.degraded_detail.clone());
             Ok((sidecar, detail))
         }
-        Err(error @ V3LifecycleError::HooksControlValidation(_)) => Err(error),
         Err(error @ V3LifecycleError::HooksOptionalUnavailable(_)) => {
             // Hooks are an optional integration. A broken hook supervisor
             // must not tear down the RouteCodex lifecycle control plane that
@@ -306,12 +471,32 @@ pub(crate) async fn start_managed_hooks_sidecar(
             // operator can restart hooks independently.
             Ok((None, Some(format!("hooks sidecar unavailable: {error}"))))
         }
+        Err(error @ V3LifecycleError::HooksControlValidation(_)) => {
+            // A stale or identity-mismatched hooks process record is a
+            // hooks-sidecar problem, not a RouteCodex problem. The identity
+            // check still refuses to signal a foreign process group; startup
+            // degrades to `hooks_unavailable` instead of aborting the server.
+            Ok((
+                None,
+                Some(format!(
+                    "hooks sidecar unavailable: {}",
+                    optional_hooks_error(error)
+                )),
+            ))
+        }
         Err(error) => Err(error),
     }
 }
 
 fn optional_hooks_error(error: V3LifecycleError) -> V3LifecycleError {
-    V3LifecycleError::HooksOptionalUnavailable(error.to_string())
+    optional_hooks_error_reason(HooksUnavailableReason::Crashed, error)
+}
+
+fn optional_hooks_error_reason(
+    reason: HooksUnavailableReason,
+    error: V3LifecycleError,
+) -> V3LifecycleError {
+    V3LifecycleError::HooksOptionalUnavailable(format!("{}: {error}", hooks_unavailable(reason)))
 }
 
 fn optionalize_hooks_setup_error(error: V3LifecycleError) -> V3LifecycleError {
@@ -330,6 +515,7 @@ async fn finish_sidecar_start_failure(
     leader_pid: u32,
     leader_start_token: &str,
     process_record_path: &Path,
+    control_socket_path: Option<&Path>,
     mut socket_cleanup: Option<CodexAppSocketCleanup>,
 ) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
     if let Some(cleanup) = socket_cleanup.as_mut() {
@@ -349,19 +535,32 @@ async fn finish_sidecar_start_failure(
     .await;
     match termination {
         Ok(()) => {
-            let record_cleanup = fs::remove_file(process_record_path)
-                .ok()
-                .or_else(|| (!process_record_path.exists()).then_some(()));
+            let mut cleanup_failure = None;
+            if let Err(error) = remove_file_if_present(process_record_path) {
+                cleanup_failure = Some(format!(
+                    "hooks sidecar process record cleanup failed: {}; {error}",
+                    process_record_path.display()
+                ));
+            }
+            if let Some(control_socket_path) = control_socket_path {
+                if let Err(error) = remove_file_if_present(control_socket_path) {
+                    let detail = format!(
+                        "hooks sidecar control socket cleanup failed: {}; {error}",
+                        control_socket_path.display()
+                    );
+                    cleanup_failure = Some(match cleanup_failure {
+                        Some(existing) => format!("{existing}; {detail}"),
+                        None => detail,
+                    });
+                }
+            }
             let socket_cleanup = socket_cleanup.as_ref().map(cleanup_codexapp_socket);
-            if record_cleanup.is_some() && socket_cleanup.as_ref().is_none_or(Result::is_ok) {
+            if cleanup_failure.is_none() && socket_cleanup.as_ref().is_none_or(Result::is_ok) {
                 return Err(startup);
             }
             let mut detail = startup.to_string();
-            if record_cleanup.is_none() {
-                detail.push_str(&format!(
-                    "; hooks sidecar process record cleanup failed: {}",
-                    process_record_path.display()
-                ));
+            if let Some(cleanup_failure) = cleanup_failure {
+                detail.push_str(&format!("; {cleanup_failure}"));
             }
             if let Some(Err(error)) = socket_cleanup {
                 detail.push_str(&format!("; codexapp socket cleanup failed: {error}"));
@@ -376,6 +575,7 @@ async fn finish_sidecar_start_failure(
                 leader_pid,
                 leader_start_token: leader_start_token.to_string(),
                 process_record_path: process_record_path.to_path_buf(),
+                control_socket_path: None,
                 degraded_detail: Some(format!(
                     "hooks sidecar unavailable: {startup}; cleanup: {cleanup}"
                 )),
@@ -385,6 +585,14 @@ async fn finish_sidecar_start_failure(
                 "{startup}; hooks sidecar process-group owner cleanup failed before wrapper spawn: {cleanup}"
             ))),
         },
+    }
+}
+
+fn remove_file_if_present(path: &Path) -> Result<(), V3LifecycleError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -405,6 +613,7 @@ impl V3HooksSidecarProcess {
                 .flatten()
                 .unwrap_or_default(),
             process_record_path,
+            control_socket_path: None,
             degraded_detail: None,
             socket_cleanup: None,
         }
@@ -431,6 +640,7 @@ impl V3HooksSidecarProcess {
                 .flatten()
                 .unwrap_or_default(),
             process_record_path,
+            control_socket_path: None,
             degraded_detail: Some("initial termination failed".to_string()),
             socket_cleanup: Some(CodexAppSocketCleanup {
                 path: socket_path,
@@ -469,6 +679,15 @@ impl V3HooksSidecarProcess {
         }
         if let Some(cleanup) = self.socket_cleanup.as_ref() {
             cleanup_codexapp_socket(cleanup)?;
+        }
+        if let Some(control_socket_path) = self.control_socket_path.as_ref() {
+            // The owned process group is confirmed stopped above, so removing
+            // the control socket here cannot unlink a live daemon's path.
+            match fs::remove_file(control_socket_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         if self.process_record_path.exists() {
             fs::remove_file(&self.process_record_path)?;
@@ -939,32 +1158,6 @@ fn hooks_install_record_path() -> Result<Option<PathBuf>, V3LifecycleError> {
     }
 }
 
-fn required_record_path(
-    record: &Value,
-    field: &str,
-    record_path: &Path,
-) -> Result<PathBuf, V3LifecycleError> {
-    let value = record.get(field).and_then(Value::as_str).ok_or_else(|| {
-        V3LifecycleError::Validation(format!(
-            "hooks install record {} is missing {field}",
-            record_path.display()
-        ))
-    })?;
-    let path = PathBuf::from(value);
-    if !path.is_absolute() {
-        return Err(V3LifecycleError::Validation(format!(
-            "hooks install record {field} must be absolute"
-        )));
-    }
-    if !path.exists() {
-        return Err(V3LifecycleError::Validation(format!(
-            "hooks install record {field} does not exist: {}",
-            path.display()
-        )));
-    }
-    Ok(path)
-}
-
 // d7cb31f：sidecar 失败时清理 codexapp unix socket——残留 socket 会让
 // 后续所有 restart 因 AddrInUse 失败（孤儿进程终止后 socket 文件仍在）。
 fn prepare_codexapp_socket_cleanup(
@@ -1067,59 +1260,6 @@ fn validate_install_owned_socket_path(
     Ok(())
 }
 
-// d7cb31f：internal codexapp 可执行文件路径由 lifecycle 从 install record
-// 解析并注入 supervisor，不再依赖外部 shell 导出 ROUTECODEX_V3_CODEXAPP_BINARY。
-fn codexapp_binary_from_record(
-    record: &Value,
-    record_path: &Path,
-) -> Result<std::path::PathBuf, V3LifecycleError> {
-    let _install_root = required_record_path(record, "install_root", record_path)?;
-    let bin_directory = record
-        .get("bin_directory")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            V3LifecycleError::Validation(format!(
-                "hooks install record {} has no bin_directory",
-                record_path.display()
-            ))
-        })?;
-    let bin_directory = std::path::Path::new(bin_directory);
-    if !bin_directory.is_absolute() {
-        return Err(V3LifecycleError::Validation(format!(
-            "hooks install record bin_directory must be absolute"
-        )));
-    }
-    let canonical_bin_directory = fs::canonicalize(bin_directory).map_err(|error| {
-        V3LifecycleError::Validation(format!(
-            "hooks install record bin_directory {} cannot be resolved: {error}",
-            bin_directory.display()
-        ))
-    })?;
-    if !canonical_bin_directory.is_dir() {
-        return Err(V3LifecycleError::Validation(format!(
-            "hooks install record bin_directory is not a directory: {}",
-            bin_directory.display()
-        )));
-    }
-    let candidate = canonical_bin_directory.join("rccv3-codexapp");
-    let canonical_candidate = fs::canonicalize(&candidate).map_err(|error| {
-        V3LifecycleError::Validation(format!(
-            "hooks install record {} requires installed internal codexapp binary at {}: {error}",
-            record_path.display(),
-            candidate.display()
-        ))
-    })?;
-    if !canonical_candidate.starts_with(&canonical_bin_directory) || !canonical_candidate.is_file()
-    {
-        return Err(V3LifecycleError::Validation(format!(
-            "hooks install record {} requires internal codexapp binary inside bin_directory at {}",
-            record_path.display(),
-            canonical_candidate.display()
-        )));
-    }
-    Ok(canonical_candidate)
-}
-
 // d7cb31f：sidecar stderr 落到实例目录诊断文件，退出原因可追溯。
 fn stderr_capture(instance_dir: &Path) -> Result<Stdio, V3LifecycleError> {
     let path = instance_dir.join("hooks-sidecar.stderr.log");
@@ -1181,6 +1321,7 @@ mod tests {
             &record_path,
             serde_json::json!({
                 "supervisor_enabled": true,
+                "hooks_runtime": "legacy_supervisor",
                 "supervisor_wrapper": supervisor_wrapper,
                 "daemon_config": daemon_config,
                 "bin_directory": bin_directory,

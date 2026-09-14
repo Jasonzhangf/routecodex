@@ -2,6 +2,108 @@ version: 2
 status: p6_source_and_local_live_verified_hub_v1_contract_defined
 scope: routecodex-v3
 chains:
+- chain_id: v3.rcc_internal_hooks_sidecar
+  owner_feature_id: v3.rcc_internal_hooks_sidecar
+  summary: Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.
+  edges:
+  - step_id: v3-hooks-sidecar-life-01
+    from_node: V3Lifecycle04ChildSpawned
+    to_node: V3HooksInstallRecord
+    caller_symbol: start_configured_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: hooks_runtime_mode
+    callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.lifecycle.hooks_sidecar_declaration]
+      produces: [v3.hooks.sidecar_install_record]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-life-02
+    from_node: V3HooksInstallRecord
+    to_node: ControlServer
+    caller_symbol: start_configured_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+    callee_symbol: ControlServer::with_native_sockets_handlers_and_state
+    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.sidecar_install_record]
+      produces: [v3.lifecycle.hooks_sidecar_process, v3.hooks.control_socket]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-forward-01
+    from_node: ControlServer
+    to_node: HooksSidecarCore
+    caller_symbol: handle_control_request
+    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: HooksSidecarCore::forward
+    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.control_socket]
+      produces: [v3.hooks.delivery_ledger]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-native-01
+    from_node: HooksSidecarCore
+    to_node: NativeAppServerTransport
+    caller_symbol: HooksSidecarCore::send_to_target
+    caller_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    callee_symbol: NativeAppServerTransport::send_message
+    callee_file: v3/crates/routecodex-v3-hooks/src/appserver.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.delivery_ledger]
+      produces: [v3.hooks.native_appserver_transport]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-status-01
+    from_node: ControlServer
+    to_node: NativeAppServerTransport
+    caller_symbol: handle_control_request
+    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: NativeAppServerTransport::session_status
+    callee_file: v3/crates/routecodex-v3-hooks/src/appserver.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.control_socket]
+      produces: [v3.hooks.session_status]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-timer-01
+    from_node: HooksSidecarCore
+    to_node: HooksSidecarCore
+    caller_symbol: timer_tick
+    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: HooksSidecarCore::run_due_schedules
+    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.schedule_registry]
+      produces: [v3.hooks.delivery_ledger]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-hook-01
+    from_node: HooksSidecarCore
+    to_node: HookRegistry
+    caller_symbol: HooksSidecarCore::dispatch_hook_event
+    caller_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    callee_symbol: HookRegistry::dispatch
+    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    status: anchored
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    resource_flow:
+      consumes: [v3.hooks.mounted_handler_registry]
+      produces: [v3.hooks.delivery_ledger]
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.provider_global_cooldown_persistence
   owner_feature_id: v3.provider_global_cooldown_persistence
   summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.
