@@ -1381,9 +1381,6 @@ fn normalize_openai_chat_messages_payload(
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
 }
-
-/// Normalize the legacy dotted MCP namespace form only at the provider
-/// function-call boundary. Already flattened names remain byte-for-byte.
 fn provider_function_name(name: &str) -> String {
     if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
         let dot = dot + "mcp__".len();
@@ -1394,12 +1391,7 @@ fn provider_function_name(name: &str) -> String {
         name.to_owned()
     }
 }
-
 fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
-    // Responses control-plane history is carried through Chat extensions. Its
-    // tool_search call/output records are protocol history, not provider
-    // function declarations; changing their names here makes the next
-    // round-trip lose the native ToolSearch semantics.
     let responses_extension = message
         .get("routecodex_chat_extension")
         .and_then(Value::as_object);
@@ -1441,17 +1433,9 @@ fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value
                 let normalized = provider_function_name(name);
                 part_object.insert("name".to_string(), Value::String(normalized));
             }
-            if let Some(tool_use) = part_object.get_mut("tool_use").and_then(Value::as_object_mut)
-            {
-                if let Some(name) = tool_use.get("name").and_then(Value::as_str) {
-                    let normalized = provider_function_name(name);
-                    tool_use.insert("name".to_string(), Value::String(normalized));
-                }
-            }
         }
     }
 }
-
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
     message_row: &mut Map<String, Value>,
 ) {

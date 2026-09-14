@@ -1014,17 +1014,6 @@ fn tool_search_chat_extensions_round_trip_to_responses_fields() {
 }
 
 #[test]
-fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
-    let payload = json!({
-        "model": "glm-5.3",
-        "messages": [{"role":"tool","tool_call_id":"call_search","content":[{"type":"tool_result","name":"mcp__mcpx.workspace","content":"{}"}]}]
-    });
-    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("dotted MCP history names must be legal on provider wire");
-    assert_eq!(request["messages"][0]["content"][0]["name"], "mcp__mcpx__workspace");
-}
-
-#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",
@@ -1050,29 +1039,6 @@ fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
                 "text": "compact reasoning must reach provider"
             }]
         })
-    );
-}
-
-#[test]
-fn openai_chat_provider_preserves_tool_search_control_history_names() {
-    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
-        "model": "glm-5.3",
-        "messages": [{
-            "role": "assistant",
-            "tool_calls": [{
-                "id": "search_1",
-                "type": "function",
-                "function": {"name": "mcp__mcpx.workspace", "arguments": "{}"}
-            }],
-            "routecodex_chat_extension": {
-                "responses_tool_call_type": "tool_search_call"
-            }
-        }]
-    }))
-    .expect("tool_search history must remain projectable");
-    assert_eq!(
-        request["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__mcpx.workspace"
     );
 }
 
@@ -1103,7 +1069,7 @@ fn openai_responses_wire_does_not_leak_client_metadata_and_projects_reasoning_ef
     assert!(request.get("metadata").is_none(), "{request}");
     assert_eq!(request["reasoning"], json!({"effort":"medium"}));
 }
-
+include!("request_outbound_mcp_tests.rs");
 #[test]
 fn openai_responses_wire_preserves_unknown_non_empty_reasoning_effort() {
     let payload = json!({
