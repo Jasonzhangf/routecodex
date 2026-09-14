@@ -1249,21 +1249,22 @@ impl V3ProviderHealthStore {
             // 无阈值的不可恢复 action 立即阻断；无阈值的可恢复 action 仍按
             // score 归零阻断。score 基线是 configured priority，因此低优先级
             // key 的一次 -5 不能绕过可恢复阈值直接进入 cooldown。
-            let should_block = match action.recovery {
-                V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-                    if action.failure_threshold == 0 =>
-                {
-                    true
-                }
-                V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-                | V3ProviderRecoveryKind::RecoverableCounted
-                    if action.failure_threshold > 0 =>
-                {
-                    history.failure_streak >= action.failure_threshold
-                }
-                V3ProviderRecoveryKind::RecoverableCounted => history.score_milli == 0,
-                _ => false,
-            };
+            let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
+                && match action.recovery {
+                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+                        if action.failure_threshold == 0 =>
+                    {
+                        true
+                    }
+                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+                    | V3ProviderRecoveryKind::RecoverableCounted
+                        if action.failure_threshold > 0 =>
+                    {
+                        history.failure_streak >= action.failure_threshold
+                    }
+                    V3ProviderRecoveryKind::RecoverableCounted => history.score_milli == 0,
+                    _ => false,
+                };
             if should_block {
                 upsert_provider_cooldown_probe_with_interval(
                     &mut state,
@@ -1319,6 +1320,8 @@ impl V3ProviderHealthStore {
             history.last_success_at_ms = Some(now_ms);
             history.score_generation = history.score_generation.saturating_add(1);
         }
+        let auth_key = provider_cooldown_probe_key(provider_id, Some(auth_alias), None);
+        state.auth_key_consecutive_failures.remove(&auth_key);
         if let Some(completion) = completion {
             let _ = completion.send_replace(true);
         }

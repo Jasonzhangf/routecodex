@@ -161,18 +161,22 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
 fn session_scoped_recoverable_failures_do_not_create_global_key_cooldown() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable_session("transport");
-    for now_ms in 100..103 {
+    for now_ms in 100..120 {
         store
             .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
             .expect("session-scoped failure");
     }
 
     let projection = store
-        .scheduling_projection("provider-a", "key-a", "model-b", 1, 1, 103)
+        .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 120)
         .expect("session-scoped projection");
-    assert_eq!(projection.score_milli, 1);
+    assert_eq!(projection.score_milli, 0);
     assert!(projection.available);
     assert_eq!(projection.blocked_scopes, Vec::<String>::new());
+    assert!(store
+        .provider_cooldown_probe_keys(120, false)
+        .expect("session-scoped actions must not create a global probe")
+        .is_empty());
 }
 
 #[test]
