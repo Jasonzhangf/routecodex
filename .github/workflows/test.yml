@@ -145,7 +145,7 @@ jobs:
         run: npm run build:min
       - name: Install direct V3 CLI binary
         if: needs.scope.outputs.v3_build == 'true'
-        run: RUSTUP_TOOLCHAIN=stable npm run install:v3
+        run: npm run install:v3
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
