@@ -860,6 +860,13 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
 ) -> Result<(), V3AnthropicCodecError> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            if tool
+                .get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            {
+                continue;
+            }
             let flattened = flatten_namespace_tool_for_provider("anthropic", tool)
                 .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[]" })?
                 .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
@@ -1226,6 +1233,17 @@ mod tests {
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
         assert_ne!(tools[0]["name"], "mcp__mcpx");
+    }
+
+    #[test]
+    fn anthropic_empty_namespace_is_omitted_from_provider_tools() {
+        let tools = responses_tools_for_anthropic_wire(
+            json!({"tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": []}]} )
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(tools.is_empty());
     }
 
     #[test]
