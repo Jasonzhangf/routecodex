@@ -217,6 +217,11 @@ export function runRegisteredGates({ gateIds, gateMap, truth, failures, context 
       addFailure(failures, 'REQUIRED_GATE_EXECUTION_FAILED', `${context}: ${gateId}: ${outcome.error.message}`);
     } else if (outcome.receipt.status !== 0) {
       addFailure(failures, 'REQUIRED_GATE_FAILED', `${context}: ${gateId} exited ${outcome.receipt.status}`);
+    } else if (gate.evidence_role === 'red_gate'
+        && gate.test_name
+        && !String(outcome.receipt.stdout ?? '').includes(gate.test_name)) {
+      addFailure(failures, 'REQUIRED_GATE_TEST_NOT_RUN',
+        `${context}: ${gateId} did not report test ${gate.test_name}`);
     }
   }
 }

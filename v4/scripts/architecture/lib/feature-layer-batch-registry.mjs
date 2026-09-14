@@ -193,6 +193,19 @@ export function validateRegistryBindings(input, failures) {
   const functions = uniqueMap(input.functionMap.functions, 'function_id', failures, 'DUPLICATE_FUNCTION_ID');
   const resources = uniqueMap(input.resourceMap.resources, 'resource_id', failures, 'DUPLICATE_RESOURCE_ID');
   const gates = uniqueMap(input.verificationMap.gates, 'gate_id', failures, 'DUPLICATE_GATE_ID');
+  for (const redGate of gates.values()) {
+    if (redGate.status !== 'active' || redGate.evidence_role !== 'red_gate') continue;
+    const positiveGate = [...gates.values()].find((candidate) =>
+      candidate.status === 'active'
+      && candidate.evidence_role === 'positive'
+      && candidate.owner_module_id === redGate.owner_module_id
+      && (candidate.feature_ids ?? []).some((featureId) => (redGate.feature_ids ?? []).includes(featureId))
+      && canonicalJson(candidate.argv ?? []) === canonicalJson(redGate.argv ?? []));
+    if (positiveGate) {
+      addFailure(failures, 'RED_GATE_DUPLICATES_POSITIVE',
+        `${redGate.gate_id} reuses positive gate ${positiveGate.gate_id} command`);
+    }
+  }
   const governance = modules.get(OWNER_MODULE_ID);
   if (!governance
       || governance.status !== 'active'
