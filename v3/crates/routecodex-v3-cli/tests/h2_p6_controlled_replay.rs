@@ -731,7 +731,7 @@ async fn wait_for_health(
     // loaded machine exceeds: startup has been measured at 10.46s while the
     // server is healthy throughout. Wait on a deadline instead so slow hosts
     // are not reported as broken servers.
-    let mut last_observation = String::from("no health attempt");
+    let mut last_observation;
     let deadline = Instant::now() + HEALTH_READY_TIMEOUT;
     loop {
         if let Some(status) = cli.child.try_wait().unwrap() {
@@ -756,15 +756,14 @@ async fn wait_for_health(
             }
         }
         if Instant::now() >= deadline {
-            break;
+            panic!(
+                "rccv3 CLI health did not become ready on {port} within {:?}; pid={}; last={last_observation}",
+                HEALTH_READY_TIMEOUT,
+                cli.child.id()
+            );
         }
         sleep(Duration::from_millis(100)).await;
     }
-    panic!(
-        "rccv3 CLI health did not become ready on {port} within {:?}; pid={}; last={last_observation}",
-        HEALTH_READY_TIMEOUT,
-        cli.child.id()
-    );
 }
 
 async fn next_capture(
