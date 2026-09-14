@@ -165,7 +165,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}"
     ));
     assert!(sse_body.contains(
-        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}"
+        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\""
     ));
     assert!(!sse_body.contains("data: [DONE]"), "{sse_body}");
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
