@@ -35,9 +35,17 @@ function runExpectFail(name, mutate, expectedText) {
     console.error(failures.join('\\n'));
     process.exit(1);
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
   if (result.status === 0) {
     console.error(`[v3-mainline-caller-flow-red] ${name}: expected failure but passed`);
+    process.exit(1);
+  }
+  if (result.error) {
+    console.error(`[v3-mainline-caller-flow-red] ${name}: spawn failed: ${result.error.message}`);
     process.exit(1);
   }
   const output = `${result.stdout}\n${result.stderr}`;
@@ -103,9 +111,17 @@ runExpectFail('missing-caller-symbol', (copy) => {
     console.error('forbidden source registered direct response edge');
     process.exit(1);
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
   if (result.status === 0) {
     console.error('[v3-mainline-caller-flow-red] source-registered-direct-response-hook: expected failure but passed');
+    process.exit(1);
+  }
+  if (result.error) {
+    console.error(`[v3-mainline-caller-flow-red] source-registered-direct-response-hook: spawn failed: ${result.error.message}`);
     process.exit(1);
   }
   const output = `${result.stdout}\n${result.stderr}`;
@@ -125,9 +141,17 @@ runExpectFail('missing-caller-symbol', (copy) => {
     console.error('forbidden source protocol preplanning helper');
     process.exit(1);
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
   if (result.status === 0) {
     console.error('[v3-mainline-caller-flow-red] source-protocol-preplanning-helper: expected failure but passed');
+    process.exit(1);
+  }
+  if (result.error) {
+    console.error(`[v3-mainline-caller-flow-red] source-protocol-preplanning-helper: spawn failed: ${result.error.message}`);
     process.exit(1);
   }
   const output = `${result.stdout}\n${result.stderr}`;
@@ -162,9 +186,17 @@ runExpectFail('missing-caller-symbol', (copy) => {
     console.error('audited locked fingerprint changed');
     process.exit(1);
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
   if (result.status === 0) {
     console.error('[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: expected failure but passed');
+    process.exit(1);
+  }
+  if (result.error) {
+    console.error(`[v3-mainline-caller-flow-red] audited-lock-fingerprint-change: spawn failed: ${result.error.message}`);
     process.exit(1);
   }
   const output = `${result.stdout}\n${result.stderr}`;
@@ -195,9 +227,17 @@ runExpectFail('missing-caller-symbol', (copy) => {
     console.error('required main skeleton chain is not audited_locked');
     process.exit(1);
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
   if (result.status === 0) {
     console.error('[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: expected failure but passed');
+    process.exit(1);
+  }
+  if (result.error) {
+    console.error(`[v3-mainline-caller-flow-red] missing-required-main-skeleton-lock: spawn failed: ${result.error.message}`);
     process.exit(1);
   }
   const output = `${result.stdout}\n${result.stderr}`;
