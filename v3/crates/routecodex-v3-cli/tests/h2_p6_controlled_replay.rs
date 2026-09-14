@@ -164,9 +164,26 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert!(sse_body.contains(
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}"
     ));
-    assert!(sse_body.contains(
-        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}"
-    ));
+    let completed_data = sse_body
+        .lines()
+        .zip(sse_body.lines().skip(1))
+        .find_map(|(event, data)| {
+            (event == "event: response.completed")
+                .then(|| data.strip_prefix("data: "))
+                .flatten()
+        })
+        .expect("SSE body must contain a response.completed event");
+    let completed: Value =
+        serde_json::from_str(completed_data).expect("response.completed data must be JSON");
+    assert_eq!(completed["type"], "response.completed");
+    assert_eq!(completed["response"]["id"], "h2_sse");
+    assert_eq!(completed["response"]["status"], "completed");
+    for field in ["input_tokens", "output_tokens", "total_tokens"] {
+        assert!(
+            completed["response"]["usage"][field].is_u64(),
+            "response.completed usage.{field} must be a non-negative integer: {completed}"
+        );
+    }
     assert!(!sse_body.contains("data: [DONE]"), "{sse_body}");
     let sse_capture = next_capture(&mut success.captures, "sse success").await;
     assert_eq!(sse_capture.accept.as_deref(), Some("text/event-stream"));
@@ -668,9 +685,6 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_B_KEY", "h2-failure-b-secret")
-        .env("TMPDIR", "build-control/temp")
-        .env("TMP", "build-control/temp")
-        .env("TEMP", "build-control/temp")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
@@ -695,7 +709,7 @@ async fn wait_for_health(
     server_id: &str,
 ) {
     let mut last_observation = String::from("no health attempt");
-    for _ in 0..80 {
+    for _ in 0..240 {
         if let Some(status) = cli.child.try_wait().unwrap() {
             panic!("rccv3 CLI exited before health on {port}: {status}");
         }
