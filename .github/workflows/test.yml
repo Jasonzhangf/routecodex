@@ -26,6 +26,7 @@ jobs:
       v3_router: ${{ steps.changed.outputs.v3_router }}
       v3_tool: ${{ steps.changed.outputs.v3_tool }}
       v4: ${{ steps.changed.outputs.v4 }}
+      v4_full: ${{ steps.changed.outputs.v4_full }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,7 +155,7 @@ jobs:
 
   v4-build:
     needs: scope
-    if: needs.scope.outputs.v4 == 'true'
+    if: needs.scope.outputs.v4_full == 'true'
     # GitHub-hosted macos-14 is ARM64 (2025-09-19 hosted-runner label change);
     # matches the aarch64-apple-darwin Active fixtures. Intel labels such as
     # macos-14-large/macos-15-intel are rejected by the isolation gate.
@@ -181,7 +182,7 @@ jobs:
 
   v4-appsdk-admission:
     needs: scope
-    if: needs.scope.outputs.v4 == 'true'
+    if: needs.scope.outputs.v4_full == 'true'
     runs-on: macos-14
     timeout-minutes: 10
     steps:
@@ -205,3 +206,29 @@ jobs:
           appsdk version
           test -x "$(command -v appsdk)"
           appsdk verify --admission v4
+
+  v4-scoped:
+    needs: scope
+    if: needs.scope.outputs.v4 == 'true' && needs.scope.outputs.v4_full != 'true'
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v4/package-lock.json
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: v4
+      - name: V4 install local build dependencies
+        run: npm ci --prefix v4 --ignore-scripts
+      - name: V4 scoped owner and contract checks
+        env:
+          ROUTECODEX_GATE_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          ROUTECODEX_GATE_DIFF_HEAD: ${{ github.sha }}
+          ROUTECODEX_GATE_REMOTE_NAME: origin
+        run: npm --prefix v4 run verify:scoped
