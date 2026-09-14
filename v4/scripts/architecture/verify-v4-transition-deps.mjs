@@ -40,6 +40,24 @@ const ADDITIONAL_PROMOTION_REQUIREMENTS = [
   'promotion_record',
 ];
 
+const ZONE_REQUIREMENT_BY_RECORD_STEP = {
+  clean_worktree: 'clean_worktree',
+  baseline_reproduction: 'baseline_reproduction',
+  fix_candidate_verified: 'fix_candidate_verified',
+  development_whitebox_pass: 'development_whitebox_pass',
+  deployed_blackbox_pass: 'deployed_blackbox_pass',
+  pre_review_validation_pass: 'pre_review_validation_pass',
+  architecture_review_pass: 'architecture_review_pass',
+  post_architecture_effectiveness_pass: 'post_architecture_effectiveness_pass',
+  merge_queued: 'merge_queue_admitted_when_parallel',
+  integration_verified: 'tested_integration_verified_when_parallel',
+  remote_verified: 'local_and_remote_mainline_receipt_when_parallel',
+  mainline_merged: 'mainline_merge_verified',
+  scenario_composition_verified: 'scenario_composition_verified',
+  compile: 'compile',
+  promotion_record: 'promotion_record',
+};
+
 const ALLOWED_RECORDS = new Set([
   ...REQUIRED_PROMOTION_RECORDS,
   'EvidenceRecord',
@@ -66,7 +84,12 @@ function requiredPromotionRequirements(recordGraph) {
     return null;
   }
   const parallelOnly = parallelOrder.filter((entry) => !singleOrder.includes(entry));
-  return [...new Set([...singleOrder, ...parallelOnly, ...ADDITIONAL_PROMOTION_REQUIREMENTS])];
+  const requiredSteps = [...singleOrder, ...parallelOnly, ...ADDITIONAL_PROMOTION_REQUIREMENTS];
+  return [...new Set(
+    requiredSteps
+      .map((step) => ZONE_REQUIREMENT_BY_RECORD_STEP[step])
+      .filter((requirement) => requirement !== undefined),
+  )];
 }
 
 export function validateTransitionContract(lifecycle, zone, recordGraph) {
