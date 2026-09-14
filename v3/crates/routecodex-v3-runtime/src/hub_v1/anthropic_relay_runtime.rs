@@ -668,11 +668,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         };
-        let provider_wire_protocol = provider_wire_protocol_for_provider_type(
-            &selected.candidate.provider_id,
-            &selected.candidate.provider_type,
-        )
-        .map_err(V3AnthropicRelayRuntimeError::Target)?;
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
@@ -696,10 +691,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             selected.candidate.clone(),
         );
         trace.push("V3HubReqTarget06Resolved");
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-        trace.push("V3HubReqOutbound07ProviderSemantic");
-        let target = provider_target(manifest, req07.selected_target(), None)?;
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -721,6 +712,21 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 continue;
             }};
         }
+        let provider_wire_protocol = match provider_wire_protocol_for_provider_type(
+            &selected.candidate.provider_id,
+            &selected.candidate.provider_type,
+        ) {
+            Ok(protocol) => protocol,
+            Err(error) => handle_provider_request_failure!(
+                "V3ProviderTarget06WireProtocol",
+                "provider_wire_protocol_unsupported",
+                error
+            ),
+        };
+        let req07 =
+            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        trace.push("V3HubReqOutbound07ProviderSemantic");
+        let target = provider_target(manifest, req07.selected_target(), None)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {
             Ok(req_compat) => req_compat,
             Err(error) => {
@@ -772,11 +778,24 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     ),
                 }
             }
-            other => {
-                return Err(V3AnthropicRelayRuntimeError::Target(format!(
-                    "Anthropic Relay does not support provider transport protocol {other:?}"
-                )));
+            V3HubProviderWireProtocol::OpenAiChat => {
+                match build_v3_provider_transport_request_for_protocol(
+                    V3HubProviderWireProtocol::OpenAiChat,
+                    wire,
+                ) {
+                    Ok(request) => request,
+                    Err(error) => handle_provider_request_failure!(
+                        "V3ProviderReqOutbound09TransportRequest",
+                        "provider_transport_request_error",
+                        error
+                    ),
+                }
             }
+            other => handle_provider_request_failure!(
+                "V3ProviderReqOutbound09TransportRequest",
+                "provider_transport_request_error",
+                format!("Anthropic Relay does not support provider transport protocol {other:?}")
+            ),
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
@@ -964,9 +983,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         local.as_ref(),
                         &requested_local_ids,
                         |finalized| {
-                            let client_events =
-                                project_v3_responses_json_as_anthropic_events(finalized)?;
-                            Ok(project_v3_anthropic_events_after_resp04(client_events))
+                            project_v3_anthropic_client_response_for_provider(
+                                finalized,
+                                provider_wire_protocol,
+                                V3HubTransportIntent::Sse,
+                            )
+                            .map_err(V3AnthropicRelayRuntimeError::from)
                         },
                     )
                     .await
@@ -1159,7 +1181,14 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         local.as_ref(),
                         &requested_local_ids,
                         |finalized| {
-                            if transport_intent == V3HubTransportIntent::Sse {
+                            if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
+                                project_v3_anthropic_client_response_for_provider(
+                                    finalized,
+                                    provider_wire_protocol,
+                                    transport_intent,
+                                )
+                                .map_err(V3AnthropicRelayRuntimeError::from)
+                            } else if transport_intent == V3HubTransportIntent::Sse {
                                 let client_events =
                                     project_v3_responses_json_as_anthropic_events(finalized)?;
                                 Ok(project_v3_anthropic_events_after_resp04(client_events))

@@ -163,6 +163,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     let protocol_plan = None;
     let owner_resolution_context = match build_responses_previous_response_owner_resolution_context(
         headers,
+        Some(&payload),
         &request_id,
         &state.server,
         "/v1/responses",
@@ -277,6 +278,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
     let continuation_scope = match build_responses_relay_local_continuation_scope(
         headers,
+        Some(&payload),
         &request_id,
         &state.server,
         "/v1/responses",

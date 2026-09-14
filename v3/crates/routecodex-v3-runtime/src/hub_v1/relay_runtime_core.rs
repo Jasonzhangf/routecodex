@@ -615,7 +615,33 @@ where
             selected.route.target_plan.len(),
             &selected.candidate.model_id,
         );
-        let provider_wire_protocol = C::wire_protocol(&selected.candidate)?;
+        let provider_wire_protocol = match C::wire_protocol(&selected.candidate) {
+            Ok(protocol) => protocol,
+            Err(error) => {
+                let terminal_failure = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    C::request_failure_builder(
+                        "V3ProviderTarget06WireProtocol",
+                        "provider_wire_protocol_unsupported",
+                        error,
+                    ),
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        same_candidate_retries: &mut same_candidate_retries,
+                        trace: &mut trace,
+                    },
+                    &mut retry_selected,
+                    &mut pending_provider_action_recovery,
+                )
+                .await
+                .map_err(V3RelayCoreError::Target)?;
+                if let Some(failure) = terminal_failure {
+                    return Ok(C::assemble_failure_output(failure, trace));
+                }
+                continue;
+            }
+        };
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
             V3HubTargetResolution::Routed,
