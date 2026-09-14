@@ -255,8 +255,9 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         }
     }
     let mut exhaustion;
+    let mut availability_rx = provider_health.store.availability_generation_receiver();
     loop {
-        let observed_generation = provider_health.store.availability_generation();
+        let observed_generation = *availability_rx.borrow_and_update();
         let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
             Err(error) => {
@@ -310,7 +311,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         }
         if let Err(error) = provider_health
             .store
-            .wait_for_availability_change(observed_generation)
+            .wait_for_availability_change(&mut availability_rx, observed_generation)
             .await
         {
             return V3TargetSelectionAfterRescue::Failed(target_resolution_source(

@@ -308,11 +308,15 @@ impl V3ProviderHealthStore {
         *self.availability_generation.borrow()
     }
 
+    pub fn availability_generation_receiver(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.availability_generation.subscribe()
+    }
+
     pub async fn wait_for_availability_change(
         &self,
+        receiver: &mut tokio::sync::watch::Receiver<u64>,
         observed_generation: u64,
     ) -> Result<u64, V3ProviderHealthError> {
-        let mut receiver = self.availability_generation.subscribe();
         loop {
             let current = *receiver.borrow_and_update();
             if current != observed_generation {
