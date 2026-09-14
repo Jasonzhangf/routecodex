@@ -79,6 +79,28 @@ export const CONSUMER_REGRESSIONS = [
   ['routecodex-v4-cli-plugin', 'routecodex-v4-base-node', '--source-deps', 'routecodex-v4-plugin-contract,routecodex-v4-plugin-plan,routecodex-v4-plugin-catalog,routecodex-v4-cordis-bridge,routecodex-v4-node-container,routecodex-v4-standard-plugins'],
 ];
 
+// These are the unique active map commands that are not architecture or
+// build-link consumer commands. A shared command runs once and can project
+// into several map roles; it must not be copied into one entry per role.
+export const MODULE_REGRESSIONS = [
+  { label: 'module:routecodex-v4-plugin-plan', command: 'cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-cordis-bridge', command: 'cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-node-container', command: 'cargo test -p routecodex-v4-node-container --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-node-container-l2-epoch', command: 'cargo test -p routecodex-v4-node-container --test l2_epoch --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-cli', command: 'cargo test -p routecodex-v4-cli --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-lifecycle', command: 'cargo test -p routecodex-v4-lifecycle --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-servertool', command: 'cargo test -p routecodex-v4-servertool --test l2_servertool --manifest-path Cargo.toml --locked' },
+  { label: 'module:feature-layer-self-test', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --self-test' },
+  { label: 'module:feature-layer-admission', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --admission' },
+  { label: 'module:feature-layer-boundary', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --boundary-self-test' },
+  { label: 'module:standard-plugins-request', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked' },
+  { label: 'module:standard-plugins-response', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_inbound_outbound --manifest-path Cargo.toml --locked' },
+  { label: 'module:standard-plugins-response-chat-process', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_chat_process_plugins --manifest-path Cargo.toml --locked' },
+  { label: 'module:routecodex-v4-runtime-l2-ports', command: 'cargo test --manifest-path Cargo.toml -p routecodex-v4-runtime --test l2_ports --locked' },
+];
+
+export const ISOLATION_COMMAND = 'node scripts/verify-isolation.mjs';
+
 export const RUNTIME_BIN_REGRESSION = 'cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests';
 
 export function architectureCommand(gate, flag) {

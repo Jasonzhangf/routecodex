@@ -78,7 +78,7 @@ const GATE_MATRIX_HASHES = {
 };
 const PREFLIGHT_PREFIXES = new Map([
   ['build', ['buildSource', 'sha256:0c66e6e16328c5d107ff843d0445f65287c3c5445d2d1a3acb71b3e92c63cea7', 'BUILD_PREFLIGHT_BINDING']],
-  ['verify', ['verifySource', 'sha256:a5786bacc0a56eef31daaeed4e08afd404e74972990151b27b662852c02c44f3', 'VERIFY_PREFLIGHT_BINDING']],
+  ['verify', ['verifySource', 'sha256:533d4f02e9fe535d575069ed13aed2055c40d534200e91c0b15033b53949c1b8', 'VERIFY_PREFLIGHT_BINDING']],
   ['install', ['installSource', 'sha256:e9f37bb003682cfcd5f535b759d8cb0a727b654929cebe6e2107c1ec64de3029', 'INSTALL_PREFLIGHT_BINDING']],
   ['manifest compile', ['compileManifestSource', 'sha256:ac1a1c53ea6748f21046bf4508cd81928a374150d580ece41a494856802ff973', 'MANIFEST_COMPILE_PREFLIGHT_BINDING']],
 ]);
