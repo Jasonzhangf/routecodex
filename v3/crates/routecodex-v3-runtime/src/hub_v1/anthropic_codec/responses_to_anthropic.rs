@@ -861,6 +861,42 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
         let tool_object = tool
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
+        if tool_object.get("type").and_then(Value::as_str) == Some("namespace") {
+            let namespace = tool_object.get("name").and_then(Value::as_str).ok_or(
+                V3AnthropicCodecError::MalformedField {
+                    field: "tools[].name",
+                },
+            )?;
+            for child in tool_object
+                .get("tools")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let mut child = child.clone();
+                if let Some(child_object) = child.as_object_mut() {
+                    let child_name = child_object
+                        .get("name")
+                        .or_else(|| child_object.get("function").and_then(|f| f.get("name")))
+                        .and_then(Value::as_str)
+                        .ok_or(V3AnthropicCodecError::MalformedField {
+                            field: "tools[].name",
+                        })?;
+                    if child_object.get("type").and_then(Value::as_str) != Some("namespace") {
+                        child_object.insert(
+                            "name".to_string(),
+                            Value::String(format!("{namespace}__{child_name}")),
+                        );
+                    }
+                }
+                append_responses_tools_for_anthropic_wire(
+                    Some(&Value::Array(vec![child])),
+                    output,
+                    seen_names,
+                )?;
+            }
+            continue;
+        }
         let anthropic_tool = responses_tool_as_anthropic_tool(tool_object)?;
         let name = anthropic_tool
             .get("name")
