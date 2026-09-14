@@ -16,8 +16,7 @@ pub const STATIC_PROVIDERS_HTML: &str = include_str!("../../../admin-webui/provi
 pub const STATIC_REQUESTS_HTML: &str = include_str!("../../../admin-webui/requests.html");
 pub const STATIC_APP_JS: &str = include_str!("../../../admin-webui/app.embedded.txt");
 pub const STATIC_STYLE_CSS: &str = include_str!("../../../admin-webui/styles.css");
-pub const STATIC_VENDOR_AMBIENT_CSS: &str =
-    include_str!("../../../admin-webui/vendor/ambient.css");
+pub const STATIC_VENDOR_AMBIENT_CSS: &str = include_str!("../../../admin-webui/vendor/ambient.css");
 pub const STATIC_APP_CORE_JS: &str = include_str!("../../../admin-webui/app/core.js");
 pub const STATIC_APP_SHELL_JS: &str = include_str!("../../../admin-webui/app/shell.js");
 pub const STATIC_APP_CHARTS_JS: &str = include_str!("../../../admin-webui/app/charts.js");
