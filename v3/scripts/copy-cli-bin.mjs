@@ -8,6 +8,10 @@ const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = path.join(v3Root, 'Cargo.toml');
 const sourceBin = path.join(v3Root, 'target', 'release', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3');
 const targetBin = path.join(v3Root, 'dist', 'bin', process.platform === 'win32' ? 'rccv3.exe' : 'rccv3');
+const hooksBinaryName =
+  process.platform === 'win32' ? 'rccv3-hooksd.exe' : 'rccv3-hooksd';
+const sourceHooksBin = path.join(v3Root, 'target', 'release', hooksBinaryName);
+const targetHooksBin = path.join(v3Root, 'dist', 'bin', hooksBinaryName);
 
 function fail(message) {
   console.error(`[copy-v3-cli-bin] ${message}`);
@@ -31,6 +35,8 @@ const result = spawnSync('cargo', [
   manifestPath,
   '-p',
   'routecodex-v3-cli',
+  '-p',
+  'routecodex-v3-hooks',
 ], { cwd: v3Root, env, stdio: 'inherit' });
 
 if ((result.status ?? 0) !== 0) {
@@ -39,23 +45,33 @@ if ((result.status ?? 0) !== 0) {
 if (!fs.existsSync(sourceBin)) {
   fail(`built V3 CLI binary not found: ${sourceBin}`);
 }
+if (!fs.existsSync(sourceHooksBin)) {
+  fail(`built V3 hooks sidecar binary not found: ${sourceHooksBin}`);
+}
 
 fs.mkdirSync(path.dirname(targetBin), { recursive: true });
-const temporaryBin = path.join(
-  path.dirname(targetBin),
-  `.${path.basename(targetBin)}.${process.pid}.${Date.now()}.tmp`,
-);
-fs.copyFileSync(sourceBin, temporaryBin);
-if (process.platform !== 'win32') {
-  fs.chmodSync(temporaryBin, 0o755);
-  const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
-    cwd: v3Root,
-    encoding: 'utf8',
-  });
-  if (sign.error || sign.status !== 0) {
-    fs.rmSync(temporaryBin, { force: true });
-    fail(`ad hoc code signing failed: ${sign.error?.message ?? sign.stderr ?? `exit ${sign.status}`}`);
+for (const [source, target] of [
+  [sourceBin, targetBin],
+  [sourceHooksBin, targetHooksBin],
+]) {
+  const temporaryBin = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  fs.copyFileSync(source, temporaryBin);
+  if (process.platform !== 'win32') {
+    fs.chmodSync(temporaryBin, 0o755);
+    const sign = spawnSync('codesign', ['-s', '-', '-f', temporaryBin], {
+      cwd: v3Root,
+      encoding: 'utf8',
+    });
+    if (sign.error || sign.status !== 0) {
+      fs.rmSync(temporaryBin, { force: true });
+      fail(`ad hoc code signing failed: ${sign.error?.message ?? sign.stderr ?? `exit ${sign.status}`}`);
+    }
   }
+  fs.renameSync(temporaryBin, target);
+  console.log(
+    `[copy-v3-cli-bin] copied ${path.relative(v3Root, source)} -> ${path.relative(v3Root, target)}`,
+  );
 }
-fs.renameSync(temporaryBin, targetBin);
-console.log(`[copy-v3-cli-bin] copied ${path.relative(v3Root, sourceBin)} -> ${path.relative(v3Root, targetBin)}`);

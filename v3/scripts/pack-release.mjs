@@ -10,7 +10,10 @@ const manifestPath = path.join(v3Root, 'Cargo.toml');
 const packageJsonPath = path.join(v3Root, 'package.json');
 const isolationGate = path.join(v3Root, 'scripts', 'verify-isolation.mjs');
 const binaryName = process.platform === 'win32' ? 'rccv3.exe' : 'rccv3';
+const hooksBinaryName =
+  process.platform === 'win32' ? 'rccv3-hooksd.exe' : 'rccv3-hooksd';
 const repoBin = path.join(v3Root, 'dist', 'bin', binaryName);
+const repoHooksBin = path.join(v3Root, 'dist', 'bin', hooksBinaryName);
 const packControlRoot = path.join(v3Root, 'build-control', 'pack');
 const packArtifactRoot = path.join(v3Root, 'artifacts', 'pack');
 
@@ -85,13 +88,22 @@ done
 mkdir -p "$BIN_DIR"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_BIN="$SCRIPT_DIR/bin/rccv3"
+SRC_HOOKS_BIN="$SCRIPT_DIR/bin/rccv3-hooksd"
 [[ -f "$SRC_BIN" ]] || { echo "missing rccv3 binary at $SRC_BIN" >&2; exit 2; }
+[[ -f "$SRC_HOOKS_BIN" ]] || { echo "missing rccv3-hooksd binary at $SRC_HOOKS_BIN" >&2; exit 2; }
 TMP_BIN="$BIN_DIR/.rccv3.$$.$RANDOM.tmp"
-trap 'rm -f "$TMP_BIN"' EXIT INT TERM
+TMP_HOOKS_BIN="$BIN_DIR/.rccv3-hooksd.$$.$RANDOM.tmp"
+trap 'rm -f "$TMP_BIN" "$TMP_HOOKS_BIN"' EXIT INT TERM
 cp "$SRC_BIN" "$TMP_BIN"
+cp "$SRC_HOOKS_BIN" "$TMP_HOOKS_BIN"
 chmod 755 "$TMP_BIN"
-if [[ "$(uname -s)" == "Darwin" ]]; then codesign -s - -f "$TMP_BIN"; fi
+chmod 755 "$TMP_HOOKS_BIN"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  codesign -s - -f "$TMP_BIN"
+  codesign -s - -f "$TMP_HOOKS_BIN"
+fi
 mv -f "$TMP_BIN" "$BIN_DIR/rccv3"
+mv -f "$TMP_HOOKS_BIN" "$BIN_DIR/rccv3-hooksd"
 ln -sfn rccv3 "$BIN_DIR/rcc"
 ln -sfn rccv3 "$BIN_DIR/routecodex"
 trap - EXIT INT TERM
@@ -121,17 +133,28 @@ function buildReleaseBinary(runRoot, version) {
     manifestPath,
     '-p',
     'routecodex-v3-cli',
+    '-p',
+    'routecodex-v3-hooks',
   ], { env });
   const sourceBin = path.join(cargoTarget, 'release', binaryName);
   if (!fs.existsSync(sourceBin)) fail(`built V3 CLI binary missing: ${sourceBin}`);
+  const sourceHooksBin = path.join(cargoTarget, 'release', hooksBinaryName);
+  if (!fs.existsSync(sourceHooksBin)) {
+    fail(`built V3 hooks sidecar binary missing: ${sourceHooksBin}`);
+  }
   copyExecutableAtomic(sourceBin, repoBin);
+  copyExecutableAtomic(sourceHooksBin, repoHooksBin);
   process.stdout.write(`[pack-release] binary=${path.relative(v3Root, repoBin)} sha256=${sha256(repoBin)}\n`);
+  process.stdout.write(
+    `[pack-release] hooks_binary=${path.relative(v3Root, repoHooksBin)} sha256=${sha256(repoHooksBin)}\n`,
+  );
 }
 
 function packDev(runRoot, version) {
   const releaseRoot = path.join(runRoot, `routecodex-v3-${version}`);
   fs.mkdirSync(path.join(releaseRoot, 'bin'), { recursive: true });
   fs.copyFileSync(repoBin, path.join(releaseRoot, 'bin', binaryName));
+  fs.copyFileSync(repoHooksBin, path.join(releaseRoot, 'bin', hooksBinaryName));
   fs.writeFileSync(path.join(releaseRoot, 'install.sh'), installScript(version), { mode: 0o755 });
   fs.writeFileSync(
     path.join(releaseRoot, 'README.md'),
@@ -149,7 +172,11 @@ function packNpm(runRoot, version) {
   const packageRoot = path.join(runRoot, 'package');
   fs.mkdirSync(path.join(packageRoot, 'dist', 'bin'), { recursive: true });
   fs.copyFileSync(repoBin, path.join(packageRoot, 'dist', 'bin', binaryName));
+  fs.copyFileSync(repoHooksBin, path.join(packageRoot, 'dist', 'bin', hooksBinaryName));
   if (process.platform !== 'win32') fs.chmodSync(path.join(packageRoot, 'dist', 'bin', binaryName), 0o755);
+  if (process.platform !== 'win32') {
+    fs.chmodSync(path.join(packageRoot, 'dist', 'bin', hooksBinaryName), 0o755);
+  }
   fs.writeFileSync(path.join(packageRoot, 'package.json'), `${JSON.stringify({
     name: 'routecodex',
     version,
@@ -159,6 +186,7 @@ function packNpm(runRoot, version) {
       routecodex: 'dist/bin/rccv3',
       rcc: 'dist/bin/rccv3',
       rccv3: 'dist/bin/rccv3',
+      'rccv3-hooksd': 'dist/bin/rccv3-hooksd',
     },
     files: ['dist/bin'],
     engines: { node: '>=20 <26' },

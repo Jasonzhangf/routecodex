@@ -16,12 +16,23 @@ pub(crate) fn reap_inactive_runtime_files(
     } else {
         None
     };
-    if hooks_sidecar_process_group_is_alive(instance_dir)? {
-        return Err(V3LifecycleError::IdentityMismatch(
-            "refusing to reap lifecycle state while hooks sidecar process group is alive"
-                .to_string(),
-        ));
-    }
+    // Startup admission is the one boundary where the optional sidecar must
+    // never block RouteCodex. A positively verified live group still blocks
+    // (its runtime is active); an uncertain or stale record must not. The
+    // record is preserved on uncertainty so no cleanup obligation is silently
+    // discarded, and it is removed only when the group is confirmed gone.
+    let hooks_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    let hooks_record_uncertain = match hooks_sidecar_process_group_is_alive(instance_dir) {
+        Ok(true) => {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap lifecycle state while hooks sidecar process group is alive"
+                    .to_string(),
+            ));
+        }
+        Ok(false) => false,
+        Err(V3LifecycleError::HooksControlValidation(_)) => hooks_record_path.exists(),
+        Err(error) => return Err(error),
+    };
     let terminal_status = status.as_ref().is_some_and(|status| {
         matches!(
             status.state,
@@ -86,6 +97,12 @@ pub(crate) fn reap_inactive_runtime_files(
         }
     }
     for file in ["pid.cache", "control.json", HOOKS_SIDECAR_PROCESS_FILE] {
+        if file == HOOKS_SIDECAR_PROCESS_FILE && hooks_record_uncertain {
+            // Preserve the uncertain hooks process record: the main runtime can
+            // be reaped and restarted, but the sidecar record stays for an
+            // explicit operator/next-start cleanup decision.
+            continue;
+        }
         let path = instance_dir.join(file);
         if path.exists() {
             fs::remove_file(path)?;
@@ -118,8 +135,15 @@ pub(crate) fn owned_unreachable_runtime_state_is_reapable(
     instance_dir: &Path,
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<bool, V3LifecycleError> {
-    if hooks_sidecar_process_group_is_alive(instance_dir)? {
-        return Ok(false);
+    // This predicate decides only whether the *main runtime* state is safely
+    // reapable. An uncertain hooks record is preserved by
+    // `reap_inactive_runtime_files`, and a positively live owned hooks group
+    // still means the instance is active. Hooks uncertainty must not make the
+    // main runtime unreapable, because that would block startup.
+    match hooks_sidecar_process_group_is_alive(instance_dir) {
+        Ok(true) => return Ok(false),
+        Ok(false) | Err(V3LifecycleError::HooksControlValidation(_)) => {}
+        Err(error) => return Err(error),
     }
     let pid_path = instance_dir.join("pid.cache");
     let cached_pid = if pid_path.exists() {

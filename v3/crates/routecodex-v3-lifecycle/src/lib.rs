@@ -868,23 +868,6 @@ impl V3ManagedLifecycle {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
-        if hooks_sidecar_process_group_is_alive(&instance_dir)? {
-            let error = V3LifecycleError::HooksControlValidation(
-                "hooks sidecar process group from a previous run is still alive".to_string(),
-            );
-            let detail = format!("hooks sidecar startup blocked: {error}");
-            return match write_status(
-                &instance_dir,
-                &declaration.instance_id,
-                V3ManagedRunState::Failed,
-                Some(detail.clone()),
-            ) {
-                Ok(()) => Err(error),
-                Err(status_error) => Err(V3LifecycleError::Validation(format!(
-                    "{detail}; failed to persist lifecycle failure: {status_error}"
-                ))),
-            };
-        }
         if let Err(error) = verify_published_declaration(&instance_dir, &declaration) {
             if !adopt_exec_restart_declaration_change(
                 &self.state_root,
@@ -947,20 +930,6 @@ impl V3ManagedLifecycle {
         let (mut hooks_sidecar, hooks_sidecar_detail) =
             match start_managed_hooks_sidecar(&instance_dir).await {
                 Ok(result) => result,
-                Err(error @ V3LifecycleError::HooksControlValidation(_)) => {
-                    let detail = format!("hooks sidecar startup blocked: {error}");
-                    return match write_status(
-                        &instance_dir,
-                        &declaration.instance_id,
-                        V3ManagedRunState::Failed,
-                        Some(detail.clone()),
-                    ) {
-                        Ok(()) => Err(error),
-                        Err(status_error) => Err(V3LifecycleError::Validation(format!(
-                            "{detail}; failed to persist lifecycle failure: {status_error}"
-                        ))),
-                    };
-                }
                 Err(error) => return Err(error),
             };
         let handle = match spawn_v3_server_aggregate_with_admin(
@@ -1488,5 +1457,7 @@ async fn release_foreign_managed_listener_ports_for_start(
     }
     Ok(())
 }
+#[cfg(test)]
+mod internal_hooksd_tests;
 #[cfg(test)]
 mod tests;
