@@ -828,7 +828,7 @@ async fn admit_v3_responses_session_after_json_parse(
     request_headers: &HeaderMap,
     payload: &Value,
 ) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) = match responses_control_scope_headers(request_headers) {
+    let (session_id, conversation_id) = match responses_control_scope_headers(request_headers, Some(payload)) {
         Ok(scope) => scope,
         Err(message) => {
             let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
@@ -1143,7 +1143,7 @@ fn build_v3_provider_failure_session_scope_for_request(
     server: &V3ServerManifest,
     headers: &HeaderMap,
 ) -> Result<Option<V3ProviderFailureSessionScope>, String> {
-    let (session_id, _) = responses_control_scope_headers(headers)?;
+    let (session_id, _) = responses_control_scope_headers(headers, None)?;
     session_id
         .map(|session_id| {
             V3ProviderFailureSessionScope::new(&server.id, &server.routing_group, &session_id)

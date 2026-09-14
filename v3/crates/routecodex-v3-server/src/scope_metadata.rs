@@ -66,6 +66,7 @@ pub(crate) fn responses_payload_previous_response_id(payload: &Value) -> Option<
 
 pub(crate) fn build_responses_direct_continuation_scope(
     headers: &HeaderMap,
+    payload: Option<&Value>,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
@@ -73,6 +74,7 @@ pub(crate) fn build_responses_direct_continuation_scope(
 ) -> Result<V3ResponsesDirectContinuationScope, String> {
     let (session_id, conversation_id) = request_local_continuation_scope(
         headers,
+        payload,
         entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
         request_id,
     )?;
@@ -87,6 +89,7 @@ pub(crate) fn build_responses_direct_continuation_scope(
 
 pub(crate) fn build_responses_relay_local_continuation_scope(
     headers: &HeaderMap,
+    payload: Option<&Value>,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
@@ -94,6 +97,7 @@ pub(crate) fn build_responses_relay_local_continuation_scope(
 ) -> Result<V3ResponsesRelayLocalContinuationScope, String> {
     let (session_id, conversation_id) = request_local_continuation_scope(
         headers,
+        payload,
         entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
         request_id,
     )?;
@@ -108,6 +112,7 @@ pub(crate) fn build_responses_relay_local_continuation_scope(
 
 pub(crate) fn build_responses_previous_response_owner_resolution_context(
     headers: &HeaderMap,
+    payload: Option<&Value>,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
@@ -118,6 +123,7 @@ pub(crate) fn build_responses_previous_response_owner_resolution_context(
     }
     let direct_scope = build_responses_direct_continuation_scope(
         headers,
+        payload,
         request_id,
         server,
         endpoint,
@@ -125,6 +131,7 @@ pub(crate) fn build_responses_previous_response_owner_resolution_context(
     )?;
     let relay_scope = build_responses_relay_local_continuation_scope(
         headers,
+        payload,
         request_id,
         server,
         endpoint,
@@ -143,10 +150,11 @@ pub(crate) fn build_responses_previous_response_owner_resolution_context(
 
 pub(crate) fn request_local_continuation_scope(
     headers: &HeaderMap,
+    payload: Option<&Value>,
     requires_client_scope: bool,
     request_id: &str,
 ) -> Result<(String, String), String> {
-    let (session_id, conversation_id) = responses_control_scope_headers(headers)?;
+    let (session_id, conversation_id) = responses_control_scope_headers(headers, payload)?;
     match (session_id, conversation_id) {
         (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
         (None, None) if !requires_client_scope => {
@@ -158,7 +166,7 @@ pub(crate) fn request_local_continuation_scope(
             Ok((request_scope.clone(), request_scope))
         }
         _ => Err(
-            "Responses continuation requires typed session and conversation control headers; request payload and client metadata cannot construct continuation control identity"
+            "Responses continuation requires typed session and conversation control identity in control headers, x-codex-turn-metadata, or request payload client_metadata; without those typed keys request payload and client metadata cannot construct continuation control identity"
                 .to_string(),
         ),
     }
@@ -166,6 +174,7 @@ pub(crate) fn request_local_continuation_scope(
 
 pub(crate) fn responses_control_scope_headers(
     headers: &HeaderMap,
+    payload: Option<&Value>,
 ) -> Result<(Option<String>, Option<String>), String> {
     let direct_session_id = first_header_text(
         headers,
@@ -192,10 +201,11 @@ pub(crate) fn responses_control_scope_headers(
     }
     let turn_metadata = parse_codex_turn_metadata(headers)?;
     let session_id = direct_session_id
-        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS));
-    let conversation_id = direct_conversation_id.or_else(|| {
-        read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS)
-    });
+        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_SESSION_PATHS))
+        .or_else(|| read_first_scope_value(payload, BODY_SESSION_PATHS));
+    let conversation_id = direct_conversation_id
+        .or_else(|| read_first_scope_value(turn_metadata.as_ref(), TURN_METADATA_CONVERSATION_PATHS))
+        .or_else(|| read_first_scope_value(payload, BODY_CONVERSATION_PATHS));
     Ok((session_id, conversation_id))
 }
 

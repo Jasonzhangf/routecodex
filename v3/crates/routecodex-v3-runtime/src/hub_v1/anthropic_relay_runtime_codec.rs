@@ -1,4 +1,7 @@
-use super::{project_v3_responses_reasoning_item_as_anthropic_content, V3AnthropicCodecError};
+use super::{
+    project_v3_responses_reasoning_item_as_anthropic_content, V3AnthropicCodecError,
+    V3HubProviderWireProtocol, V3HubTransportIntent,
+};
 use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Value};
 
@@ -85,6 +88,132 @@ pub fn project_v3_responses_json_as_anthropic_events(
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
     let message = project_v3_responses_json_as_anthropic_message(response)?;
     project_v3_anthropic_message_as_sse_events(&message)
+}
+
+/// Dispatch the client projection by the selected provider wire protocol.
+///
+/// The Anthropic entry serves any routed provider: `anthropic` and `responses`
+/// providers carry the canonical Responses-shaped semantic payload (projected
+/// via `project_v3_responses_json_as_anthropic_message`), while `openai_chat`
+/// providers carry the raw `chat.completion` composite shape and need their own
+/// Anthropic message projection. Non-OpenAiChat behavior is unchanged.
+pub fn project_v3_anthropic_client_response_for_provider(
+    semantic: &Value,
+    provider_protocol: V3HubProviderWireProtocol,
+    transport_intent: V3HubTransportIntent,
+) -> Result<Value, V3AnthropicCodecError> {
+    let message = if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
+        project_v3_openai_chat_completion_as_anthropic_message(semantic)?
+    } else {
+        project_v3_responses_json_as_anthropic_message(semantic)?
+    };
+    match transport_intent {
+        V3HubTransportIntent::Sse => {
+            let client_events = project_v3_anthropic_message_as_sse_events(&message)?;
+            Ok(project_v3_anthropic_events_after_resp04(client_events))
+        }
+        V3HubTransportIntent::Json => Ok(message),
+    }
+}
+
+/// Project an OpenAI Chat `chat.completion` composite (JSON response or
+/// materialized SSE) into an Anthropic client message.
+pub fn project_v3_openai_chat_completion_as_anthropic_message(
+    response: &Value,
+) -> Result<Value, V3AnthropicCodecError> {
+    let object = response
+        .as_object()
+        .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
+    let choices = object
+        .get("choices")
+        .and_then(Value::as_array)
+        .ok_or(V3AnthropicCodecError::ContentNotArray)?;
+    let choice = choices.first().cloned().unwrap_or_default();
+    let message = choice.get("message").cloned().unwrap_or_default();
+    let mut content = Vec::new();
+    if let Some(thinking) = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        content.push(json!({"type":"thinking","thinking":thinking}));
+    }
+    if let Some(text) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        content.push(json!({"type":"text","text":text}));
+    } else if let Some(refusal) = message
+        .get("refusal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        content.push(json!({"type":"text","text":refusal}));
+    }
+    let tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|calls| calls.to_vec())
+        .unwrap_or_default();
+    for tool_call in &tool_calls {
+        let function = tool_call.get("function").cloned().unwrap_or_default();
+        let arguments = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let input = serde_json::from_str::<Value>(arguments)
+            .ok()
+            .unwrap_or_else(|| json!({}));
+        content.push(json!({
+            "type":"tool_use",
+            "id":tool_call.get("id").cloned().unwrap_or(Value::Null),
+            "name":function.get("name").cloned().unwrap_or(Value::Null),
+            "input":input
+        }));
+    }
+    let response_id = object.get("id").and_then(Value::as_str).unwrap_or("record");
+    let message_id = if let Some(id) = response_id.strip_prefix("chatcmpl-") {
+        format!("msg_{id}")
+    } else {
+        format!("msg_{response_id}")
+    };
+    let mut message = json!({
+        "id":message_id,
+        "type":"message",
+        "role":"assistant",
+        "stop_reason":openai_chat_stop_reason_as_anthropic_stop_reason(&choice, &tool_calls),
+        "content":content
+    });
+    if let Some(model) = object.get("model") {
+        message["model"] = model.clone();
+    }
+    if let Some(usage) = object.get("usage").and_then(Value::as_object) {
+        message["usage"] = json!({
+            "input_tokens":usage.get("prompt_tokens").cloned().unwrap_or(Value::Null),
+            "output_tokens":usage.get("completion_tokens").cloned().unwrap_or(Value::Null)
+        });
+    } else if let Some(usage) = object.get("usage") {
+        message["usage"] = usage.clone();
+    }
+    Ok(message)
+}
+
+fn openai_chat_stop_reason_as_anthropic_stop_reason(
+    choice: &Value,
+    tool_calls: &[Value],
+) -> Value {
+    if !tool_calls.is_empty() {
+        return Value::String("tool_use".to_string());
+    }
+    let stop_reason = Value::String(match choice.get("finish_reason").and_then(Value::as_str) {
+        Some("length" | "max_tokens") => "max_tokens".to_string(),
+        _ => "end_turn".to_string(),
+    });
+    stop_reason
 }
 
 pub fn project_v3_responses_error_as_anthropic_error(body: &[u8]) -> Value {
