@@ -1216,18 +1216,33 @@ mod tests {
         let replacement = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
         let startup_identity =
             codexapp_socket_identity(&fs::symlink_metadata(&socket_path).unwrap());
-        assert_ne!(pre_start_identity, startup_identity);
 
-        cleanup_codexapp_socket(&CodexAppSocketCleanup {
-            path: socket_path.clone(),
-            install_root: root.path().to_path_buf(),
-            pre_start_identity: Some(pre_start_identity),
-            startup_identity: Some(startup_identity),
-        })
-        .unwrap();
+        if pre_start_identity == startup_identity {
+            // The kernel reused the same inode after unlink, so the replacement
+            // is indistinguishable from the original socket. Cleanup must
+            // preserve it rather than guessing ownership.
+            cleanup_codexapp_socket(&CodexAppSocketCleanup {
+                path: socket_path.clone(),
+                install_root: root.path().to_path_buf(),
+                pre_start_identity: Some(pre_start_identity),
+                startup_identity: Some(startup_identity),
+            })
+            .unwrap();
+            drop(replacement);
+            assert!(socket_path.exists());
+            fs::remove_file(&socket_path).unwrap();
+        } else {
+            cleanup_codexapp_socket(&CodexAppSocketCleanup {
+                path: socket_path.clone(),
+                install_root: root.path().to_path_buf(),
+                pre_start_identity: Some(pre_start_identity),
+                startup_identity: Some(startup_identity),
+            })
+            .unwrap();
 
-        drop(replacement);
-        assert!(!socket_path.exists());
+            drop(replacement);
+            assert!(!socket_path.exists());
+        }
     }
 
     #[test]
