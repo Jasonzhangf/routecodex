@@ -216,8 +216,8 @@ expectFailure(
   (root) => mutate(
     root,
     'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
-    'async fn pending_endpoint_after_responses_admission(',
-    'async fn pending_endpoint_after_responses_admission(\n    let _ = commit_at_resp04;\n',
+    'pub(crate) async fn pending_endpoint_after_responses_admission_inner(',
+    'pub(crate) async fn pending_endpoint_after_responses_admission_inner(\n    let _ = commit_at_resp04;\n',
   ),
   'server handler must not own semantic operation commit_at_resp04',
 );
@@ -238,8 +238,8 @@ expectFailure(
   (root) => mutate(
     root,
     'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
-    'async fn pending_endpoint_after_responses_admission(',
-    'async fn pending_endpoint_renamed(',
+    'pub(crate) fn pending_endpoint_after_responses_admission(',
+    'pub(crate) fn pending_endpoint_renamed(',
   ),
   'immutable-interval owner body is missing',
 );
@@ -392,8 +392,8 @@ expectFailure(
   (root) => mutate(
     root,
     'v3/crates/routecodex-v3-server/src/websocket.rs',
-    'async fn send_responses_websocket_sse_stream(',
-    'async fn send_responses_websocket_sse_stream(\n    let _ = apply_v3_tool_call_servertool_hook_at_resp03;\n',
+    'pub(crate) async fn send_responses_relay_websocket_sse_stream(',
+    'pub(crate) async fn send_responses_relay_websocket_sse_stream(\n    let _ = apply_v3_tool_call_servertool_hook_at_resp03;\n',
   ),
   'post-commit server projection must not own semantic operation servertool',
 );

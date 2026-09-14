@@ -592,7 +592,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
         // Probe health records each target result; aggregate probe errors are
         // not human console events.
         let _ = startup_result;
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
                 _ = &mut probe_shutdown_rx => break,

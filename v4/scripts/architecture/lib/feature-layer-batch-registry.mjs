@@ -72,13 +72,13 @@ export const GATE_INPUT_SETS = {
   ],
 };
 const GATE_MATRIX_HASHES = {
-  architecture: 'sha256:cf8e7fa9a91a53d868681516d7adeafc1de84edcf4cab5d11bf8170dc1cef87d',
+  architecture: 'sha256:cd3e240f83926cb2e5c4ff495dacfc5cd60f790bae02a967a8e4c68a028e1bf8',
   red: 'sha256:465a132dff4f7a183b943b9630fea127909c79b2fb9cfc14bc39a579a2b49d6c',
   packageScripts: 'sha256:4037eda3c523c0def4f0d5ad1c6bd3fe39169c6001cb3357790e6fc3624499f5',
 };
 const PREFLIGHT_PREFIXES = new Map([
-  ['build', ['buildSource', 'sha256:fb028d2b084eeb78e4afc9d45c954af15536ecc47379660a4a6dc5ccd42461b5', 'BUILD_PREFLIGHT_BINDING']],
-  ['verify', ['verifySource', 'sha256:54b85f89f7bc89bfd42676adb6147912ddb6949dc9d07347b325763687441b0c', 'VERIFY_PREFLIGHT_BINDING']],
+  ['build', ['buildSource', 'sha256:0c66e6e16328c5d107ff843d0445f65287c3c5445d2d1a3acb71b3e92c63cea7', 'BUILD_PREFLIGHT_BINDING']],
+  ['verify', ['verifySource', 'sha256:a5786bacc0a56eef31daaeed4e08afd404e74972990151b27b662852c02c44f3', 'VERIFY_PREFLIGHT_BINDING']],
   ['install', ['installSource', 'sha256:e9f37bb003682cfcd5f535b759d8cb0a727b654929cebe6e2107c1ec64de3029', 'INSTALL_PREFLIGHT_BINDING']],
   ['manifest compile', ['compileManifestSource', 'sha256:ac1a1c53ea6748f21046bf4508cd81928a374150d580ece41a494856802ff973', 'MANIFEST_COMPILE_PREFLIGHT_BINDING']],
 ]);
@@ -295,25 +295,49 @@ export function validateRegistryBindings(input, failures) {
     addFailure(failures, 'PACKAGE_SCRIPT_FULL_BINDING',
       'the complete V4 package script surface must match its protected semantic projection');
   }
-  const buildLines = input.buildSource.split(/\r?\n/);
-  const importIndex = buildLines.findIndex((line) => line.trim() === "import { run } from './_common.mjs';");
-  const firstExecutionIndex = buildLines.findIndex((line, index) =>
-    index > importIndex && line.trim().length > 0);
-  const cargoIndex = buildLines.findIndex((line) => line.trim().startsWith("run('cargo "));
-  if (importIndex < 0
-      || firstExecutionIndex < 0
-      || buildLines[firstExecutionIndex].trim() !== `run('${BUILD_GUARD_COMMAND}');`
-      || cargoIndex < 0
-      || firstExecutionIndex > cargoIndex) {
+  const buildSource = input.buildSource;
+  const buildFunction = buildSource.indexOf('export function runBuild()');
+  const guardedBuildFunction = buildSource.indexOf('export function runGuardedBuild()');
+  const buildGuard = `run('${BUILD_GUARD_COMMAND}');`;
+  const buildGuardIndex = buildSource.indexOf(buildGuard);
+  const buildMarker = buildSource.indexOf(PREFLIGHT_MARKER);
+  const guardedBuildBodyStart = buildSource.indexOf('{', guardedBuildFunction) + 1;
+  const guardedBuildBody = guardedBuildFunction >= 0 && buildMarker > guardedBuildBodyStart
+    ? buildSource.slice(guardedBuildBodyStart, buildMarker).trim()
+    : '';
+  const buildCall = buildSource.indexOf('  runBuild();', buildMarker);
+  const directDeclaration = buildSource.indexOf('const direct = process.argv[1]');
+  const directInvocation = buildSource.indexOf('if (direct) runGuardedBuild();');
+  const cargoIndex = buildSource.indexOf("run('cargo ");
+  if (buildFunction < 0
+      || guardedBuildFunction < 0
+      || buildGuardIndex < guardedBuildBodyStart
+      || buildGuardIndex < 0
+      || buildSource.indexOf(buildGuard, buildGuardIndex + buildGuard.length) >= 0
+      || !guardedBuildBody.startsWith(buildGuard)
+      || buildMarker < buildGuardIndex
+      || buildCall < buildMarker
+      || directDeclaration < guardedBuildFunction
+      || directInvocation < directDeclaration
+      || cargoIndex < buildFunction) {
     addFailure(failures, 'BUILD_PREFLIGHT_BINDING', 'build guard must run before the first Cargo/link action');
   }
   const verifyGuard = input.verifySource.indexOf(`run('${BUILD_GUARD_COMMAND}');`);
   const verifyFirstRun = input.verifySource.indexOf('run(');
   const verifyFirstMutation = input.verifySource.indexOf('fs.rmSync(');
+  const verifyBuildImport = "import { runBuild } from './build.mjs';";
+  const verifyBuildEntrypoint = "run('node scripts/build.mjs');";
+  const verifyBuildCall = 'runBuild();';
   if (verifyGuard < 0 || verifyGuard !== verifyFirstRun
       || verifyFirstMutation < 0 || verifyGuard > verifyFirstMutation) {
     addFailure(failures, 'VERIFY_PREFLIGHT_BINDING',
       'verify build guard must be the first execution before build or fixture mutation');
+  }
+  if (!input.verifySource.includes(verifyBuildImport)
+      || !input.verifySource.includes(verifyBuildCall)
+      || input.verifySource.includes(verifyBuildEntrypoint)) {
+    addFailure(failures, 'VERIFY_PREFLIGHT_BINDING',
+      'verify must reuse the unguarded build implementation after its preflight');
   }
   const installAdmission = input.installSource.indexOf("'--admission'");
   const installFirstEffect = input.installSource.indexOf('fs.existsSync(source)');

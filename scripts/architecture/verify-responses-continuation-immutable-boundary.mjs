@@ -168,7 +168,7 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
   requireNonEmpty(postCommitSseTransport, requiredFiles.responsesRelayRuntime + '::build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05', failures);
   const sseTransportInterval = allFunctionBodiesMatching(
     sources.responsesRelayRuntime,
-    /(^|\n)(pub\(crate\) )?fn (project_v3_responses_client_[a-z0-9_]+|append_v3_responses_client_[a-z0-9_]+|build_v3_server_resp_outbound_06_[a-z0-9_]+|build_v3_runtime_sse_json_frame)\(/g,
+    /(^|\n)(pub(?:\(crate\))? )?fn (project_v3_responses_client_[a-z0-9_]+|append_v3_responses_client_[a-z0-9_]+|build_v3_server_resp_outbound_06_[a-z0-9_]+|build_v3_runtime_sse_json_frame)\(/g,
     requiredFiles.responsesRelayRuntime,
   );
   // SSE transport owner 检查改为特定函数定义存在（防改名单个函数绕过家族过滤；
@@ -238,13 +238,27 @@ export function verifyResponsesContinuationImmutableBoundary(root) {
     }
   }
 
-  const serverHandler = functionBody(
+  const serverHandlerWrapper = functionBody(
     sources.endpointHandlers,
-    'pub(crate) async fn pending_endpoint_after_responses_admission(',
+    'pub(crate) fn pending_endpoint_after_responses_admission(',
   );
-  requireNonEmpty(serverHandler, requiredFiles.serverLib + '::pending_endpoint_after_responses_admission', failures);
+  const serverHandlerInner = functionBody(
+    sources.endpointHandlers,
+    'pub(crate) async fn pending_endpoint_after_responses_admission_inner(',
+  );
+  requireNonEmpty(
+    serverHandlerWrapper,
+    requiredFiles.endpointHandlers + '::pending_endpoint_after_responses_admission',
+    failures,
+  );
+  requireNonEmpty(
+    serverHandlerInner,
+    requiredFiles.endpointHandlers + '::pending_endpoint_after_responses_admission_inner',
+    failures,
+  );
+  const serverHandler = serverHandlerWrapper + '\n' + serverHandlerInner;
   const serverHandlerInterval = [
-    [requiredFiles.serverLib + '::pending_endpoint_after_responses_admission', serverHandler],
+    [requiredFiles.endpointHandlers + '::pending_endpoint_after_responses_admission', serverHandler],
   ];
   for (const [file, source] of serverHandlerInterval) {
     for (const forbidden of [

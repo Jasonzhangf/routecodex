@@ -14,7 +14,9 @@ pub fn v3_sse_post_commit_disposition(
         V3ErrorSourceKind::ClientDisconnect | V3ErrorSourceKind::TargetPoolExhausted => {
             V3SsePostCommitDisposition::CloseEof
         }
-        V3ErrorSourceKind::ProviderFailure if crate::is_v3_retryable_transient_source(source) => {
+        V3ErrorSourceKind::ProviderFailure
+            if crate::is_v3_retryable_transient_stage_code(source.source_stage, &source.code) =>
+        {
             V3SsePostCommitDisposition::CloseEof
         }
         _ => V3SsePostCommitDisposition::ProjectInternalTerminal,

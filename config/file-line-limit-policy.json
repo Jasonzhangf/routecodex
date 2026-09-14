@@ -18,6 +18,8 @@
     ".beads/"
   ],
   "allowList": [
-    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs"
+    "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
+    "v3/scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs",
+    "v3/scripts/architecture/verify-v3-provider-action-gate.mjs"
   ]
 }

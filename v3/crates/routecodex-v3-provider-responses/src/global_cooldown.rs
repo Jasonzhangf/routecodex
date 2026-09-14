@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const SCHEMA_VERSION: u32 = 1;
-const PROBE_RETRY_INTERVAL_MS: u64 = 60_000;
+const PROBE_RETRY_INTERVAL_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum V3ProviderCooldownFailureClass {

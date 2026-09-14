@@ -762,10 +762,8 @@ pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
     classified
 }
 
-/// 瞬态失败（SSE 流内协议失败 / transport 响应头挂起）判定，由错误处理中心
-/// 根据**错误阶段 + 错误类别**决定，与入口（direct/relay/chat）无关。
-/// 命中时 provider failure 层按「同 provider 直接重试 3 次、health-neutral
-/// （不计冷却）、第 3 次失败后一次回报错误中心再切 provider」驱动重试。
+/// 历史瞬态分类保留用于兼容旧诊断字段；provider failure production path
+/// 不再据此 retry_same，SSE/transport failure 统一计入 provider health 并切换候选。
 ///
 /// - SSE 流内阶段：ProviderFailure 一律视为瞬态（HTTP 2xx 后响应体/流内失败，
 ///   含裸 error 事件、response.failed/incomplete、空包、首事件超时、
@@ -773,10 +771,8 @@ pub fn build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy
 /// - transport 阶段：仅挂起（响应头等待超时，code=`provider_response_header_timeout`）
 ///   视为瞬态；其余 transport 错误（连接失败等）保持计 health 的原策略。
 pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool {
-    if source.source_kind != V3ErrorSourceKind::ProviderFailure {
-        return false;
-    }
-    is_v3_retryable_transient_stage_code(source.source_stage, &source.code)
+    let _ = source;
+    false
 }
 
 /// Returns whether a provider failure is health-neutral and eligible for the
@@ -817,12 +813,8 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         V3ErrorSourceKind::ModelNotFound
     );
     let retry_eligible = provider_failure && candidates_remaining > 0;
-    // 瞬态失败（SSE 流内/挂起，由错误处理中心按阶段+类别判定）为 provider
-    // 内部瞬态问题：不计入 provider health（health-neutral），由 provider
-    // failure 层按「同 provider 重试 3 次、第 3 次失败后一次回报再切」处理。
-    let health_affecting = provider_failure
-        && !matches!(scope, V3ErrorActionScope::None)
-        && !is_v3_retryable_transient_source(&classified.source);
+    // Provider failures, including SSE/transport failures, affect provider health.
+    let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
         "target_local_reselect"
     } else if client_disconnect {
@@ -860,25 +852,23 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
-    let target_exhausted = (provider_failure
-        && route_pool_remaining_after_exclusion == 0
-        && !default_pool_available
-        && !same_provider_retry_available)
-        || matches!(
-            local_action.classified.source.source_kind,
-            V3ErrorSourceKind::PendingEndpoint
-                | V3ErrorSourceKind::InvalidRequest
-                | V3ErrorSourceKind::RequestConflict
-                | V3ErrorSourceKind::UnsupportedMediaType
-                | V3ErrorSourceKind::PayloadTooLarge
-                | V3ErrorSourceKind::MethodNotAllowed
-                | V3ErrorSourceKind::PathNotFound
-                | V3ErrorSourceKind::ModelNotFound
-                | V3ErrorSourceKind::TargetPoolExhausted
-                | V3ErrorSourceKind::RuntimeFailure
-                | V3ErrorSourceKind::ClientDisconnect
-                | V3ErrorSourceKind::SuccessControl
-        );
+    let target_exhausted =
+        (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available)
+            || matches!(
+                local_action.classified.source.source_kind,
+                V3ErrorSourceKind::PendingEndpoint
+                    | V3ErrorSourceKind::InvalidRequest
+                    | V3ErrorSourceKind::RequestConflict
+                    | V3ErrorSourceKind::UnsupportedMediaType
+                    | V3ErrorSourceKind::PayloadTooLarge
+                    | V3ErrorSourceKind::MethodNotAllowed
+                    | V3ErrorSourceKind::PathNotFound
+                    | V3ErrorSourceKind::ModelNotFound
+                    | V3ErrorSourceKind::TargetPoolExhausted
+                    | V3ErrorSourceKind::RuntimeFailure
+                    | V3ErrorSourceKind::ClientDisconnect
+                    | V3ErrorSourceKind::SuccessControl
+            );
     V3Error04TargetExhaustionDecision {
         local_action,
         route_pool_remaining_after_exclusion,
@@ -894,12 +884,6 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
 ) -> V3Error05ExecutionDecision {
     let action = match exhaustion.local_action.classified.source.source_kind {
         V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
-        V3ErrorSourceKind::ProviderFailure if exhaustion.same_provider_retry_available => {
-            V3Error05ExecutionAction::WaitThenRetrySame {
-                recovery: recovery
-                    .expect("retry-same Error05 requires an exact recovery admission witness"),
-            }
-        }
         V3ErrorSourceKind::ProviderFailure
             if exhaustion.route_pool_remaining_after_exclusion > 0
                 || exhaustion.default_pool_available =>

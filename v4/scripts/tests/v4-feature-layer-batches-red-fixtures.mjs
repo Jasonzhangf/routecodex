@@ -39,7 +39,7 @@ export function selfTestResultHasBlockingFailure(result) {
 }
 
 function codes(failures) {
-  return sortedUnique(failures.map((item) => item.code));
+  return sortedUnique(failures.filter((item) => item.severity !== 'warning').map((item) => item.code));
 }
 
 function sameCodes(actual, expected) {
@@ -501,6 +501,17 @@ export function runFeatureLayerBatchRedFixtures({
         input.verifySource = input.verifySource.replace(
           "run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');\n",
           '',
+        );
+      },
+      options: { mode: 'definition', allowPendingGuard: true },
+    },
+    {
+      name: 'verify re-enters guarded build entrypoint',
+      expected: ['VERIFY_PREFLIGHT_BINDING'],
+      mutate(input) {
+        input.verifySource = input.verifySource.replace(
+          'runBuild();',
+          "run('node scripts/build.mjs');",
         );
       },
       options: { mode: 'definition', allowPendingGuard: true },

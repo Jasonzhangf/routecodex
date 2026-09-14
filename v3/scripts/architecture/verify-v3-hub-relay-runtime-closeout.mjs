@@ -201,7 +201,7 @@ for (const phrase of [
   'controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit',
   'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
   'local_continuation_servertool_roundtrip_is_runtime_e2e',
-  'provider_error_closeout_enters_error01_06_without_success_projection',
+  'provider_error_closeout_holds_while_pool_exhaustion_waits_for_recovery',
   'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile',
   'execute_v3_responses_relay_runtime',
   'servertool.exec',
@@ -357,7 +357,7 @@ for (const [text, path, label] of [
 // 并行 worker 正在重构 handle_provider_failure 签名（provider_health 参数迁移中），
 // 此处只要求最小锚（共享 handle_provider_failure 定义 + run_v3_relay_provider_failure_policy 调用）。
 // TODO(阶段6复核补齐，验收 gate)：共享重构稳定后必须恢复完整语义检查
-// （Error05 action 消费 WaitThenReselect/WaitThenRetrySame/ProjectTerminal、
+// （Error05 action 消费 WaitThenReselect/ProjectTerminal、
 // ordered SSE 失败路径、failure_context 构造），由 v3-provider-action-gate 的
 // relay_runtime_shared 锚 + 本最小锚共同保证 provider 失败语义不进 payload。
 requireText(
@@ -585,7 +585,6 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     'V3RelayProviderFailurePolicyContext',
     'V3RelayProviderFailurePolicyState',
     'V3Error05ExecutionAction::WaitThenReselect',
-    'V3Error05ExecutionAction::WaitThenRetrySame',
     'V3Error05ExecutionAction::ProjectTerminal',
     'V3ProviderFailureRuntimeHealth',
   ]) {
@@ -604,7 +603,6 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
     requireOrderedSequence(text, owner, [
       'let result = run_v3_relay_provider_failure_policy(',
       'V3Error05ExecutionAction::WaitThenReselect',
-      'V3Error05ExecutionAction::WaitThenRetrySame',
       'V3Error05ExecutionAction::ProjectTerminal',
     ]);
     return;
@@ -613,7 +611,6 @@ function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKi
   requireOrderedSequence(handleSlice, `${owner}: handle_provider_failure`, [
     'let result = run_v3_relay_provider_failure_policy(',
     'V3Error05ExecutionAction::WaitThenReselect',
-    'V3Error05ExecutionAction::WaitThenRetrySame',
     'V3Error05ExecutionAction::ProjectTerminal',
   ]);
   // 内联 state 构造（&mut V3RelayProviderFailurePolicyState {）仅协议文件要求；

@@ -160,20 +160,12 @@ impl Default for V3ResponsesRelayRetryPolicy {
 
 impl V3ResponsesRelayRetryPolicy {
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        let same_candidate_retries = manifest
-            .error
-            .provider_error_default_path
-            .iter()
-            .find_map(|step| match step {
-                routecodex_v3_config::V3ProviderDispositionStepManifest::WaitRetry {
-                    max_attempts,
-                    ..
-                } => Some(max_attempts.saturating_sub(1) as usize),
-                _ => None,
-            })
-            .unwrap_or(0);
+        // Every provider failure changes the candidate. RetrySame is retained
+        // only as a config compatibility enum and never grants production
+        // same-candidate retries.
+        let _ = manifest;
         Self {
-            same_candidate_retries,
+            same_candidate_retries: 0,
         }
     }
 

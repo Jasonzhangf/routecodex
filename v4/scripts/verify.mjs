@@ -11,10 +11,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { v4Root, run } from './_common.mjs';
+import { runBuild } from './build.mjs';
 import { ARCHITECTURE_GATES, CONSUMER_REGRESSIONS } from './_gate-matrix.mjs';
 
 run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
 // V4-LAYER-PREFLIGHT-END
+
+const { runIndependent, reportIndependentFailures } = await import('./_common.mjs');
 
 function restoreHermeticActive() {
   const fixture = path.join(v4Root, 'tests/resources/active-link-fixture/active/lib');
@@ -30,18 +33,28 @@ function restoreHermeticActive() {
 run('cargo run --quiet --manifest-path Cargo.toml -p routecodex-v4-skeleton --bin routecodex-v4-plan-hash -- contracts/skeleton-plan.contract.json --check');
 run('cargo build --release --manifest-path Cargo.toml --locked');
 restoreHermeticActive();
-run('node scripts/build.mjs');
+runBuild();
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-binary --root . --consumer routecodex-v4-runtime-bin --deps routecodex-v4-base-node,routecodex-v4-edge,routecodex-v4-control,routecodex-v4-error --source-deps routecodex-v4-cli,routecodex-v4-cordis-bridge,routecodex-v4-lifecycle,routecodex-v4-node-container,routecodex-v4-plugin-plan,routecodex-v4-servertool,routecodex-v4-standard-plugins --rlib-deps routecodex_v4_config=build-control/routecodex-v4-config/libroutecodex_v4_config.rlib,routecodex_v4_provider=build-control/routecodex-v4-provider/libroutecodex_v4_provider.rlib,routecodex_v4_router=build-control/routecodex-v4-router/libroutecodex_v4_router.rlib,routecodex_v4_runtime=build-control/routecodex-v4-runtime/libroutecodex_v4_runtime.rlib,routecodex_v4_server=build-control/routecodex-v4-server/libroutecodex_v4_server.rlib --out build-control/routecodex-v4-runtime-bin/tests');
 
-for (const gate of ARCHITECTURE_GATES) {
-  run(`node scripts/architecture/${gate}`);
-}
+run('node scripts/tests/verify-independent-failures.mjs');
 
-for (const [consumer, deps, ...extra] of CONSUMER_REGRESSIONS) {
+const architectureFailures = runIndependent(ARCHITECTURE_GATES.map((gate) => ({
+  label: `architecture:${gate}`,
+  command: `node scripts/architecture/${gate}`,
+})));
+
+const consumerFailures = runIndependent(CONSUMER_REGRESSIONS.map(([consumer, deps, ...extra]) => {
   const extraArgs = extra.length > 0 ? ` ${extra.join(' ')}` : '';
-  run(
-    `cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer ${consumer} --deps ${deps}${extraArgs}`,
-  );
+  return {
+    label: `consumer:${consumer}`,
+    command: `cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- test-consumer --root . --consumer ${consumer} --deps ${deps}${extraArgs}`,
+  };
+}));
+
+const matrixFailures = [...architectureFailures, ...consumerFailures];
+if (matrixFailures.length > 0) {
+  reportIndependentFailures('verify', matrixFailures);
+  process.exit(1);
 }
 
 run('cargo run --quiet --release --manifest-path Cargo.toml -p routecodex-v4-build-link -- gen-index --root .');

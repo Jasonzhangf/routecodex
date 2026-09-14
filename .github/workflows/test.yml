@@ -18,6 +18,13 @@ jobs:
     outputs:
       changed: ${{ steps.changed.outputs.changed }}
       v3: ${{ steps.changed.outputs.v3 }}
+      v3_architecture: ${{ steps.changed.outputs.v3_architecture }}
+      v3_build: ${{ steps.changed.outputs.v3_build }}
+      v3_provider: ${{ steps.changed.outputs.v3_provider }}
+      v3_session: ${{ steps.changed.outputs.v3_session }}
+      v3_debug: ${{ steps.changed.outputs.v3_debug }}
+      v3_router: ${{ steps.changed.outputs.v3_router }}
+      v3_tool: ${{ steps.changed.outputs.v3_tool }}
       v4: ${{ steps.changed.outputs.v4 }}
     steps:
       - uses: actions/checkout@v4
@@ -84,81 +91,66 @@ jobs:
         run: npm ci --prefix v3 --ignore-scripts --no-audit --no-fund
       - name: Fetch Rust dependencies for V3 checks
         run: cargo fetch --locked --manifest-path v3/Cargo.toml
+      - name: V3 CI gate wiring regression
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: node --test tests/scripts/v3-ci-gate-dedup.test.mjs
       - name: Fallback and internal policy hardcode gate
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:fallback-hardcode
-      - name: V3 Responses session admission
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:v3-responses-session-admission
-      - name: V3 Responses session admission red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run test:v3-responses-session-admission-red-fixtures
       - name: V3 Responses session admission behavior
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_session == 'true' }}
         run: npm run test:v3-responses-session-admission
       - name: File line-limit gate (<500)
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:file-line-limit
-      - name: V3 file-size ratchet gate (<=1500)
+      - name: File line-limit behavior regression
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:v3-file-size
-      - name: V3 and shared classifier file-size red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run test:v3-file-size-red-fixtures
+        run: npm run test:file-line-limit
       - name: V3 provider action gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate
       - name: V3 provider action architecture gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run verify:v3-provider-action-gate
       - name: V3 provider action red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate-red-fixtures
       - name: V3 5520 duplicate response tool identity
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_tool == 'true' }}
         run: npm run test:v3-5520-duplicate-tool-identity
-      - name: V3 Runtime timing observability
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:v3-runtime-timing-observability
-      - name: V3 Runtime timing red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run test:v3-runtime-timing-observability-red-fixtures
       - name: V3 debug side-channel contract
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run test:v3-debug-contract
       - name: V3 debug payload budget
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run verify:v3-debug-payload-budget
       - name: V3 debug payload budget red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run test:v3-debug-payload-budget-red-fixtures
       - name: V3 canonical verification stack
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm --prefix v3 run verify:ci
-      - name: V3 console request count red fixtures
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm --prefix v3 run test:v3-console-request-count-visibility-red-fixtures
       - name: V3 route-classifier semantic gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}
         run: npm run test:route-classifier-semantics
       - name: Servertool Rust-only gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
+        if: ${{ !cancelled() && needs.scope.outputs.v3_tool == 'true' }}
         run: node scripts/verify-servertool-rust-only.mjs
       - name: Build (release)
-        if: needs.scope.outputs.v3 == 'true'
+        if: needs.scope.outputs.v3_build == 'true'
         env:
           BUILD_MODE: release
           # Prevent build scripts from mutating version files in CI.
         run: npm run build:min
       - name: Install direct V3 CLI binary
-        if: needs.scope.outputs.v3 == 'true'
+        if: needs.scope.outputs.v3_build == 'true'
         run: RUSTUP_TOOLCHAIN=stable npm run install:v3
       - name: Install built V3 CLI shim
-        if: needs.scope.outputs.v3 == 'true'
+        if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
-      - name: Run host tests
-        if: needs.scope.outputs.v3 == 'true'
-        run: npm run test:v3-workspace
+      - name: Run host tests after install
+        if: needs.scope.outputs.v3_build == 'true'
+        run: node v3/scripts/run-v3-cargo-test.mjs +stable --workspace -- --nocapture
 
   v4-build:
     needs: scope

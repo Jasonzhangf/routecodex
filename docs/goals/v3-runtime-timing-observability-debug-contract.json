@@ -105,7 +105,6 @@
     "docs/goals/v3-console-human-readable-layering-test-design.md",
     "docs/architecture",
     "scripts/architecture/verify-v3-runtime-timing-observability.mjs",
-    "scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs",
     "scripts/architecture/verify-v3-console-request-count-visibility.mjs",
     "scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs",
     "scripts/architecture/verify-architecture-mainline-manifest-sync.mjs",

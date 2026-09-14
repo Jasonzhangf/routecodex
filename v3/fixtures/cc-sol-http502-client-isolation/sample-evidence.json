@@ -62,6 +62,8 @@
     {
       "rid": "openai-responses-router-gpt-5.5-20260906T093047022-52660-4398",
       "mode": "direct",
+      "superseded": true,
+      "superseded_by": "cooldown-recovery-0913 no-retry-same contract",
       "client_status": 200,
       "error_chain": [],
       "final_provider_key": "cc-sol:key1:gpt-5.6-sol",

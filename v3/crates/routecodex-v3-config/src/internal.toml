@@ -26,7 +26,7 @@ responses_continuation_disabled = true
 
 [error]
 provider_error_default_path = [
-  { step = "wait_retry", retry_mode = "retry_same", max_attempts = 3, backoff_ms = 0 },
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 3, backoff_ms = 0 },
   { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
   { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
 ]
