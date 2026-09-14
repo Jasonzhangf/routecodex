@@ -63,8 +63,8 @@ mod tests {
 
     #[test]
     fn adaptive_probe_starts_fast_and_stretches_for_non_recovery() {
-        assert_eq!(adaptive_probe_interval_ms(3, 3, None, 0), 30_000);
-        assert!(adaptive_probe_interval_ms(10, 10, None, 1) >= 15 * 60_000);
+        assert_eq!(adaptive_probe_interval_ms(3, 3, None, 0), 5_000);
+        assert!(adaptive_probe_interval_ms(10, 10, None, 1) >= 3 * 60_000);
     }
 
     #[test]

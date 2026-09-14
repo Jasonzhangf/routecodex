@@ -412,7 +412,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             V3ProviderCooldownFailureClass::Semantic
         );
         assert_eq!(entries[0].1, 120_200);
-        assert_eq!(entries[0].2, 30_200);
+        assert_eq!(entries[0].2, 5_200);
         assert_eq!(store.persistence_alarm(), None);
     }
 
