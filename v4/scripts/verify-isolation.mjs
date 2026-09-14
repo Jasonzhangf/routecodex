@@ -300,9 +300,21 @@ function checkModuleCoverage(registry, files) {
   return out;
 }
 
-function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/maps/mainline-call-map.json')) {
+function checkMainlineEdges(
+  mainlinePath = path.join(v4Root, 'docs/architecture/maps/mainline-call-map.json'),
+  resourceMapPath = path.join(v4Root, 'docs/architecture/maps/resource-map.json'),
+) {
   const out = [];
   const mainline = JSON.parse(fs.readFileSync(mainlinePath, 'utf8'));
+  const resourceMap = fs.existsSync(resourceMapPath)
+    ? JSON.parse(fs.readFileSync(resourceMapPath, 'utf8'))
+    : { resources: [] };
+  const generatedPaths = new Set((resourceMap.resources ?? [])
+    .filter((resource) => resource.status === 'active'
+      && resource.allowed_operations?.includes('generate')
+      && typeof resource.truth_store === 'string'
+      && !resource.truth_store.endsWith('/**'))
+    .map((resource) => resource.truth_store));
   const allowedOwners = new Set(['appsdk::goal', 'appsdk::lifecycle', 'appsdk::regression_gate', 'appsdk::compiler', 'appsdk::publisher', 'appsdk::freezer', 'appsdk::verifier', 'appsdk::workspace', 'appsdk::init', 'appsdk::verify', 'appsdk::build_domain', 'routecodex-v4-build-link', 'routecodex-v4-edge::validate_edge', 'routecodex-v4-control::metadata_center', 'routecodex-v4-error::error_chain', 'routecodex-v4-base-node::BaseNode', 'routecodex-v4-config::config_node', 'routecodex-v4-config::validate_edges', 'routecodex-v4-config::parse_v4_config_02_from_v4_config_01', 'routecodex-v4-config::validate_v4_config_03_from_v4_config_02', 'routecodex-v4-config::build_v4_config_04_from_v4_config_03', 'routecodex-v4-config::publish_v4_config_05_from_v4_config_04', 'routecodex-v4-runtime::ExecutionContext', 'routecodex-v4-runtime::SkeletonRuntime', 'routecodex-v4-runtime::scope_session_from_control', 'routecodex-v4-plugin-plan::compile_node_plan', 'routecodex-v4-plugin-catalog::register', 'routecodex-v4-cordis-bridge::compile_node', 'routecodex-v4-cordis-bridge::execute_plan']);
   allowedOwners.add('routecodex-v4-runtime::NodePlugin');
   allowedOwners.add('routecodex-v4-runtime::execute_mock_transport_slice');
@@ -346,7 +358,10 @@ function checkMainlineEdges(mainlinePath = path.join(v4Root, 'docs/architecture/
   const pathExists = (candidate) => {
     const trimmed = candidate.trim();
     const concrete = trimmed.endsWith('/**') ? trimmed.slice(0, -3) : trimmed;
-    return fs.existsSync(path.join(v4Root, concrete));
+    // Static isolation validates the declared owner/path. Generated artifacts
+    // are validated by their producer after generation, so they may be absent
+    // until that later build step.
+    return generatedPaths.has(concrete) || fs.existsSync(path.join(v4Root, concrete));
   };
   for (const edge of mainline.edges ?? []) {
     if (!edge.from || !edge.to || !edge.owner) {
@@ -695,6 +710,54 @@ function runCommandBindingSelfTest() {
     const missingModuleFailures = checkDeclaredExecutedBinding(missingModuleFixturePath, architectureDir);
     if (!missingModuleFailures.some((failure) => failure.includes('canonical module command is not declared active'))) {
       console.error('[v4 isolation] active command binding self-test did not reject an undeclared canonical module command');
+      process.exit(1);
+    }
+
+    const resourceMapFixturePath = path.join(fixtureRoot, 'resource-map.json');
+    fs.writeFileSync(resourceMapFixturePath, JSON.stringify({
+      resources: [{
+        resource_id: 'v4.build.active_artifact_index',
+        owner: 'routecodex-v4-build-link',
+        truth_store: 'build-control/active-index.json',
+        allowed_operations: ['generate', 'read', 'validate'],
+        status: 'active',
+      }],
+    }));
+    const generatedArtifactMainlinePath = path.join(fixtureRoot, 'generated-artifact-mainline.json');
+    fs.writeFileSync(generatedArtifactMainlinePath, JSON.stringify({
+      edges: [{
+        from: 'routecodex-v4-build-link',
+        to: 'v4.build.active_artifact_index',
+        owner: 'routecodex-v4-build-link',
+        path: 'build-control/active-index.json',
+        status: 'active',
+      }],
+    }));
+    const generatedArtifactFailures = checkMainlineEdges(
+      generatedArtifactMainlinePath,
+      resourceMapFixturePath,
+    );
+    if (generatedArtifactFailures.length > 0) {
+      console.error('[v4 isolation] generated artifact path self-test incorrectly rejected a pre-build path');
+      process.exit(1);
+    }
+
+    const missingSourceMainlinePath = path.join(fixtureRoot, 'missing-source-mainline.json');
+    fs.writeFileSync(missingSourceMainlinePath, JSON.stringify({
+      edges: [{
+        from: 'routecodex-v4-build-link',
+        to: 'v4.build.missing_source',
+        owner: 'routecodex-v4-build-link',
+        path: 'crates/routecodex-v4-build-link/src/missing.rs',
+        status: 'active',
+      }],
+    }));
+    const missingSourceFailures = checkMainlineEdges(
+      missingSourceMainlinePath,
+      resourceMapFixturePath,
+    );
+    if (!missingSourceFailures.some((failure) => failure.includes('missing bound path'))) {
+      console.error('[v4 isolation] missing source path self-test did not reject a missing source path');
       process.exit(1);
     }
     console.log('[v4 isolation] command binding self-test OK');
