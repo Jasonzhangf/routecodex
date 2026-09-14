@@ -1014,6 +1014,17 @@ fn tool_search_chat_extensions_round_trip_to_responses_fields() {
 }
 
 #[test]
+fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
+    let payload = json!({
+        "model": "glm-5.3",
+        "messages": [{"role":"tool","tool_call_id":"call_search","content":[{"type":"tool_result","name":"mcp__mcpx.workspace","content":"{}"}]}]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("dotted MCP history names must be legal on provider wire");
+    assert_eq!(request["messages"][0]["content"][0]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
 fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
     let payload = json!({
         "model": "deepseek-v4-flash",

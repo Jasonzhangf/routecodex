@@ -1359,6 +1359,7 @@ fn normalize_openai_chat_messages_payload(
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
+        normalize_openai_chat_message_tool_call_names(message_row);
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         let Some(content) = message_row.get_mut("content") else {
             continue;
