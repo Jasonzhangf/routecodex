@@ -62,7 +62,7 @@ pub fn project_v3_responses_sse_event_json(semantic: &V3ResponsesSseSemanticObje
     let mut value = semantic.to_normalized_value();
     let terminal = matches!(
         value.get("type").and_then(Value::as_str),
-        Some("response.completed" | "response.incomplete")
+        Some("response.completed" | "response.done" | "response.incomplete")
     );
     if terminal {
         if let Some(response) = value.get_mut("response").and_then(Value::as_object_mut) {
