@@ -164,9 +164,11 @@ runExpectFail('missing-caller-symbol', (copy) => {
 }
 
 {
+  const lockParsedPath = path.join(tmp, 'v3-mainline-call-map.lock.json');
+  fs.writeFileSync(lockParsedPath, JSON.stringify(parsed), 'utf8');
   const script = `
     import { auditV3ArchitectureLocks, chainFingerprint } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const parsed = ${JSON.stringify(parsed)};
+    const parsed = JSON.parse(fs.readFileSync(${JSON.stringify(lockParsedPath)}, 'utf8'));
     const lockedChain = parsed.chains[0];
     const locks = {
       schema_version: 1,
@@ -209,9 +211,11 @@ runExpectFail('missing-caller-symbol', (copy) => {
 }
 
 {
+  const lockParsedPath = path.join(tmp, 'v3-mainline-call-map.skeleton.json');
+  fs.writeFileSync(lockParsedPath, JSON.stringify(parsed), 'utf8');
   const script = `
     import { auditV3ArchitectureLocks } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const parsed = ${JSON.stringify(parsed)};
+    const parsed = JSON.parse(fs.readFileSync(${JSON.stringify(lockParsedPath)}, 'utf8'));
     const locks = {
       schema_version: 1,
       policy: {
