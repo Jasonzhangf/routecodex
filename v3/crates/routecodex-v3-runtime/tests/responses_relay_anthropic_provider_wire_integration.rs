@@ -82,55 +82,31 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
     }
 }
 
-struct AnthropicCyberRefusalThenSuccessTransport {
+struct AnthropicCyberRefusalTransport {
     attempts: Mutex<usize>,
 }
 
 #[async_trait]
-impl ResponsesTransport for AnthropicCyberRefusalThenSuccessTransport {
+impl ResponsesTransport for AnthropicCyberRefusalTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        let attempt = {
-            let mut attempts = self.attempts.lock().unwrap();
-            *attempts += 1;
-            *attempts
-        };
-        if attempt == 1 {
-            let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
-                Ok("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".as_bytes().to_vec()),
-                Ok("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"policy\"}}}\n\n".as_bytes().to_vec()),
-            ];
-            return Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(futures_util::stream::iter(frames)),
-            ));
-        }
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
+        let mut attempts = self.attempts.lock().unwrap();
+        *attempts += 1;
+        let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
+            Ok("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".as_bytes().to_vec()),
+            Ok("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"policy\"}}}\n\n".as_bytes().to_vec()),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
             200,
             vec![V3ProviderResponseHeader {
                 name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
+                value: b"text/event-stream".to_vec(),
             }],
-            serde_json::to_vec(&json!({
-                "id":"msg_after_cyber_retry",
-                "type":"message",
-                "role":"assistant",
-                "model":"claude-fable-5",
-                "content":[{"type":"text","text":"OK after retry"}],
-                "usage":{"input_tokens":7,"output_tokens":3},
-                "stop_reason":"end_turn"
-            }))
-            .unwrap(),
+            Box::pin(futures_util::stream::iter(frames)),
         ))
     }
 }
@@ -518,8 +494,8 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failure() {
-    let transport = AnthropicCyberRefusalThenSuccessTransport {
+async fn responses_relay_anthropic_cyber_refusal_sse_projects_terminal_on_single_candidate() {
+    let transport = AnthropicCyberRefusalTransport {
         attempts: Mutex::new(0),
     };
     let output = execute_v3_responses_relay_runtime_with_retry_policy(
@@ -548,8 +524,11 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     .await
     .unwrap();
 
-    assert_eq!(*transport.attempts.lock().unwrap(), 2);
-    assert_eq!(output.status, 200);
+    // RetrySame is a config compatibility enum only; production never grants a
+    // same-candidate retry, and this pool declares a single target so
+    // reselection cannot yield another attempt either.
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert_eq!(output.status, 502);
     let observability = output.observability.as_ref().expect("observability");
     assert_eq!(observability.provider_failure_events.len(), 1);
     let failure = &observability.provider_failure_events[0];
@@ -561,19 +540,11 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
-    match output.client_body {
-        V3ResponsesRelayClientBody::Sse(mut stream) => {
-            use futures_util::StreamExt;
-            let mut forwarded = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk);
-            }
-            let text = String::from_utf8(forwarded).unwrap();
-            assert!(text.contains("OK after retry"));
-            assert!(!text.contains("ANTHROPIC_CYBER_REFUSAL"));
-        }
-        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
-    }
+    assert!(
+        output.node_trace.contains(&"V3Error06ClientProjected"),
+        "single-candidate pool must project the provider failure terminally: {:?}",
+        output.node_trace
+    );
 }
 
 #[tokio::test]
