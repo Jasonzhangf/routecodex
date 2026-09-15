@@ -1026,7 +1026,7 @@ resources:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: score == 0
+      cooldown_condition: failure_streak >= typed failure_threshold when present; thresholdless recoverable uses score == 0; thresholdless irrecoverable blocks immediately
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1180,6 +1180,7 @@ resources:
       cross_model_same_key: isolated
       priority_contract: higher configured priority wins; only exactly equal highest available priority candidates are weighted; health never changes priority
       weight_contract: effective_weight_milli = max(baseWeight, 1) * max(score, 1)
+      availability_contract: score never blocks scheduling; only typed cooldown/probe/auth-key state does
       forbidden_consumers: [request.normal_payload, response.client_payload, MetadataCenter]
     allowed_writers: [V3ProviderHealthStore::scheduling_projection]
     allowed_readers: [V3TargetInterpreter::select_available_with_health]

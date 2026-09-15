@@ -121,6 +121,51 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
+fn model_success_does_not_clear_auth_key_cooldown() {
+    let store = V3ProviderHealthStore::default();
+    for now_ms in 1..=3 {
+        fail(&store, now_ms);
+    }
+    store
+        .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
+        .expect("model success");
+    assert!(
+        !store
+            .availability_for_session(
+                &scope(),
+                "provider-a",
+                Some("key-a"),
+                Some("model-b"),
+                30_004,
+            )
+            .available,
+        "a model-scoped success must not clear an auth-key cooldown"
+    );
+    assert_eq!(
+        store.provider_cooldown_probe_keys_due(5_003).unwrap().len(),
+        1,
+        "the auth-key probe remains the only recovery owner"
+    );
+}
+
+#[test]
+fn model_success_resets_auth_key_consecutive_failures() {
+    let store = V3ProviderHealthStore::default();
+    fail(&store, 1);
+    fail(&store, 2);
+    store
+        .record_provider_key_success("provider-a", "key-a", "model-a", 3)
+        .expect("model success");
+    fail(&store, 4);
+    assert!(
+        store
+            .availability_for_session(&scope(), "provider-a", Some("key-a"), Some("model-a"), 5,)
+            .available,
+        "a success between failures must reset the auth-key failure streak"
+    );
+}
+
+#[test]
 fn probe_failures_follow_5s_30s_1m_3m_15m_1h_3h_ladder() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
