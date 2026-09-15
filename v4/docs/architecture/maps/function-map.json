@@ -918,14 +918,12 @@
       ],
       "required_gates": [
         "v4_real_runtime_admission_red",
-        "v4_parity_gate_real_runtime_admission",
-        "v4_parity_gate_real_runtime_admission_red",
         "v4_real_runtime_compiled_manifest",
         "v4_real_runtime_provider_transport",
         "v4_real_runtime_server_http",
         "v4_real_runtime_responses_json",
         "v4_real_runtime_responses_sse",
-        "v4_real_runtime_v3_isolation"
+        "v4_isolation_positive"
       ],
       "resource_bindings": [
         "v4.runtime.admission_manifest"
@@ -946,7 +944,7 @@
       ],
       "required_gates": [
         "v4_real_runtime_compiled_manifest",
-        "v4_real_runtime_v3_isolation"
+        "v4_isolation_positive"
       ],
       "resource_bindings": [
         "v4.runtime.compiled_manifest",
