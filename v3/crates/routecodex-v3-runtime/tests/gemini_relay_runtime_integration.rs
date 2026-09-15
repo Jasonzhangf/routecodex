@@ -33,7 +33,7 @@ fn ensure_gemini_relay_test_state_dir() {
     });
 }
 
-#[path = "../support/hub_v1_fixture.rs"]
+#[path = "support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
