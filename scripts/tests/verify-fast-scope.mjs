@@ -41,7 +41,13 @@ const cases = [
   { relative: 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/tests/agent-collab-protocol-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true, v4Full: true },
+  { relative: 'package.json', contents: '{"description":"scope fixture"}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: false, v4Full: false },
+  { relative: 'package.json', contents: '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n', fine: { v3_architecture: true }, v3: true, v4: false, v4Full: false },
+  { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: true, v4Full: true },
+  { relative: 'package.json', contents: '{"scripts":{"verify:fallback-hardcode":"npm run verify:no-fallback-all && npm run verify:internal-policy-hardcode"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
+  { relative: 'package.json', contents: '{"scripts":{"verify:file-line-limit":"node scripts/ci/check-file-line-limit.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
+  { relative: 'package.json', contents: '{"scripts":{"test:file-line-limit":"node --test tests/scripts/file-line-limit.test.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
+  { relative: 'package-lock.json', contents: '{"lockfileVersion":3}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: false, v4Full: false },
   { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false },
   {
     relative: 'scripts/verify-fast.mjs',
@@ -284,6 +290,119 @@ for (const { relative, contents, additionalFiles = [], diffMode, fine, v3, v4, v
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+const newRefDeletionRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-new-ref-delete-'));
+try {
+  const packagePath = join(newRefDeletionRoot, 'package.json');
+  mkdirSync(join(packagePath, '..'), { recursive: true });
+  writeFileSync(packagePath, '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n');
+  symlinkSync(join(repo, 'node_modules'), join(newRefDeletionRoot, 'node_modules'), 'dir');
+  execFileSync('git', ['init', '-q'], { cwd: newRefDeletionRoot });
+  execFileSync('git', ['add', 'package.json'], { cwd: newRefDeletionRoot });
+  execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'base manifest'], { cwd: newRefDeletionRoot });
+  const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: newRefDeletionRoot, encoding: 'utf8' }).trim();
+  rmSync(packagePath);
+  execFileSync('git', ['add', '-u', 'package.json'], { cwd: newRefDeletionRoot });
+  execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'delete manifest'], { cwd: newRefDeletionRoot });
+  const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: newRefDeletionRoot, encoding: 'utf8' }).trim();
+  execFileSync('git', ['update-ref', 'refs/remotes/testremote/base', baseCommit], { cwd: newRefDeletionRoot });
+  const scopeOutputPath = join(newRefDeletionRoot, 'scope-output.txt');
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: newRefDeletionRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROUTECODEX_GATE_DIFF_BASE: '0'.repeat(40),
+      ROUTECODEX_GATE_DIFF_HEAD: headCommit,
+      ROUTECODEX_GATE_REMOTE_NAME: 'testremote',
+      ROUTECODEX_GATE_SCOPE_ONLY: '1',
+      ROUTECODEX_GATE_SCOPE_OUTPUT: scopeOutputPath,
+    },
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const scope = existsSync(scopeOutputPath) ? readFileSync(scopeOutputPath, 'utf8') : '<missing scope output>';
+  if (result.status !== 0
+      || !scope.includes('v3=true\n')
+      || !scope.includes('v3_architecture=true\n')
+      || !scope.includes('v4=false\n')
+      || !scope.includes('v4_full=false\n')) {
+    failures.push(`new-ref package deletion must retain the manifest scope, got status=${result.status}\n${output}\n${scope}`);
+  }
+} finally {
+  rmSync(newRefDeletionRoot, { recursive: true, force: true });
+}
+
+const stagedDeletionRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-staged-delete-'));
+try {
+  const packagePath = join(stagedDeletionRoot, 'package.json');
+  writeFileSync(packagePath, '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n');
+  symlinkSync(join(repo, 'node_modules'), join(stagedDeletionRoot, 'node_modules'), 'dir');
+  execFileSync('git', ['init', '-q'], { cwd: stagedDeletionRoot });
+  execFileSync('git', ['add', 'package.json'], { cwd: stagedDeletionRoot });
+  execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'base manifest'], { cwd: stagedDeletionRoot });
+  rmSync(packagePath);
+  execFileSync('git', ['add', '-u', 'package.json'], { cwd: stagedDeletionRoot });
+  const scopeOutputPath = join(stagedDeletionRoot, 'scope-output.txt');
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: stagedDeletionRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROUTECODEX_GATE_DIFF_MODE: 'staged',
+      ROUTECODEX_GATE_SCOPE_ONLY: '1',
+      ROUTECODEX_GATE_SCOPE_OUTPUT: scopeOutputPath,
+    },
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const scope = existsSync(scopeOutputPath) ? readFileSync(scopeOutputPath, 'utf8') : '<missing scope output>';
+  if (result.status !== 0
+      || !scope.includes('v3=true\n')
+      || !scope.includes('v3_architecture=true\n')
+      || !scope.includes('v4=false\n')
+      || !scope.includes('v4_full=false\n')) {
+    failures.push(`staged package deletion must retain the manifest scope, got status=${result.status}\n${output}\n${scope}`);
+  }
+} finally {
+  rmSync(stagedDeletionRoot, { recursive: true, force: true });
+}
+
+const baseHeadDeletionRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-base-head-delete-'));
+try {
+  const packagePath = join(baseHeadDeletionRoot, 'package.json');
+  writeFileSync(packagePath, '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n');
+  symlinkSync(join(repo, 'node_modules'), join(baseHeadDeletionRoot, 'node_modules'), 'dir');
+  execFileSync('git', ['init', '-q'], { cwd: baseHeadDeletionRoot });
+  execFileSync('git', ['add', 'package.json'], { cwd: baseHeadDeletionRoot });
+  execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'base manifest'], { cwd: baseHeadDeletionRoot });
+  const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: baseHeadDeletionRoot, encoding: 'utf8' }).trim();
+  rmSync(packagePath);
+  execFileSync('git', ['add', '-u', 'package.json'], { cwd: baseHeadDeletionRoot });
+  execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'delete manifest'], { cwd: baseHeadDeletionRoot });
+  const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: baseHeadDeletionRoot, encoding: 'utf8' }).trim();
+  const scopeOutputPath = join(baseHeadDeletionRoot, 'scope-output.txt');
+  const result = spawnSync(process.execPath, [verifier], {
+    cwd: baseHeadDeletionRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROUTECODEX_GATE_DIFF_BASE: baseCommit,
+      ROUTECODEX_GATE_DIFF_HEAD: headCommit,
+      ROUTECODEX_GATE_SCOPE_ONLY: '1',
+      ROUTECODEX_GATE_SCOPE_OUTPUT: scopeOutputPath,
+    },
+  });
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const scope = existsSync(scopeOutputPath) ? readFileSync(scopeOutputPath, 'utf8') : '<missing scope output>';
+  if (result.status !== 0
+      || !scope.includes('v3=true\n')
+      || !scope.includes('v3_architecture=true\n')
+      || !scope.includes('v4=false\n')
+      || !scope.includes('v4_full=false\n')) {
+    failures.push(`base/head package deletion must retain the manifest scope, got status=${result.status}\n${output}\n${scope}`);
+  }
+} finally {
+  rmSync(baseHeadDeletionRoot, { recursive: true, force: true });
 }
 
 const missingRustOwnerRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-rust-owner-'));
