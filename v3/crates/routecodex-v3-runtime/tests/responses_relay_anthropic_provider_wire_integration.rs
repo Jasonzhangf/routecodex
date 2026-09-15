@@ -548,6 +548,9 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
     .await
     .unwrap();
 
+    // RetrySame is a config compatibility enum only; production never grants a
+    // same-candidate retry, and this pool declares a single target so
+    // reselection cannot yield another attempt either.
     assert_eq!(*transport.attempts.lock().unwrap(), 1);
     assert_eq!(output.status, 502);
     let observability = output.observability.as_ref().expect("observability");
@@ -565,6 +568,11 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
         panic!("route exhaustion must project a typed JSON terminal error")
     };
     assert_eq!(body["error"]["code"], "network_error");
+    assert!(
+        output.node_trace.contains(&"V3Error06ClientProjected"),
+        "single-candidate pool must project the provider failure terminally: {:?}",
+        output.node_trace
+    );
 }
 
 #[tokio::test]
