@@ -179,7 +179,11 @@ function isV3RootScript(relative) {
 }
 
 function isV3ArchitectureRootScript(relative) {
-  return isV3RootScript(relative) && relative !== 'scripts/verify-fast.mjs';
+  return isV3RootScript(relative)
+    && relative !== 'scripts/verify-fast.mjs'
+    && relative !== 'scripts/ci/check-file-line-limit.mjs'
+    && relative !== 'scripts/ci/repo-sanity.mjs'
+    && relative !== 'scripts/ci/mempalace-scan-artifact-audit.mjs';
 }
 
 function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
