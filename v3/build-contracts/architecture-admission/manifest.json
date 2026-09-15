@@ -768,7 +768,7 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "df2f62ef90d3b141e3b371033a74d39d3a746241",
+      "source_commit": "491fe1e6221c20688f88aca17b7a9bfeee599cfd",
       "sha256": "33f821755eb8eab6bd96b95c4bd4f8eba7f00c64c0e55f02eec21a224eb7f1c1"
     },
     {
@@ -966,7 +966,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
+      "source_commit": "491fe1e6221c20688f88aca17b7a9bfeee599cfd",
       "sha256": "34d716b04697e4ceb938134930019744c2d1cc505de8f20fdd76d847d214e1b3"
     },
     {
@@ -1218,7 +1218,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "1c799ae5806dbd52142c70fe7eb566709010d47b",
+      "source_commit": "491fe1e6221c20688f88aca17b7a9bfeee599cfd",
       "sha256": "f5260d39ccee849aacf2d87b1d96aeb332d86e2a43cafd5ec37d6da88bb8c632"
     },
     {
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "b03ab562bf7dd71625a5f227785560e49424af6d4bad9ddd504f61e8b8f2706b"
+  "manifest_digest": "b9666f9a0e23b23d5dfc2bf2c9fade1c2f4ede837e1b0eda4c6c97d8ff7d10c5"
 }
