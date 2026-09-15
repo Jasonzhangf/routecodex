@@ -54,6 +54,14 @@ function runChecker(tempRoot) {
   );
 }
 
+function runCheckerWithBase(tempRoot, base) {
+  return spawnSync(
+    process.execPath,
+    [join(tempRoot, 'scripts/ci/check-file-line-limit.mjs'), `--base=${base}`],
+    { cwd: tempRoot, encoding: 'utf8' }
+  );
+}
+
 test('historical over-limit file without growth is warning-only', () => {
   const tempRoot = createRepo(6, 'a\nb\nc\nd\ne\nf\n');
   try {
@@ -68,14 +76,14 @@ test('historical over-limit file without growth is warning-only', () => {
   }
 });
 
-test('new growth in an over-limit file remains blocking', () => {
+test('new growth in an already over-limit file is warning-only', () => {
   const tempRoot = createRepo(6, 'a\nb\nc\nd\ne\n');
   try {
     commitChange(tempRoot, 'tracked.mjs', 'a\nb\nc\nd\ne\nf\n');
     const result = runChecker(tempRoot);
     const output = `${result.stdout}\n${result.stderr}`;
-    if (result.status !== 1 || !output.includes('modified-file-over-limit')) {
-      throw new Error(`expected blocking result, got status=${result.status}\n${output}`);
+    if (result.status !== 0 || !output.includes('[file-line-limit] warn') || !output.includes('modified-file-over-limit')) {
+      throw new Error(`expected warning-only result, got status=${result.status}\n${output}`);
     }
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
@@ -90,6 +98,20 @@ test('new over-limit files remain blocking', () => {
     const output = `${result.stdout}\n${result.stderr}`;
     if (result.status !== 1 || !output.includes('new-file-over-limit')) {
       throw new Error(`expected new-file block, got status=${result.status}\n${output}`);
+    }
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('unreadable base revision remains blocking', () => {
+  const tempRoot = createRepo(6, 'a\nb\nc\nd\ne\nf\n');
+  try {
+    commitChange(tempRoot, 'tracked.mjs', 'a\nb\nc\nd\ne\nf\ng\n');
+    const result = runCheckerWithBase(tempRoot, '0000000000000000000000000000000000000000');
+    const output = `${result.stdout}\n${result.stderr}`;
+    if (result.status !== 1 || !output.includes('cannot diff base range')) {
+      throw new Error(`expected unreadable-base block, got status=${result.status}\n${output}`);
     }
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
