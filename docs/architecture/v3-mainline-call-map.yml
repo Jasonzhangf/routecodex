@@ -77,7 +77,7 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-hooks-sidecar-timer-01
-    from_node: HooksSidecarCore
+    from_node: ControlServer
     to_node: HooksSidecarCore
     caller_symbol: timer_tick
     caller_file: v3/crates/routecodex-v3-hooks/src/control.rs

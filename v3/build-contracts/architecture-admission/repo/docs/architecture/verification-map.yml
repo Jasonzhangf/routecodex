@@ -270,7 +270,6 @@ verification:
     --lib
   smoke:
   - npm run verify:v3-runtime-timing-observability
-  - npm run test:v3-runtime-timing-observability-red-fixtures
   - npm run verify:function-map-compile-gate
   build:
   - npm run build:min
