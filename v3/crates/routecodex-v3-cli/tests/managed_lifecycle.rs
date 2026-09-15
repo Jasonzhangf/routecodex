@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -6,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -118,11 +119,52 @@ continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"
 "#;
 
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static ALLOCATED_PORTS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let mut allocated = ALLOCATED_PORTS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        if allocated.insert(port) {
+            return port;
+        }
+    }
+}
+
+fn state_root_diagnostics(state_root: &Path) -> String {
+    let instances_root = state_root.join("instances");
+    let Ok(entries) = fs::read_dir(&instances_root) else {
+        return format!("instances_root={}", instances_root.display());
+    };
+    let mut diagnostics = String::new();
+    for entry in entries.flatten() {
+        let instance_dir = entry.path();
+        if !instance_dir.is_dir() {
+            continue;
+        }
+        for file_name in [
+            "status.json",
+            "server.log",
+            "hooks-sidecar.stderr.log",
+            "hooks-sidecar.pid",
+        ] {
+            let path = instance_dir.join(file_name);
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            diagnostics.push_str(&format!(
+                "\n--- {} ---\n{}",
+                path.display(),
+                String::from_utf8_lossy(&bytes)
+            ));
+        }
+    }
+    diagnostics
 }
 
 fn write_config(root: &TempDir, ports: [u16; 2]) -> PathBuf {
@@ -1070,8 +1112,9 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     );
     assert!(
         start.status.success(),
-        "{}",
-        String::from_utf8_lossy(&start.stderr)
+        "{}{}",
+        String::from_utf8_lossy(&start.stderr),
+        state_root_diagnostics(&state_root)
     );
     for port in ports {
         wait_port(port, true);
