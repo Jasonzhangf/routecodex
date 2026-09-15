@@ -2283,8 +2283,8 @@ resources:
 - resource_id: v4.runtime.admission_manifest
   axis: information
   verification_gate:
-  - v4_parity_gate_real_runtime_admission
-  - v4_parity_gate_real_runtime_admission_red
+  - v4_real_runtime_admission_red
+  - v4_real_runtime_responses_json
   resource_kind: admission_contract
   lifecycle: v4.runtime.admission
   owner_crate: routecodex-v4-config
@@ -2344,7 +2344,7 @@ resources:
   axis: diagnostic
   verification_gate:
   - v4_real_runtime_compiled_manifest
-  - v4_real_runtime_v3_isolation
+  - v4_isolation_positive
   resource_kind: runtime_identity
   lifecycle: v4.runtime.admission
   owner_crate: routecodex-v4-runtime-bin
