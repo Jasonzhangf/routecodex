@@ -178,10 +178,14 @@ function isV3RootScript(relative) {
     || relative === 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
 }
 
+function isV3ArchitectureRootScript(relative) {
+  return isV3RootScript(relative) && relative !== 'scripts/verify-fast.mjs';
+}
+
 function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
   const scopes = new Set();
   const add = (...names) => names.forEach((name) => scopes.add(name));
-  const sharedRootChanged = rootPackageChanged || paths.includes('scripts/verify-fast.mjs');
+  const sharedRootChanged = rootPackageChanged;
   if (sharedRootChanged || workflowScope.v3 && workflowScope.v4) {
     add(...[
       'v3_architecture',
@@ -202,7 +206,7 @@ function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
   for (const path of paths) {
     const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
     if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
-        || isV3RootScript(path)) add('v3_architecture');
+        || isV3ArchitectureRootScript(path)) add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
         || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
@@ -217,7 +221,7 @@ function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
 }
 
 function classifyV4FullScope(paths, { rootPackageChanged, workflowScope }) {
-  if (rootPackageChanged || workflowScope.v4 || paths.includes('scripts/verify-fast.mjs')) return true;
+  if (rootPackageChanged || workflowScope.v4) return true;
 
   return paths.some((path) => {
     if (!path.startsWith('v4/')) return false;
@@ -254,7 +258,7 @@ function writeChangedScopeOutputs(entries) {
     v3_debug: fineScopes.has('v3_debug'),
     v3_router: fineScopes.has('v3_router'),
     v3_tool: fineScopes.has('v3_tool'),
-    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged || paths.includes('scripts/verify-fast.mjs'),
+    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged,
     v4_full: v4FullScope,
   };
 

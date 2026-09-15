@@ -42,7 +42,24 @@ const cases = [
   { relative: 'scripts/tests/agent-collab-protocol-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true, v4Full: true },
-  { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, true])), v3: true, v4: true, v4Full: true },
+  { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false },
+  {
+    relative: 'scripts/verify-fast.mjs',
+    contents: 'export const scopeFixture = true;\n',
+    additionalFiles: [{ relative: 'v3/crates/routecodex-v3-provider-responses/src/lib.rs', contents: 'pub const SCOPE_FIXTURE: bool = true;\n' }],
+    fine: { v3_build: true, v3_provider: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: 'scripts/verify-fast.mjs',
+    contents: 'export const scopeFixture = true;\n',
+    additionalFiles: [{ relative: 'v4/contracts/node-graph.contract.json', contents: '{"scopeFixture":true}\n' }],
+    fine: Object.fromEntries(fineScopes.map((name) => [name, false])),
+    v3: true,
+    v4: true,
+    v4Full: true,
+  },
   { relative: 'scripts/ensure-cli-command-shim.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/install-v3-cli.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'tests/scripts/v3-cli-distribution.spec.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -227,15 +244,18 @@ for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install 
 }
 
 mkdirSync(join(repo, 'playground'), { recursive: true });
-for (const { relative, contents, diffMode, fine, v3, v4, v4Full = false } of cases) {
+for (const { relative, contents, additionalFiles = [], diffMode, fine, v3, v4, v4Full = false } of cases) {
   const root = mkdtempSync(join(repo, 'playground', '.verify-fast-scope-'));
   try {
-    const target = join(root, relative);
-    mkdirSync(join(target, '..'), { recursive: true });
-    writeFileSync(target, contents ?? 'scope fixture\n');
+    const files = [{ relative, contents }, ...additionalFiles];
+    for (const file of files) {
+      const target = join(root, file.relative);
+      mkdirSync(join(target, '..'), { recursive: true });
+      writeFileSync(target, file.contents ?? 'scope fixture\n');
+    }
     symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir');
     execFileSync('git', ['init', '-q'], { cwd: root });
-    execFileSync('git', ['add', relative], { cwd: root });
+    execFileSync('git', ['add', ...files.map((file) => file.relative)], { cwd: root });
     const diffEnv = {};
     if (diffMode === 'new-ref') {
       execFileSync('git', ['-c', 'user.name=Scope Test', '-c', 'user.email=scope@example.invalid', 'commit', '-qm', 'scope fixture'], { cwd: root });
