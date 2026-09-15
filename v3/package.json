@@ -19,6 +19,7 @@
     "verify": "node scripts/verify.mjs",
     "verify:red": "node scripts/verify-red.mjs",
     "test:v3-verify-red-failure-aggregation-regression": "node scripts/tests/v3-verify-red-failure-aggregation-regression.mjs",
+    "test:v3-cargo-test-timeout-regression": "node scripts/tests/v3-cargo-test-timeout-regression.mjs",
     "test:v3-gate-severity-regression": "node scripts/tests/v3-gate-severity-regression.mjs",
     "verify:ci": "node scripts/verify-ci.mjs",
     "verify:isolation": "node scripts/verify-isolation.mjs",

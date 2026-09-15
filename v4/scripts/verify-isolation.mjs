@@ -44,7 +44,9 @@ import {
   ADMISSION_COMMAND,
   BOUNDARY_COMMAND,
   BUILD_GUARD_COMMAND,
+  ROLE_CONTRACTS,
   SELF_TEST_COMMAND,
+  isMachinePath,
 } from './architecture/lib/feature-layer-batch-contract.mjs';
 import { loadV3Baseline } from './architecture/_v3-baseline.mjs';
 
@@ -91,6 +93,95 @@ const ALLOWED_OUTPUT_PREFIXES = [
   'active',
   'protected',
 ];
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isContainedV4Path(root, inputPath) {
+  if (!isMachinePath(inputPath)) return false;
+  const resolvedRoot = fs.realpathSync(root);
+  const resolvedInput = fs.realpathSync(path.join(root, inputPath));
+  const relative = path.relative(resolvedRoot, resolvedInput);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function commandAdapter(command) {
+  const executable = String(command ?? '').trim().split(/\s+/)[0];
+  if (executable === 'node') return 'node';
+  if (executable === 'cargo') return 'cargo';
+  return null;
+}
+
+function checkGateInputBinding(gate, root, moduleIds, out) {
+  if (!moduleIds.has(gate.owner_module_id)) {
+    out.push(`active gate ${gate.gate_id} has unknown owner_module_id ${JSON.stringify(gate.owner_module_id)}`);
+  }
+  if (gate.producer?.identity !== gate.gate_id) {
+    out.push(`active gate ${gate.gate_id} producer identity does not match gate_id`);
+  }
+  if (gate.producer && commandAdapter(gate.command) !== gate.producer.adapter) {
+    out.push(`active gate ${gate.gate_id} producer adapter does not match command`);
+  }
+
+  const inlineInputs = gate.input_paths;
+  const hasInlineInput = inlineInputs !== undefined;
+  if (hasInlineInput) {
+    if (!Array.isArray(inlineInputs) || inlineInputs.length === 0) {
+      out.push(`active gate ${gate.gate_id} has invalid input_paths`);
+    } else {
+      for (const inputPath of inlineInputs) {
+        if (!isMachinePath(inputPath)
+            || !fs.existsSync(path.join(root, inputPath))
+            || !isContainedV4Path(root, inputPath)) {
+          out.push(`active gate ${gate.gate_id} has invalid input path ${JSON.stringify(inputPath)}`);
+        }
+      }
+    }
+  }
+
+  const hasContractPath = nonEmptyString(gate.input_contract_path);
+  const hasInputSet = nonEmptyString(gate.input_set_id);
+  if (hasContractPath !== hasInputSet) {
+    out.push(`active gate ${gate.gate_id} has incomplete input contract binding`);
+  }
+  if (!hasContractPath || !hasInputSet) {
+    if (!hasInlineInput) out.push(`active gate ${gate.gate_id} is missing machine-readable input binding`);
+    return;
+  }
+
+  const contractPath = path.join(root, gate.input_contract_path);
+  if (!isMachinePath(gate.input_contract_path) || !fs.existsSync(contractPath)) {
+    out.push(`active gate ${gate.gate_id} input contract does not exist: ${gate.input_contract_path}`);
+    return;
+  }
+  if (!isContainedV4Path(root, gate.input_contract_path)) {
+    out.push(`active gate ${gate.gate_id} input contract escapes V4 root: ${gate.input_contract_path}`);
+    return;
+  }
+  let contract;
+  try {
+    contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  } catch (error) {
+    out.push(`active gate ${gate.gate_id} input contract is invalid JSON: ${error.message}`);
+    return;
+  }
+  const inputSet = contract.input_sets?.[gate.input_set_id];
+  if (!Array.isArray(inputSet) || inputSet.length === 0) {
+    out.push(`active gate ${gate.gate_id} input set does not exist: ${gate.input_set_id}`);
+  } else {
+    for (const inputPath of inputSet) {
+      if (!isMachinePath(inputPath)
+          || !fs.existsSync(path.join(root, inputPath))
+          || !isContainedV4Path(root, inputPath)) {
+        out.push(`active gate ${gate.gate_id} input set contains invalid path ${JSON.stringify(inputPath)}`);
+      }
+    }
+  }
+  if (contract.gate_bindings?.[gate.gate_id] !== gate.input_set_id) {
+    out.push(`active gate ${gate.gate_id} is not bound to input set ${gate.input_set_id}`);
+  }
+}
 
 function walkFiles(dir, rel = '', out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -522,11 +613,41 @@ function checkDeclaredExecutedBinding(
     .filter((gate) => gate.status === 'active')
     .map((gate) => String(gate.command ?? '').trim()));
   const seenGateIds = new Set();
+  const moduleRegistryPath = path.join(admissionEntrypointRoot, '.appsdk/maps/module-registry.json');
+  let moduleIds = new Set();
+  if (!fs.existsSync(moduleRegistryPath)) {
+    out.push(`module registry missing: ${moduleRegistryPath}`);
+  } else {
+    try {
+      const moduleRegistry = JSON.parse(fs.readFileSync(moduleRegistryPath, 'utf8'));
+      if (!Array.isArray(moduleRegistry.modules)) {
+        out.push(`module registry has no modules array: ${moduleRegistryPath}`);
+      } else {
+        moduleIds = new Set(moduleRegistry.modules
+          .filter((module) => module.status === 'active')
+          .map((module) => module.module_id));
+      }
+    } catch (error) {
+      out.push(`module registry is invalid JSON: ${error.message}`);
+    }
+  }
   for (const gate of map.gates ?? []) {
     if (seenGateIds.has(gate.gate_id)) {
       out.push(`duplicate gate_id in verification-map.json: ${gate.gate_id}`);
     }
     seenGateIds.add(gate.gate_id);
+    if (gate.status === 'active') {
+      if (!nonEmptyString(gate.owner_module_id)) {
+        out.push(`active gate ${gate.gate_id} is missing owner_module_id`);
+      }
+      if (!gate.producer || !nonEmptyString(gate.producer.adapter) || !nonEmptyString(gate.producer.identity)) {
+        out.push(`active gate ${gate.gate_id} is missing producer identity`);
+      }
+      if (gate.evidence_role !== null && !Object.hasOwn(ROLE_CONTRACTS, gate.evidence_role)) {
+        out.push(`active gate ${gate.gate_id} has invalid evidence_role ${JSON.stringify(gate.evidence_role)}`);
+      }
+      checkGateInputBinding(gate, admissionEntrypointRoot, moduleIds, out);
+    }
     const command = String(gate.command ?? '');
     if (Array.isArray(gate.argv)) {
       const declaredArgv = gate.argv.every((part) => typeof part === 'string')
@@ -694,6 +815,11 @@ function checkDeclaredExecutedBinding(
 function runCommandBindingSelfTest() {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-isolation-command-binding-'));
   try {
+    const fixtureModuleRegistryPath = path.join(fixtureRoot, '.appsdk/maps/module-registry.json');
+    fs.mkdirSync(path.dirname(fixtureModuleRegistryPath), { recursive: true });
+    fs.writeFileSync(fixtureModuleRegistryPath, JSON.stringify({
+      modules: [{ module_id: 'routecodex-v4-governance', status: 'active' }],
+    }));
     if (MODULE_REGRESSIONS.some(({ command }) => command === ADMISSION_COMMAND)) {
       console.error('[v4 isolation] build matrix must not execute strict feature-layer admission');
       process.exit(1);
@@ -795,6 +921,257 @@ function runCommandBindingSelfTest() {
     const missingModuleFailures = checkDeclaredExecutedBinding(missingModuleFixturePath, architectureDir);
     if (!missingModuleFailures.some((failure) => failure.includes('canonical module command is not declared active'))) {
       console.error('[v4 isolation] active command binding self-test did not reject an undeclared canonical module command');
+      process.exit(1);
+    }
+
+    const incompleteActiveFixturePath = path.join(fixtureRoot, 'incomplete-active-verification-map.json');
+    fs.writeFileSync(incompleteActiveFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-incomplete',
+        status: 'active',
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const incompleteActiveFailures = checkDeclaredExecutedBinding(incompleteActiveFixturePath, architectureDir);
+    if (!incompleteActiveFailures.some((failure) => failure.includes('missing owner_module_id'))
+        || !incompleteActiveFailures.some((failure) => failure.includes('missing producer identity'))
+        || !incompleteActiveFailures.some((failure) => failure.includes('invalid evidence_role'))
+        || !incompleteActiveFailures.some((failure) => failure.includes('missing machine-readable input binding'))) {
+      console.error('[v4 isolation] active gate metadata self-test did not reject an incomplete active row');
+      process.exit(1);
+    }
+
+    const invalidInputPathFixturePath = path.join(fixtureRoot, 'invalid-input-path-verification-map.json');
+    fs.writeFileSync(invalidInputPathFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-invalid-input',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-invalid-input' },
+        evidence_role: 'positive',
+        input_paths: ['', 123, 'missing/input.json'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const invalidInputPathFailures = checkDeclaredExecutedBinding(invalidInputPathFixturePath, architectureDir);
+    if (!invalidInputPathFailures.some((failure) => failure.includes('has invalid input path'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted invalid input paths');
+      process.exit(1);
+    }
+
+    const escapedInputFixturePath = path.join(fixtureRoot, 'escaped-input-verification-map.json');
+    fs.symlinkSync(path.join(fixtureRoot, '..'), path.join(fixtureRoot, 'escaped-input'));
+    fs.writeFileSync(escapedInputFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-escaped-input',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-escaped-input' },
+        evidence_role: 'positive',
+        input_paths: ['escaped-input'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const escapedInputFailures = checkDeclaredExecutedBinding(
+      escapedInputFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!escapedInputFailures.some((failure) => failure.includes('has invalid input path'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an input path escaping V4');
+      process.exit(1);
+    }
+
+    const unknownOwnerFixturePath = path.join(fixtureRoot, 'unknown-owner-verification-map.json');
+    fs.writeFileSync(unknownOwnerFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-unknown-owner',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-missing',
+        producer: { adapter: 'node', identity: 'g-unknown-owner' },
+        evidence_role: 'positive',
+        input_paths: ['architecture/verify-v4-active-link.mjs'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const unknownOwnerFailures = checkDeclaredExecutedBinding(
+      unknownOwnerFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!unknownOwnerFailures.some((failure) => failure.includes('unknown owner_module_id'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an unknown owner');
+      process.exit(1);
+    }
+
+    const adapterMismatchFixturePath = path.join(fixtureRoot, 'adapter-mismatch-verification-map.json');
+    fs.writeFileSync(adapterMismatchFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-adapter-mismatch',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'cargo', identity: 'g-adapter-mismatch' },
+        evidence_role: 'positive',
+        input_paths: ['architecture/verify-v4-active-link.mjs'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const adapterMismatchFailures = checkDeclaredExecutedBinding(
+      adapterMismatchFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!adapterMismatchFailures.some((failure) => failure.includes('producer adapter does not match command'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted a producer adapter mismatch');
+      process.exit(1);
+    }
+
+    const producerIdentityFixturePath = path.join(fixtureRoot, 'producer-identity-verification-map.json');
+    fs.writeFileSync(producerIdentityFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-producer-identity',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-other-producer' },
+        evidence_role: 'positive',
+        input_paths: ['architecture/verify-v4-active-link.mjs'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const producerIdentityFailures = checkDeclaredExecutedBinding(
+      producerIdentityFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!producerIdentityFailures.some((failure) => failure.includes('producer identity does not match gate_id'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted a producer identity mismatch');
+      process.exit(1);
+    }
+
+    const missingRegistryRoot = path.join(fixtureRoot, 'missing-registry-root');
+    fs.mkdirSync(missingRegistryRoot, { recursive: true });
+    const missingRegistryFixturePath = path.join(fixtureRoot, 'missing-registry-verification-map.json');
+    fs.writeFileSync(missingRegistryFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-missing-registry',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-missing-registry' },
+        evidence_role: 'positive',
+        input_paths: ['architecture/verify-v4-active-link.mjs'],
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const missingRegistryFailures = checkDeclaredExecutedBinding(
+      missingRegistryFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      missingRegistryRoot,
+    );
+    if (!missingRegistryFailures.some((failure) => failure.includes('module registry missing'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted a missing module registry');
+      process.exit(1);
+    }
+
+    const escapedContractFixturePath = path.join(fixtureRoot, 'escaped-contract-verification-map.json');
+    fs.symlinkSync(path.join(fixtureRoot, '..'), path.join(fixtureRoot, 'escaped-contract'));
+    fs.writeFileSync(escapedContractFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-escaped-contract',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-escaped-contract' },
+        evidence_role: 'positive',
+        input_contract_path: 'escaped-contract',
+        input_set_id: 'declared',
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const escapedContractFailures = checkDeclaredExecutedBinding(
+      escapedContractFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!escapedContractFailures.some((failure) => failure.includes('input contract escapes V4 root'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an input contract escaping V4');
+      process.exit(1);
+    }
+
+    const invalidContractFixturePath = path.join(fixtureRoot, 'invalid-contract-verification-map.json');
+    fs.writeFileSync(invalidContractFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-invalid-contract',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-invalid-contract' },
+        evidence_role: 'positive',
+        input_contract_path: 'missing-contract.json',
+        input_set_id: 'missing-set',
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const invalidContractFailures = checkDeclaredExecutedBinding(invalidContractFixturePath, architectureDir);
+    if (!invalidContractFailures.some((failure) => failure.includes('input contract does not exist'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an unknown input contract');
+      process.exit(1);
+    }
+
+    const contractFixturePath = path.join(fixtureRoot, 'input-contract.json');
+    fs.writeFileSync(contractFixturePath, JSON.stringify({
+      input_sets: { declared: ['architecture/verify-v4-active-link.mjs'] },
+      gate_bindings: { 'g-other': 'declared' },
+    }));
+    const unboundContractFixturePath = path.join(fixtureRoot, 'unbound-contract-verification-map.json');
+    fs.writeFileSync(unboundContractFixturePath, JSON.stringify({
+      gates: [{
+        gate_id: 'g-unbound-contract',
+        status: 'active',
+        owner_module_id: 'routecodex-v4-governance',
+        producer: { adapter: 'node', identity: 'g-unbound-contract' },
+        evidence_role: 'positive',
+        input_contract_path: 'input-contract.json',
+        input_set_id: 'declared',
+        command: ISOLATION_COMMAND,
+        argv: ['node', 'scripts/verify-isolation.mjs'],
+      }],
+    }));
+    const unboundContractFailures = checkDeclaredExecutedBinding(
+      unboundContractFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!unboundContractFailures.some((failure) => failure.includes('is not bound to input set'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an unbound input contract');
+      process.exit(1);
+    }
+
+    const unknownSetFixturePath = path.join(fixtureRoot, 'unknown-set-verification-map.json');
+    const unknownSetMap = JSON.parse(fs.readFileSync(unboundContractFixturePath, 'utf8'));
+    unknownSetMap.gates[0].input_set_id = 'missing';
+    fs.writeFileSync(unknownSetFixturePath, JSON.stringify(unknownSetMap));
+    const unknownSetFailures = checkDeclaredExecutedBinding(
+      unknownSetFixturePath,
+      architectureDir,
+      path.join(fixtureRoot, 'test.mjs'),
+      fixtureRoot,
+    );
+    if (!unknownSetFailures.some((failure) => failure.includes('input set does not exist'))) {
+      console.error('[v4 isolation] active gate metadata self-test accepted an unknown input set');
       process.exit(1);
     }
 

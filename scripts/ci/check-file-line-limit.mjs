@@ -125,7 +125,15 @@ function getChangedFiles(range) {
   const diffCmd = range
     ? `git diff --name-status --diff-filter=ACMR ${range}`
     : 'git diff --name-status --diff-filter=ACMR HEAD';
-  return parseNameStatus(tryRun(diffCmd));
+  if (!range) return parseNameStatus(tryRun(diffCmd));
+  try {
+    return parseNameStatus(run(diffCmd));
+  } catch (error) {
+    // An unreadable base cannot prove no-growth; fail closed instead of
+    // reporting "no changed files" as a pass.
+    console.error(`[file-line-limit] fail: cannot diff base range ${range}: ${error.message}`);
+    process.exit(1);
+  }
 }
 
 function main() {
@@ -154,11 +162,17 @@ function main() {
     }
     const violationType = entry.status === 'A' ? 'new-file-over-limit' : 'modified-file-over-limit';
     if (entry.status !== 'A') {
+      // A historical file already over the limit is advisory: line count is a
+      // structural signal, so it warns (with the delta) instead of blocking a
+      // repair. Only newly added files are hard-blocked. An unreadable base
+      // cannot prove no-growth, so it stays blocking.
       const baselineLines = countLinesAtRevision(baseRevision, entry.basePath || filePath);
-      if (baselineLines !== null && lines <= baselineLines) {
-        warnings.push({ type: violationType, path: filePath, lines, baselineLines });
+      if (baselineLines === null) {
+        violations.push({ type: violationType, path: filePath, lines });
         continue;
       }
+      warnings.push({ type: violationType, path: filePath, lines, baselineLines });
+      continue;
     }
     violations.push({ type: violationType, path: filePath, lines });
   }
@@ -166,9 +180,10 @@ function main() {
   if (warnings.length) {
     console.warn(`[file-line-limit] warn (limit=${policy.limit}, range=${range || 'HEAD'})`);
     for (const warning of warnings) {
-      console.warn(
-        `- ${warning.type}: ${warning.path} (${warning.lines} lines; baseline ${warning.baselineLines}; no growth)`
-      );
+      const baseline = warning.baselineLines === null ? 'unknown' : warning.baselineLines;
+      const delta = warning.baselineLines === null ? null : warning.lines - warning.baselineLines;
+      const change = delta === null ? '' : (delta > 0 ? `; growth +${delta}` : '; no growth');
+      console.warn(`- ${warning.type}: ${warning.path} (${warning.lines} lines; baseline ${baseline}${change})`);
     }
   }
 

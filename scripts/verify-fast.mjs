@@ -63,7 +63,7 @@ function deletedFiles() {
   return git(['--name-only'], 'D').split('\n').map((file) => file.trim()).filter(Boolean);
 }
 
-function changedWorkflowLines(relative, commit = null) {
+function changedFileLines(relative, commit = null) {
   if (commit) {
     try {
       return execFileSync(
@@ -80,7 +80,7 @@ function changedWorkflowLines(relative, commit = null) {
   }
   if (newRef) return [];
   try {
-    return execFileSync('git', gitArgs(['--unified=0', '--', relative]), { cwd: root, encoding: 'utf8' })
+    return execFileSync('git', gitArgs(['--unified=0', '--', relative], 'ACMRTD'), { cwd: root, encoding: 'utf8' })
       .split('\n')
       .filter((line) => /^[+-](?![+-])/u.test(line))
       .map((line) => line.slice(1));
@@ -105,7 +105,7 @@ function classifyWorkflowScope(entries) {
       v4 = true;
       continue;
     }
-    const changedLines = changedWorkflowLines(relative, commit);
+    const changedLines = changedFileLines(relative, commit);
     const touchesV3 = changedLines.some((line) => v3Marker.test(line));
     const touchesV4 = changedLines.some((line) => v4Marker.test(line));
     if (touchesV3 && !touchesV4) v3 = true;
@@ -116,6 +116,50 @@ function classifyWorkflowScope(entries) {
     }
   }
   return { v3, v4 };
+}
+
+function classifyRootPackageScope(entries) {
+  const v3Marker = /\bV3\b|(?:^|[\s"'`/:])v3(?:[-_/.:]|[\s"'`]|$)/u;
+  const v4Marker = /\bV4\b|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
+  const sharedRootV3Scripts = [
+    'verify:fallback-hardcode',
+    'verify:file-line-limit',
+    'test:file-line-limit',
+    'verify:no-fallback-all',
+    'verify:architecture-fallback-denylist',
+    'verify:internal-policy-hardcode',
+  ];
+  const fineScopes = new Set();
+  let v3 = false;
+  let v4 = false;
+  let v4Full = false;
+
+  for (const { commit, path: relative } of entries.filter(({ path }) => /^package(?:-lock)?\.json$/u.test(path))) {
+    for (const line of changedFileLines(relative, commit)) {
+      if (sharedRootV3Scripts.some((script) => line.includes(`"${script}"`))) {
+        v3 = true;
+      }
+      if (v3Marker.test(line)) {
+        v3 = true;
+        const value = line.toLowerCase();
+        const before = fineScopes.size;
+        if (/(?:architecture|verify:local|verify:ci|verify:v3(?:"|:))/u.test(value)) fineScopes.add('v3_architecture');
+        if (/(?:build|install|pack|compile)/u.test(value)) fineScopes.add('v3_build');
+        if (/(?:provider|action|health)/u.test(value)) fineScopes.add('v3_provider');
+        if (/(?:session|continuation)/u.test(value)) fineScopes.add('v3_session');
+        if (/debug/u.test(value)) fineScopes.add('v3_debug');
+        if (/(?:router|route-classifier|classifier)/u.test(value)) fineScopes.add('v3_router');
+        if (/(?:tool|servertool)/u.test(value)) fineScopes.add('v3_tool');
+        if (fineScopes.size === before) fineScopes.add('v3_architecture');
+      }
+      if (v4Marker.test(line)) {
+        v4 = true;
+        v4Full = true;
+      }
+    }
+  }
+
+  return { v3, v4, v4Full, fineScopes };
 }
 
 function isV3RootScript(relative) {
@@ -178,11 +222,18 @@ function isV3RootScript(relative) {
     || relative === 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json';
 }
 
-function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
+function isV3ArchitectureRootScript(relative) {
+  return isV3RootScript(relative)
+    && relative !== 'scripts/verify-fast.mjs'
+    && relative !== 'scripts/ci/check-file-line-limit.mjs'
+    && relative !== 'scripts/ci/repo-sanity.mjs'
+    && relative !== 'scripts/ci/mempalace-scan-artifact-audit.mjs';
+}
+
+function classifyV3FineScopes(paths, { workflowScope }) {
   const scopes = new Set();
   const add = (...names) => names.forEach((name) => scopes.add(name));
-  const sharedRootChanged = rootPackageChanged || paths.includes('scripts/verify-fast.mjs');
-  if (sharedRootChanged || workflowScope.v3 && workflowScope.v4) {
+  if (workflowScope.v3 && workflowScope.v4) {
     add(...[
       'v3_architecture',
       'v3_build',
@@ -202,7 +253,7 @@ function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
   for (const path of paths) {
     const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
     if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
-        || isV3RootScript(path)) add('v3_architecture');
+        || isV3ArchitectureRootScript(path)) add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
         || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
@@ -216,8 +267,8 @@ function classifyV3FineScopes(paths, { rootPackageChanged, workflowScope }) {
   return scopes;
 }
 
-function classifyV4FullScope(paths, { rootPackageChanged, workflowScope }) {
-  if (rootPackageChanged || workflowScope.v4 || paths.includes('scripts/verify-fast.mjs')) return true;
+function classifyV4FullScope(paths, { workflowScope }) {
+  if (workflowScope.v4) return true;
 
   return paths.some((path) => {
     if (!path.startsWith('v4/')) return false;
@@ -237,13 +288,13 @@ function writeChangedScopeOutputs(entries) {
   const paths = [...new Set(entries.map(({ path }) => path))];
   const has = (pattern) => paths.some((relative) => pattern.test(relative));
   const workflowScope = classifyWorkflowScope(entries);
-  const rootPackageChanged = has(/^package(?:-lock)?\.json$/u);
-  const fineScopes = classifyV3FineScopes(paths, { rootPackageChanged, workflowScope });
-  const v4FullScope = classifyV4FullScope(paths, { rootPackageChanged, workflowScope });
-  const v3Scope = fineScopes.size > 0 || workflowScope.v3 || has(/^v3\//u)
+  const fineScopes = classifyV3FineScopes(paths, { workflowScope });
+  const rootPackageScope = classifyRootPackageScope(entries);
+  rootPackageScope.fineScopes.forEach((scope) => fineScopes.add(scope));
+  const v4FullScope = classifyV4FullScope(paths, { workflowScope }) || rootPackageScope.v4Full;
+  const v3Scope = fineScopes.size > 0 || workflowScope.v3 || has(/^v3\//u) || rootPackageScope.v3
     || paths.some((relative) => isV3RootScript(relative))
-    || has(/^docs\/(?:architecture|design|goals|schemas)\//u)
-    || rootPackageChanged;
+    || has(/^docs\/(?:architecture|design|goals|schemas)\//u);
   const values = {
     changed: paths.length > 0,
     v3: v3Scope,
@@ -254,7 +305,7 @@ function writeChangedScopeOutputs(entries) {
     v3_debug: fineScopes.has('v3_debug'),
     v3_router: fineScopes.has('v3_router'),
     v3_tool: fineScopes.has('v3_tool'),
-    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageChanged || paths.includes('scripts/verify-fast.mjs'),
+    v4: workflowScope.v4 || has(/^v4\//u) || rootPackageScope.v4,
     v4_full: v4FullScope,
   };
 
@@ -349,7 +400,12 @@ if (process.env.ROUTECODEX_GATE_SCOPE_OUTPUT && !staged && (!base || !head)) {
 }
 writeChangedScopeOutputs([
   ...entries,
-  ...deleted.map((path) => ({ commit: null, path })),
+  ...deleted.map((path) => {
+    const newRefEntry = newRef
+      ? allNewRefEntries.find((entry) => entry.path === path && entry.status === 'D')
+      : null;
+    return { commit: newRefEntry?.commit ?? null, path };
+  }),
 ]);
 if (entries.length === 0 && deleted.length === 0) {
   process.stdout.write(`[verify:fast] PASS no changed files; ${skippedFullCi}\n`);

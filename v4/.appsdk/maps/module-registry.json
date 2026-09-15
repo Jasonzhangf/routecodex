@@ -590,7 +590,7 @@
       "verification_gates": [
         "v4_real_runtime_admission_red",
         "v4_real_runtime_compiled_manifest",
-        "v4_real_runtime_v3_isolation",
+        "v4_isolation_positive",
         "v4_runtime_bin_l2_regression",
         "v4_infrastructure_contract"
       ]

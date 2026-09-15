@@ -13,7 +13,6 @@ use super::request_outbound_metadata::{
 };
 use super::request_outbound_tool_id::compact_tool_id;
 use std::collections::BTreeSet;
-
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -125,7 +124,6 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
     }
     normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
 }
-
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
     // Re-running it here would reapply public metadata limits to the provider
@@ -1359,6 +1357,9 @@ fn normalize_openai_chat_messages_payload(
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
+        super::request_outbound_mcp_names::normalize_openai_chat_message_tool_call_names(
+            message_row,
+        );
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         let Some(content) = message_row.get_mut("content") else {
             continue;
@@ -1380,7 +1381,6 @@ fn normalize_openai_chat_messages_payload(
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
 }
-
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
     message_row: &mut Map<String, Value>,
 ) {

@@ -694,6 +694,15 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
 }
 
 fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
+    let state_root = std::env::temp_dir().join(format!(
+        "rccv3-h2-state-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after UNIX epoch")
+            .as_nanos()
+    ));
+    let temp_dir = PathBuf::from("/tmp/rccv3-h2-runtime");
+    fs::create_dir_all(&temp_dir).expect("H2 lifecycle temp directory must be available");
     let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
         .arg(config_path)
@@ -701,9 +710,10 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_B_KEY", "h2-failure-b-secret")
-        .env("TMPDIR", "build-control/temp")
-        .env("TMP", "build-control/temp")
-        .env("TEMP", "build-control/temp")
+        .env("TMPDIR", &temp_dir)
+        .env("TMP", &temp_dir)
+        .env("TEMP", &temp_dir)
+        .env("ROUTECODEX_V3_STATE_DIR", &state_root)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()

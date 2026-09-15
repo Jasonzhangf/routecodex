@@ -501,7 +501,7 @@ GET  /v4/admin/audit
 - 合同：`contracts/real-runtime-admission.manifest.json` 与编译产物 `generated/real-runtime-admission/manifest.compiled.json`
 - 入口：独立 `routecodex-v4-runtime-bin` / `rccv4`
 - owner：`feature_id:v4.runtime.independent_admission`
-- gate：`v4_parity_gate_real_runtime_admission`（含 `--red-self-test`）
+- gate：`v4_real_runtime_admission_red`（含 `--red-self-test`）
 - 范围：独立 listener、typed routing、Responses wire build/raw parse、真实 provider transport、JSON/SSE client emission 与 ErrorChain；不读取、调用、安装或重启 V3
 
 
