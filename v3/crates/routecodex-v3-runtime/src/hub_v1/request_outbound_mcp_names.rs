@@ -62,3 +62,37 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
         }
     }
 }
+
+pub(super) fn restore_responses_mcp_namespace(object: &mut Map<String, Value>) -> bool {
+    if object.get("namespace").is_some() {
+        return false;
+    }
+    let Some(name) = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let Some(rest) = name.strip_prefix("mcp__") else {
+        return false;
+    };
+    // Provider wire flattens a client namespace path into
+    // `mcp__<server>[__<nested>...]__<tool>`: the tool is the last segment and
+    // every earlier segment is namespace path. Using the last separator keeps
+    // nested declarations (mcp__mcpx__workspace__read) reversible to
+    // namespace `mcp__mcpx__workspace` + name `read` instead of gluing the
+    // remaining path onto the tool name.
+    let Some((namespace, tool)) = rest.rsplit_once("__") else {
+        return false;
+    };
+    if namespace.is_empty() || tool.is_empty() {
+        return false;
+    }
+    object.insert(
+        "namespace".to_owned(),
+        Value::String(format!("mcp__{namespace}")),
+    );
+    object.insert("name".to_owned(), Value::String(tool.to_owned()));
+    true
+}

@@ -139,6 +139,7 @@ fn normalize_v3_responses_function_call_arguments_for_event(
         if object.get("type").and_then(Value::as_str) != Some("function_call") {
             return Ok(());
         }
+        normalized |= super::request_outbound_mcp_names::restore_responses_mcp_namespace(object);
         let Some(arguments) = object.get_mut("arguments") else {
             if partial_function_call {
                 object.insert("arguments".to_owned(), Value::String(String::new()));
