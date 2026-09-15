@@ -1,4 +1,74 @@
 use serde_json::{Map, Value};
+use std::collections::HashMap;
+
+/// Returns the reversible client namespace path -> provider function name map
+/// for a namespace declaration. The same traversal rules as flattening are
+/// used, so nested declarations cannot drift from their wire names.
+pub fn namespace_tool_name_map(tool: &Value) -> Result<Option<HashMap<String, String>>, String> {
+    let Some(namespace) = tool.as_object() else {
+        return Ok(None);
+    };
+    if namespace.get("type").and_then(Value::as_str) != Some("namespace") {
+        return Ok(None);
+    }
+    let name = namespace
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "provider namespace tool requires a non-empty name".to_string())?;
+    let tools = namespace
+        .get("tools")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| format!("provider namespace tool {name} requires non-empty tools"))?;
+    let mut map = HashMap::new();
+    collect_namespace_tool_names(name, name, tools, &mut map)?;
+    Ok(Some(map))
+}
+
+fn collect_namespace_tool_names(
+    qualified_namespace: &str,
+    client_namespace: &str,
+    tools: &[Value],
+    map: &mut HashMap<String, String>,
+) -> Result<(), String> {
+    for (index, tool) in tools.iter().enumerate() {
+        let object = tool.as_object().ok_or_else(|| {
+            format!("provider namespace tool {client_namespace}.tools[{index}] must be an object")
+        })?;
+        match object.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                let child = object.get("name").and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+                    .ok_or_else(|| format!("provider namespace tool {client_namespace}.tools[{index}] requires a non-empty namespace name"))?;
+                let nested = object.get("tools").and_then(Value::as_array).filter(|v| !v.is_empty())
+                    .ok_or_else(|| format!("provider namespace tool {client_namespace}.tools[{index}] requires non-empty tools"))?;
+                collect_namespace_tool_names(
+                    &format!("{qualified_namespace}__{child}"),
+                    &format!("{client_namespace}.{child}"),
+                    nested,
+                    map,
+                )?;
+            }
+            Some("function") => {
+                let function = object.get("function").and_then(Value::as_object);
+                let child = function.and_then(|v| v.get("name"))
+                    .or_else(|| object.get("name"))
+                    .and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
+                    .ok_or_else(|| format!("provider namespace tool {client_namespace}.tools[{index}] requires a non-empty function name"))?;
+                let client_path = format!("{client_namespace}.{child}");
+                let provider_name = if child == qualified_namespace || child.starts_with(&format!("{qualified_namespace}__")) {
+                    child.to_string()
+                } else {
+                    format!("{qualified_namespace}__{child}")
+                };
+                map.insert(client_path, provider_name);
+            }
+            _ => return Err(format!("provider namespace tool {client_namespace}.tools[{index}].type must be namespace or function")),
+        }
+    }
+    Ok(())
+}
 
 pub fn flatten_namespace_tool_for_provider(
     protocol: &str,
