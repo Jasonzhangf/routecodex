@@ -229,9 +229,12 @@ mod tests {
                 {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
             ]}]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
-            .expect_err("invalid nested tool name must be rejected locally");
-        assert!(error.to_string().contains("body.messages[0].content[0].name"));
+        let error =
+            build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
+                .expect_err("invalid nested tool name must be rejected locally");
+        assert!(error
+            .to_string()
+            .contains("body.messages[0].content[0].name"));
     }
 
     #[test]
@@ -245,12 +248,9 @@ mod tests {
                 }}
             ]}]
         });
-        let error = build_v3_provider_12_responses_wire_payload(
-            "req-chat-tool-call-name",
-            target(),
-            body,
-        )
-        .expect_err("invalid openai_chat tool call name must be rejected locally");
+        let error =
+            build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
+                .expect_err("invalid openai_chat tool call name must be rejected locally");
         assert!(error
             .to_string()
             .contains("body.messages[0].tool_calls[0].function.name"));
@@ -318,8 +318,9 @@ mod tests {
                 ]}
             ]
         });
-        let wire = build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body)
-            .expect("namespace-qualified names must be mapped before provider transport");
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-qualified-tool", target(), body)
+                .expect("namespace-qualified names must be mapped before provider transport");
         assert_eq!(
             wire.body()["tools"][0]["name"],
             "mcp__codex_review__review_start"
@@ -330,6 +331,31 @@ mod tests {
         );
         assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
         assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
+    }
+
+    #[test]
+    fn wire_maps_nested_mcpx_namespace_calls_reversibly() {
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "function_call", "call_id": "call-workspace", "name": "mcp__mcpx.workspace.read", "arguments": "{}"}
+            ], "tools": [
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "namespace", "name": "workspace", "tools": [
+                        {"type": "function", "name": "read", "parameters": {"type": "object"}}
+                    ]}
+                ]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-nested-mcpx", target(), body)
+            .expect("nested MCPX namespace must flatten");
+        assert_eq!(
+            wire.body()["tools"][0]["name"],
+            "mcp__mcpx__workspace__read"
+        );
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__mcpx__workspace__read"
+        );
     }
 
     #[test]
@@ -372,15 +398,17 @@ mod tests {
                 }}
             ]}]
         });
-        let wire =
-            build_v3_provider_12_responses_wire_payload("req-qualified-chat-convention", chat_target, body)
-                .expect("convention namespace call names must be mapped before provider transport");
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-qualified-chat-convention",
+            chat_target,
+            body,
+        )
+        .expect("convention namespace call names must be mapped before provider transport");
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
             "mcp__node_repl__js"
         );
     }
-
 
     #[test]
     fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
@@ -400,12 +428,9 @@ mod tests {
                 }}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload(
-            "req-declaration-name",
-            chat_target,
-            body,
-        )
-        .expect_err("ordinary tool declaration must not be rewritten before validation");
+        let error =
+            build_v3_provider_12_responses_wire_payload("req-declaration-name", chat_target, body)
+                .expect_err("ordinary tool declaration must not be rewritten before validation");
         assert!(
             error.to_string().contains("body.tools[1].function.name"),
             "declaration path must be rejected without mapping: {error}"
@@ -428,7 +453,10 @@ mod tests {
             body,
         )
         .expect("known historical MCP namespace call must be normalized");
-        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
     }
 
     #[test]
@@ -444,7 +472,10 @@ mod tests {
             body,
         )
         .expect("known historical MCP namespace call must be normalized");
-        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
     }
 
     #[test]
@@ -459,7 +490,10 @@ mod tests {
             body,
         )
         .expect("historical MCP tool_use names must be normalized");
-        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
     }
 
     #[test]
@@ -503,7 +537,10 @@ mod tests {
             body,
         )
         .expect("incomplete namespace declarations still require convention mapping");
-        assert_eq!(wire.body()["input"][0]["name"], "mcp__codex_review__review_start");
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
     }
 
     #[test]
@@ -657,9 +694,9 @@ mod tests {
         .expect("DeepSeek Responses wire must not reject thinking mode with a tool");
         assert!(wire.body().get("tool_choice").is_none());
         assert!(wire.body()["tools"].as_array().is_some_and(|tools| {
-            tools.iter().any(|tool| {
-                tool.get("name").and_then(Value::as_str) == Some("exec_command")
-            })
+            tools
+                .iter()
+                .any(|tool| tool.get("name").and_then(Value::as_str) == Some("exec_command"))
         }));
     }
 
@@ -746,15 +783,18 @@ mod tests {
                 {"type":"tool_search_output","call_id":"call_nonempty","tools":[{"type":"function","name":"real","description":"real tool"}]}
             ]
         });
-        let wire = build_v3_provider_12_responses_wire_payload("req-cc-sol-empty", target, body)
-            .unwrap();
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-cc-sol-empty", target, body).unwrap();
         assert_eq!(wire.body()["input"][0]["type"], "function_call");
         assert_eq!(wire.body()["input"][0]["name"], "tool_search");
-        assert_eq!(wire.body()["input"][1], json!({
-            "type":"function_call_output",
-            "call_id":"call_empty",
-            "output":"[]"
-        }));
+        assert_eq!(
+            wire.body()["input"][1],
+            json!({
+                "type":"function_call_output",
+                "call_id":"call_empty",
+                "output":"[]"
+            })
+        );
         assert_eq!(wire.body()["input"][2]["type"], "tool_search_call");
         assert_eq!(wire.body()["input"][3]["type"], "tool_search_output");
     }
@@ -770,8 +810,12 @@ mod tests {
                 {"type":"tool_search_output","call_id":"call_nonempty","tools":[{"type":"function","name":"real"}]}
             ]
         });
-        let neutral = build_v3_provider_12_responses_wire_payload("req-neutral-empty", target(), body.clone())
-            .unwrap();
+        let neutral = build_v3_provider_12_responses_wire_payload(
+            "req-neutral-empty",
+            target(),
+            body.clone(),
+        )
+        .unwrap();
         assert_eq!(neutral.body()["input"], body["input"]);
         let mut cc_sol = target();
         cc_sol.compatibility_profile = Some("responses:thinking-tags".into());
@@ -944,8 +988,8 @@ mod tests {
             ]
         });
 
-        let wire = build_v3_provider_12_responses_wire_payload("req-max-summary", target, body)
-            .unwrap();
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-max-summary", target, body).unwrap();
         assert_eq!(wire.body()["reasoning"]["effort"], "max");
         assert_eq!(
             wire.body()["input"][0]["content"],
@@ -1108,8 +1152,16 @@ mod tests {
         .unwrap();
         let input = wire.body()["input"].as_array().unwrap();
         assert_eq!(
-            input.iter().map(|item| item["type"].as_str().unwrap()).collect::<Vec<_>>(),
-            vec!["message", "reasoning", "function_call", "function_call_output"]
+            input
+                .iter()
+                .map(|item| item["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "message",
+                "reasoning",
+                "function_call",
+                "function_call_output"
+            ]
         );
         assert_eq!(
             input[1]["content"],
@@ -1256,11 +1308,10 @@ mod tests {
                         .position(|(candidate, _)| *candidate == call_id)
                         .expect("output must match an earlier pending call");
                     let call_input_index = pending[call_index].1;
-                    let gap_has_assistant =
-                        input[call_input_index + 1..index].iter().any(|mid| {
+                    let gap_has_assistant = input[call_input_index + 1..index].iter().any(|mid| {
                         mid["type"].as_str() == Some("message")
                             && mid["role"].as_str() == Some("assistant")
-                        });
+                    });
                     assert!(
                         !gap_has_assistant,
                         "no assistant message may sit between a tool call and its output"
@@ -1301,8 +1352,7 @@ mod tests {
                 {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
             ]
         });
-        let wire =
-            build_v3_provider_12_responses_wire_payload("req-paired", target, body).unwrap();
+        let wire = build_v3_provider_12_responses_wire_payload("req-paired", target, body).unwrap();
         let input = wire.body()["input"].as_array().unwrap();
         let types: Vec<&str> = input
             .iter()
@@ -1353,7 +1403,12 @@ mod tests {
             .collect();
         assert_eq!(
             types,
-            vec!["function_call", "function_call_output", "reasoning", "message"]
+            vec![
+                "function_call",
+                "function_call_output",
+                "reasoning",
+                "message"
+            ]
         );
         assert_eq!(
             input[2]["content"],

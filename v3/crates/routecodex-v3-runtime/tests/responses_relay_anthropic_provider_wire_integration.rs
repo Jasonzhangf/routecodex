@@ -518,7 +518,7 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failure() {
+async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exhausted() {
     let transport = AnthropicCyberRefusalThenSuccessTransport {
         attempts: Mutex::new(0),
     };
@@ -564,6 +564,10 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_retryable_provider_failu
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("route exhaustion must project a typed JSON terminal error")
+    };
+    assert_eq!(body["error"]["code"], "network_error");
     assert!(
         output.node_trace.contains(&"V3Error06ClientProjected"),
         "single-candidate pool must project the provider failure terminally: {:?}",

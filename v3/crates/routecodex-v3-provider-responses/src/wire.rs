@@ -1,6 +1,8 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
+use provider_compat_core::namespace_tools::{
+    flatten_namespace_tool_for_provider, namespace_tool_name_map,
+};
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{json, Map, Value};
@@ -660,45 +662,16 @@ fn expand_namespace_tools_in_responses_wire_body(
     let mut expanded = Vec::with_capacity(tools.len());
     let mut namespace_name_map = HashMap::new();
     for tool in tools {
-        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
-            let namespace_name = tool
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            if let (Some(namespace_name), Some(children)) =
-                (namespace_name, tool.get("tools").and_then(Value::as_array))
-            {
-                for child in children {
-                    let child_name = child
-                        .get("function")
-                        .and_then(Value::as_object)
-                        .and_then(|function| function.get("name"))
-                        .or_else(|| child.get("name"))
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty());
-                    if let Some(child_name) = child_name {
-                        let qualified_name = format!("{namespace_name}.{child_name}");
-                        namespace_name_map.insert(
-                            qualified_name,
-                            map_namespace_tool_name(namespace_name, child_name),
-                        );
-                    }
-                }
+        if let Some(mapping) = namespace_tool_name_map(&tool).map_err(|detail| {
+            V3ProviderError::NamespaceToolFlattenFailed {
+                request_id: request_id.to_string(),
+                detail,
             }
+        })? {
+            namespace_name_map.extend(mapping);
         }
         match flatten_namespace_tool_for_provider(protocol, &tool) {
-            Ok(Some(mut children)) => {
-                if let Some(namespace_name) = tool.get("name").and_then(Value::as_str) {
-                    rename_flattened_namespace_children(
-                        namespace_name,
-                        tool.get("tools").and_then(Value::as_array),
-                        &mut children,
-                    );
-                }
-                expanded.extend(children)
-            }
+            Ok(Some(mut children)) => expanded.extend(children),
             Ok(None) => expanded.push(tool),
             Err(detail) => {
                 return Err(V3ProviderError::NamespaceToolFlattenFailed {
@@ -722,57 +695,6 @@ fn expand_namespace_tools_in_responses_wire_body(
         provider_type == "openai_chat",
     );
     Ok(body)
-}
-
-fn rename_flattened_namespace_children(
-    namespace_name: &str,
-    source_children: Option<&Vec<Value>>,
-    flattened_children: &mut [Value],
-) {
-    let Some(source_children) = source_children else {
-        return;
-    };
-    for (source, flattened) in source_children.iter().zip(flattened_children.iter_mut()) {
-        let child_name = source
-            .get("function")
-            .and_then(Value::as_object)
-            .and_then(|function| function.get("name"))
-            .or_else(|| source.get("name"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let Some(child_name) = child_name else {
-            continue;
-        };
-        let mapped = Value::String(map_namespace_tool_name(namespace_name, child_name));
-        if let Some(object) = flattened.as_object_mut() {
-            object.insert("name".to_string(), mapped.clone());
-            if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
-                function.insert("name".to_string(), mapped.clone());
-            }
-        }
-    }
-}
-
-fn map_namespace_tool_name(namespace_name: &str, child_name: &str) -> String {
-    if child_name
-        .strip_prefix(namespace_name)
-        .is_some_and(|suffix| suffix.starts_with("__"))
-    {
-        return child_name.to_string();
-    }
-    let qualified_name = format!("{namespace_name}.{child_name}");
-    let mut mapped = String::with_capacity(qualified_name.len());
-    for character in qualified_name.chars() {
-        match character {
-            '.' => mapped.push_str("__"),
-            character if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') => {
-                mapped.push(character)
-            }
-            _ => mapped.push('_'),
-        }
-    }
-    mapped
 }
 
 fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
@@ -897,7 +819,7 @@ fn map_known_namespace_qualified_call_name(name: &str) -> Option<String> {
     {
         return None;
     }
-    Some(map_namespace_tool_name(&format!("mcp__{namespace}"), child))
+    Some(format!("mcp__{namespace}__{child}"))
 }
 
 fn is_namespace_component(value: &str) -> bool {
