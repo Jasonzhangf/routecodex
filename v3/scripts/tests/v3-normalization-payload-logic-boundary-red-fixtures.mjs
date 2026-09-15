@@ -112,8 +112,8 @@ const fixtures = [
   {
     name: 'RespOutbound required_action inference',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs',
-    from: ') -> V3HubRespOutbound05ClientSemantic {\n    let client_payload = Arc::new(input.finalized_payload().clone());',
-    to: ') -> V3HubRespOutbound05ClientSemantic {\n    let _required_action = "required_action";\n    let client_payload = Arc::new(input.finalized_payload().clone());',
+    from: ') -> V3HubRespOutbound05ClientSemantic {\n    let client_payload = Arc::new(input.provider_payload().clone());',
+    to: ') -> V3HubRespOutbound05ClientSemantic {\n    let _required_action = "required_action";\n    let client_payload = Arc::new(input.provider_payload().clone());',
     diagnostic: /RespOutbound05 client semantic projection/,
   },
   {
@@ -131,17 +131,10 @@ const fixtures = [
     diagnostic: /Relay response normalize wrapper/,
   },
   {
-    name: 'servertool before context restore',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
-    to: 'run_servertool_profile(profile, &mut events)?;\n        let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
-    diagnostic: /servertool hook must run after context restore/,
-  },
-  {
     name: 'Req04 protocol conversion resurrected',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: '        if let Some(context) = local_context.as_deref() {',
-    to: '        let _converted = encode_v3_anthropic_request_as_responses_semantic(payload.clone());\n        if let Some(context) = local_context.as_deref() {',
+    from: '        let memory_raw_capture_guidance_injected = normalized.memory_raw_capture_guidance_injected;',
+    to: '        let _converted = encode_v3_anthropic_request_as_responses_semantic(payload.clone());\n        let memory_raw_capture_guidance_injected = normalized.memory_raw_capture_guidance_injected;',
     diagnostic: /ReqChatProcess protocol conversion boundary/,
   },
   {

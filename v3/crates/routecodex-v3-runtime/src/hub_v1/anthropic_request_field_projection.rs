@@ -227,9 +227,8 @@ fn responses_public_metadata_user_id(
             field: "routecodex_chat_extension.responses_request.metadata",
         })?;
     // Arbitrary public Responses metadata is not provider-wire metadata for Anthropic.
-    // V3AnthropicResponsesProjectionContext carries it on the adjacent response projection
-    // and restores it before Resp03/continuation save; this helper extracts only the
-    // exact Anthropic metadata.user_id intersection.
+    // V3AnthropicResponsesProjectionContext carries it on the adjacent response projection;
+    // this helper extracts only the exact Anthropic metadata.user_id intersection.
     let Some(user_id) = metadata.get("user_id") else {
         return Ok(None);
     };

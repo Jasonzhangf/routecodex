@@ -2,13 +2,11 @@ use routecodex_v3_runtime::{
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02,
-    build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw, run_v3_anthropic_relay_client_projection_hook,
     run_v3_anthropic_relay_runtime_req_inbound, V3AnthropicRelayProtocolHookError,
-    V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode,
-    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRespContinuation04Committed,
-    V3HubTransportIntent,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
+    V3HubRespChatProcess03Governed, V3HubTransportIntent,
 };
 use serde_json::json;
 
@@ -31,23 +29,18 @@ fn response04(
     execution: V3HubExecutionMode,
     provider_wire_protocol: V3HubProviderWireProtocol,
     transport_intent: V3HubTransportIntent,
-) -> V3HubRespContinuation04Committed {
+) -> V3HubRespChatProcess03Governed {
     let raw = build_v3_provider_resp_inbound_01_raw(
         payload,
         entry_protocol,
         provider_wire_protocol,
-        V3HubContinuationOwnership::New,
         execution,
         V3HubInvocationSource::Client,
         transport_intent,
     );
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(raw).unwrap();
     let normalized = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
-    let governed = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(normalized);
-    build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
-        governed,
-        V3HubContinuationCommit::None,
-    )
+    build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(normalized)
 }
 
 #[test]

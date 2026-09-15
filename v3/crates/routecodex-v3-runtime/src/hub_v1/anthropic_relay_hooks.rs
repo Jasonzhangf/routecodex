@@ -1,10 +1,10 @@
 use super::{
     anthropic_codec::encode_v3_anthropic_request_as_responses_semantic,
     build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
-    build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
+    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03,
     validate_v3_anthropic_hub_response_payload_for_client_projection, V3AnthropicCodecError,
     V3HubEntryProtocol, V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
-    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRespContinuation04Committed,
+    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRespChatProcess03Governed,
     V3HubRespOutbound05ClientSemantic, V3HubTransportIntent,
 };
 use serde_json::Value;
@@ -42,41 +42,23 @@ impl V3HubReqInbound02Normalized {
 
 impl V3HubRespOutbound05ClientSemantic {
     pub fn payload(&self) -> &Value {
-        self.previous
-            .previous
-            .previous
-            .provider_raw()
-            .payload
-            .0
-            .as_ref()
+        self.previous.previous.provider_raw().payload.0.as_ref()
     }
 
     pub fn entry_protocol(&self) -> V3HubEntryProtocol {
-        self.previous
-            .previous
-            .previous
-            .provider_raw()
-            .entry_protocol
+        self.previous.previous.provider_raw().entry_protocol
     }
 
     pub fn execution_mode(&self) -> V3HubExecutionMode {
-        self.previous.previous.previous.provider_raw().execution
+        self.previous.previous.provider_raw().execution
     }
 
     pub fn provider_wire_protocol(&self) -> V3HubProviderWireProtocol {
-        self.previous
-            .previous
-            .previous
-            .provider_raw()
-            .provider_protocol
+        self.previous.previous.provider_raw().provider_protocol
     }
 
     pub fn transport_intent(&self) -> V3HubTransportIntent {
-        self.previous
-            .previous
-            .previous
-            .provider_raw()
-            .transport_intent
+        self.previous.previous.provider_raw().transport_intent
     }
 
     pub fn node_id(&self) -> &'static str {
@@ -116,9 +98,9 @@ pub fn run_v3_anthropic_relay_runtime_req_inbound(
 /// runtime 侧 Anthropic 格式投影由相邻闭包经
 /// `build_v3_hub_resp_outbound_05_..._with_client_payload` 完成。
 pub fn run_v3_anthropic_relay_client_projection_hook(
-    committed: V3HubRespContinuation04Committed,
+    governed: V3HubRespChatProcess03Governed,
 ) -> Result<V3HubRespOutbound05ClientSemantic, V3AnthropicRelayProtocolHookError> {
-    let raw = committed.previous.previous.provider_raw();
+    let raw = governed.provider_raw();
     let entry_protocol = raw.entry_protocol;
     let execution = raw.execution;
     let provider_wire_protocol = raw.provider_protocol;
@@ -129,7 +111,7 @@ pub fn run_v3_anthropic_relay_client_projection_hook(
         entry_protocol,
         transport_intent,
     )?;
-    Ok(build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(committed))
+    Ok(build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(governed))
 }
 
 fn assert_anthropic_relay_responses_axes(

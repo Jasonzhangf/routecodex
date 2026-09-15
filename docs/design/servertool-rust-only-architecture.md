@@ -18,7 +18,6 @@ the independent `codex-hooks` daemon/CodexApp framework.
 ```text
 client request
   -> Server / HTTP framing
-  -> V3HubReqContinuation03Classified
   -> V3HubReqChatProcess04Governed
   -> registered servertool request hook (when applicable)
   -> V3HubReqExecution05Planned
@@ -26,7 +25,6 @@ client request
   -> V3ProviderRespInbound01Raw
   -> V3HubRespChatProcess03Governed
   -> registered servertool response hook (when applicable)
-  -> V3HubRespContinuation04Committed
   -> normal client semantic/frame projection
 ```
 
@@ -52,7 +50,7 @@ or create a servertool-specific response exit.
   one JSON projection descriptor. Codex executes the projected command through
   the normal tool loop; the CLI itself does not execute the business operation.
 
-Control state, continuation scope, provider/auth/routing state, debug state,
+Control state, provider/auth/routing state, debug state,
 and client/provider business payloads remain separate typed resources. Missing
 or contradictory control truth fails explicitly; no fallback or guessed
 repair is allowed.

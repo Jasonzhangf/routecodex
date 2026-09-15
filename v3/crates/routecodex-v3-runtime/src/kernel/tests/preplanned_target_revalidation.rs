@@ -72,7 +72,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
         provider_ids: Mutex::new(Vec::new()),
     };
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_now_epoch_ms(now + 10)
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),

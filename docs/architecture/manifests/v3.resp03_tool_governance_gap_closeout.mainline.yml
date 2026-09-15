@@ -9,7 +9,8 @@ nodes:
   - V3Resp03FinishReasonBranch
   - V3Resp03ToolCallServertoolHook
   - V3Resp03OrdinaryToolGovernance
-  - V3HubRespContinuation04Committed
+  - V3HubRespOutbound05ClientSemantic
+  - V3ServerRespOutbound06ClientFrame
 edges:
   - step_id: v3-resp03-tool-governance-01
     from_node: V3HubRespInbound02Normalized
@@ -39,12 +40,19 @@ edges:
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     owner_symbol: project_v3_apply_patch_freeform_calls_at_resp03
     status: anchored
-  - step_id: v3-resp03-tool-governance-06
-    from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
+  - step_id: v3-resp03-tool-governance-05
+    from_node: V3Resp03OrdinaryToolGovernance
+    to_node: V3HubRespOutbound05ClientSemantic
     owner_feature_id: v3.resp03_tool_governance_gap_closeout
-    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
-    owner_symbol: commit_v3_hub_relay_response
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+    owner_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
+    status: anchored
+  - step_id: v3-resp03-tool-governance-06
+    from_node: V3HubRespOutbound05ClientSemantic
+    to_node: V3ServerRespOutbound06ClientFrame
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+    owner_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
     status: anchored
 verification_gates:
   - npm run verify:v3-mainline-caller-flow

@@ -1124,7 +1124,7 @@ chains:
     semantic_contract:
       - reads selected provider_type and provider.responses.process from v3.target.concrete_provider
       - responses provider with responses.process=chat chooses HubRelay before SameProtocolDirect
-      - writes the initial protocol decision before dispatch; after provider-failure reselection the execution owner recomputes the decision only for the newly selected Target10, while previous_response_id continuation owner remains the only Direct/Relay lock
+      - writes the initial protocol decision before dispatch; after provider-failure reselection the execution owner recomputes the decision only for the newly selected Target10
     resource_flow:
       consumes:
       - v3.target.concrete_provider
@@ -1163,7 +1163,7 @@ chains:
       - v3.request.tool_thinking_turn_context
     semantic_contract:
       - consumes the current selected Target10 protocol decision and fails fast if Direct receives a non-Direct mode at initial entry
-      - Direct runtime reselects from the full captured Target09 candidate set; when the new selected target requires Hub Relay and no Direct-owned previous_response_id is active, it returns a typed relay handoff side-channel carrying every request-local failed candidate so Relay cannot retry an already-failed Direct target
+      - Direct runtime reselects from the full captured Target09 candidate set; when the new selected target requires Hub Relay, it returns a typed relay handoff side-channel carrying every request-local failed candidate so Relay cannot retry an already-failed Direct target
   - step_id: v3-rd-10
     from_node: V3ResponsesDirect11Policy
     to_node: V3Provider12ResponsesWirePayload
@@ -1296,7 +1296,7 @@ chains:
 - chain_id: v3.hub_pipeline.v1.request
   owner_feature_id: v3.hub_pipeline_static_skeleton
   manifest: docs/architecture/manifests/v3.hub_pipeline.v1.request.mainline.yml
-  summary: Fixed Hub v1 request topology. All Direct/Relay/continuation/target/provider-protocol branches traverse every adjacent node and are supplied by static Rust hooks.
+  summary: Fixed Hub v1 request topology. All Direct/Relay/target/provider-protocol branches traverse every adjacent node and are supplied by static Rust hooks.
   edges:
   - step_id: v3-hub-req-01
     from_node: V3HubReqInbound01ClientRaw
@@ -1319,32 +1319,10 @@ chains:
       - v3.hub.entry_protocol
   - step_id: v3-hub-req-02
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
-    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
-    status: anchored
-    binding_kind: h1_typed_test
-    owner_feature_id: v3.hub_pipeline_static_skeleton
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      - v3.hub.entry_protocol
-      produces:
-      - v3.hub.continuation_ownership
-      side_channel_reads:
-      - v3.hub.entry_protocol
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-      side_channel_writes:
-      - v3.hub.continuation_ownership
-  - step_id: v3-hub-req-03
-    from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     binding_kind: h1_typed_test
@@ -1352,13 +1330,13 @@ chains:
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
       produces:
       - v3.request.normal_payload
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.entry_protocol
       side_channel_writes: []
-  - step_id: v3-hub-req-04
+  - step_id: v3-hub-req-03
     from_node: V3HubReqChatProcess04Governed
     to_node: V3HubReqExecution05Planned
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1371,15 +1349,14 @@ chains:
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.continuation_ownership
       - v3.config.published_manifest
       produces:
       - v3.hub.execution_plan
       side_channel_reads:
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
       side_channel_writes:
       - v3.hub.execution_plan
-  - step_id: v3-hub-req-05
+  - step_id: v3-hub-req-04
     from_node: V3HubReqExecution05Planned
     to_node: V3HubReqTarget06Resolved
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1396,10 +1373,10 @@ chains:
       produces:
       - v3.hub.resolved_target
       side_channel_reads:
-      - v3.continuation.remote_binding
+      - v3.hub.execution_plan
       side_channel_writes:
       - v3.hub.resolved_target
-  - step_id: v3-hub-req-06
+  - step_id: v3-hub-req-05
     from_node: V3HubReqTarget06Resolved
     to_node: V3HubReqOutbound07ProviderSemantic
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1420,7 +1397,7 @@ chains:
       - v3.hub.execution_plan
       side_channel_writes:
       - v3.hub.provider_protocol
-  - step_id: v3-hub-req-07
+  - step_id: v3-hub-req-06
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1440,7 +1417,7 @@ chains:
       side_channel_reads:
       - v3.hub.provider_protocol
       side_channel_writes: []
-  - step_id: v3-hub-req-08
+  - step_id: v3-hub-req-07
     from_node: ProviderReqCompat06ProviderCompat
     to_node: V3ProviderReqOutbound08WirePayload
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1457,7 +1434,7 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-req-09
+  - step_id: v3-hub-req-08
     from_node: V3ProviderReqOutbound08WirePayload
     to_node: V3ProviderReqOutbound09TransportRequest
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1573,7 +1550,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_pipeline.v1.relay_request_source_slice
   owner_feature_id: v3.hub_relay_request_semantics
-  summary: Relay request-side source slice. Req02 normalizes, Req03 classifies only, and Req04 restores/governs; later fixed nodes remain the standard Hub v1 chain.
+  summary: Relay request-side source slice. Req02 normalizes and Req04 governs request tool/history semantics; later fixed nodes remain the standard Hub v1 chain.
   edges:
   - step_id: v3-hub-relay-req-01
     from_node: V3HubReqInbound01ClientRaw
@@ -1596,11 +1573,11 @@ chains:
       side_channel_writes: []
   - step_id: v3-hub-relay-req-02
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
+    to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: classify_continuation
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     binding_kind: relay_request_source_slice
     owner_feature_id: v3.hub_relay_request_semantics
@@ -1609,31 +1586,30 @@ chains:
       - v3.request.normal_payload
       - v3.hub.entry_protocol
       produces:
-      - v3.hub.continuation_ownership
+      - v3.request.normal_payload
       side_channel_reads:
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-      side_channel_writes:
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
+      side_channel_writes: []
   - step_id: v3-hub-relay-req-03
-    from_node: V3HubReqContinuation03Classified
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: V3HubRelayRequestHooks::run
+    from_node: V3HubReqChatProcess04Governed
+    to_node: V3HubReqExecution05Planned
+    caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: restore_local_context_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+    callee_symbol: build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs
     status: anchored
     binding_kind: relay_request_source_slice
     owner_feature_id: v3.hub_relay_request_semantics
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.continuation_ownership
+      - v3.hub.execution_plan
       produces:
-      - v3.request.normal_payload
+      - v3.hub.execution_plan
       side_channel_reads:
-      - v3.continuation.local_context_truth
-      side_channel_writes: []
+      - v3.hub.execution_plan
+      side_channel_writes:
+      - v3.hub.execution_plan
 - chain_id: v3.hub_pipeline.v1.response
   owner_feature_id: v3.hub_pipeline_static_skeleton
   manifest: docs/architecture/manifests/v3.hub_pipeline.v1.response.mainline.yml
@@ -1698,35 +1674,10 @@ chains:
       side_channel_writes: []
   - step_id: v3-hub-resp-04
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
-    status: anchored
-    binding_kind: h1_typed_test
-    owner_feature_id: v3.hub_pipeline_static_skeleton
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      - v3.hub.continuation_ownership
-      produces:
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-      side_channel_reads:
-      - v3.hub.continuation_ownership
-      side_channel_writes:
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-    semantic_contract:
-      - V3HubRespContinuation04Committed contains finalized response and continuation data only
-      - Web search transition stays in a typed outcome side channel and is consumed by its registered runtime edge, never by Resp04 or Resp05 data nodes
-  - step_id: v3-hub-resp-05
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     binding_kind: h1_typed_test
@@ -1740,7 +1691,7 @@ chains:
       side_channel_reads:
       - v3.hub.entry_protocol
       side_channel_writes: []
-  - step_id: v3-hub-resp-06
+  - step_id: v3-hub-resp-05
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
@@ -1758,7 +1709,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_pipeline.v1.relay_response_source_slice
   owner_feature_id: v3.hub_relay_response_semantics
-  summary: Relay response-side source slice. Static callable response hooks implement Resp01->Resp04 only; Resp05/Server/SSE remain pass-through projection/transport and cannot own continuation semantics.
+  summary: Relay response-side source slice. Static callable response hooks implement Resp01->Resp03 only; Resp05/Server/SSE remain pass-through projection/transport.
   edges:
   - step_id: v3-hub-relay-resp-01
     from_node: V3ProviderRespInbound01Raw
@@ -1821,23 +1772,23 @@ chains:
       side_channel_writes: []
   - step_id: v3-hub-relay-resp-04
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: V3HubRelayResponseHookRegistry::commit
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: V3HubRelayResponseHookRegistry::govern
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    callee_symbol: commit_v3_hub_relay_response
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     binding_kind: relay_response_source_slice
     owner_feature_id: v3.hub_relay_response_semantics
     resource_flow:
       consumes:
       - v3.hub.response_semantic
+      - v3.hub.entry_protocol
       produces:
-      - v3.continuation.local_context_truth
+      - v3.response.client_payload
       side_channel_reads:
-      - v3.hub.continuation_ownership
-      side_channel_writes:
-      - v3.continuation.local_context_truth
+      - v3.hub.entry_protocol
+      side_channel_writes: []
 - chain_id: v3.protocol.anthropic.characterization
   owner_feature_id: v3.protocol_anthropic_codec_characterization
   summary: Characterization-only Anthropic request/response codec evidence. These edges do not register Hub hooks or create a second runtime lifecycle.
@@ -2194,7 +2145,7 @@ chains:
       - v3.hub.response_semantic
       produces: []
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.response_semantic
       side_channel_writes: []
   - step_id: v3-hub-relay-copy-probe-03
     from_node: ProviderRespCompat02ProviderCompat
@@ -2211,42 +2162,43 @@ chains:
       - v3.hub.response_semantic
       produces: []
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.response_semantic
       side_channel_writes: []
   - step_id: v3-hub-relay-copy-probe-04
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
-    caller_symbol: local_context_is_retained_until_req04_outcome_release
+    caller_symbol: relay_json_moves_one_business_payload_through_req04
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
-    callee_symbol: restore_local_context_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     binding_kind: test_probe_over_existing_adjacent_chain
     owner_feature_id: v3.hub_relay_payload_copy_runtime_probes
     resource_flow:
       consumes:
-      - v3.continuation.local_context_truth
+      - v3.request.normal_payload
       produces: []
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.execution_plan
       side_channel_writes: []
   - step_id: v3-hub-relay-copy-probe-05
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: servertool_roundtrip_uses_one_resp04_context_and_restores_before_req04_hook
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: relay_sse_keeps_one_canonical_payload_without_materializing_stream
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
-    callee_symbol: V3HubRelayResponseHookRegistry::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     binding_kind: test_probe_over_existing_adjacent_chain
     owner_feature_id: v3.hub_relay_payload_copy_runtime_probes
     resource_flow:
       consumes:
       - v3.hub.response_semantic
-      - v3.continuation.local_context_truth
-      produces: []
+      - v3.hub.entry_protocol
+      produces:
+      - v3.response.client_payload
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.response_semantic
       side_channel_writes: []
 - chain_id: v3.server.startup
   owner_feature_id: v3.foundation_p0_p2
@@ -2756,231 +2708,6 @@ chains:
       side_channel_writes:
       - v3.debug.response_dry_run_execution
     status: anchored
-- chain_id: v3.responses_continuation.remote_contract_store
-  owner_feature_id: v3.remote_continuation_contract_store
-  summary: H4 source-only direct-owner remote locator commit/load contract. It stores locator and pin control facts only and is not wired into Hub v1.
-  edges:
-  - step_id: v3-h4-remote-01
-    from_node: V3RemoteContinuationCommitInput
-    to_node: V3RemoteContinuationLocator
-    caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
-    caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
-    callee_symbol: V3RemoteContinuationStore::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
-    owner_feature_id: v3.remote_continuation_contract_store
-    binding_kind: h4_contract_store_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      produces:
-      - v3.continuation.remote_binding
-      side_channel_reads: []
-      side_channel_writes:
-      - v3.continuation.remote_binding
-    status: anchored
-  - step_id: v3-h4-remote-02
-    from_node: V3RemoteContinuationLoadRequest
-    to_node: V3RemoteContinuationLocator
-    caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
-    caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
-    callee_symbol: V3RemoteContinuationStore::load
-    callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
-    owner_feature_id: v3.remote_continuation_contract_store
-    binding_kind: h4_contract_store_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      produces:
-      - v3.continuation.remote_binding
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes: []
-    status: anchored
-- chain_id: v3.responses_continuation.remote_locator_codec
-  owner_feature_id: v3.remote_continuation_contract_store
-  summary: H4 lossless locator-only codec. Unknown local context/history/tool-state fields fail decoding.
-  edges:
-  - step_id: v3-h4-codec-01
-    from_node: V3RemoteContinuationLocator
-    to_node: V3RemoteContinuationLocatorEncoded
-    caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
-    caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
-    callee_symbol: encode_v3_remote_continuation_locator
-    callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
-    owner_feature_id: v3.remote_continuation_contract_store
-    binding_kind: h4_contract_store_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      produces:
-      - v3.continuation.remote_binding
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes: []
-    status: anchored
-  - step_id: v3-h4-codec-02
-    from_node: V3RemoteContinuationLocatorEncoded
-    to_node: V3RemoteContinuationLocator
-    caller_symbol: direct_remote_locator_round_trips_for_same_entry_scope_and_pin
-    caller_file: v3/crates/routecodex-v3-runtime/tests/h4_remote_continuation_contract.rs
-    callee_symbol: decode_v3_remote_continuation_locator
-    callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
-    owner_feature_id: v3.remote_continuation_contract_store
-    binding_kind: h4_contract_store_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      produces:
-      - v3.continuation.remote_binding
-      side_channel_reads: []
-      side_channel_writes:
-      - v3.continuation.remote_binding
-    status: anchored
-- chain_id: v3.responses_direct.remote_continuation.integration
-  owner_feature_id: v3.responses_direct_remote_continuation_integration
-  summary: Responses Direct remote continuation commits provider-owned identity at Resp04; next Req03 first resolves previous_response_id owner from direct remote vs relay local stores, then direct-owned ids load scope and exact-pin provider/model/auth at Req06. Continuation owner selection is not a Target model capability.
-  edges:
-  - step_id: v3-rci-01
-    from_node: V3Server03HttpRequestRaw
-    to_node: V3HubReqContinuation03Classified
-    caller_symbol: pending_endpoint
-    caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: resolve_v3_responses_previous_response_owner_execution_mode_at_req03
-    callee_file: v3/crates/routecodex-v3-runtime/src/responses_continuation_owner.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-      produces:
-      - v3.hub.continuation_ownership
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      - v3.continuation.local_context_truth
-      side_channel_writes: []
-    status: anchored
-  - step_id: v3-rci-02
-    from_node: V3HubReqContinuation03Classified
-    to_node: V3HubReqTarget06Resolved
-    caller_symbol: execute_v3_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: V3TargetInterpreter::resolve_exact_provider_model_auth
-    callee_file: v3/crates/routecodex-v3-target/src/lib.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      - v3.config.published_manifest
-      produces:
-      - v3.target.concrete_provider
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes:
-      - v3.target.concrete_provider
-    status: anchored
-  - step_id: v3-rci-ws-01
-    from_node: V3HubReqTarget06Resolved
-    to_node: V3Transport13ResponsesHttpRequest
-    caller_symbol: responses_direct_provider_transport_hook
-    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
-    callee_symbol: build_v3_transport_13_responses_request_from_v3_provider_12
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_provider_transport_source
-    resource_flow:
-      consumes:
-      - v3.target.concrete_provider
-      - v3.provider.responses_transport_capability
-      - v3.provider.responses_wire_payload
-      produces:
-      - v3.provider.transport_request
-      - v3.provider.responses_websocket_connection
-      side_channel_reads:
-      - v3.provider.responses_transport_capability
-      side_channel_writes:
-      - v3.provider.responses_websocket_connection
-    status: anchored
-  - step_id: v3-rci-03
-    from_node: V3ProviderResp14Raw
-    to_node: V3DirectResp14ProviderProjectionPrepared
-    caller_symbol: execute_v3_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: responses_direct_response_projection_hook_with_context
-    callee_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.response.provider_raw
-      - v3.target.concrete_provider
-      - v3.direct_response.compat_context
-      produces:
-      - v3.direct_response.compat_plan
-      side_channel_reads:
-      - v3.target.concrete_provider
-      side_channel_writes:
-      - v3.direct_response.compat_plan
-    status: anchored
-  - step_id: v3-rci-04
-    from_node: V3DirectResp14ProviderProjectionPrepared
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3RemoteContinuationStore::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/remote_continuation.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      - v3.response.provider_raw
-      produces:
-      - v3.continuation.remote_binding
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes:
-      - v3.continuation.remote_binding
-    status: anchored
-  - step_id: v3-rci-05
-    from_node: V3HubRespContinuation04Committed
-    to_node: V3DirectResp15ClientPayloadReady
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ResponsesDirectRuntimeOutput
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      - v3.response.provider_raw
-      produces: []
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes: []
-    status: anchored
-  - step_id: v3-rci-06
-    from_node: V3DirectResp15ClientPayloadReady
-    to_node: V3Resp15ClientPayload
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ResponsesDirectRuntimeOutput
-    callee_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    owner_feature_id: v3.responses_direct_remote_continuation_integration
-    binding_kind: responses_direct_runtime_source
-    resource_flow:
-      consumes:
-      - v3.continuation.remote_binding
-      - v3.response.provider_raw
-      produces:
-      - v3.response.client_payload
-      side_channel_reads:
-      - v3.continuation.remote_binding
-      side_channel_writes: []
-    status: anchored
 - chain_id: v3.anthropic_relay.controlled_runtime
   owner_feature_id: v3.anthropic_relay_runtime_integration
   summary: Controlled Anthropic /v1/messages Relay request through the sole Hub v1 lifecycle, generic Responses transport, Error01-06, and the sole Anthropic client projection exit.
@@ -3030,39 +2757,20 @@ chains:
     status: anchored
   - step_id: v3-anthropic-relay-03
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
-    owner_feature_id: v3.anthropic_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      - v3.hub.entry_protocol
-      produces:
-      - v3.hub.continuation_ownership
-      side_channel_reads:
-      - v3.hub.entry_protocol
-      side_channel_writes:
-      - v3.hub.continuation_ownership
-    status: anchored
-  - step_id: v3-anthropic-relay-04
-    from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     owner_feature_id: v3.anthropic_relay_runtime_integration
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
       produces:
       - v3.request.normal_payload
       side_channel_reads:
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
       side_channel_writes: []
     status: anchored
   - step_id: v3-anthropic-relay-05
@@ -3076,11 +2784,10 @@ chains:
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.hub.continuation_ownership
       produces:
       - v3.hub.execution_plan
       side_channel_reads:
-      - v3.hub.continuation_ownership
+      - v3.hub.entry_protocol
       side_channel_writes:
       - v3.hub.execution_plan
     status: anchored
@@ -3251,28 +2958,10 @@ chains:
     status: anchored
   - step_id: v3-anthropic-relay-15
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: execute_v3_anthropic_relay_runtime
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3HubRelayResponseHookRegistry::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    owner_feature_id: v3.anthropic_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      - v3.hub.continuation_ownership
-      produces:
-      - v3.hub.response_semantic
-      side_channel_reads:
-      - v3.hub.continuation_ownership
-      side_channel_writes: []
-    status: anchored
-  - step_id: v3-anthropic-relay-16
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: execute_v3_anthropic_relay_runtime
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     owner_feature_id: v3.anthropic_relay_runtime_integration
     resource_flow:
@@ -3285,7 +2974,7 @@ chains:
       - v3.hub.entry_protocol
       side_channel_writes: []
     status: anchored
-  - step_id: v3-anthropic-relay-17
+  - step_id: v3-anthropic-relay-16
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
     caller_symbol: execute_v3_anthropic_relay_runtime
@@ -3348,64 +3037,6 @@ chains:
       side_channel_writes:
       - v3.error.chain
     status: anchored
-- chain_id: v3.anthropic_relay.local_continuation
-  owner_feature_id: v3.anthropic_relay_local_continuation_integration
-  summary: Resp04 local canonical save through the immutable interval to next Req04 exact-scope restore and governance.
-  edges:
-  - step_id: v3-localcont-01
-    from_node: V3LocalContResp01ChatProcessGoverned
-    to_node: V3LocalContResp02ImmutableSaved
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: commit_or_release_local_continuation
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    owner_feature_id: v3.anthropic_relay_local_continuation_integration
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.continuation.local_context_truth
-      side_channel_reads: []
-      side_channel_writes:
-      - v3.continuation.local_context_truth
-    status: anchored
-  - step_id: v3-localcont-02
-    from_node: V3LocalContResp02ImmutableSaved
-    to_node: V3LocalContReq03ExactScopeLoaded
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3HubContinuationLookup::with_local_context_from_req04_store
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    owner_feature_id: v3.anthropic_relay_local_continuation_integration
-    resource_flow:
-      consumes:
-      - v3.continuation.local_context_truth
-      produces:
-      - v3.hub.continuation_ownership
-      side_channel_reads:
-      - v3.continuation.local_context_truth
-      side_channel_writes:
-      - v3.hub.continuation_ownership
-    status: anchored
-  - step_id: v3-localcont-03
-    from_node: V3LocalContReq03ExactScopeLoaded
-    to_node: V3LocalContReq04RestoredGoverned
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: merge_v3_relay_restored_local_context_at_req04
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
-    owner_feature_id: v3.anthropic_relay_local_continuation_integration
-    resource_flow:
-      consumes:
-      - v3.continuation.local_context_truth
-      - v3.request.normal_payload
-      - v3.hub.continuation_ownership
-      produces:
-      - v3.request.normal_payload
-      side_channel_reads:
-      - v3.continuation.local_context_truth
-      side_channel_writes: []
-    status: anchored
 - chain_id: v3.openai_chat_relay.controlled_runtime
   owner_feature_id: v3.openai_chat_relay_runtime_integration
   summary: Controlled /v1/chat/completions Relay through the sole Hub v1 request/response lifecycle; SSE is incrementally projected by Runtime and transported by Server without materialization.
@@ -3448,27 +3079,10 @@ chains:
       side_channel_writes: []
   - step_id: v3-openai-chat-relay-03
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
-    status: anchored
-    owner_feature_id: v3.openai_chat_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.request.provider_semantic
-      produces:
-      - v3.request.provider_semantic
-      side_channel_reads:
-      - v3.hub.continuation_ownership
-      side_channel_writes: []
-  - step_id: v3-openai-chat-relay-04
-    from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     owner_feature_id: v3.openai_chat_relay_runtime_integration
@@ -3478,7 +3092,7 @@ chains:
       produces:
       - v3.request.provider_semantic
       side_channel_reads:
-      - v3.hub.static_hook_registry
+      - v3.hub.entry_protocol
       side_channel_writes: []
   - step_id: v3-openai-chat-relay-05
     from_node: V3HubReqChatProcess04Governed
@@ -3652,36 +3266,22 @@ chains:
       side_channel_writes: []
   - step_id: v3-openai-chat-relay-15
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: project_json_response
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3HubRelayResponseHookRegistry::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    status: anchored
-    owner_feature_id: v3.openai_chat_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.hub.response_semantic
-      side_channel_reads: []
-      side_channel_writes: []
-  - step_id: v3-openai-chat-relay-16
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: project_json_response
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.openai_chat_relay_runtime_integration
     resource_flow:
       consumes:
       - v3.hub.response_semantic
+      - v3.hub.entry_protocol
       produces:
       - v3.response.client_payload
       - v3.openai_chat.client_sse_stream
-      side_channel_reads: []
+      side_channel_reads:
+      - v3.hub.entry_protocol
       side_channel_writes: []
   - step_id: v3-openai-chat-relay-17
     from_node: V3HubRespOutbound05ClientSemantic
@@ -3742,27 +3342,10 @@ chains:
       side_channel_writes: []
   - step_id: v3-gemini-relay-03
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
-    status: anchored
-    owner_feature_id: v3.gemini_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.request.provider_semantic
-      produces:
-      - v3.request.provider_semantic
-      side_channel_reads:
-      - v3.hub.continuation_ownership
-      side_channel_writes: []
-  - step_id: v3-gemini-relay-04
-    from_node: V3HubReqContinuation03Classified
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     owner_feature_id: v3.gemini_relay_runtime_integration
@@ -3772,7 +3355,7 @@ chains:
       produces:
       - v3.request.provider_semantic
       side_channel_reads:
-      - v3.hub.static_hook_registry
+      - v3.hub.entry_protocol
       side_channel_writes: []
   - step_id: v3-gemini-relay-05
     from_node: V3HubReqChatProcess04Governed
@@ -3946,36 +3529,22 @@ chains:
       side_channel_writes: []
   - step_id: v3-gemini-relay-15
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: project_json_response
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3HubRelayResponseHookRegistry::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    status: anchored
-    owner_feature_id: v3.gemini_relay_runtime_integration
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.hub.response_semantic
-      side_channel_reads: []
-      side_channel_writes: []
-  - step_id: v3-gemini-relay-16
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: project_json_response
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.gemini_relay_runtime_integration
     resource_flow:
       consumes:
       - v3.hub.response_semantic
+      - v3.hub.entry_protocol
       produces:
       - v3.response.client_payload
       - v3.gemini.client_sse_stream
-      side_channel_reads: []
+      side_channel_reads:
+      - v3.hub.entry_protocol
       side_channel_writes: []
   - step_id: v3-gemini-relay-17
     from_node: V3HubRespOutbound05ClientSemantic
@@ -4048,7 +3617,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_relay.runtime_closeout
   owner_feature_id: v3.hub_relay_runtime_closeout
-  summary: Controlled Hub Relay Runtime closeout over the fixed Req01-Req09 and Resp01-Resp06 topology. It binds JSON/SSE, local continuation, servertool hook profile, Responses Relay source server entry, Error01-06, and one-response-exit evidence without claiming live/P6/global cutover.
+  summary: Controlled Hub Relay Runtime closeout over the fixed Req01-Req09 and Resp01-Resp06 topology. It binds JSON/SSE, Responses field parity, servertool hook profile, Responses Relay source server entry, Error01-06, and one-response-exit evidence without claiming live/P6/global cutover.
   manifest: docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml
   edges:
   - step_id: v3-hub-relay-closeout-01
@@ -4071,11 +3640,11 @@ chains:
       - v3.hub.entry_protocol
   - step_id: v3-hub-relay-closeout-02
     from_node: V3HubReqInbound02Normalized
-    to_node: V3HubReqContinuation03Classified
+    to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
     resource_flow:
@@ -4083,30 +3652,11 @@ chains:
       - v3.request.normal_payload
       - v3.hub.entry_protocol
       produces:
-      - v3.hub.continuation_ownership
-      side_channel_reads:
-      - v3.continuation.local_context_truth
-      side_channel_writes:
-      - v3.hub.continuation_ownership
-  - step_id: v3-hub-relay-closeout-03
-    from_node: V3HubReqContinuation03Classified
-    to_node: V3HubReqChatProcess04Governed
-    caller_symbol: V3HubRelayRequestHooks::run_from_normalized
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
-    status: anchored
-    owner_feature_id: v3.hub_relay_runtime_closeout
-    resource_flow:
-      consumes:
-      - v3.request.normal_payload
-      - v3.hub.continuation_ownership
-      produces:
       - v3.request.normal_payload
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.entry_protocol
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-04
+  - step_id: v3-hub-relay-closeout-03
     from_node: V3HubReqChatProcess04Governed
     to_node: V3HubReqExecution05Planned
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4123,7 +3673,7 @@ chains:
       side_channel_reads:
       - v3.hub.static_hook_registry
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-05
+  - step_id: v3-hub-relay-closeout-04
     from_node: V3HubReqExecution05Planned
     to_node: V3HubReqTarget06Resolved
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4140,7 +3690,7 @@ chains:
       - v3.hub.resolved_target
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-06
+  - step_id: v3-hub-relay-closeout-05
     from_node: V3HubReqTarget06Resolved
     to_node: V3HubReqOutbound07ProviderSemantic
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4158,7 +3708,7 @@ chains:
       - v3.hub.provider_protocol
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-07
+  - step_id: v3-hub-relay-closeout-06
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4175,7 +3725,7 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-08
+  - step_id: v3-hub-relay-closeout-07
     from_node: ProviderReqCompat06ProviderCompat
     to_node: V3ProviderReqOutbound08WirePayload
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4191,7 +3741,7 @@ chains:
       - v3.hub.provider_wire_payload
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-09
+  - step_id: v3-hub-relay-closeout-08
     from_node: V3ProviderReqOutbound08WirePayload
     to_node: V3ProviderReqOutbound09TransportRequest
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4208,7 +3758,7 @@ chains:
       side_channel_reads:
       - v3.secret.provider_auth_handle
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-10
+  - step_id: v3-hub-relay-closeout-09
     from_node: V3ProviderReqOutbound09TransportRequest
     to_node: V3ProviderRespInbound01Raw
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4224,7 +3774,7 @@ chains:
       - v3.response.provider_raw
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-11
+  - step_id: v3-hub-relay-closeout-10
     from_node: V3ProviderRespInbound01Raw
     to_node: ProviderRespCompat02ProviderCompat
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4240,7 +3790,7 @@ chains:
       - v3.hub.response_semantic
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-12
+  - step_id: v3-hub-relay-closeout-11
     from_node: ProviderRespCompat02ProviderCompat
     to_node: V3HubRespInbound02Normalized
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4256,7 +3806,7 @@ chains:
       - v3.hub.response_semantic
       side_channel_reads: []
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-13
+  - step_id: v3-hub-relay-closeout-12
     from_node: V3HubRespInbound02Normalized
     to_node: V3HubRespChatProcess03Governed
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4273,41 +3823,25 @@ chains:
       side_channel_reads:
       - v3.hub.static_hook_registry
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-14
+  - step_id: v3-hub-relay-closeout-13
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3HubRelayResponseHookRegistry::commit
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
-    status: anchored
-    owner_feature_id: v3.hub_relay_runtime_closeout
-    resource_flow:
-      consumes:
-      - v3.hub.response_semantic
-      produces:
-      - v3.continuation.local_context_truth
-      side_channel_reads: []
-      side_channel_writes:
-      - v3.continuation.local_context_truth
-  - step_id: v3-hub-relay-closeout-15
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
     resource_flow:
       consumes:
       - v3.hub.response_semantic
-      - v3.continuation.local_context_truth
+      - v3.hub.entry_protocol
       produces:
       - v3.response.client_payload
-      side_channel_reads: []
+      side_channel_reads:
+      - v3.hub.entry_protocol
       side_channel_writes: []
-  - step_id: v3-hub-relay-closeout-16
+  - step_id: v3-hub-relay-closeout-14
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -4446,7 +3980,7 @@ chains:
 - chain_id: v3.protocol_conversion_field_parity
   owner_feature_id: v3.protocol_conversion_field_parity
   binding_kind: protocol_field_parity_test_over_existing_relay_chain
-  summary: Field-parity contract overlay over existing V3 Relay chains. Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process; outbound projection consumes only governed Chat semantics. Arguments, client metadata, reasoning effort/budget/summary/context/mode/include/display, and other payload fields stay in the data plane. Routing/switch/retry/continuation control stays in typed control resources/MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
+  summary: Field-parity contract overlay over existing V3 Relay chains. Source wire is decoded to Chat canonical plus registered payload extensions before Chat Process; outbound projection consumes only governed Chat semantics. Arguments, client metadata, reasoning effort/budget/summary/context/mode/include/display, and other payload fields stay in the data plane. Routing/switch/retry control stays in typed control resources/MetadataCenter, and neither side reconstructs the other. It does not introduce a separate runtime lifecycle or any server/SSE/provider-transport owner.
   design_contract: docs/design/v3-protocol-request-field-projection.md
   lifecycle_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.yml
   module_boundary_manifest: docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml
@@ -4478,7 +4012,7 @@ chains:
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: V3ProviderReqOutbound08WirePayload
     caller_symbol: responses_openai_chat_field_parity_request_matrix
-    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
     callee_symbol: build_v3_openai_chat_standard_request_from_chat_canonical
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     status: anchored
@@ -4517,7 +4051,7 @@ chains:
     from_node: V3ProviderRespInbound01Raw
     to_node: V3HubRespInbound02Normalized
     caller_symbol: responses_openai_chat_field_parity_response_matrix
-    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
     callee_symbol: build_v3_responses_provider_response_from_openai_chat_payload
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
     status: anchored
@@ -4621,7 +4155,7 @@ chains:
     to_node: V3EntryBind04ExecutionBindingProjected
     caller_symbol: responses_relay_manifest
     caller_file: v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     owner_feature_id: v3.hub_relay_runtime_closeout
@@ -4640,7 +4174,7 @@ chains:
     to_node: V3HubReqInbound01ClientRaw
     caller_symbol: pending_endpoint
     caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     edge_kind: aggregate_entry_edge
@@ -4719,11 +4253,11 @@ chains:
   summary: Unified ServertoolCenter (MetadataCenter) skeleton. Tools (web_search and servertool CLI) are identified, state-loaded, and projected only through fixed Req04/Resp03 governance hooks; data plane stays logic-free.
   edges:
   - step_id: v3-servertool-center-req-01
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
-    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03
+    callee_symbol: build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
     status: anchored
     owner_feature_id: v3.servertool_center_skeleton
@@ -4804,13 +4338,13 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_relay.tool_servertool_multiturn_parity
   owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool governance with immutable restored history, Req04 apply_patch feedback normalization, response tool harvest, Resp03 apply_patch freeform client projection, continuation commit, SSE ordering, and single response exit.
+  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool governance, Req04 apply_patch feedback normalization, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
   manifest: docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
   edges:
   - step_id: v3-relay-tool-parity-01
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
-    caller_symbol: request_governance_matches_function_custom_servertool_and_internal_tool_outputs_to_restored_context
+    caller_symbol: protocol_transport_matrix_uses_one_chat_process_governance_path
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
     callee_symbol: run_from_normalized
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
@@ -4819,14 +4353,13 @@ chains:
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.continuation.local_context_truth
       produces: []
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.request.normal_payload
       side_channel_writes:
       - v3.hub.tool_governance_truth
   - step_id: v3-relay-tool-parity-02
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
@@ -4837,10 +4370,9 @@ chains:
     resource_flow:
       consumes:
       - v3.request.normal_payload
-      - v3.continuation.local_context_truth
       produces: []
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.request.normal_payload
       side_channel_writes:
       - v3.hub.tool_governance_truth
   - step_id: v3-relay-tool-parity-04
@@ -4863,11 +4395,11 @@ chains:
       - v3.hub.tool_governance_truth
   - step_id: v3-relay-tool-parity-05
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
+    to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
-    callee_symbol: commit_v3_hub_relay_response
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
     resource_flow:
@@ -4875,11 +4407,10 @@ chains:
       - v3.hub.response_semantic
       - v3.hub.tool_governance_truth
       produces:
-      - v3.continuation.local_context_truth
+      - v3.response.client_payload
       side_channel_reads:
-      - v3.hub.tool_governance_truth
-      side_channel_writes:
-      - v3.continuation.local_context_truth
+      - v3.hub.entry_protocol
+      side_channel_writes: []
   - step_id: v3-relay-tool-parity-06
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
@@ -4897,7 +4428,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.resp03_tool_governance_gap_closeout
   owner_feature_id: v3.resp03_tool_governance_gap_closeout
-  summary: 'Resp03 response small skeleton: provider-neutral text harvest and tool-frame repair occur before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; terminal branch preserves response semantics; Resp04 only saves the governed continuation truth.'
+  summary: 'Resp03 response small skeleton: provider-neutral text harvest and tool-frame repair occur before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; terminal branch preserves response semantics; Resp05 consumes the governed response directly.'
   manifest: docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml
   edges:
   - step_id: v3-resp03-tool-governance-01
@@ -4966,23 +4497,37 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.hub.tool_governance_truth
-  - step_id: v3-resp03-tool-governance-06
-    from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    caller_symbol: commit_v3_hub_relay_response
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
-    callee_symbol: V3HubRelayCanonicalResponseContext
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+  - step_id: v3-resp03-tool-governance-05
+    from_node: V3Resp03OrdinaryToolGovernance
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: resp05_consumes_resp03_repaired_payload_without_semantic_repair
+    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.resp03_tool_governance_gap_closeout
     resource_flow:
       consumes:
-      - v3.hub.response_semantic
+      - v3.hub.tool_governance_truth
       produces:
-      - v3.continuation.local_context_truth
+      - v3.response.client_payload
       side_channel_reads: []
-      side_channel_writes:
-      - v3.continuation.local_context_truth
+      side_channel_writes: []
+  - step_id: v3-resp03-tool-governance-06
+    from_node: V3HubRespOutbound05ClientSemantic
+    to_node: V3ServerRespOutbound06ClientFrame
+    caller_symbol: responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
+    caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+    callee_symbol: build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
+    status: anchored
+    owner_feature_id: v3.resp03_tool_governance_gap_closeout
+    resource_flow:
+      consumes:
+      - v3.response.client_payload
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.live_provider_compat.parity
   owner_feature_id: v3.live_provider_compat_parity_closeout
   summary: Docs/verifier lifecycle for V3 live provider compatibility parity; it indexes endpoint/transport/provider evidence and projects production blockers without touching runtime or live config.
@@ -5149,7 +4694,7 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
   - step_id: v3-protocol-boundary-req-03
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: openai_chat_tool_identity_is_governed_at_req04_after_normalization
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
@@ -5163,11 +4708,11 @@ chains:
       produces:
       - v3.hub.tool_governance_truth
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.response_semantic
       side_channel_writes:
       - v3.hub.tool_governance_truth
   - step_id: v3-protocol-boundary-req-04
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: gemini_function_response_identity_is_governed_at_req04_after_normalization
     caller_file: v3/crates/routecodex-v3-runtime/tests/hub_relay_request_semantics.rs
@@ -5181,7 +4726,7 @@ chains:
       produces:
       - v3.hub.tool_governance_truth
       side_channel_reads:
-      - v3.continuation.local_context_truth
+      - v3.hub.response_semantic
       side_channel_writes:
       - v3.hub.tool_governance_truth
   - step_id: v3-protocol-boundary-resp-01
@@ -5912,7 +5457,7 @@ chains:
     to_node: V3RuntimeTimingExternalAttempt
     caller_symbol: execute_responses_direct_server_outcome
     caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
-    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target
+    callee_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
     status: anchored
     owner_feature_id: v3.runtime_timing_observability
@@ -6147,26 +5692,6 @@ chains:
       caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-09
-      from_node: V3ExecutionRetryOrReselect
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6866,7 +6391,7 @@ chains:
       to_node: V3ProviderActionSuccessFinalize
       caller_symbol: execute_v3_anthropic_relay_runtime_inner
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: record_provider_success_after_resp04
+      callee_symbol: record_provider_success_after_response_governance
       callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
@@ -6884,7 +6409,7 @@ chains:
     - step_id: v3-provider-action-gate-47
       from_node: V3ProviderActionSuccessFinalize
       to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: record_provider_success_after_resp04
+      caller_symbol: record_provider_success_after_response_governance
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
       callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -7086,11 +6611,11 @@ chains:
       side_channel_reads: [v3.hub.provider_protocol]
       side_channel_writes: []
   - step_id: v3-sse-codec-03
-    from_node: V3HubRespContinuation04Committed
+    from_node: V3HubRespChatProcess03Governed
     to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: project_sse_stream
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     status: anchored
     owner_feature_id: v3.sse_protocol_codec_projection_boundary
@@ -7264,7 +6789,7 @@ chains:
   summary: Req04 atomically compiles one strict provider-facing tool_thinking_json_v2 contract requiring reason and goal_alignment_confidence, never injects or requests model_id, wraps eligible free-form custom tools, and emits request-local typed custom provenance; protocol projections preserve complete schemas and parameter containers; Resp03 separately accepts reason-only output for compatibility, removes active reason/confidence only after valid reason authorization, independently strips legacy model_id at identified native tool-call envelope/parameter boundaries, mechanically restores valid custom shape, preserves malformed custom wrappers, finalizes one typed turn result, and projects one separate normal reasoning item without changing provider-native reasoning.
   edges:
   - step_id: v3-tool-thinking-req04-relay-contract
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
@@ -8110,7 +7635,7 @@ chains:
       side_channel_reads: [v3.memory.raw_capture_config]
       side_channel_writes: []
   - step_id: v3-memory-raw-capture-relay-req04
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqInbound02Normalized
     to_node: V3HubReqChatProcess04Governed
     caller_symbol: V3HubRelayRequestHooks::run_from_normalized_with_events
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs

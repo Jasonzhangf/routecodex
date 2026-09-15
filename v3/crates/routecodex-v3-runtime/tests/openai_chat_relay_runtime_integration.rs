@@ -700,7 +700,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.malformed_mm]
 type = "anthropic"
@@ -879,7 +878,6 @@ data: [DONE]
             "ProviderRespCompat02ProviderCompat",
             "V3HubRespInbound02Normalized",
             "V3HubRespChatProcess03Governed",
-            "V3HubRespContinuation04Committed",
             "V3HubRespOutbound05ClientSemantic",
             "V3ServerRespOutbound06ClientFrame"
         ],
@@ -1987,7 +1985,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.controlled]
 type = "openai_chat"
@@ -2027,7 +2024,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.controlled]
 type = "openai_chat"
@@ -2068,7 +2064,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 attempt_store = {{}}
 [providers.{identity}]
 type = "openai_chat"
@@ -2112,7 +2107,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.__PRIMARY__]
 type = "openai_chat"
@@ -2513,7 +2507,6 @@ endpoints = ["openai_chat", "responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.__MM_PROVIDER__]
 type = "anthropic"
@@ -2616,7 +2609,6 @@ endpoints = ["openai_chat", "responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.mm]
 type = "anthropic"
@@ -2663,7 +2655,6 @@ endpoints = ["openai_chat", "responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.mm]
 type = "anthropic"
@@ -2877,7 +2868,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
@@ -2978,7 +2968,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
@@ -3126,7 +3115,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.wschat]
 type = "openai_chat"
@@ -3227,7 +3215,6 @@ endpoints = ["openai_chat"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.mm]
 type = "anthropic"

@@ -104,8 +104,7 @@ V3 Hub v1 每个 contract node 必须有且只有一个 split owner file。命�
 | --- | --- | --- |
 | `V3HubReqInbound01ClientRaw` | `hub_v1/req_inbound_01_client_raw.rs` | `build_v3_hub_req_inbound_01_client_raw` |
 | `V3HubReqInbound02Normalized` | `hub_v1/req_inbound_02_normalized.rs` | `build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01` |
-| `V3HubReqContinuation03Classified` | `hub_v1/req_continuation_03_classified.rs` | `build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02` |
-| `V3HubReqChatProcess04Governed` | `hub_v1/req_chat_process_04_governed.rs` | `build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03` |
+| `V3HubReqChatProcess04Governed` | `hub_v1/req_chat_process_04_governed.rs` | `build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02` |
 | `V3HubReqExecution05Planned` | `hub_v1/req_execution_05_planned.rs` | `build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04` |
 | `V3HubReqTarget06Resolved` | `hub_v1/req_target_06_resolved.rs` | `build_v3_hub_req_target_06_from_v3_hub_req_execution_05` |
 | `V3HubReqOutbound07ProviderSemantic` | `hub_v1/req_outbound_07_provider_semantic.rs` | `build_v3_hub_req_outbound_07_from_v3_hub_req_target_06` |
@@ -116,8 +115,7 @@ V3 Hub v1 每个 contract node 必须有且只有一个 split owner file。命�
 | `ProviderRespCompat02ProviderCompat` | `hub_v1/provider_resp_compat_02_provider_compat.rs` | `build_provider_resp_compat_02_from_v3_provider_resp_inbound_01` |
 | `V3HubRespInbound02Normalized` | `hub_v1/resp_inbound_02_normalized.rs` | `build_v3_hub_resp_inbound_02_from_provider_resp_compat_02` |
 | `V3HubRespChatProcess03Governed` | `hub_v1/resp_chat_process_03_governed.rs` | `build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02` |
-| `V3HubRespContinuation04Committed` | `hub_v1/resp_continuation_04_committed.rs` | `build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03` |
-| `V3HubRespOutbound05ClientSemantic` | `hub_v1/resp_outbound_05_client_semantic.rs` | `build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04` |
+| `V3HubRespOutbound05ClientSemantic` | `hub_v1/resp_outbound_05_client_semantic.rs` | `build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03` |
 | `V3ServerRespOutbound06ClientFrame` | `hub_v1/server_resp_outbound_06_client_frame.rs` | `build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05` |
 
 Shared helper owner boundary:
@@ -263,7 +261,6 @@ ProviderRespInbound01Raw
   -> ProviderRespCompat02ProviderCompat
   -> HubRespInbound03Parsed
   -> HubRespChatProcess04Governed
-  -> HubRespContinuation05Committed
   -> HubRespOutbound06ClientSemantic
   -> ServerRespOutbound07ClientFrame
 ```
@@ -276,8 +273,7 @@ ProviderRespInbound01Raw
 | `ProviderRespCompat02ProviderCompat` | `ProviderRespInbound01Raw` | standard provider protocol response | provider-specific 到标准 provider 协议兼容；family-specific 异常归一到错误链；特殊字段剥离/归一 | tool governance、harvest/apply_patch/servertool/stopless、side-channel 注入、fallback 成成功 |
 | `HubRespInbound03Parsed` | `ProviderRespCompat02ProviderCompat` | parsed Hub response | provider raw -> Hub canonical response | 吞解析错误 |
 | `HubRespChatProcess04Governed` | `HubRespInbound03Parsed` | governed Hub response | 响应侧工具治理、文本工具收割、servertool followup 判定 | 修请求侧历史污染 |
-| `HubRespContinuation05Committed` | `HubRespChatProcess04Governed` | continuation truth | 响应侧 Chat Process 之后保存 continuation 真相；不可变区起点 | 请求恢复、payload repair、resp_outbound 中保存 |
-| `HubRespOutbound06ClientSemantic` | `HubRespContinuation05Committed` | client protocol semantic | Hub 响应投影到客户端入口协议；`/v1/chat/completions` 必须是 Chat Completion shape，`/v1/responses` 必须是 Responses shape | provider 特例、吞上游错误、手工包装 Responses |
+| `HubRespOutbound06ClientSemantic` | `HubRespChatProcess04Governed` | client protocol semantic | Hub 响应投影到客户端入口协议；`/v1/chat/completions` 必须是 Chat Completion shape，`/v1/responses` 必须是 Responses shape | provider 特例、吞上游错误、手工包装 Responses |
 | `ServerRespOutbound07ClientFrame` | `HubRespOutbound06ClientSemantic` | Express JSON/SSE frame | client frame 写出、headers、SSE framing | metadata/runtime state 注入 client body |
 
 响应链清洗标准：provider raw 先解析为 Hub 规范，再治理，再按入口协议投影到 client；任何错误必须转入错误链，禁止在响应链中伪装成正常成功 payload。
@@ -303,7 +299,7 @@ ServerReqInbound01ClientRaw
 闭环约束：
 
 1. `requestId` / `pipelineId` / port / session scope 只能通过 `Meta*` carrier 串联，不得混入 provider wire payload。
-2. `previous_response_id` 只能作为 continuation lookup key；lookup 成功后恢复本地 tool_call context，lookup 失败必须 fail-fast。
+2. `previous_response_id` 在 V3 已退休；非空值必须在 routing/provider 前显式 fail-fast，不能作为 lookup key。
 3. provider direct/passthrough 仍必须遵守出口不可见：internal metadata 不得进入 upstream，也不得进入 client response。
 4. servertool followup 只能从 origin snapshot 重建，不得从当前污染 payload 猜测补齐。
 5. 响应链方向永远是 provider/model inbound -> chatprocess -> client outbound；servertool 只代客户端执行本地工具，不拥有独立响应出口。
@@ -427,8 +423,8 @@ MetaReq01EntryCaptured
 1. 只能在当前 request/response 闭环内存在。
 2. 必须绑定 `requestId`、`pipelineId`、port/serverId、session/conversation scope。
 3. 不得进入 provider body、SDK options、client response body、provider persistent state。
-4. `previous_response_id` 是恢复 key，不是 orphan tool_result 通行证。
-5. 闭环完成必须释放；持久化 continuation 只能保存恢复所需的 response id、provider key、scope、tool_call context，不保存 live metadata 对象。
+4. `previous_response_id` 是已退休 Responses continuation 字段；非空值不允许作为 orphan tool_result 或 restore 入口。
+5. 闭环完成必须释放；不得持久化 continuation 状态。
 
 ## 7. 模块落点
 

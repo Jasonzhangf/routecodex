@@ -4,10 +4,6 @@ use super::web_search_hop::{
     resolve_web_search_mode_and_backend,
 };
 use super::*;
-#[cfg(test)]
-use crate::local_continuation::{
-    V3LocalContinuationResp04SaveInput, V3LocalContinuationTerminalOutcome,
-};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
@@ -105,9 +101,8 @@ impl V3ResponsesRelayProviderHealthHandle {
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation,
-    execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_runtime_with_server_tool_state,
     project_v3_responses_relay_runtime_failure,
 };
 use responses_relay_failures::{
@@ -119,7 +114,6 @@ use responses_relay_failures::{
 };
 use responses_relay_json_hooks::*;
 
-const V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE: &str =
     "provider response event stream ended before response.completed";
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
@@ -149,7 +143,6 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         manifest,
         input,
         transport,
-        None,
         Some(V3ResponsesRelayServerToolExecution {
             control: server_tool_state,
             scope,
@@ -169,241 +162,48 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state<
-    T: ResponsesTransport,
->(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
+    server_tool_state: &V3ResponsesRelayServerToolState,
+    scope: V3ResponsesRelayServerToolScope,
+    provider_snapshots: V3ResponsesRelayProviderSnapshotCapture,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&local_server_tool.scope);
-    let provider_failure_event_sink = local_server_tool.provider_failure_event_sink.clone();
-    execute_v3_responses_relay_runtime_inner(
+    let transport = V3LiveSnapResponsesTransport::with_default_transport();
+    let snapshots = transport.snapshots();
+    let mut output = execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
-        transport,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state: local_server_tool.state,
-            scope: local_server_tool.scope,
-            now_epoch_ms: local_server_tool.now_epoch_ms,
-            commit_resp04_effects: true,
-        }),
+        &transport,
         Some(V3ResponsesRelayServerToolExecution {
-            control: local_server_tool.server_tool_state,
-            scope: server_tool_scope,
+            control: server_tool_state,
+            scope,
             commit_effects: true,
         }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
         provider_failure_event_sink,
-        local_server_tool.route_selection_event_sink.clone(),
-        None,
-        None,
-        BTreeSet::new(),
-        None,
-        None,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target<
-    T: ResponsesTransport,
->(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: BTreeSet<String>,
-    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&local_server_tool.scope);
-    let provider_failure_event_sink = local_server_tool.provider_failure_event_sink.clone();
-    execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state: local_server_tool.state,
-            scope: local_server_tool.scope,
-            now_epoch_ms: local_server_tool.now_epoch_ms,
-            commit_resp04_effects: true,
-        }),
-        Some(V3ResponsesRelayServerToolExecution {
-            control: local_server_tool.server_tool_state,
-            scope: server_tool_scope,
-            commit_effects: true,
-        }),
-        provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        true,
-        provider_failure_event_sink,
-        local_server_tool.route_selection_event_sink.clone(),
-        Some(initial_selected_target),
-        Some(initial_expanded),
-        request_local_excluded_candidates,
-        observability_accumulator,
-        request_execution_control,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    state: &V3ResponsesRelayLocalContinuationState,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
-        manifest,
-        input,
-        crate::default_responses_transport(),
-        provider_health,
-        V3ResponsesRelayLocalServerToolInput::new(
-            state,
-            server_tool_state,
-            scope,
-            now_epoch_ms,
-        ),
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_state_and_initial_target(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    state: &V3ResponsesRelayLocalContinuationState,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
-        manifest,
-        input,
-        crate::default_responses_transport(),
-        provider_health,
-        V3ResponsesRelayLocalServerToolInput::new(
-            state,
-            server_tool_state,
-            scope,
-            now_epoch_ms,
-        ),
+        route_selection_event_sink,
         initial_selected_target,
         initial_expanded,
-        BTreeSet::new(),
-        None,
-        None,
+        initial_request_local_excluded_candidates,
+        initial_observability_accumulator,
+        initial_request_execution_control,
     )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
-        manifest,
-        input,
-        crate::default_responses_transport(),
-        provider_health,
-        local_server_tool,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: BTreeSet<String>,
-    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
-        manifest,
-        input,
-        crate::default_responses_transport(),
-        provider_health,
-        local_server_tool,
-        initial_selected_target,
-        initial_expanded,
-        request_local_excluded_candidates,
-        observability_accumulator,
-        request_execution_control,
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_provider_snapshots(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
-    capture: V3ResponsesRelayProviderSnapshotCapture,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let transport = V3LiveSnapResponsesTransport::with_default_transport();
-    let snapshots = transport.snapshots();
-    let mut output =
-        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_and_server_tool_state(
-            manifest,
-            input,
-            &transport,
-            provider_health,
-            local_server_tool,
-        )
-        .await?;
-    output.provider_snapshots =
-        Some(snapshots.into_payload(capture.provider_request, capture.provider_response));
-    Ok(output)
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    local_server_tool: V3ResponsesRelayLocalServerToolInput<'_>,
-    capture: V3ResponsesRelayProviderSnapshotCapture,
-    initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
-    initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: BTreeSet<String>,
-    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let transport = V3LiveSnapResponsesTransport::with_default_transport();
-    let snapshots = transport.snapshots();
-    let mut output =
-        execute_v3_responses_relay_runtime_with_transport_health_local_continuation_server_tool_state_and_initial_target(
-            manifest,
-            input,
-            &transport,
-            provider_health,
-            local_server_tool,
-            initial_selected_target,
-            initial_expanded,
-            request_local_excluded_candidates,
-            observability_accumulator,
-            request_execution_control,
-        )
-        .await?;
-    output.provider_snapshots =
-        Some(snapshots.into_payload(capture.provider_request, capture.provider_response));
+    .await?;
+    output.provider_snapshots = Some(snapshots.into_payload(
+        provider_snapshots.provider_request,
+        provider_snapshots.provider_response,
+    ));
     Ok(output)
 }
 
@@ -434,7 +234,6 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         input,
         transport,
         None,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -463,7 +262,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         input,
         transport,
         None,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -476,47 +274,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
     )
     .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_local_continuation<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-    state: &V3ResponsesRelayLocalContinuationState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(manifest);
-    execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-            commit_resp04_effects: true,
-        }),
-        None,
-        provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        true,
-        None,
-        None,
-        None,
-        None,
-        BTreeSet::new(),
-        None,
-        None,
-    )
-    .await
-}
-
-struct V3ResponsesRelayLocalContinuationExecution<'state> {
-    state: &'state V3ResponsesRelayLocalContinuationState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-    commit_resp04_effects: bool,
 }
 
 pub(crate) struct V3ResponsesRelayServerToolExecution<'state> {
@@ -682,43 +439,6 @@ fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
         .collect()
 }
 
-fn commit_or_release_responses_local_continuation(
-    _receipt: &crate::nodes::V3AttemptSuccessReceipt,
-    local: Option<&V3ResponsesRelayLocalContinuationExecution<'_>>,
-    restored_context_ids: &[String],
-    canonical_request: &Value,
-    canonical_response: &Value,
-    action: V3HubContinuationCommit,
-    continuation_disabled: bool,
-) -> Result<(), V3ResponsesRelayRuntimeError> {
-    let Some(local) = local else {
-        return Ok(());
-    };
-    if !local.commit_resp04_effects {
-        return Ok(());
-    }
-    if continuation_disabled {
-        return Ok(());
-    }
-    let canonical_context = if action == V3HubContinuationCommit::LocalContext {
-        build_v3_relay_local_continuation_context_at_resp04(canonical_request, canonical_response)?
-    } else {
-        canonical_response.clone()
-    };
-    let mut store = local.state.lock_store()?;
-    commit_or_release_v3_relay_local_continuation_at_resp04(
-        &mut store,
-        local.scope.local_key(),
-        local.now_epoch_ms,
-        V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
-        restored_context_ids,
-        &canonical_context,
-        canonical_response.get("id").and_then(Value::as_str),
-        action,
-    )?;
-    Ok(())
-}
-
 fn build_v3_relay_observability_from_selected(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     transport_intent: V3HubTransportIntent,
@@ -872,23 +592,6 @@ pub(crate) fn infer_v3_runtime_incomplete_finish_reason(
         "content_filter" => "content_filter".to_string(),
         other => other.to_string(),
     })
-}
-
-fn infer_v3_runtime_finish_reason(
-    action: V3HubContinuationCommit,
-    response_status: Option<&str>,
-) -> Option<String> {
-    match action {
-        V3HubContinuationCommit::LocalContext => Some("tool_calls".to_string()),
-        V3HubContinuationCommit::None | V3HubContinuationCommit::RemoteBinding => {
-            match response_status.map(str::trim) {
-                Some(status) if status.eq_ignore_ascii_case("completed") => {
-                    Some("stop".to_string())
-                }
-                _ => None,
-            }
-        }
-    }
 }
 
 fn read_v3_runtime_string_path(value: &Value, path: &[&str]) -> Option<String> {

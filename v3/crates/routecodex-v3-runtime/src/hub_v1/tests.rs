@@ -246,11 +246,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         V3HubTransportIntent::Json,
     );
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-        req02,
-        V3HubContinuationOwnership::New,
-    );
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Direct,
@@ -303,7 +299,6 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         json!({"output":"x"}),
         V3HubEntryProtocol::Responses,
         V3HubProviderWireProtocol::Responses,
-        V3HubContinuationOwnership::New,
         V3HubExecutionMode::Direct,
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Json,
@@ -312,11 +307,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
     let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(resp_compat).unwrap();
     let resp03 = build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(resp02);
-    let resp04 = build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03(
-        resp03,
-        V3HubContinuationCommit::None,
-    );
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04);
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
 }
 
@@ -329,11 +320,7 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
         V3HubTransportIntent::Json,
     );
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-        req02,
-        V3HubContinuationOwnership::New,
-    );
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Direct,
@@ -406,11 +393,7 @@ fn provider_req_compat_loads_selected_target_profile() {
         V3HubTransportIntent::Json,
     );
     let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-    let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-        req02,
-        V3HubContinuationOwnership::New,
-    );
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,
@@ -460,20 +443,6 @@ fn provider_req_compat_loads_selected_target_profile() {
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
     let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
     assert_eq!(req09.compat_profile_id(), "chat:minimax");
-}
-
-#[test]
-fn four_branch_axes_are_independent_values() {
-    let facts = (
-        V3HubEntryProtocol::Responses,
-        V3HubContinuationOwnership::RouteCodexLocalOwned,
-        V3HubExecutionMode::Relay,
-        V3HubProviderWireProtocol::Gemini,
-    );
-    assert_eq!(facts.0, V3HubEntryProtocol::Responses);
-    assert_eq!(facts.1, V3HubContinuationOwnership::RouteCodexLocalOwned);
-    assert_eq!(facts.2, V3HubExecutionMode::Relay);
-    assert_eq!(facts.3, V3HubProviderWireProtocol::Gemini);
 }
 
 #[test]
@@ -670,262 +639,6 @@ fn openai_chat_request_encoding_maps_assistant_reasoning_blocks_to_reasoning_con
     assert_eq!(
         request["messages"][0]["reasoning_content"],
         "I should verify the result before returning."
-    );
-}
-
-#[test]
-fn local_continuation_context_preserves_request_history_tools_and_response_delta() {
-    let canonical_request = json!({
-        "input": [{"role": "user", "content": "original task"}],
-        "tools": [{"type": "function", "name": "exec_command"}],
-        "instructions": "base instructions"
-    });
-    let finalized_response = json!({
-        "status": "requires_action",
-        "output": [{
-            "type": "function_call",
-            "call_id": "call_exec_tool",
-            "name": "exec_command",
-            "arguments": "{\"cmd\":\"pwd\"}"
-        }]
-    });
-    let context = build_v3_relay_local_continuation_context_at_resp04(
-        &canonical_request,
-        &finalized_response,
-    )
-    .unwrap();
-    assert_eq!(
-        context["messages"],
-        json!([
-            {"role": "system", "content": "base instructions"},
-            {"role": "user", "content": "original task"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": "call_exec_tool",
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "arguments": "{\"cmd\":\"pwd\"}"
-                    }
-                }]
-            }
-        ])
-    );
-    assert_eq!(context["tools"], canonical_request["tools"]);
-    assert!(context.get("instructions").is_none());
-
-    let mut current = json!({
-        "messages": [{
-            "role": "tool",
-            "tool_call_id": "call_exec_tool",
-            "content": "",
-            "routecodex_chat_extension": {
-                "responses_tool_output_type": "function_call_output"
-            }
-        }]
-    });
-    merge_v3_relay_restored_local_context_at_req04(&mut current, &context).unwrap();
-    assert_eq!(
-        current["messages"],
-        json!([
-            {"role": "system", "content": "base instructions"},
-            {"role": "user", "content": "original task"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": "call_exec_tool",
-                    "type": "function",
-                    "function": {
-                        "name": "exec_command",
-                        "arguments": "{\"cmd\":\"pwd\"}"
-                    }
-                }]
-            },
-            {
-                "role": "tool",
-                "tool_call_id": "call_exec_tool",
-                "content": "",
-                "routecodex_chat_extension": {
-                    "responses_tool_output_type": "function_call_output"
-                }
-            }
-        ])
-    );
-    assert_eq!(current["tools"], canonical_request["tools"]);
-    assert!(current.get("instructions").is_none());
-}
-
-#[test]
-fn resp04_only_coalesces_the_latest_appended_response_suffix_and_keeps_history_immutable() {
-    let mut historical_input = vec![
-        json!({"type":"output_text","text":"historical visible text"}),
-        json!({
-            "type":"function_call",
-            "call_id":"call_historical",
-            "name":"historical_tool",
-            "arguments":"{}"
-        }),
-        json!({
-            "type":"function_call_output",
-            "call_id":"call_historical",
-            "output":"historical result"
-        }),
-    ];
-    for index in 3..294 {
-        historical_input.push(json!({
-            "type":"message",
-            "role":"user",
-            "content":[{"type":"input_text","text":format!("history-{index}")}]
-        }));
-    }
-    let canonical_request = json!({"input": historical_input});
-    let historical_chat =
-        build_v3_openai_chat_provider_payload_from_responses_payload(&canonical_request)
-            .expect("historical request must canonicalize without rewriting its order");
-    let historical_messages = historical_chat["messages"]
-        .as_array()
-        .expect("historical messages")
-        .clone();
-    assert_eq!(historical_messages.len(), 293);
-    assert_eq!(historical_messages[0]["content"], "historical visible text");
-    assert_eq!(
-        historical_messages[0]["tool_calls"][0]["id"],
-        "call_historical"
-    );
-    assert_eq!(historical_messages[1]["tool_call_id"], "call_historical");
-
-    let finalized_response = json!({
-        "status":"requires_action",
-        "output":[
-            {"type":"reasoning","summary":[{"type":"summary_text","text":"latest thought"}]},
-            {"type":"output_text","text":"latest visible text"},
-            {
-                "type":"function_call",
-                "call_id":"call_latest",
-                "name":"latest_tool",
-                "arguments":"{\"path\":\"/tmp\"}"
-            }
-        ]
-    });
-    let context = build_v3_relay_local_continuation_context_at_resp04(
-        &canonical_request,
-        &finalized_response,
-    )
-    .expect("Resp04 must append and normalize only the current response delta");
-    let messages = context["messages"]
-        .as_array()
-        .expect("continuation messages");
-
-    assert_eq!(
-        &messages[..293],
-        historical_messages.as_slice(),
-        "the complete historical prefix must remain byte-for-byte JSON equivalent"
-    );
-    assert!(messages.len() > 293);
-    let latest_suffix = &messages[293..];
-    assert!(latest_suffix.iter().any(|item| {
-        item.get("content") == Some(&json!("latest visible text"))
-            || item
-                .get("reasoning_content")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|text| text == "latest thought")
-    }));
-    assert!(latest_suffix.iter().any(|item| {
-        item.get("tool_calls")
-            .and_then(serde_json::Value::as_array)
-            .into_iter()
-            .flatten()
-            .any(|call| call.get("id") == Some(&json!("call_latest")))
-    }));
-}
-
-#[test]
-fn local_continuation_context_never_carries_runtime_control_state() {
-    let canonical_request = json!({
-        "input": [{"role": "user", "content": "original task"}],
-        "tools": [{"type": "function", "name": "exec_command"}],
-        "instructions": "base instructions"
-    });
-    let finalized_response = json!({
-        "status": "requires_action",
-        "output": [{
-            "type": "function_call",
-            "call_id": "call_exec_tool",
-            "name": "exec_command",
-            "arguments": "{\"cmd\":\"pwd\"}"
-        }]
-    });
-    let context = build_v3_relay_local_continuation_context_at_resp04(
-        &canonical_request,
-        &finalized_response,
-    )
-    .unwrap();
-    let serialized = serde_json::to_string(&context).unwrap();
-    for forbidden in [
-        "runtime_control",
-        "runtimeControl",
-        "natural_stop_count",
-        "max_natural_stops",
-    ] {
-        assert!(
-            !serialized.contains(forbidden),
-            "relay local continuation context leaked runtime control field {forbidden}: {serialized}"
-        );
-    }
-}
-
-#[test]
-fn req04_rejects_responses_shaped_continuation_instead_of_rebuilding_chat() {
-    let mut current = json!({
-        "messages": [{"role":"tool","tool_call_id":"call_old","content":"ok"}]
-    });
-    let restored = json!({
-        "input": [{"type":"function_call","call_id":"call_old","name":"lookup","arguments":"{}"}],
-        "output": []
-    });
-
-    let error = merge_v3_relay_restored_local_context_at_req04(&mut current, &restored)
-        .expect_err("Req04 must not rebuild Chat from a stored Responses payload");
-
-    assert!(error.to_string().contains("Chat canonical messages"));
-}
-
-#[test]
-fn req04_restore_preserves_saved_and_current_request_images() {
-    let mut current = json!({
-        "messages": [{
-            "role": "user",
-            "content": [{
-                "type": "image_url",
-                "image_url": {"url": "data:image/png;base64,CURRENT"}
-            }]
-        }]
-    });
-    let restored = json!({
-        "messages": [{
-            "role": "user",
-            "content": [{
-                "type": "image_url",
-                "image_url": {"url": "data:image/png;base64,SAVED"}
-            }]
-        }]
-    });
-
-    let current_payload_start =
-        merge_v3_relay_restored_local_context_at_req04(&mut current, &restored)
-            .expect("Req04 must merge restored Chat continuation");
-
-    assert_eq!(current_payload_start, 1);
-    assert_eq!(
-        current["messages"][0]["content"][0]["image_url"]["url"],
-        "data:image/png;base64,SAVED"
-    );
-    assert_eq!(
-        current["messages"][1]["content"][0]["image_url"]["url"],
-        "data:image/png;base64,CURRENT"
     );
 }
 

@@ -5,62 +5,23 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None, None)
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None)
         .await
         .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation(
+pub async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    state: &V3ResponsesRelayLocalContinuationState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-) -> crate::V3FoundationRuntimeOutput {
-    let server_tool_state = V3ResponsesRelayServerToolState::default();
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
-    execute_v3_responses_relay_dry_run_runtime_inner(
-        manifest,
-        input,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-            commit_resp04_effects: false,
-        }),
-        Some(V3ResponsesRelayServerToolExecution {
-            control: &server_tool_state,
-            scope: server_tool_scope,
-            commit_effects: false,
-        }),
-        None,
-        None,
-    )
-    .await
-    .into_foundation()
-}
-
-pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_and_server_tool_state(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    state: &V3ResponsesRelayLocalContinuationState,
     server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
+    scope: V3ResponsesRelayServerToolScope,
 ) -> crate::V3FoundationRuntimeOutput {
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-            commit_resp04_effects: false,
-        }),
         Some(V3ResponsesRelayServerToolExecution {
             control: server_tool_state,
-            scope: server_tool_scope,
+            scope,
             commit_effects: false,
         }),
         None,
@@ -70,29 +31,20 @@ pub async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_
     .into_foundation()
 }
 
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_continuation_server_tool_state_and_initial_target(
+pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state_and_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    state: &V3ResponsesRelayLocalContinuationState,
     server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
+    scope: V3ResponsesRelayServerToolScope,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> crate::V3FoundationRuntimeOutput {
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-            commit_resp04_effects: false,
-        }),
         Some(V3ResponsesRelayServerToolExecution {
             control: server_tool_state,
-            scope: server_tool_scope,
+            scope,
             commit_effects: false,
         }),
         Some(initial_selected_target),
@@ -102,27 +54,18 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_local_contin
     .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state(
+pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    state: &V3ResponsesRelayLocalContinuationState,
     server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayLocalContinuationScope,
-    now_epoch_ms: u64,
+    scope: V3ResponsesRelayServerToolScope,
 ) -> V3ResponsesRelayDryRunOutcome {
-    let server_tool_scope = V3ResponsesRelayServerToolScope::from(&scope);
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
-        Some(V3ResponsesRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-            commit_resp04_effects: false,
-        }),
         Some(V3ResponsesRelayServerToolExecution {
             control: server_tool_state,
-            scope: server_tool_scope,
+            scope,
             commit_effects: false,
         }),
         None,
@@ -134,7 +77,6 @@ pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_local
 pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
     server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
@@ -145,10 +87,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
             "object": "routecodex.provider_request_dry_run_terminal",
             "terminal_effect": "no_network_send",
             "provider_network_send": false,
-            "continuation": {
-                "owner": "none",
-                "continuable": false
-            },
             "message": "routecodex provider-request dry-run stopped before provider send"
         }),
         Arc::clone(&captured_provider_request),
@@ -159,7 +97,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
         &transport,
-        local,
         server_tool_state,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
@@ -213,10 +150,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         "object": "routecodex.provider_request_dry_run_terminal",
         "terminal_effect": "no_network_send",
         "provider_network_send": false,
-        "continuation": {
-            "owner": "none",
-            "continuable": false
-        },
         "message": "routecodex provider-request dry-run stopped before provider send"
     });
     V3ResponsesRelayDryRunOutcome::Foundation(crate::V3FoundationRuntimeOutput {

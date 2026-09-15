@@ -36,7 +36,7 @@ const files = {
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
   openaiChatTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   geminiTests: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
-  directSseTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
+  directSseTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRelayTests: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   directTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   errorTests: 'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
@@ -406,8 +406,6 @@ for (const [name, source, rel] of [
     failures.push(`${rel}: ${name} must not select a recovery lane by latest routing-group state`);
   }
 }
-requireText(text.direct, files.direct, 'let mut continuation_provider_action_lookup = previous_response_id.is_some();');
-requireText(text.direct, files.direct, 'wait_for_exact_selected_provider_action');
 requireText(text.directSse, files.directSse, 'classify_v3_provider_sse_json_data(');
 requireText(text.directSse, files.directSse, 'V3HubProviderWireProtocol::Responses,');
 if (/event_type|event\s*==\s*["']response\./u.test(text.directSse)) {
@@ -641,16 +639,10 @@ requireText(
   files.directHelpers,
   'if matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)',
 );
-for (const token of [
-  'V3ExactPinAvailabilityExhaustion',
-  'continuation_exact_pin_unavailable',
-]) {
-  requireText(text.directHelpers, files.directHelpers, token);
-}
 requireText(
   text.directExactPinTests,
   files.directExactPinTests,
-  'missing_exact_pin_is_provider_availability_error05_without_router_reentry',
+  'previous_response_id_is_rejected_without_router_or_provider_reentry',
 );
 for (const token of [
   'provider_failure_with_route_capacity_is_typed_nonterminal_error05',
@@ -865,7 +857,6 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
   ['v3-provider-action-gate-07', 'Gate', 'Retry'],
   ['v3-provider-action-gate-08', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-09', 'Retry', 'Gate'],
   ['v3-provider-action-gate-10', 'Witness', 'Gate'],
   ['v3-provider-action-gate-11', 'Witness', 'Gate'],
   ['v3-provider-action-gate-12', 'Witness', 'Gate'],

@@ -33,7 +33,7 @@ fn ensure_gemini_relay_test_state_dir() {
     });
 }
 
-#[path = "../../../tests/support/hub_v1_fixture.rs"]
+#[path = "../support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
@@ -623,7 +623,6 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
             "ProviderRespCompat02ProviderCompat",
             "V3HubRespInbound02Normalized",
             "V3HubRespChatProcess03Governed",
-            "V3HubRespContinuation04Committed",
             "V3HubRespOutbound05ClientSemantic",
             "V3ServerRespOutbound06ClientFrame"
         ],

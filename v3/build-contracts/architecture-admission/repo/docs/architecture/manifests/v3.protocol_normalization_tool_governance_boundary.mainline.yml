@@ -18,7 +18,6 @@ node_ids:
   - ProviderRespCompat02ProviderCompat
   - HubRespInbound03Parsed
   - HubRespChatProcess04Governed
-  - HubRespContinuation05Committed
   - HubRespOutbound06ClientSemantic
   - ServerRespOutbound07ClientFrame
 nodes:
@@ -47,8 +46,7 @@ edges:
   - { step_id: v3-protocol-boundary-resp-01, from_node: ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-02, from_node: ProviderRespCompat02ProviderCompat, to_node: HubRespInbound03Parsed, status: anchored, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-03, from_node: HubRespInbound03Parsed, to_node: HubRespChatProcess04Governed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-resp-04, from_node: HubRespChatProcess04Governed, to_node: HubRespContinuation05Committed, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
-  - { step_id: v3-protocol-boundary-resp-05, from_node: HubRespContinuation05Committed, to_node: HubRespOutbound06ClientSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
+  - { step_id: v3-protocol-boundary-resp-04, from_node: HubRespChatProcess04Governed, to_node: HubRespOutbound06ClientSemantic, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
   - { step_id: v3-protocol-boundary-resp-06, from_node: HubRespOutbound06ClientSemantic, to_node: ServerRespOutbound07ClientFrame, status: contract_locked, owner_feature_id: v3.protocol_normalization_tool_governance_boundary }
 normalization_contract:
   allowed:

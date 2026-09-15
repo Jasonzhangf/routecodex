@@ -55,7 +55,7 @@ async fn direct_reselect_can_handoff_to_relay_target_after_provider_failure() {
     assert!(!plan.protocol_candidate_keys.contains("chat:key:test"));
 
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(&plan),
+        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
@@ -133,7 +133,7 @@ async fn direct_continues_relay_handoff_attempts_and_timing_without_payload_leak
     )
     .expect("protocol plan");
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_initial_plan(&plan)
             .with_observability_accumulator(Some(accumulator)),
         &manifest,
@@ -166,7 +166,6 @@ routing_group = "default"
 allowed_modes = ["direct"]
 allowed_invocation_sources = ["client"]
 allowed_transports = ["json"]
-continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.primary]
 type = "responses"
 base_url = "http://primary.invalid/v1"

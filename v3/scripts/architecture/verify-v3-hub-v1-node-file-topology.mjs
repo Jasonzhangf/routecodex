@@ -25,8 +25,7 @@ const REQUIRED_GATES = [
 const NODE_OWNERS = [
   ['V3HubReqInbound01ClientRaw', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs', 'build_v3_hub_req_inbound_01_client_raw'],
   ['V3HubReqInbound02Normalized', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs', 'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01'],
-  ['V3HubReqContinuation03Classified', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs', 'build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02'],
-  ['V3HubReqChatProcess04Governed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03'],
+  ['V3HubReqChatProcess04Governed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02'],
   ['V3HubReqExecution05Planned', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs', 'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04'],
   ['V3HubReqTarget06Resolved', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs', 'build_v3_hub_req_target_06_from_v3_hub_req_execution_05'],
   ['V3HubReqOutbound07ProviderSemantic', 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs', 'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06'],
@@ -37,8 +36,7 @@ const NODE_OWNERS = [
   ['ProviderRespCompat02ProviderCompat', 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs', 'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01'],
   ['V3HubRespInbound02Normalized', 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs', 'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02'],
   ['V3HubRespChatProcess03Governed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs', 'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02'],
-  ['V3HubRespContinuation04Committed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs', 'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03'],
-  ['V3HubRespOutbound05ClientSemantic', 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs', 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04'],
+  ['V3HubRespOutbound05ClientSemantic', 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs', 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03'],
   ['V3ServerRespOutbound06ClientFrame', 'v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs', 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05'],
 ].map(([node, ownerFile, builderSymbol]) => ({ node, ownerFile, builderSymbol }));
 
@@ -53,20 +51,18 @@ const SHARED_HELPERS = [
 
 const EXPECTED_FIXED_EDGES = new Map([
   ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized', 'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01']],
-  ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqContinuation03Classified', 'build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02']],
-  ['v3-hub-req-03', ['V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03']],
-  ['v3-hub-req-04', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned', 'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04']],
-  ['v3-hub-req-05', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved', 'build_v3_hub_req_target_06_from_v3_hub_req_execution_05']],
-  ['v3-hub-req-06', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic', 'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06']],
-  ['v3-hub-req-07', ['V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07']],
-  ['v3-hub-req-08', ['ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload', 'build_v3_provider_req_outbound_08_from_provider_req_compat_06']],
-  ['v3-hub-req-09', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest', 'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08']],
+  ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqChatProcess04Governed', 'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02']],
+  ['v3-hub-req-03', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned', 'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04']],
+  ['v3-hub-req-04', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved', 'build_v3_hub_req_target_06_from_v3_hub_req_execution_05']],
+  ['v3-hub-req-05', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic', 'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06']],
+  ['v3-hub-req-06', ['V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat', 'build_provider_req_compat_06_from_v3_hub_req_outbound_07']],
+  ['v3-hub-req-07', ['ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload', 'build_v3_provider_req_outbound_08_from_provider_req_compat_06']],
+  ['v3-hub-req-08', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest', 'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08']],
   ['v3-hub-resp-01', ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01']],
   ['v3-hub-resp-02', ['ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized', 'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02']],
   ['v3-hub-resp-03', ['V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed', 'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02']],
-  ['v3-hub-resp-04', ['V3HubRespChatProcess03Governed', 'V3HubRespContinuation04Committed', 'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03']],
-  ['v3-hub-resp-05', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic', 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04']],
-  ['v3-hub-resp-06', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05']],
+  ['v3-hub-resp-04', ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03']],
+  ['v3-hub-resp-05', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05']],
 ]);
 
 function rel(file) {

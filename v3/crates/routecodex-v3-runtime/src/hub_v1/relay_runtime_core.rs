@@ -468,7 +468,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
 ///
 /// 生命周期（VR 重试 loop / provider action recovery / 错误策略循环）只在本函数；
 /// 骨架上的逻辑（共享辅助、codec 方法）不持有生命周期。
-pub async fn execute_v3_relay_runtime_core<'store, C, T>(
+pub async fn execute_v3_relay_runtime_core<C, T>(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
     failure_session_scope: V3ProviderFailureSessionScope,
@@ -479,7 +479,6 @@ pub async fn execute_v3_relay_runtime_core<'store, C, T>(
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
-    continuation_lookup: V3HubContinuationLookup<'store>,
     provider_header_overrides: Vec<V3ProviderRequestHeader>,
     allow_exhaustion_rescue_probe: bool,
     initial_request_execution_control: Option<V3RequestExecutionControl>,
@@ -512,13 +511,9 @@ where
     C::validate_client_payload(&req01.payload.0)?;
     let req02 = C::req_inbound_02(req01)?;
     trace.push("V3HubReqInbound02Normalized");
-    // continuation lookup 由入口构建（协议差异：responses/anthropic 从 local store
-    // 恢复上下文；openai/gemini 传无恢复的默认 lookup）。不可变区规则：
-    // restore 只允许在 req_chatprocess 入口（req03 hooks 链）。
     let request_outcome = compile_v3_hub_relay_request_hooks()
-        .run_from_normalized(req02, &continuation_lookup, &request_hook_profile)
+        .run_from_normalized(req02, &request_hook_profile)
         .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-    trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
@@ -532,7 +527,7 @@ where
         build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(req04, execution_mode);
     trace.push("V3HubReqExecution05Planned");
     let routing_payload = C::routing_payload(
-        &req05.previous.previous.previous.previous.payload.0,
+        &req05.previous.previous.previous.payload.0,
         &requested_model,
     )?;
     let routing_payload_ref: &Value = routing_payload.as_ref();
@@ -888,7 +883,7 @@ where
                     failure_session_scope.session_id(),
                     provider_value,
                     provider_wire_protocol,
-                    &req05.previous.previous.previous.previous.payload.0,
+                    &req05.previous.previous.previous.payload.0,
                     transport_intent,
                     &mut trace,
                     selected_target_compatibility_profile.as_deref(),

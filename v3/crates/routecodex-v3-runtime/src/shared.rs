@@ -66,69 +66,6 @@ pub(crate) fn v3_route_plan_error_source(
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum V3RemoteContinuationObservation {
-    Pending {
-        response_id: String,
-    },
-    Terminal,
-    Streaming {
-        state: V3SseRemoteContinuationObservationState,
-    },
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct V3SseRemoteContinuationObservationState {
-    inner: Arc<Mutex<V3SseRemoteContinuationObservationInner>>,
-}
-
-#[derive(Debug, Default)]
-struct V3SseRemoteContinuationObservationInner {
-    pending_response_id: Option<String>,
-}
-
-impl V3SseRemoteContinuationObservationState {
-    pub(crate) fn pending_response_id(&self) -> Result<Option<String>, String> {
-        self.inner
-            .lock()
-            .map(|inner| inner.pending_response_id.clone())
-            .map_err(|error| error.to_string())
-    }
-
-    pub(crate) fn record_pending_response_id(
-        &self,
-        response_id: &str,
-    ) -> Result<(), V3Error01SourceRaised> {
-        self.inner
-            .lock()
-            .map_err(|error| {
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ProviderResp14Raw",
-                    "sse_remote_continuation_observer_poisoned",
-                    error.to_string(),
-                )
-            })?
-            .pending_response_id = Some(response_id.to_string());
-        Ok(())
-    }
-
-    pub(crate) fn clear_pending_response_id(&self) -> Result<(), V3Error01SourceRaised> {
-        self.inner
-            .lock()
-            .map_err(|error| {
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ProviderResp14Raw",
-                    "sse_remote_continuation_observer_poisoned",
-                    error.to_string(),
-                )
-            })?
-            .pending_response_id = None;
-        Ok(())
-    }
-}
-
 pub(crate) enum V3ProviderAttemptBody {
     Json(serde_json::Value),
     Bytes(Vec<u8>),
@@ -158,35 +95,17 @@ pub(crate) struct V3ProviderAttemptPayload {
 #[derive(Debug)]
 pub struct V3ProviderResponseProjection {
     pub(crate) attempt_payload: V3ProviderAttemptPayload,
-    pub(crate) remote_continuation: V3RemoteContinuationObservation,
     pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
     pub(crate) compat_plan: V3DirectResponseCompatPlan,
 }
 
 /// 客户端响应 id 剥离开关：开启后把返回给客户端的 Responses body 中
-/// `id` 替换为空串，客户端无法用 previous_response_id 做增量续接，
-/// 强制下一次请求全量发送（配合本地 continuation 关闭，避免上游对
-/// previous_response_id 兼容性差异导致的 400）。
+/// `id` 替换为空串。客户端必须全量发送后续上下文。
 pub(crate) fn v3_strip_client_response_id_enabled_for_server(
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
     server_id: &str,
 ) -> bool {
     v3_feature_enabled_for_server(manifest, server_id, "strip_client_response_id", false)
-}
-
-/// 本地 continuation 保存/恢复开关：开启后 Resp04 不再保存 continuation
-/// locator，Req03 也不再按 previous_response_id 恢复（客户端拿不到 id，
-/// 必然全量请求；即便收到 previous_response_id 也按未命中处理）。
-pub(crate) fn v3_responses_continuation_disabled_for_server(
-    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
-    server_id: &str,
-) -> bool {
-    v3_feature_enabled_for_server(
-        manifest,
-        server_id,
-        "responses_continuation_disabled",
-        false,
-    )
 }
 
 /// 客户端响应 id 剥离唯一入口：把 Responses body 中顶层 `id`（或嵌套
@@ -327,12 +246,10 @@ async fn project_provider_raw_to_client_payload_inner(
             )
         })?;
     let provider_body = raw.into_body();
-    let (body, remote_continuation, stream_observation) = if content_type
-        .starts_with("text/event-stream")
-    {
+    let (body, stream_observation) = if content_type.starts_with("text/event-stream") {
         match provider_body {
             V3ProviderResponseBody::Sse(stream) => {
-                let (stream, remote_continuation, stream_observation) = process_direct_sse_stream(
+                let (stream, stream_observation) = process_direct_sse_stream(
                     &provider_id,
                     &request_id,
                     observation_session_id,
@@ -345,15 +262,10 @@ async fn project_provider_raw_to_client_payload_inner(
                     toolreason_client_projection,
                 )
                 .await?;
-                (
-                    V3ProviderAttemptBody::Sse(stream),
-                    remote_continuation,
-                    stream_observation,
-                )
+                (V3ProviderAttemptBody::Sse(stream), stream_observation)
             }
             V3ProviderResponseBody::Json(body_bytes) => {
-                let observation = observe_sse_remote_continuation_bytes(&provider_id, &body_bytes)?;
-                (V3ProviderAttemptBody::Bytes(body_bytes), observation, None)
+                (V3ProviderAttemptBody::Bytes(body_bytes), None)
             }
         }
     } else if content_type.starts_with("application/json") {
@@ -398,8 +310,7 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
-        let observation = observe_json_remote_continuation(&provider_id, status, &parsed)?;
-        (V3ProviderAttemptBody::Json(parsed), observation, None)
+        (V3ProviderAttemptBody::Json(parsed), None)
     } else {
         return Err(build_v3_error_01_source_raised_external(
             V3ErrorSourceKind::ProviderFailure,
@@ -424,7 +335,6 @@ async fn project_provider_raw_to_client_payload_inner(
             headers: BTreeMap::from([("content-type".to_string(), content_type)]),
             body,
         },
-        remote_continuation,
         stream_observation,
         compat_plan: compat_plan.clone(),
     })
@@ -447,7 +357,6 @@ async fn process_direct_sse_stream(
 ) -> Result<
     (
         V3ProviderAttemptSseStream,
-        V3RemoteContinuationObservation,
         Option<V3RuntimeStreamObservation>,
     ),
     V3Error01SourceRaised,
@@ -463,14 +372,12 @@ async fn process_direct_sse_stream(
         provider_protocol,
     )
     .await?;
-    let observation_state = V3SseRemoteContinuationObservationState::default();
     let usage_observation = V3RuntimeStreamObservation::default();
     let client_stream = observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         provider_id.to_string(),
         request_id.to_string(),
         session_id,
         stream,
-        observation_state.clone(),
         usage_observation.clone(),
         v3_direct_sse_frame_interval_timeout(sse_first_frame_timeout_ms),
         compatibility_profile,
@@ -483,13 +390,7 @@ async fn process_direct_sse_stream(
         false,
         false,
     );
-    Ok((
-        client_stream,
-        V3RemoteContinuationObservation::Streaming {
-            state: observation_state,
-        },
-        Some(usage_observation),
-    ))
+    Ok((client_stream, Some(usage_observation)))
 }
 
 async fn guard_initial_direct_sse_provider_failure(
@@ -714,7 +615,6 @@ fn build_v3_provider_sse_json_error(
 fn observed_sse_client_stream(
     provider_id: String,
     stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
@@ -722,7 +622,6 @@ fn observed_sse_client_stream(
     observed_sse_client_stream_with_protocol(
         provider_id,
         stream,
-        observation_state,
         usage_observation,
         v3_direct_sse_default_timeout(),
         compatibility_profile,
@@ -737,7 +636,6 @@ fn observed_sse_client_stream(
 fn observed_sse_client_stream_with_timeout(
     provider_id: String,
     stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
@@ -746,7 +644,6 @@ fn observed_sse_client_stream_with_timeout(
     observed_sse_client_stream_with_timeout_and_projection(
         provider_id,
         stream,
-        observation_state,
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
@@ -759,7 +656,6 @@ fn observed_sse_client_stream_with_timeout(
 fn observed_sse_client_stream_with_timeout_and_projection(
     provider_id: String,
     stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
@@ -772,7 +668,6 @@ fn observed_sse_client_stream_with_timeout_and_projection(
         String::new(),
         None,
         stream,
-        observation_state,
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
@@ -787,7 +682,6 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     request_id: String,
     session_id: Option<&str>,
     stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
@@ -798,7 +692,6 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     observed_sse_client_stream_with_protocol(
         provider_id,
         stream,
-        observation_state,
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
@@ -813,7 +706,6 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
 fn observed_sse_client_stream_with_protocol(
     provider_id: String,
     stream: V3ProviderSseStream,
-    observation_state: V3SseRemoteContinuationObservationState,
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
@@ -826,8 +718,6 @@ fn observed_sse_client_stream_with_protocol(
     struct ObservedState {
         stream: V3ProviderSseStream,
         decoder: SseIncrementalDecoder,
-        response_id_candidate: Option<String>,
-        observation_state: V3SseRemoteContinuationObservationState,
         usage_observation: V3RuntimeStreamObservation,
         provider_id: String,
         done: bool,
@@ -849,8 +739,6 @@ fn observed_sse_client_stream_with_protocol(
         ObservedState {
             stream,
             decoder: SseIncrementalDecoder::new(SseTransportLimits::default()),
-            response_id_candidate: None,
-            observation_state,
             usage_observation,
             provider_id,
             done: false,
@@ -943,12 +831,10 @@ fn observed_sse_client_stream_with_protocol(
                     } else {
                         chunk.clone()
                     };
-                    let result = observe_sse_remote_continuation_chunk(
+                    let result = observe_sse_frame_chunk(
                         &state.provider_id,
                         &chunk,
                         &mut state.decoder,
-                        &mut state.response_id_candidate,
-                        &state.observation_state,
                         &state.usage_observation,
                         provider_protocol,
                     );
@@ -1237,12 +1123,10 @@ fn apply_deepseek_console_go_sse_chunk(frame: &[u8]) -> Vec<u8> {
     output.into_bytes()
 }
 
-fn observe_sse_remote_continuation_chunk(
+fn observe_sse_frame_chunk(
     provider_id: &str,
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
-    response_id_candidate: &mut Option<String>,
-    observation_state: &V3SseRemoteContinuationObservationState,
     usage_observation: &V3RuntimeStreamObservation,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
 ) -> Result<(bool, bool), V3Error01SourceRaised> {
@@ -1253,11 +1137,6 @@ fn observe_sse_remote_continuation_chunk(
     let mut semantic_observed = false;
     for frame in frames {
         let fields = frame.frame().fields();
-        if let Some(response_id) =
-            observe_sse_frame_remote_continuation(provider_id, fields, response_id_candidate)?
-        {
-            observation_state.record_pending_response_id(&response_id)?;
-        }
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
         let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
             .map_err(|message| {
@@ -1295,25 +1174,6 @@ fn observe_sse_remote_continuation_chunk(
                     | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
             )
         );
-        if matches!(
-            classification,
-            Some(
-                V3ProviderResponsesJsonFrameOutcome::Terminal
-                    | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
-            )
-        ) {
-            let requires_action = serde_json::from_str::<serde_json::Value>(&data)
-                .ok()
-                .and_then(|value| value.get("response").cloned())
-                .as_ref()
-                .and_then(serde_json::Value::as_object)
-                .and_then(|response| response.get("status"))
-                .and_then(serde_json::Value::as_str)
-                == Some("requires_action");
-            if !requires_action {
-                observation_state.clear_pending_response_id()?;
-            }
-        }
     }
     Ok((terminal_observed, semantic_observed))
 }
@@ -1361,192 +1221,6 @@ fn observe_sse_usage_frame(
                 error,
             )
         })
-}
-
-fn observe_sse_remote_continuation_bytes(
-    provider_id: &str,
-    body: &[u8],
-) -> Result<V3RemoteContinuationObservation, V3Error01SourceRaised> {
-    let mut response_id_candidate = None;
-    let mut pending_response_id = None;
-    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let frames = decoder
-        .push(build_v3_sse_transport_in_01_raw_chunk(body))
-        .map_err(|error| sse_transport_source(provider_id, error))?;
-    for frame in frames {
-        if let Some(response_id) = observe_sse_frame_remote_continuation(
-            provider_id,
-            frame.frame().fields(),
-            &mut response_id_candidate,
-        )? {
-            pending_response_id = Some(response_id);
-        }
-    }
-    decoder
-        .finish()
-        .map_err(|error| sse_transport_source(provider_id, error))?;
-    Ok(
-        pending_response_id.map_or(V3RemoteContinuationObservation::Terminal, |response_id| {
-            V3RemoteContinuationObservation::Pending { response_id }
-        }),
-    )
-}
-
-fn observe_sse_frame_remote_continuation(
-    provider_id: &str,
-    fields: &[SseField],
-    response_id_candidate: &mut Option<String>,
-) -> Result<Option<String>, V3Error01SourceRaised> {
-    let data = collect_v3_provider_sse_json_data(fields);
-    let Some(event) = parse_v3_provider_sse_json_data(&data).map_err(|error| {
-        build_v3_error_01_source_raised_external(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_sse_event_invalid",
-            error.clone(),
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: None,
-                code: Some("PROVIDER_RESPONSE_SSE_EVENT_INVALID".to_string()),
-                provider_id: Some(provider_id.to_string()),
-                upstream_request_id: None,
-                message: Some(error),
-            },
-        )
-    })?
-    else {
-        return Ok(None);
-    };
-    let semantic = event.get("response").unwrap_or(&event);
-    let semantic_response_id = semantic
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(ToOwned::to_owned);
-    if let Some(response_id) = semantic_response_id.as_ref() {
-        *response_id_candidate = Some(response_id.clone());
-    }
-    if event.get("type").and_then(serde_json::Value::as_str) == Some("response.created") {
-        return Ok(semantic_response_id);
-    }
-    if matches!(
-        event
-            .pointer("/item/type")
-            .and_then(serde_json::Value::as_str),
-        Some("function_call" | "custom_tool_call")
-    ) {
-        let response_id = event
-            .get("response_id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(ToOwned::to_owned)
-            .or_else(|| semantic_response_id.clone())
-            .or_else(|| response_id_candidate.clone())
-            .ok_or_else(|| {
-                build_v3_error_01_source_raised_external(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "pending_remote_response_id_missing",
-                    "pending SSE function call has no response id",
-                    V3ExternalErrorLink {
-                        kind: V3ExternalErrorKind::Provider,
-                        status: None,
-                        code: Some("PENDING_REMOTE_RESPONSE_ID_MISSING".to_string()),
-                        provider_id: Some(provider_id.to_string()),
-                        upstream_request_id: None,
-                        message: Some("pending SSE function call has no response id".to_string()),
-                    },
-                )
-            })?;
-        return Ok(Some(response_id));
-    }
-    let has_pending_tool_output = semantic
-        .get("output")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                matches!(
-                    item.get("type").and_then(serde_json::Value::as_str),
-                    Some("function_call" | "custom_tool_call")
-                )
-            })
-        });
-    let requires_action = matches!(
-        semantic.get("status").and_then(serde_json::Value::as_str),
-        Some("requires_action")
-    );
-    if has_pending_tool_output || requires_action {
-        let response_id = semantic_response_id
-            .or_else(|| response_id_candidate.clone())
-            .ok_or_else(|| {
-                build_v3_error_01_source_raised_external(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "pending_remote_response_id_missing",
-                    "pending SSE continuation has no response id",
-                    V3ExternalErrorLink {
-                        kind: V3ExternalErrorKind::Provider,
-                        status: None,
-                        code: Some("PENDING_REMOTE_RESPONSE_ID_MISSING".to_string()),
-                        provider_id: Some(provider_id.to_string()),
-                        upstream_request_id: None,
-                        message: Some("pending SSE continuation has no response id".to_string()),
-                    },
-                )
-            })?;
-        return Ok(Some(response_id));
-    }
-    Ok(None)
-}
-
-fn observe_json_remote_continuation(
-    provider_id: &str,
-    status: u16,
-    body: &serde_json::Value,
-) -> Result<V3RemoteContinuationObservation, V3Error01SourceRaised> {
-    let pending = matches!(
-        body.get("status").and_then(serde_json::Value::as_str),
-        Some("requires_action" | "in_progress")
-    ) || body
-        .get("output")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                matches!(
-                    item.get("type").and_then(serde_json::Value::as_str),
-                    Some("function_call" | "custom_tool_call")
-                )
-            })
-        });
-    if !pending {
-        return Ok(V3RemoteContinuationObservation::Terminal);
-    }
-    let response_id = body
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| {
-            build_v3_error_01_source_raised_external(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "pending_remote_response_id_missing",
-                "pending Responses continuation has no response id",
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some("PENDING_REMOTE_RESPONSE_ID_MISSING".to_string()),
-                    provider_id: Some(provider_id.to_string()),
-                    upstream_request_id: None,
-                    message: Some("pending Responses continuation has no response id".to_string()),
-                },
-            )
-        })?;
-    Ok(V3RemoteContinuationObservation::Pending {
-        response_id: response_id.to_string(),
-    })
 }
 
 fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
@@ -1858,7 +1532,6 @@ mod tests {
         let mut stream = observed_sse_client_stream_with_timeout(
             "provider".to_string(),
             Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)])),
-            V3SseRemoteContinuationObservationState::default(),
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(100),
             None,
@@ -1886,7 +1559,6 @@ mod tests {
                 stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)])
                     .chain(futures_util::stream::pending()),
             ),
-            V3SseRemoteContinuationObservationState::default(),
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
             None,
@@ -1920,7 +1592,6 @@ mod tests {
         let mut stream = observed_sse_client_stream_with_timeout(
             "provider".to_string(),
             Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)]).chain(keepalives)),
-            V3SseRemoteContinuationObservationState::default(),
             V3RuntimeStreamObservation::default(),
             std::time::Duration::from_millis(20),
             None,
@@ -1999,12 +1670,10 @@ mod tests {
                 .to_vec(),
         )]);
 
-        let observation_state = V3SseRemoteContinuationObservationState::default();
         let usage_observation = V3RuntimeStreamObservation::default();
         let mut client_stream = observed_sse_client_stream(
             provider_id.clone(),
             Box::pin(stream),
-            observation_state,
             usage_observation.clone(),
             None,
             crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,

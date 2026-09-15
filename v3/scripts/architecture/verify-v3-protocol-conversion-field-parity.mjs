@@ -43,7 +43,7 @@ const paths = {
   anthropicRequestFieldProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs',
   anthropicProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs',
   geminiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
-  responsesTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  responsesTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs',
   responsesAnthropicProviderTests: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
   anthropicTests: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
   anthropicCodecTests: 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs',
@@ -755,7 +755,7 @@ for (const phrase of [
 for (const phrase of [
   '--lib responses_openai_chat_field_parity',
   '--test responses_direct_tool_passthrough responses_openai_chat_field_parity',
-  '--test responses_relay_local_continuation_integration responses_openai_chat_field_parity',
+  '--test responses_relay_field_parity_integration responses_openai_chat_field_parity',
 ]) requireText(String(JSON.parse(text.v3PackageJson).scripts?.['test:v3-protocol-conversion-field-parity'] ?? ''), 'v3/package.json::test:v3-protocol-conversion-field-parity', phrase);
 
 const unpairedMalformedOpenAiChatTest = functionSlice(

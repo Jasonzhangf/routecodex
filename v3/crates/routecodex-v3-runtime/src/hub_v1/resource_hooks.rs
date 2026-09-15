@@ -132,14 +132,6 @@ static V3_HUB_V1_STATIC_NODE_HOOKS: [V3HubStaticHookSpec; V3_HUB_V1_NODE_HOOK_CO
         V3HubHookPhase::Exit,
     ),
     static_hook(
-        V3HubFixedNode::V3HubReqContinuation03Classified,
-        V3HubHookPhase::Entry,
-    ),
-    static_hook(
-        V3HubFixedNode::V3HubReqContinuation03Classified,
-        V3HubHookPhase::Exit,
-    ),
-    static_hook(
         V3HubFixedNode::V3HubReqChatProcess04Governed,
         V3HubHookPhase::Entry,
     ),
@@ -225,14 +217,6 @@ static V3_HUB_V1_STATIC_NODE_HOOKS: [V3HubStaticHookSpec; V3_HUB_V1_NODE_HOOK_CO
     ),
     static_hook(
         V3HubFixedNode::V3HubRespChatProcess03Governed,
-        V3HubHookPhase::Exit,
-    ),
-    static_hook(
-        V3HubFixedNode::V3HubRespContinuation04Committed,
-        V3HubHookPhase::Entry,
-    ),
-    static_hook(
-        V3HubFixedNode::V3HubRespContinuation04Committed,
         V3HubHookPhase::Exit,
     ),
     static_hook(

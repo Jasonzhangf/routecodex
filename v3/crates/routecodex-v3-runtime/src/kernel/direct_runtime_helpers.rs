@@ -476,27 +476,5 @@ fn v3_direct_client_transport_label(payload: &V3Resp15ClientPayload) -> &str {
     }
 }
 
-fn release_terminal_failure_locator(
-    continuation_state: Option<&V3ResponsesDirectContinuationState>,
-    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
-    previous_response_id: Option<&str>,
-    selected_pin: &V3RemoteContinuationPin,
-) -> Result<(), String> {
-    let (Some(state), Some(scope), Some(response_id)) =
-        (continuation_state, continuation_scope, previous_response_id)
-    else {
-        return Ok(());
-    };
-    let mut store = state.store.lock().map_err(|error| error.to_string())?;
-    if !store.release_bound(response_id, &scope.key, selected_pin) {
-        return Err(format!(
-            "terminal failure locator {response_id} was not present at Resp04 release"
-        ));
-    }
-    Ok(())
-}
-
-/// Exact-pin availability remains fail-fast in the adjacent stream helper:
-/// `V3ExactPinAvailabilityExhaustion` emits `continuation_exact_pin_unavailable`.
 include!("direct_runtime_helpers_stream.rs");
 include!("direct_response_thinking_compat.rs");

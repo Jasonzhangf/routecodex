@@ -257,7 +257,7 @@ runExpectFail('missing-caller-symbol', (copy) => {
 {
   const script = `
     import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div></html>';
+    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespOutbound05ClientSemantic v3.hub_pipeline.v1.response</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('Error resources'))) process.exit(0);
     console.error('missing review marker Error resources');
@@ -281,7 +281,7 @@ ${result.stderr}`;
 {
   const script = `
     import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
+    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespOutbound05ClientSemantic v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('provider request compat'))) process.exit(0);
     console.error('request skeleton must show provider request compat before wire payload');
@@ -306,7 +306,7 @@ ${result.stderr}`;
 {
   const script = `
     import { auditV3ReviewSurfaceHtmlText } from ${JSON.stringify(path.join(root, 'v3/scripts/architecture/v3-mainline-caller-flow-lib.mjs'))};
-    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3Router05RequestClassified V3Target10ConcreteProviderSelected V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespContinuation04Committed v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
+    const html = '<html><h2>Request skeleton / 请求主骨架</h2><div>V3HubReqInbound01ClientRaw V3HubReqChatProcess04Governed ProviderReqCompat06ProviderCompat V3Router05RequestClassified V3Target10ConcreteProviderSelected V3ProviderReqOutbound08WirePayload v3.hub_pipeline.v1.request</div><h2>Response skeleton / 响应主骨架</h2><div>V3ProviderRespInbound01Raw ProviderRespCompat02ProviderCompat V3HubRespChatProcess03Governed V3HubRespOutbound05ClientSemantic v3.hub_pipeline.v1.response</div><h2>Error resources / 错误处理资源</h2><div>V3Error01SourceRaised V3Error06ClientProjected v3.provider.health_state v3.error.client_projection</div></html>';
     const audit = auditV3ReviewSurfaceHtmlText(html, 'fixture.html');
     if (!audit.failures.some((failure) => failure.includes('typed-test-only'))) process.exit(0);
     console.error('missing review marker typed-test-only');

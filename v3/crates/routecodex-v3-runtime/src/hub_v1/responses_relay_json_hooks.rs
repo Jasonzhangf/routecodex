@@ -25,14 +25,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
 pub(crate) fn run_json_response_hooks(
     input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
-) -> Result<
-    (
-        V3HubContinuationCommit,
-        Value,
-        Option<V3WebSearchCenterState>,
-    ),
-    V3ResponsesRelayRuntimeError,
-> {
+) -> Result<(Value, Option<V3WebSearchCenterState>), V3ResponsesRelayRuntimeError> {
     let normalized_provider_value = match input.provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             normalize_v3_responses_json_document(input.provider_value, "Responses")?
@@ -47,7 +40,6 @@ pub(crate) fn run_json_response_hooks(
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             input.provider_protocol,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             input.provider_response_transport_intent,
@@ -89,11 +81,8 @@ pub(crate) fn run_json_response_hooks(
     };
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    let action = resp04.action();
-    let response_web_search_state = resp04.web_search_transition().cloned();
-    trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
+    let (resp03, response_web_search_state) = resp03.into_parts();
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");
     crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
@@ -102,7 +91,7 @@ pub(crate) fn run_json_response_hooks(
         input.request_id,
     );
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((action, finalized_payload, response_web_search_state))
+    Ok((finalized_payload, response_web_search_state))
 }
 
 fn normalize_v3_responses_json_document(

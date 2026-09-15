@@ -4,7 +4,6 @@
   "expected_node_trace": [
     "V3HubReqInbound01ClientRaw",
     "V3HubReqInbound02Normalized",
-    "V3HubReqContinuation03Classified",
     "V3HubReqChatProcess04Governed",
     "V3HubReqExecution05Planned",
     "V3HubReqTarget06Resolved",

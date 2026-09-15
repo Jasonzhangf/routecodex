@@ -88,7 +88,6 @@ routing_group = "default"
 allowed_modes = ["direct"]
 allowed_invocation_sources = ["client"]
 allowed_transports = ["sse"]
-continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.openai]
 type = "responses"
 base_url = "http://127.0.0.1:9/v1"

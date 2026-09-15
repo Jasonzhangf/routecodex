@@ -150,7 +150,10 @@ const boundaries = [
   },
   {
     owner: 'RespOutbound05 client semantic projection',
-    text: functionBody(hub, 'pub fn build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04'),
+    text: functionBody(
+      hub,
+      'pub fn build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
+    ),
     required: ['previous: input'],
   },
   {
@@ -183,7 +186,6 @@ const forbiddenLogic = [
   /\brepair\b/i,
   /\bsanitize\b/i,
   /\bcanonical_context\b/,
-  /\bV3HubContinuationCommit\b/,
   /\bArc::clone\b/,
   /\bserde_json::(?:to_value|from_value|to_string|from_str|to_vec|from_slice)\b/,
   /\bpayload\.clone\s*\(/,
@@ -303,11 +305,10 @@ for (const boundary of protocolMappingBoundaries) {
 
 const requestRun = functionBody(relayRequest, 'fn run_from_normalized_with_events');
 requireAll(requestRun, 'ReqChatProcess tool governance owner', [
-  'restore_local_context_at_req04',
   'current_payload_start',
   'govern_tool_outputs_at_req04',
   'run_servertool_profile',
-  'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
+  'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02',
 ]);
 forbidAll(relayRequest, 'ReqChatProcess protocol conversion boundary', [
   /\bReq04ProtocolSemanticConverted\b/,
@@ -320,9 +321,6 @@ forbidAll(requestRun, 'ReqChatProcess protocol conversion boundary', [
   /\bpayload\.clone\s*\(\)/,
   /\*\s*payload\s*=/,
 ]);
-if (requestRun.indexOf('restore_local_context_at_req04') > requestRun.indexOf('run_servertool_profile')) {
-  fail('ReqChatProcess tool governance owner: servertool hook must run after context restore');
-}
 
 const responseGovern = functionBody(hub, 'fn govern_v3_hub_relay_response');
 requireAll(responseGovern, 'RespChatProcess tool governance owner', [
@@ -331,9 +329,6 @@ requireAll(responseGovern, 'RespChatProcess tool governance owner', [
   'V3HubResponseTerminality::NonTerminal',
 ]);
 forbidAll(responseGovern, 'RespChatProcess tool governance owner', [
-  /\bV3HubContinuationCommit\b/,
-  /\bbuild_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03\b/,
-  /\bbuild_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04\b/,
 ]);
 const responseToolCollector = functionBody(hub, 'fn collect_v3_resp03_responses_tool_calls');
 requireAll(responseToolCollector, 'RespChatProcess tool governance collector', [
@@ -353,9 +348,6 @@ requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec bou
 // encode_v3_anthropic_request_as_responses_semantic + build_v3_hub_req_inbound_02 检查。
 
 const responseRuntime = functionBody(responsesRelayJsonHooks, 'fn run_json_response_hooks');
-if (responseRuntime.indexOf('hooks.govern') > responseRuntime.indexOf('hooks.commit')) {
-  fail('Responses Relay response runtime: Chat Process govern must run before continuation commit');
-}
 
 requireAll(protocolBoundaryManifest, 'V3 protocol normalization boundary manifest', [
   'ProviderReqCompat06ProviderCompat',

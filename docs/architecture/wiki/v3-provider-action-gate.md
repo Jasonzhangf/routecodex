@@ -37,7 +37,6 @@ flowchart TD
   TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
   Gate -->|v3-provider-action-gate-07| Retry
   Witness -->|v3-provider-action-gate-08| Gate
-  Retry -->|v3-provider-action-gate-09| Gate
   Witness -->|v3-provider-action-gate-10| Gate
   Witness -->|v3-provider-action-gate-11| Gate
   Witness -->|v3-provider-action-gate-12| Gate
@@ -127,9 +126,7 @@ Review locks:
   provider error waits at least one second, sustained terminal projections remain
   five seconds apart, and a concurrent routing-group success cannot release a stale
   provider error directly to the client.
-- A fresh non-continuation request bypasses an unrelated recovery lane. A pinned Direct
-  continuation checks the existing exact-provider lane; when no failure state exists,
-  that check returns immediately.
+- A fresh request bypasses an unrelated recovery lane.
 - Client disconnect is health-neutral and does not enter this gate.
 - SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
   business-byte commit it uses the existing retry/reselect path; after commit it only
@@ -152,7 +149,7 @@ Review locks:
   `handle_v3_responses_relay_provider_failure`, then
   `run_v3_relay_provider_failure_policy`; they cannot return directly as provider-bound
   request errors or bypass typed Error05 admission.
-- The machine gate requires the exact fifty-one-edge set, resolves every declared symbol in
+- The machine gate requires the exact frozen edge set, resolves every declared symbol in
   its declared source, verifies each caller body invokes its callee, and compares every
   map edge endpoint/status/symbol/source field with this lifecycle manifest.
 - Traffic Governor saturation is a separate typed admission-backpressure lane. Its

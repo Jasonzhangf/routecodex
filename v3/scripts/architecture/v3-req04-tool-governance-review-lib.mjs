@@ -8,7 +8,6 @@ const SOURCE_DOCS = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
@@ -19,8 +18,7 @@ const REQUIRED_HTML_MARKERS = [
   'Server SSE Frame Accepted',
   'Request Normalization',
   'Tool Output Pair Normalization',
-  'Continuation Owner Check',
-  'Continuation Restore at Req04',
+  'Req04 Chat Process Governance',
   'Merge Current Tool Surfaces',
   'Preserve Client Tool Feedback',
   'Request Tool Governance Flow',
@@ -30,7 +28,7 @@ const REQUIRED_HTML_MARKERS = [
   'Error feedback is preserved',
   'Provider codec owns malformed provider fields',
   'Resp03 owns response governance',
-  'Resp04 continuation save is Chat Process endpoint',
+  'Responses continuation is retired',
   'RespOutbound Client Semantic',
   'JSON to SSE Client Frame',
   'Diagnostics stay side-channel only',
@@ -71,22 +69,14 @@ const REQUEST_NODES = [
   },
   {
     id: 'RQ04',
-    kind: 'boundary',
-    title: 'Continuation Owner Check',
-    raw: 'V3HubReqContinuation03Classified',
-    does: '校验 entry protocol、continuationOwner、session/conversation、port/group scope。',
-    logic: '只分类 owner/scope；不恢复 payload。owner 不匹配、entry 不匹配、scope 不匹配必须 fail-fast。',
+    kind: 'govern',
+    title: 'Req04 Chat Process Governance',
+    raw: 'V3HubReqChatProcess04Governed',
+    does: '治理当前请求的工具输出、history、servertool request hook 和请求语义。',
+    logic: 'Req04 是唯一请求侧 Chat Process owner；非空 previous_response_id 已在路由前拒绝，不恢复 continuation context。',
   },
   {
     id: 'RQ05',
-    kind: 'restore',
-    title: 'Continuation Restore at Req04',
-    raw: 'V3LocalContinuationStore::restore_at_req04',
-    does: '在 request Chat Process 入口恢复上一轮 Resp04 保存的 canonical local context。',
-    logic: '恢复的是 Resp04 已保存的 canonical context，不是重新读取一遍历史；恢复后只合并当前请求增量工具输出和工具 surface。',
-  },
-  {
-    id: 'RQ06',
     kind: 'load',
     title: 'Merge Current Tool Surfaces',
     raw: 'top-level tools + input[].additional_tools.tools',
@@ -94,7 +84,7 @@ const REQUEST_NODES = [
     logic: '保留原 surface；additional_tools 是 Codex capability declaration surface，不能为了内部工具注入而 flatten/drop。',
   },
   {
-    id: 'RQ07',
+    id: 'RQ06',
     kind: 'preserve',
     title: 'Preserve Client Tool Feedback',
     raw: 'function_call_output / custom output truth',
@@ -102,7 +92,7 @@ const REQUEST_NODES = [
     logic: '只根据显式协议字段配对 call_id/type；错误反馈是模型下一轮纠错输入，不能按错误文本删除。',
   },
   {
-    id: 'RQ08',
+    id: 'RQ07',
     kind: 'inject',
     title: 'Inject Current Internal Tools',
     raw: 'tool-thinking / servertool request hook profile',
@@ -110,11 +100,11 @@ const REQUEST_NODES = [
     logic: '最多一次；append/augment 当前 turn，不覆盖客户端工具，不清空 system/developer/user context。',
   },
   {
-    id: 'RQ09',
+    id: 'RQ08',
     kind: 'emit',
     title: 'Emit Req04 Governed Request',
     raw: 'V3HubReqExecution05Planned',
-    does: '把 restored context + 当前请求工具 surface + 当前工具输出结果交给 ReqExecution05。',
+    does: '把当前请求工具 surface 和工具输出结果交给 ReqExecution05。',
     logic: 'Req04 到此结束；provider wire 字段错误只能在 ReqOutbound/provider codec 修，不能在 Req04 删除 transcript truth。',
   },
 ];
@@ -206,31 +196,23 @@ const RESPONSE_NODES = [
     title: 'Emit Resp03 Governed Semantic',
     raw: 'V3HubRespChatProcess03Governed::output',
     does: '合流输出 Resp03 已治理的 response semantic。',
-    logic: '到 Resp03 出口时响应治理完成；后续节点只能 save / project，不再解释工具语义。',
+    logic: '到 Resp03 出口时响应治理完成；后续节点只能 project / frame，不再解释工具语义。',
   },
   {
     id: 'RS11',
-    kind: 'save',
-    title: 'Resp04 Continuation Save',
-    raw: 'V3HubRespContinuation04Committed',
-    does: '保存 Resp03 已治理结果形成下一轮 Req04 可恢复的 canonical local context；这是 Chat Process 终点。',
-    logic: 'Resp04 只 commit/release continuation；禁止重新解释响应、补工具、修 history 或注入 guidance。保存完成后才允许进入 RespOutbound。',
-  },
-  {
-    id: 'RS12',
     kind: 'emit',
     title: 'RespOutbound Client Semantic',
     raw: 'V3HubRespOutbound05ClientSemantic',
-    does: 'Chat Process 结束后，把已治理/已保存的 Hub response semantic 投影为入口协议可见的 client semantic。',
-    logic: '只做 client protocol projection；不保存 continuation，不恢复请求，不吞上游错误。',
+    does: 'Resp03 结束后，把已治理的 Hub response semantic 投影为入口协议可见的 client semantic。',
+    logic: '只做 client protocol projection；不恢复请求，不吞上游错误。',
   },
   {
-    id: 'RS13',
+    id: 'RS12',
     kind: 'frame',
     title: 'JSON to SSE Client Frame',
     raw: 'V3ServerRespOutbound06ClientFrame / json2sse',
     does: '对客户端 SSE 入口，把 outbound client semantic 转成 SSE frame 并发送。',
-    logic: '这是传输 framing：JSON/Semantic → SSE frame；不得再治理工具、保存 continuation 或修响应语义。',
+    logic: '这是传输 framing：JSON/Semantic → SSE frame；不得再治理工具或修响应语义。',
   },
 ];
 
@@ -238,7 +220,7 @@ const NOTE_CARDS = [
   {
     title: 'Client SSE request lifecycle split from response governance',
     badge: 'split',
-    text: '请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、continuation owner check、Req04 restore、当前请求 merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册 servertool hook、将 stop 保持为普通终止响应。两边不能混成一张图。',
+    text: '请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、Req04 current-turn merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册 servertool hook、将 stop 保持为普通终止响应。两边不能混成一张图。',
   },
   {
     title: 'Error feedback is preserved',
@@ -256,9 +238,9 @@ const NOTE_CARDS = [
     text: '响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、servertool hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。',
   },
   {
-    title: 'Resp04 continuation save is Chat Process endpoint',
+    title: 'Responses continuation is retired',
     badge: 'response',
-    text: 'Resp04 是 Chat Process 终点：只保存 Resp03 已治理的 continuation truth。之后才进入 RespOutbound，再由 json2sse 做客户端 SSE framing。',
+    text: '非空 previous_response_id 在 routing/provider 前显式拒绝；请求侧没有 restore，响应侧没有 save/store。Resp03 治理完成后直接进入 RespOutbound，再由 json2sse 做客户端 SSE framing。',
   },
   {
     title: 'Provider codec owns malformed provider fields',
@@ -275,10 +257,10 @@ const NOTE_CARDS = [
 const RESOURCE_ROWS = [
   ['Client SSE request', 'Server entry / ReqInbound', 'Request lifecycle starts here; preserve client stream intent.'],
   ['Client tool output result', 'Tool Output Pair Normalization / Req04', 'Pair by explicit protocol call_id/type; preserve error feedback.'],
-  ['Local continuation context', 'Resp04 save / Req04 restore', 'Save after Resp03, restore before Req04 current-turn merge; immutable between those points.'],
+  ['previous_response_id', 'ReqInbound fail-fast boundary', 'Reject before routing or provider transport; no local context, remote locator, or pinned-target resolution.'],
   ['Client tool declarations', 'Request data plane / Req04 reader', 'Preserve by default; do not delete because a provider cannot consume the exact shape.'],
   ['additional_tools', 'Codex capability declaration surface / Req04 reader', 'Preserve original Responses input surface; do not flatten or drop it for convenience.'],
-  ['Provider response tool calls', 'Resp03 response governance truth', 'Classify and harvest before Resp04 commit; do not leave response governance to RespOutbound.'],
+  ['Provider response tool calls', 'Resp03 response governance truth', 'Classify and harvest before RespOutbound; do not leave response governance outside Resp03.'],
   ['Servertool runtime control', 'Metadata side-channel / ServerToolCenter', 'Read/update at the registered servertool hook; never enter provider/client normal payload.'],
   ['Provider malformed fields', 'ReqOutbound / provider codec owner', 'Fix provider-bound field generation before send; do not delete transcript truth in Req04.'],
 ];
@@ -286,30 +268,28 @@ const RESOURCE_ROWS = [
 const CHECKLIST_ROWS = [
   ['C1', 'Request diagram starts at Client SSE Request Start.', 'Locks client-origin lifecycle.'],
   ['C2', 'Request diagram includes server accept and request normalization.', 'Locks no Req04-only shortcut.'],
-  ['C3', 'Request diagram includes tool output pair normalization before continuation restore/governance.', 'Locks client tool result handling.'],
-  ['C4', 'Continuation owner check is separate from continuation restore.', 'Locks owner/scope fail-fast before restore.'],
-  ['C5', 'Restored canonical context is not read as raw history again.', 'Locks save/restore lifecycle semantics.'],
-  ['C6', 'Req04 merges current request deltas after restore.', 'Locks current-turn merge point.'],
-  ['C7', 'No request-side internal artifact-removal path is declared in this small skeleton.', 'Locks removal of unproven artifact-removal path.'],
-  ['C8', 'Error feedback is preserved.', 'Locks parse-error / unknown-tool feedback preservation.'],
-  ['C9', 'additional_tools reach provider-visible tools.', 'Locks Codex capability declaration surface.'],
-  ['C10', 'Resp03 owns response-side tool/servertool governance.', 'Locks no handler/RespOutbound duplicate response governance.'],
-  ['C11', 'Resp04 saves/commits continuation truth as the Chat Process endpoint; RespOutbound and JSON→SSE happen after it.', 'Locks Chat Process endpoint before outbound/json2sse.'],
-  ['C12', 'Provider-specific malformed fields are fixed in ReqOutbound/provider codec.', 'Locks provider codec owner.'],
-  ['C13', 'Metadata/debug remains side-channel only.', 'Locks normal payload purity.'],
+  ['C3', 'Request diagram includes tool output pair normalization before Req04 governance.', 'Locks client tool result handling.'],
+  ['C4', 'Responses continuation is retired before routing and provider transport.', 'Locks fail-fast continuation boundary.'],
+  ['C5', 'Req04 governs only the current request payload and tool surfaces.', 'Locks current-turn merge point.'],
+  ['C6', 'No request-side internal artifact-removal path is declared in this small skeleton.', 'Locks removal of unproven artifact-removal path.'],
+  ['C7', 'Error feedback is preserved.', 'Locks parse-error / unknown-tool feedback preservation.'],
+  ['C8', 'additional_tools reach provider-visible tools.', 'Locks Codex capability declaration surface.'],
+  ['C9', 'Resp03 owns response-side tool/servertool governance.', 'Locks no handler/RespOutbound duplicate response governance.'],
+  ['C10', 'RespOutbound and JSON→SSE happen after Resp03 governance.', 'Locks Chat Process endpoint before outbound/json2sse.'],
+  ['C11', 'Provider-specific malformed fields are fixed in ReqOutbound/provider codec.', 'Locks provider codec owner.'],
+  ['C12', 'Metadata/debug remains side-channel only.', 'Locks normal payload purity.'],
 ];
 
 const RED_FIXTURE_ROWS = [
   ['Client SSE request lifecycle begins before Req04', 'Request audit cannot omit server accept and ReqInbound normalization.'],
   ['Tool output pair normalization preserves parse-error function_call_output', 'Client tool result feedback remains model correction input.'],
-  ['Continuation owner mismatch rejects before restore', 'Owner/scope check is not hidden inside restore.'],
-  ['Restore canonical context then merge current deltas', 'Req04 does not read restored context as raw history again.'],
+  ['Continuation revival is rejected', 'Non-empty previous_response_id cannot re-enter routing or provider transport.'],
   ['Preserve malformed ordinary function_call', 'Ordinary malformed call stays transcript truth; provider codec emits legal provider shape.'],
   ['Preserve unknown-tool feedback', 'Client rejection stays feedback instead of being silently deleted.'],
   ['Reject one-sided deletion of a paired call/output', 'Call/output adjacency cannot be broken.'],
   ['Preserve additional_tools', 'Codex capability declarations remain visible.'],
   ['Classify response tool/servertool actions only in Resp03', 'Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.'],
-  ['Reject Resp04 semantic repair', 'Resp04 cannot reinterpret tools or fix history after Resp03.'],
+  ['Reject post-Resp03 semantic repair', 'RespOutbound cannot reinterpret tools or fix history after Resp03.'],
   ['Keep provider malformed-field repair in codec/builder', 'Req04 cannot become provider-specific workaround layer.'],
   ['Reject metadata/control leaks into provider/client payload', 'Side-channel remains isolated.'],
 ];
@@ -334,7 +314,7 @@ function renderRequestMermaid() {
   const lines = [
     '%%{init: {"flowchart": {"htmlLabels": true, "curve": "basis", "rankSpacing": 112, "nodeSpacing": 70}, "themeVariables": {"fontSize": "21px"}} }%%',
     'flowchart TD',
-    '  title_note["<b>Request Tool Governance Flow</b><br/><small>starts at client SSE request; normalizes tool outputs; restores continuation at Req04</small>"]',
+    '  title_note["<b>Request Tool Governance Flow</b><br/><small>starts at client SSE request; normalizes tool outputs; governs current request at Req04</small>"]',
   ];
   for (const node of REQUEST_NODES) lines.push(`  ${node.id}["${flowLabel(node)}"]`);
   lines.push('  title_note --> RQ00');
@@ -342,11 +322,10 @@ function renderRequestMermaid() {
   lines.push('  RQ01 -->|bind endpoint/request/port facts| RQ02');
   lines.push('  RQ02 -->|non-destructive protocol normalization| RQ03');
   lines.push('  RQ03 -->|normalize tool output pairing and order| RQ04');
-  lines.push('  RQ04 -->|owner/scope keys valid| RQ05');
-  lines.push('  RQ05 -->|restore canonical context before merge| RQ06');
-  lines.push('  RQ06 -->|merge current tool declarations| RQ07');
-  lines.push('  RQ07 -->|preserve current client feedback truth| RQ08');
-  lines.push('  RQ08 -->|exactly-one current internal tool policy| RQ09');
+  lines.push('  RQ04 -->|merge current tool declarations| RQ05');
+  lines.push('  RQ05 -->|preserve current client feedback truth| RQ06');
+  lines.push('  RQ06 -->|exactly-one current internal tool policy| RQ07');
+  lines.push('  RQ07 -->|ReqExecution handoff| RQ08');
   lines.push(...renderClassDefs('request'));
   return lines.join('\n');
 }
@@ -355,7 +334,7 @@ function renderResponseMermaid() {
   const lines = [
     '%%{init: {"flowchart": {"htmlLabels": true, "curve": "basis", "rankSpacing": 112, "nodeSpacing": 70}, "themeVariables": {"fontSize": "21px"}} }%%',
     'flowchart TD',
-    '  title_note["<b>Response Tool Governance Flow</b><br/><small>Provider raw → compat → normalization → Resp03 governance → Resp04 save endpoint → outbound → json2sse</small>"]',
+    '  title_note["<b>Response Tool Governance Flow</b><br/><small>Provider raw → compat → normalization → Resp03 governance → outbound → json2sse</small>"]',
   ];
   for (const node of RESPONSE_NODES) lines.push(`  ${node.id}["${flowLabel(node)}"]`);
   lines.push('  title_note --> RS00');
@@ -373,8 +352,7 @@ function renderResponseMermaid() {
   lines.push('  RS08 -->|ordinary terminal response| RS10');
   lines.push('  RS09 -->|side-channel state updated only| RS10');
   lines.push('  RS10 -->|Chat Process governed semantic complete| RS11');
-  lines.push('  RS11 -->|Chat Process endpoint: continuation saved| RS12');
-  lines.push('  RS12 -->|client SSE entry framing| RS13');
+  lines.push('  RS11 -->|client SSE entry framing| RS12');
   lines.push(...renderClassDefs('response'));
   return lines.join('\n');
 }
@@ -456,8 +434,8 @@ ${NOTE_CARDS.map((card) => `    <article class="note-card">
 
 function renderInvariantList() {
   const invariants = [
-    'Request lifecycle starts at Client SSE Request Start, then server accept, request normalization, tool output pair normalization, continuation owner check, Req04 restore, current-turn merge/governance, and ReqExecution handoff.',
-    'Restored context is already canonical; after restore, Req04 merges only current request deltas and current tool surfaces.',
+    'Request lifecycle starts at Client SSE Request Start, then server accept, request normalization, tool output pair normalization, Req04 current-turn governance, and ReqExecution handoff.',
+    'Responses continuation is retired: non-empty previous_response_id fails before routing or provider transport, and Req04 never restores a saved local context.',
     'This small skeleton does not declare a request-side internal artifact removal path because no confirmed requirement exists.',
     'Error feedback is preserved: parse-error, unknown-tool, unsupported, schema reject, and execution failure outputs remain model correction input.',
     'Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then sends tool_call through the registered servertool hook while stop remains an ordinary terminal response.',
@@ -617,13 +595,13 @@ export function renderV3Req04ToolGovernanceReviewHtml() {
       <span class="eyebrow">small skeleton review · client SSE request / response governance split</span>
       <h1>V3 Req04 / Resp03 Tool Governance Review</h1>
       <p>
-        请求生命周期从 Client SSE Request Start 开始：server accept → request normalization → tool output pair normalization → continuation owner check → Req04 restore → current-turn merge/governance。响应侧单独是 Resp03 response governance + Resp04 continuation save。
+        请求生命周期从 Client SSE Request Start 开始：server accept → request normalization → tool output pair normalization → Req04 current-turn governance。响应侧单独是 Resp03 response governance → RespOutbound projection → json2sse framing。
         每个节点都写清楚“干什么”和“逻辑”，HTML 由架构渲染器生成。
       </p>
       <div class="meta-row">
         <span class="meta-pill">Canonical Markdown source: <code>${escapeHtml(V3_REQ04_TOOL_GOVERNANCE_REVIEW_PATH)}</code></span>
-        <span class="meta-pill">Request edge: <code>Client SSE → Server raw → ReqInbound02 → Tool output pair normalization → Req03 owner check → Req04 restore/govern → ReqExecution05</code></span>
-        <span class="meta-pill">Response edge: <code>Provider raw → ProviderRespCompat02 → RespInbound02 → Resp03 text harvest/tool repair → finish_reason tool_call hook|stop terminal → Resp04 continuation save endpoint → RespOutbound05 → json2sse</code></span>
+        <span class="meta-pill">Request edge: <code>Client SSE → Server raw → ReqInbound02 → Tool output pair normalization → Req04 govern → ReqExecution05</code></span>
+        <span class="meta-pill">Response edge: <code>Provider raw → ProviderRespCompat02 → RespInbound02 → Resp03 text harvest/tool repair → finish_reason tool_call hook|stop terminal → RespOutbound05 → json2sse</code></span>
       </div>
     </header>
 
@@ -663,7 +641,7 @@ export function renderV3Req04ToolGovernanceReviewHtml() {
       <h2>Forbidden action focus</h2>
       <div class="callout">
         <strong>Do not repair tool continuity by deleting request truth or by moving governance to the wrong side.</strong>
-        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Restored context is canonical and is not read again as raw history. Response-side tool/servertool governance belongs to Resp03, then Resp04 saves continuation truth as the Chat Process endpoint; outbound and json2sse happen after that.
+        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Responses continuation is retired before routing/provider transport. Response-side tool/servertool governance belongs to Resp03; outbound and json2sse happen after that.
         Provider malformed fields are fixed at ReqOutbound/provider codec; debug/control facts stay side-channel only.
       </div>
     </section>

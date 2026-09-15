@@ -441,9 +441,9 @@ const reqChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/re
 if (/responses_like_item_to_chat_message_at_req04|restored_context_messages_at_req04|\.get\("input"\)|\.get\("output"\)/.test(reqChatProcessSource)) {
   fail('Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload');
 }
-const respContinuationSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs');
-if (/continuation_response_id/.test(respContinuationSource)) {
-  fail('Resp04 continuation control identity cannot be embedded in Chat canonical payload');
+const respChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs');
+if (/continuation_response_id/.test(respChatProcessSource)) {
+  fail('Resp03 continuation control identity cannot be embedded in Chat canonical payload');
 }
 if (!/responses_process_requires_relay/.test(runtimeNodesSource)
     || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)

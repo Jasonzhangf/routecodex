@@ -1,29 +1,14 @@
 use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_01_client_raw,
-    build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
+    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03,
     build_v3_provider_resp_inbound_01_raw,
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
-    compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks,
-    V3HubContinuationCommit, V3HubContinuationLookup, V3HubContinuationOwnership,
-    V3HubContinuationScope, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
-    V3HubProviderWireProtocol, V3HubRelayRequestError, V3HubRelayResponseError,
-    V3HubRelayResponseHookProfile, V3HubRelayToolKind, V3HubServertoolRequestProfile,
-    V3HubServertoolResponseAction, V3HubTransportIntent,
+    compile_v3_hub_relay_request_hooks, compile_v3_hub_relay_response_hooks, V3HubEntryProtocol,
+    V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayRequestError,
+    V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubRelayToolKind,
+    V3HubServertoolRequestProfile, V3HubServertoolResponseAction, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
-
-fn scope() -> V3HubContinuationScope {
-    scope_for(V3HubEntryProtocol::Responses)
-}
-
-fn scope_for(entry_protocol: V3HubEntryProtocol) -> V3HubContinuationScope {
-    V3HubContinuationScope::new(
-        entry_protocol,
-        "server-tool-parity",
-        "relay-tool-parity",
-        "session-tool-parity",
-    )
-}
 
 fn raw_request(payload: Value) -> routecodex_v3_runtime::V3HubReqInbound01ClientRaw {
     raw_request_for(
@@ -75,7 +60,6 @@ fn relay_response_for(
         payload,
         entry_protocol,
         provider_protocol_for_entry(entry_protocol),
-        V3HubContinuationOwnership::New,
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         transport,
@@ -106,21 +90,6 @@ fn restored_multitool_context() -> Value {
             {"type":"function_call","call_id":"call_apply_patch","name":"apply_patch","arguments":"{}"},
             {"type":"function_call","call_id":"call_mcp","name":"mcp.read_file","arguments":"{}"},
             {"type":"function_call","call_id":"call_native","name":"native.exec_command","arguments":"{}"}
-        ]
-    })
-}
-
-fn restored_multitool_chat_context() -> Value {
-    json!({
-        "messages": [
-            {"role":"assistant","tool_calls":[
-                {"id":"call_function","type":"function","function":{"name":"lookup","arguments":"{}"}},
-                {"id":"call_custom","type":"function","function":{"name":"custom.render","arguments":"{}"},"routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}},
-                {"id":"call_servertool","type":"function","function":{"name":"servertool.exec","arguments":"{}"}},
-                {"id":"call_apply_patch","type":"function","function":{"name":"apply_patch","arguments":"{}"}},
-                {"id":"call_mcp","type":"function","function":{"name":"mcp.read_file","arguments":"{}"}},
-                {"id":"call_native","type":"function","function":{"name":"native.exec_command","arguments":"{}"}}
-            ]}
         ]
     })
 }
@@ -203,37 +172,8 @@ fn current_tool_round_payload() -> Value {
     })
 }
 
-fn restored_tool_output_payload_for_entry(entry: V3HubEntryProtocol) -> Value {
-    match entry {
-        V3HubEntryProtocol::Responses => json!({
-            "input":[{
-                "type":"function_call_output",
-                "call_id":"call_function",
-                "output":"restored ok"
-            }]
-        }),
-        V3HubEntryProtocol::Anthropic => json!({
-            "messages":[{
-                "role":"user",
-                "content":[{
-                    "type":"tool_result",
-                    "tool_use_id":"call_function",
-                    "content":"restored ok"
-                }]
-            }]
-        }),
-        V3HubEntryProtocol::OpenAiChat | V3HubEntryProtocol::Gemini => json!({
-            "messages":[{
-                "role":"tool",
-                "tool_call_id":"call_function",
-                "content":"restored ok"
-            }]
-        }),
-    }
-}
-
 #[test]
-fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path() {
+fn protocol_transport_matrix_uses_one_chat_process_governance_path() {
     let request_hooks = compile_v3_hub_relay_request_hooks();
     let response_hooks = compile_v3_hub_relay_response_hooks();
     let entries = [
@@ -246,61 +186,13 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
 
     for entry in entries {
         for transport in transports {
-            let matrix_scope = scope_for(entry);
             let new_outcome = request_hooks
                 .run(
                     raw_request_for(current_tool_round_payload(), entry, transport),
-                    &V3HubContinuationLookup::new(None, matrix_scope.clone()),
                     &V3HubServertoolRequestProfile::disabled(),
                 )
                 .expect("new/current-history tool output must be governed at Req04");
-            assert_eq!(new_outcome.continuation(), V3HubContinuationOwnership::New);
             assert_eq!(new_outcome.tool_output_count(), 1);
-
-            let local_lookup =
-                V3HubContinuationLookup::new(Some("ctx_tool_parity"), matrix_scope.clone())
-                    .with_local_context(
-                        "ctx_tool_parity",
-                        matrix_scope.clone(),
-                        restored_multitool_chat_context(),
-                    );
-            let local_outcome = request_hooks
-                .run(
-                    raw_request_for(
-                        restored_tool_output_payload_for_entry(entry),
-                        entry,
-                        transport,
-                    ),
-                    &local_lookup,
-                    &V3HubServertoolRequestProfile::enabled(["servertool.request"]),
-                )
-                .expect("restored continuation tool output must be governed at Req04");
-            assert_eq!(
-                local_outcome.continuation(),
-                V3HubContinuationOwnership::RouteCodexLocalOwned
-            );
-            assert!(local_outcome.restored_local_context());
-            assert_eq!(local_outcome.tool_output_count(), 1);
-
-            let remote_lookup =
-                V3HubContinuationLookup::new(Some("remote_tool_parity"), matrix_scope.clone())
-                    .with_remote_binding("remote_tool_parity", matrix_scope);
-            let remote_outcome = request_hooks
-                .run(
-                    raw_request_for(
-                        json!({"input":[{"role":"user","content":"continue"}]}),
-                        entry,
-                        transport,
-                    ),
-                    &remote_lookup,
-                    &V3HubServertoolRequestProfile::disabled(),
-                )
-                .expect("remote continuation classification must not local-restore relay history");
-            assert_eq!(
-                remote_outcome.continuation(),
-                V3HubContinuationOwnership::RemoteProviderOwned
-            );
-            assert!(!remote_outcome.restored_local_context());
 
             let resp02 = response_hooks
                 .normalize(relay_response_for(
@@ -324,37 +216,7 @@ fn protocol_transport_continuation_matrix_uses_one_chat_process_governance_path(
 }
 
 #[test]
-fn request_governance_matches_function_custom_servertool_and_internal_tool_outputs_to_restored_context(
-) {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("ctx_tool_parity"), scope()).with_local_context(
-        "ctx_tool_parity",
-        scope(),
-        restored_multitool_chat_context(),
-    );
-    let outcome = hooks
-        .run(
-            raw_request(json!({
-                "input": [
-                    {"type":"function_call_output","call_id":"call_function","output":"function ok"},
-                    {"type":"custom_tool_call_output","call_id":"call_custom","output":"custom ok"},
-                    {"type":"function_call_output","call_id":"call_servertool","output":"servertool ok"},
-                    {"type":"function_call_output","call_id":"call_apply_patch","output":"patch ok"},
-                    {"type":"function_call_output","call_id":"call_mcp","output":"mcp ok"},
-                    {"type":"function_call_output","call_id":"call_native","output":"native ok"}
-                ]
-            })),
-            &lookup,
-            &V3HubServertoolRequestProfile::enabled(["servertool.request"]),
-        )
-        .expect("Req04 tool governance accepts only outputs backed by restored tool calls");
-
-    assert!(outcome.restored_local_context());
-    assert_eq!(outcome.tool_output_count(), 6);
-}
-
-#[test]
-fn apply_patch_response_is_projected_to_freeform_custom_tool_before_commit() {
+fn apply_patch_response_is_projected_to_freeform_custom_tool_before_client_projection() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let patch = "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch";
     let resp02 = hooks
@@ -379,8 +241,7 @@ fn apply_patch_response_is_projected_to_freeform_custom_tool_before_commit() {
         resp03.tool_call_kinds(),
         vec![V3HubRelayToolKind::ApplyPatch]
     );
-    let resp04 = hooks.commit(resp03).unwrap();
-    let payload = resp04.canonical_context_payload().unwrap();
+    let payload = resp03.finalized_payload();
     assert_eq!(payload["output"][0]["type"], "custom_tool_call");
     assert_eq!(payload["output"][0]["name"], "apply_patch");
     assert_eq!(payload["output"][0]["call_id"], "call_apply_patch_freeform");
@@ -389,37 +250,30 @@ fn apply_patch_response_is_projected_to_freeform_custom_tool_before_commit() {
 }
 
 #[test]
-fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output() {
+fn apply_patch_tool_output_error_is_normalized_without_continuation_state() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("ctx_apply_patch"), scope()).with_local_context(
-        "ctx_apply_patch",
-        scope(),
-        json!({
-            "messages": [{
-                "role": "assistant",
-                "tool_calls": [{
-                    "id": "call_apply_patch_freeform",
-                    "type": "function",
-                    "function": {
-                        "name": "apply_patch",
-                        "arguments": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
-                    }
-                }]
-            }]
-        }),
-    );
     let outcome = hooks
         .run(
             raw_request(json!({
+                "messages": [{
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_apply_patch_freeform",
+                        "type": "function",
+                        "function": {
+                            "name": "apply_patch",
+                            "arguments": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
+                        }
+                    }]
+                }],
                 "input":[{
                     "type":"custom_tool_call_output",
                     "call_id":"call_apply_patch_freeform",
                     "output":"apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt"
                 }]
             })),
-            &lookup,
             &V3HubServertoolRequestProfile::disabled(),
-    )
+        )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
     let output = chat_tool_output_content(outcome.payload(), "call_apply_patch_freeform").unwrap();
@@ -432,11 +286,9 @@ fn apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
 #[test]
 fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projection() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("ctx_apply_patch_legacy"), scope())
-        .with_local_context(
-            "ctx_apply_patch_legacy",
-            scope(),
-            json!({
+    let outcome = hooks
+        .run(
+            raw_request(json!({
                 "messages": [{
                     "role": "assistant",
                     "tool_calls": [{
@@ -444,19 +296,13 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
                         "type": "function",
                         "function": {"name": "apply_patch", "arguments": "{}"}
                     }]
-                }]
-            }),
-        );
-    let outcome = hooks
-        .run(
-            raw_request(json!({
+                }],
                 "input":[{
                     "type":"custom_tool_call_output",
                     "call_id":"call_apply_patch_legacy",
                     "output":"aborted"
                 }]
             })),
-            &lookup,
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -471,39 +317,13 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
 #[test]
 fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("ctx_tool_parity"), scope()).with_local_context(
-        "ctx_tool_parity",
-        scope(),
-        restored_multitool_chat_context(),
-    );
-
-    assert!(matches!(
-        hooks.run(
-            raw_request(
-                json!({"input":[{"type":"function_call_output","call_id":"missing","output":"x"}]})
-            ),
-            &lookup,
-            &V3HubServertoolRequestProfile::disabled(),
-        ),
-        Err(V3HubRelayRequestError::OrphanToolOutput { .. })
-    ));
 
     assert!(matches!(
         hooks.run(
             raw_request(json!({"input":[{"type":"function_call_output","call_id":"call_function","output":"x"}]})),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         ),
         Err(V3HubRelayRequestError::OrphanToolOutput { .. })
-    ));
-
-    assert!(matches!(
-        hooks.run(
-            raw_request(json!({"input":[{"type":"function_call_output","call_id":"call_custom","output":"x"}]})),
-            &lookup,
-            &V3HubServertoolRequestProfile::disabled(),
-        ),
-        Err(V3HubRelayRequestError::ToolOutputKindMismatch { .. })
     ));
 
     assert!(matches!(
@@ -511,7 +331,6 @@ fn request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id() {
             raw_request(
                 json!({"input":[{"type":"custom_tool_call_output","output":"missing id"}]})
             ),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         ),
         Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
@@ -531,7 +350,6 @@ fn attachment_history_is_preserved_without_placeholder_cleanup() {
                     {"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,CURRENT"}]}
                 ]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .expect("Req04 attachment history governance");
@@ -553,7 +371,6 @@ fn attachment_history_missing_resource_is_preserved_as_client_data() {
                     {"role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,CURRENT"}]}
                 ]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .expect("missing attachment metadata must not trigger history cleanup");
@@ -593,10 +410,8 @@ fn response_governance_classifies_function_custom_servertool_and_internal_tools_
         V3HubServertoolResponseAction::FollowupRequired
     );
 
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
     assert_eq!(
-        resp04.canonical_tool_call_kinds(),
+        resp03.tool_call_kinds(),
         vec![
             V3HubRelayToolKind::Function,
             V3HubRelayToolKind::Custom,
@@ -636,8 +451,7 @@ fn response_governance_projects_web_search_to_client_exec_with_original_call_id(
     );
     assert_eq!(resp03.tool_call_count(), 1);
     assert_eq!(resp03.tool_call_kinds(), vec![V3HubRelayToolKind::Function]);
-    let resp04 = hooks.commit(resp03).unwrap();
-    let payload = resp04.finalized_payload();
+    let payload = resp03.finalized_payload();
     assert_eq!(payload["output"][0]["call_id"], "call_web_search_original");
     assert_eq!(payload["output"][0]["name"], "exec_command");
     let arguments: Value = serde_json::from_str(
@@ -678,8 +492,7 @@ fn response_governance_leaves_unregistered_function_call_untouched() {
     let resp03 = hooks
         .govern(resp02, &web_search_response_profile())
         .unwrap();
-    let resp04 = hooks.commit(resp03).unwrap();
-    let payload = resp04.finalized_payload();
+    let payload = resp03.finalized_payload();
     assert_eq!(payload["output"][0]["call_id"], "call_regular");
     assert_eq!(payload["output"][0]["name"], "lookup");
     assert_eq!(payload["output"][0]["arguments"], "{\"key\":\"value\"}");
@@ -705,13 +518,13 @@ fn responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order()
         .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .unwrap();
     assert_eq!(resp03.tool_call_kinds(), vec![V3HubRelayToolKind::Function]);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.finalized_payload()["output"][0]["type"], "reasoning");
+    assert_eq!(resp03.finalized_payload()["output"][0]["type"], "reasoning");
     assert_eq!(
-        resp04.finalized_payload()["output"][1]["call_id"],
+        resp03.finalized_payload()["output"][1]["call_id"],
         "call_sse"
     );
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
+    let (resp03, _) = resp03.into_parts();
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     assert_eq!(
         resp06.response_exit_node(),
@@ -743,7 +556,6 @@ fn provider_and_client_payloads_reject_routecodex_control_leakage() {
                 "input":[{"role":"user","content":"continue"}],
                 "routecodex_internal":{"debug":true}
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         ),
         Err(V3HubRelayRequestError::SideChannelLeaked { .. })

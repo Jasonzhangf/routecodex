@@ -59,7 +59,7 @@ flowchart TD
   N4[&quot;&lt;b&gt;V3ProviderReqOutbound09TransportRequest&lt;/b&gt;&quot;]
   title_note --&gt; N0
   N0 --&gt;|entry owner receives typed input| N1
-  N1 --&gt;|normalize, classify, restore/govern| N2
+  N1 --&gt;|normalize then govern current request| N2
   N2 --&gt;|plan and resolve target| N3
   N3 --&gt;|provider semantic → wire → transport| N4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
@@ -75,7 +75,7 @@ flowchart TD
   title_note --&gt; N0
   N0 --&gt;|provider compat before Hub parse| N1
   N1 --&gt;|normalize then govern response| N2
-  N2 --&gt;|save continuation then project client semantic| N3
+  N2 --&gt;|project client semantic after governance| N3
   N3 --&gt;|Body::from_stream / JSON body transport only| N4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   class N0,N1,N2,N3,N4 node;</pre></div></section>

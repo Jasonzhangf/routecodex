@@ -42,7 +42,6 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
   'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
-  'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
@@ -147,7 +146,7 @@ const cases = [
   },
   {
     name: 'Direct response.failed loses fresh-request isolation coverage',
-    path: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_remote_continuation_integration.rs',
+    path: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
     mutate: (source) => source.replace(
       'failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06',
       'failed_terminal_sse_attempt_has_no_error06_contract',
@@ -242,15 +241,6 @@ const cases = [
     diagnostic: /must not retain bool-only provider action recovery state/u,
   },
   {
-    name: 'Direct pinned continuation ignores its active recovery lane',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
-    mutate: (source) => source.replace(
-      'wait_for_exact_selected_provider_action',
-      'bypass_exact_selected_provider_action',
-    ),
-    diagnostic: /missing wait_for_exact_selected_provider_action/u,
-  },
-  {
     name: 'provider change restarts isolated delay',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replaceAll('sustained_delay_ms()', 'bypassed_sustained_delay_ms()'),
@@ -266,13 +256,13 @@ const cases = [
     diagnostic: /missing if matches!\(source.source_kind, V3ErrorSourceKind::ClientDisconnect\)/u,
   },
   {
-    name: 'Direct exact-pin lookup failure returns to generic RuntimeFailure',
+    name: 'Direct previous_response_id rejection loses anti-revival coverage',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
     mutate: (source) => source.replace(
-      'missing_exact_pin_is_provider_availability_error05_without_router_reentry',
-      'missing_exact_pin_returns_generic_runtime_failure',
+      'previous_response_id_is_rejected_without_router_or_provider_reentry',
+      'previous_response_id_has_no_retirement_contract',
     ),
-    diagnostic: /missing missing_exact_pin_is_provider_availability_error05_without_router_reentry/u,
+    diagnostic: /missing previous_response_id_is_rejected_without_router_or_provider_reentry/u,
   },
   {
     name: 'server post-commit SSE closeout fabricates Error06 again',

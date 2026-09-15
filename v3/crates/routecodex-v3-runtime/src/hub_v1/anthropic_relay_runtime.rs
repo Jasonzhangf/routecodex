@@ -9,10 +9,6 @@ use crate::provider_failure_runtime_policy::{
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
     V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
 };
-use crate::{
-    V3LocalContinuationError, V3LocalContinuationResp04SaveInput, V3LocalContinuationScopeKey,
-    V3LocalContinuationStore, V3LocalContinuationTerminalOutcome,
-};
 use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -38,8 +34,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-const V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3AnthropicRelayRuntimeInput {
     pub server_id: String,
@@ -61,20 +55,6 @@ impl From<String> for V3AnthropicRelayRuntimeError {
 pub struct V3AnthropicRelayClientHeader {
     pub name: String,
     pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3AnthropicRelayLocalContinuationScope {
-    entry_endpoint: String,
-    session_id: String,
-    conversation_id: String,
-    port: u16,
-    routing_group: String,
-}
-
-#[derive(Debug, Default)]
-pub struct V3AnthropicRelayLocalContinuationState {
-    store: Mutex<V3LocalContinuationStore>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -107,14 +87,6 @@ pub enum V3AnthropicRelayRuntimeError {
     ExecutionControlRequest(String),
     #[error("V3 Anthropic response execution control failed: {0}")]
     ExecutionControlResponse(String),
-    #[error(transparent)]
-    LocalContinuation(#[from] V3LocalContinuationError),
-    #[error("V3 Anthropic local continuation scope routing group does not match server")]
-    LocalContinuationScopeMismatch,
-    #[error("V3 Anthropic local continuation clock overflow")]
-    LocalContinuationClockOverflow,
-    #[error("V3 Anthropic local continuation state lock is poisoned")]
-    LocalContinuationStatePoisoned,
     #[error(
         "V3 Anthropic web_search Mode B intercepted a websearch call but the chat-entry response \
          has no result projection path yet; refusing silent strip"
@@ -206,7 +178,6 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         input,
         &transport,
         client_headers,
-        None,
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
@@ -293,7 +264,6 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         input,
         &transport,
         Vec::new(),
-        None,
         V3HubRelayResponseHookProfile::empty(),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
@@ -402,7 +372,6 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         input,
         transport,
         client_headers,
-        None,
         V3HubRelayResponseHookProfile::empty(),
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
@@ -411,37 +380,10 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
     .await
 }
 
-pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation<T: ResponsesTransport>(
+pub async fn execute_v3_anthropic_relay_runtime_with_servertool_profile<T, I, S>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
-    state: &V3AnthropicRelayLocalContinuationState,
-    scope: V3AnthropicRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile(
-        manifest,
-        input,
-        transport,
-        state,
-        scope,
-        now_epoch_ms,
-        std::iter::empty::<&'static str>(),
-    )
-    .await
-}
-
-pub async fn execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile<
-    T,
-    I,
-    S,
->(
-    manifest: &V3Config05ManifestPublished,
-    input: V3AnthropicRelayRuntimeInput,
-    transport: &T,
-    state: &V3AnthropicRelayLocalContinuationState,
-    scope: V3AnthropicRelayLocalContinuationScope,
-    now_epoch_ms: u64,
     servertool_names: I,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError>
 where
@@ -454,11 +396,6 @@ where
         input,
         transport,
         Vec::new(),
-        Some(V3AnthropicRelayLocalContinuationExecution {
-            state,
-            scope,
-            now_epoch_ms,
-        }),
         V3HubRelayResponseHookProfile::new(servertool_names),
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
@@ -467,18 +404,11 @@ where
     .await
 }
 
-struct V3AnthropicRelayLocalContinuationExecution<'state> {
-    state: &'state V3AnthropicRelayLocalContinuationState,
-    scope: V3AnthropicRelayLocalContinuationScope,
-    now_epoch_ms: u64,
-}
-
 async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3AnthropicRelayRuntimeInput,
     transport: &T,
     client_headers: Vec<V3AnthropicRelayClientHeader>,
-    local: Option<V3AnthropicRelayLocalContinuationExecution<'_>>,
     mut response_hook_profile: V3HubRelayResponseHookProfile,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
@@ -520,7 +450,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             None => routecodex_v3_config::V3WebSearchExecutionMode::None,
         }
     };
-    let requested_local_ids = find_anthropic_tool_result_ids(&input.payload)?;
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Anthropic,
@@ -530,40 +459,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     trace.push("V3HubReqInbound01ClientRaw");
     let req02 = run_v3_anthropic_relay_runtime_req_inbound(req01)?;
     trace.push("V3HubReqInbound02Normalized");
-    let base_hub_scope = V3HubContinuationScope::new(
-        V3HubEntryProtocol::Anthropic,
-        &input.server_id,
-        server_routing_group(manifest, &input.server_id)?,
-        &input.request_id,
-    );
     let request_outcome = {
-        let local_store_guard =
-            if let (Some(local), Some(_)) = (local.as_ref(), requested_local_ids.first()) {
-                Some(local.state.lock_store()?)
-            } else {
-                None
-            };
-        let lookup = if let (Some(local), Some(context_id)) =
-            (local.as_ref(), requested_local_ids.first())
-        {
-            if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
-                return Err(V3AnthropicRelayRuntimeError::LocalContinuationScopeMismatch);
-            }
-            let store = local_store_guard
-                .as_deref()
-                .ok_or(V3AnthropicRelayRuntimeError::LocalContinuationStatePoisoned)?;
-            V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
-                .with_local_context_from_req04_store(
-                    context_id,
-                    local.scope.hub_scope(&input.server_id),
-                    store,
-                    local.scope.local_key(),
-                    local.now_epoch_ms,
-                    &requested_local_ids[1..],
-                )?
-        } else {
-            V3HubContinuationLookup::new(None, base_hub_scope)
-        };
         let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, &input.server_id);
         let request_hook_profile = if request_web_search_execution_mode
             .is_metadata_center_local_search()
@@ -577,13 +473,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         } else {
             V3HubServertoolRequestProfile::disabled()
         };
-        compile_v3_hub_relay_request_hooks().run_from_normalized(
-            req02,
-            &lookup,
-            &request_hook_profile,
-        )?
+        compile_v3_hub_relay_request_hooks().run_from_normalized(req02, &request_hook_profile)?
     };
-    trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
@@ -605,7 +496,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         V3HubExecutionMode::Relay,
     );
     trace.push("V3HubReqExecution05Planned");
-    let route_facts_body = req05.previous.previous.previous.previous.payload.0.clone();
+    let route_facts_body = req05.previous.previous.previous.payload.0.clone();
     let mut failed_candidates = BTreeSet::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
@@ -968,7 +859,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     V3ProviderRespInbound01RawContext::new(
                         V3HubEntryProtocol::Anthropic,
                         provider_wire_protocol,
-                        V3HubContinuationOwnership::New,
                         V3HubExecutionMode::Relay,
                         V3HubInvocationSource::Client,
                         V3HubTransportIntent::Sse,
@@ -980,8 +870,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         resp01,
                         &response_hook_profile,
                         trace.as_mut(),
-                        local.as_ref(),
-                        &requested_local_ids,
                         |finalized| {
                             project_v3_anthropic_client_response_for_provider(
                                 finalized,
@@ -1042,7 +930,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 } else {
                     V3AnthropicRelayClientBody::Json
                 };
-                record_provider_success_after_resp04(
+                record_provider_success_after_response_governance(
                     &crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
@@ -1166,7 +1054,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     V3ProviderRespInbound01RawContext::new(
                         V3HubEntryProtocol::Anthropic,
                         hook_provider_protocol,
-                        V3HubContinuationOwnership::New,
                         V3HubExecutionMode::Relay,
                         V3HubInvocationSource::Client,
                         transport_intent,
@@ -1178,8 +1065,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         resp01,
                         &response_hook_profile,
                         trace.as_mut(),
-                        local.as_ref(),
-                        &requested_local_ids,
                         |finalized| {
                             if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
                                 project_v3_anthropic_client_response_for_provider(
@@ -1191,7 +1076,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             } else if transport_intent == V3HubTransportIntent::Sse {
                                 let client_events =
                                     project_v3_responses_json_as_anthropic_events(finalized)?;
-                                Ok(project_v3_anthropic_events_after_resp04(client_events))
+                                Ok(project_v3_anthropic_client_events(client_events))
                             } else {
                                 Ok(project_v3_responses_json_as_anthropic_message(finalized)?)
                             }
@@ -1246,7 +1131,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 } else {
                     V3AnthropicRelayClientBody::Json
                 };
-                record_provider_success_after_resp04(
+                record_provider_success_after_response_governance(
                     &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
                     &provider_health,
                     &input.failure_session_scope,
@@ -1303,108 +1188,7 @@ fn anthropic_relay_client_headers_as_provider_request_headers(
         .collect()
 }
 
-fn find_anthropic_tool_result_ids(
-    payload: &Value,
-) -> Result<Vec<String>, V3AnthropicRelayRuntimeError> {
-    let mut ids = Vec::new();
-    for part in payload
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|message| message.get("content").and_then(Value::as_array))
-        .flatten()
-    {
-        if part.get("type").and_then(Value::as_str) != Some("tool_result") {
-            continue;
-        }
-        let id = part
-            .get("tool_use_id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| V3LocalContinuationError::Codec {
-                message: "Anthropic tool_result requires tool_use_id".to_string(),
-            })?;
-        if !ids.iter().any(|existing| existing == id) {
-            ids.push(id.to_owned());
-        }
-    }
-    Ok(ids)
-}
-
-fn commit_or_release_local_continuation(
-    local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
-    restored_context_ids: &[String],
-    canonical_response: &Value,
-    action: V3HubContinuationCommit,
-) -> Result<(), V3AnthropicRelayRuntimeError> {
-    let Some(local) = local else {
-        return Ok(());
-    };
-    let mut store = local.state.lock_store()?;
-    for context_id in restored_context_ids {
-        store.release_in_scope(&local.scope.local_key(), context_id);
-    }
-    if action != V3HubContinuationCommit::LocalContext {
-        return Ok(());
-    }
-    let context_ids = canonical_response
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|item| {
-            matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call")
-            )
-        })
-        .map(|item| {
-            item.get("call_id")
-                .or_else(|| item.get("id"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-                .ok_or_else(|| V3LocalContinuationError::Codec {
-                    message: "Resp04 local context has a tool call without id".to_string(),
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if context_ids.is_empty() {
-        return Err(V3LocalContinuationError::Codec {
-            message: "Resp04 local context has no tool call id".to_string(),
-        }
-        .into());
-    }
-    if let Some(duplicate) = context_ids
-        .iter()
-        .find(|id| store.contains_in_scope(&local.scope.local_key(), id))
-    {
-        return Err(V3LocalContinuationError::AlreadyCommitted {
-            context_id: duplicate.clone(),
-        }
-        .into());
-    }
-    let expires_at_epoch_ms = local
-        .now_epoch_ms
-        .checked_add(V3_ANTHROPIC_LOCAL_CONTINUATION_TTL_MS)
-        .ok_or(V3AnthropicRelayRuntimeError::LocalContinuationClockOverflow)?;
-    let canonical_context =
-        build_v3_relay_local_response_continuation_context_at_resp04(canonical_response)?;
-    for context_id in context_ids {
-        store.commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
-            context_id,
-            local.scope.local_key(),
-            canonical_context.clone(),
-            V3LocalContinuationTerminalOutcome::NonTerminal,
-            local.now_epoch_ms,
-            expires_at_epoch_ms,
-        ))?;
-    }
-    Ok(())
-}
-
-fn record_provider_success_after_resp04(
+fn record_provider_success_after_response_governance(
     receipt: &crate::nodes::V3AttemptSuccessReceipt,
     provider_health: &V3ProviderFailureRuntimeHealth,
     failure_session_scope: &V3ProviderFailureSessionScope,
