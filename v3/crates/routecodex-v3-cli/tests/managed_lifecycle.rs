@@ -6,18 +6,26 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const SECRET: &str = "managed-lifecycle-controlled-secret";
 const PORT_STATE_TIMEOUT: Duration = Duration::from_secs(15);
+static MANAGED_LIFECYCLE_TEST_LOCK: Mutex<()> = Mutex::new(());
 // The stub sidecar is launched by the managed child and must reach its marker
 // before the test exercises stop/restart/control. Under a parallel workspace
 // test run that launch can take well over a second of scheduler time, so this
 // waits for the observed state with a generous bound instead of racing a thin
 // setup deadline.
 const HOOKS_MARKER_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn lifecycle_test_guard() -> MutexGuard<'static, ()> {
+    MANAGED_LIFECYCLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn wait_for_hooksd_marker(instance_dir: &Path, marker: &Path, label: &str) {
     let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
@@ -686,6 +694,7 @@ fn copy_release_binary(source: &str, release_root: &Path) -> PathBuf {
 
 #[test]
 fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -789,6 +798,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
 
 #[test]
 fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -866,6 +876,7 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
 
 #[test]
 fn slow_hooks_sidecar_does_not_block_managed_stop() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -935,6 +946,7 @@ fn slow_hooks_sidecar_does_not_block_managed_stop() {
 
 #[test]
 fn slow_hooks_sidecar_does_not_block_managed_restart() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1014,6 +1026,7 @@ fn slow_hooks_sidecar_does_not_block_managed_restart() {
 
 #[test]
 fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1128,6 +1141,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
 
 #[test]
 fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1375,6 +1389,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
 
 #[test]
 fn top_level_lifecycle_without_config_uses_home_config_toml() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1438,6 +1453,7 @@ tiers = [[{ use = "test/test" }]]
 
 #[test]
 fn top_level_start_snap_forces_debug_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1498,6 +1514,7 @@ fn top_level_start_snap_forces_debug_snapshots() {
 
 #[test]
 fn top_level_start_without_snap_disables_codex_samples_but_preserves_debug_runtime() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1537,6 +1554,7 @@ fn top_level_start_without_snap_disables_codex_samples_but_preserves_debug_runti
 
 #[test]
 fn top_level_start_snapall_enables_direct_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1579,6 +1597,7 @@ fn top_level_start_snapall_enables_direct_snapshots() {
 
 #[test]
 fn top_level_restart_snap_forces_debug_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1635,6 +1654,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
 
 #[test]
 fn top_level_start_snap_stages_enable_local_stage_selector() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1680,6 +1700,7 @@ fn top_level_start_snap_stages_enable_local_stage_selector() {
 
 #[test]
 fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1768,6 +1789,7 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
 
 #[test]
 fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1825,6 +1847,7 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
 
 #[test]
 fn stopped_instance_restarts_from_next_release_snapshot_executable() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1913,6 +1936,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
 
 #[test]
 fn running_instance_restart_execs_next_release_snapshot_in_place() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -2010,6 +2034,7 @@ fn running_instance_restart_execs_next_release_snapshot_in_place() {
 
 #[test]
 fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -2073,6 +2098,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
 
 #[test]
 fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -2159,6 +2185,7 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
 
 #[test]
 fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -2198,6 +2225,7 @@ fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
 
 #[test]
 fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let shared_port = free_port();
@@ -2262,6 +2290,7 @@ fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
 
 #[test]
 fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let shared_port = free_port();
@@ -2335,6 +2364,7 @@ fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
 
 #[test]
 fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let target_port = free_port();
