@@ -1078,8 +1078,9 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     let bin_directory = hooks_root.join("bin");
     let record_path = hooks_root.join("install.json");
     let hooksd_started = hooks_root.join("hooksd-started");
-    let managed_tmp = root.path().join("tmp");
-    fs::create_dir_all(&managed_tmp).unwrap();
+    let managed_tmp = tempfile::Builder::new()
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
     fs::create_dir_all(&bin_directory).unwrap();
     let hooksd = bin_directory.join("rccv3-hooksd");
     fs::write(
@@ -1108,7 +1109,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
         &config,
         "start",
         &record_path,
-        &managed_tmp,
+        managed_tmp.path(),
     );
     assert!(
         start.status.success(),
@@ -1152,7 +1153,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
         &config,
         "status",
         &record_path,
-        &managed_tmp,
+        managed_tmp.path(),
     );
     assert!(status.status.success());
     assert_eq!(last_json(&status)["state"], "running");
@@ -1167,7 +1168,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
         &config,
         "stop",
         &record_path,
-        &managed_tmp,
+        managed_tmp.path(),
     );
     assert!(
         stop.status.success(),
