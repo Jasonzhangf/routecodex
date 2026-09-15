@@ -12,6 +12,26 @@ use tempfile::TempDir;
 
 const SECRET: &str = "managed-lifecycle-controlled-secret";
 const PORT_STATE_TIMEOUT: Duration = Duration::from_secs(15);
+// The stub sidecar is launched by the managed child and must reach its marker
+// before the test exercises stop/restart/control. Under a parallel workspace
+// test run that launch can take well over a second of scheduler time, so this
+// waits for the observed state with a generous bound instead of racing a thin
+// setup deadline.
+const HOOKS_MARKER_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn wait_for_hooksd_marker(instance_dir: &Path, marker: &Path, label: &str) {
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
+    while !marker.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "{label}; status={}; pid_record={}; stderr={}",
+            fs::read_to_string(instance_dir.join("status.json")).unwrap_or_default(),
+            instance_dir.join("hooks-sidecar.pid").exists(),
+            fs::read_to_string(instance_dir.join("hooks-sidecar.stderr.log")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(10));
+    }
+}
 
 fn managed_test_command(binary: &str) -> Command {
     let mut command = Command::new(binary);
@@ -887,14 +907,11 @@ fn slow_hooks_sidecar_does_not_block_managed_stop() {
         wait_port(port, true);
     }
     let instance_dir = single_instance_dir(&state_root);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !hooksd_started.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "slow hooksd did not start before stop"
-        );
-        sleep(Duration::from_millis(10));
-    }
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "slow hooksd did not start before stop",
+    );
 
     let stop_started = Instant::now();
     let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
@@ -959,14 +976,11 @@ fn slow_hooks_sidecar_does_not_block_managed_restart() {
         wait_port(port, true);
     }
     let instance_dir = single_instance_dir(&state_root);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !hooksd_started.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "slow hooksd did not start before restart"
-        );
-        sleep(Duration::from_millis(10));
-    }
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "slow hooksd did not start before restart",
+    );
 
     let restart_started = Instant::now();
     let restart = run_with_hooks_record(binary, &state_root, &config, "restart", &record_path);
@@ -1050,14 +1064,11 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
         wait_port(port, true);
     }
     let instance_dir = single_instance_dir(&state_root);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !hooksd_started.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "malformed-json test hooksd did not start"
-        );
-        sleep(Duration::from_millis(10));
-    }
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "malformed-json test hooksd did not start",
+    );
 
     let control: Value =
         serde_json::from_slice(&fs::read(instance_dir.join("control.json")).unwrap()).unwrap();

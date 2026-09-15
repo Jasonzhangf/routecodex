@@ -150,7 +150,7 @@ fn hooks_running_status_never_overwrites_stopping_or_stopped_state() {
     write_running_status_if_current(
         &instance_dir,
         "hooks-status-instance",
-        Some("hooks degraded".to_string()),
+        Some("hooks status pending".to_string()),
     )
     .unwrap();
     let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
