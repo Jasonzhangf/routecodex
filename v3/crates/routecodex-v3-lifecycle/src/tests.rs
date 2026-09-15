@@ -4,8 +4,10 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
-const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
+pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
+
+mod hooks_lifecycle;
 
 #[test]
 fn control_client_disconnect_is_not_a_managed_runtime_failure() {
@@ -45,289 +47,7 @@ async fn control_response_broken_pipe_is_nonfatal() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn configured_hooks_sidecar_requires_ready_protocol_and_stops_by_explicit_pid() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    let record_path = root.path().join("install.json");
-    let daemon_config = root.path().join("hooksd.json");
-    let supervisor_wrapper = root.path().join("supervisor-wrapper");
-    let bin_directory = root.path().join("bin");
-    fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
-    fs::write(&daemon_config, "{}").unwrap();
-    fs::write(
-        &supervisor_wrapper,
-        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
-    fs::write(
-        &record_path,
-        serde_json::json!({
-            "supervisor_enabled": true,
-            "supervisor_wrapper": supervisor_wrapper,
-            "daemon_config": daemon_config,
-            "bin_directory": bin_directory,
-            "install_root": root.path(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
-    let sidecar = start_configured_hooks_sidecar(&instance_dir)
-        .await
-        .unwrap()
-        .expect("enabled test sidecar must start");
-    sidecar.stop().await.unwrap();
-    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn delayed_hooks_stop_retries_owned_codexapp_socket_cleanup() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new_in("/tmp").unwrap();
-    let instance_dir = root.path().join("instance");
-    let socket_path = root.path().join("codexapp.sock");
-    let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
-    fs::create_dir(&instance_dir).unwrap();
-    let _socket = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
-    let install_root = root.path().to_path_buf();
-    let child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg("trap 'exit 0' TERM INT; while :; do sleep 1; done")
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let process_group_id = child.id().unwrap() as libc::pid_t;
-    fs::write(&process_record_path, "delayed cleanup record").unwrap();
-    let sidecar = V3HooksSidecarProcess::for_test_with_owned_socket_cleanup(
-        child,
-        process_group_id,
-        process_record_path.clone(),
-        socket_path.clone(),
-        install_root,
-    );
-
-    sidecar.stop().await.unwrap();
-
-    assert!(!socket_path.exists());
-    assert!(!process_record_path.exists());
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    let record_path = root.path().join("install.json");
-    let daemon_config = root.path().join("hooksd.json");
-    let supervisor_wrapper = root.path().join("supervisor-wrapper");
-    let supervisor_started = root.path().join("supervisor-started");
-    let bin_directory = root.path().join("bin");
-    let socket_path = root.path().join("routecodex-control.sock");
-    fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
-    fs::write(&daemon_config, "{}").unwrap();
-    fs::write(
-        &supervisor_wrapper,
-        format!(
-            "#!/bin/sh\nprintf 'started\\n' > '{}'\nexit 17\n",
-            supervisor_started.display()
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
-    fs::write(
-        &record_path,
-        serde_json::json!({
-            "supervisor_enabled": true,
-            "supervisor_wrapper": supervisor_wrapper,
-            "daemon_config": daemon_config,
-            "bin_directory": bin_directory,
-            "install_root": root.path(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
-    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
-    fs::write(&socket_path, "runtime-socket-marker").unwrap();
-    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
-
-    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
-
-    assert!(sidecar.is_none());
-    assert!(detail.unwrap().contains("hooks sidecar unavailable"));
-    assert!(supervisor_started.exists());
-    assert!(instance_dir.join("pid.cache").exists());
-    assert!(instance_dir.join("control.json").exists());
-    assert!(socket_path.exists());
-    write_status(
-        &instance_dir,
-        "degraded-instance",
-        V3ManagedRunState::Running,
-        Some("hooks sidecar unavailable: hooks sidecar exited before readiness".to_string()),
-    )
-    .unwrap();
-    assert_eq!(
-        read_live_status_detail(&instance_dir, "degraded-instance").unwrap(),
-        Some("hooks sidecar unavailable: hooks sidecar exited before readiness".to_string())
-    );
-    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn failed_hooks_sidecar_forced_group_cleanup_removes_codexapp_socket() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    let record_path = root.path().join("install.json");
-    let daemon_config = root.path().join("hooksd.json");
-    let supervisor_wrapper = root.path().join("supervisor-wrapper");
-    let bin_directory = root.path().join("bin");
-    let codexapp_socket = root.path().join("codexapp.sock");
-    let pid_path = root.path().join("supervisor-wrapper.pid");
-    fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
-    fs::write(
-        &daemon_config,
-        serde_json::json!({"codexapp": {"socket": codexapp_socket}}).to_string(),
-    )
-    .unwrap();
-    fs::write(
-        &supervisor_wrapper,
-        format!(
-            "#!/bin/sh\necho $$ > '{}'\nnode -e 'const net=require(\"net\"); const server=net.createServer(); server.listen(process.argv[1]); setInterval(() => {{}}, 1000);' '{}' &\nsleep 1\nprintf '%s\\n' '{{\"protocol\":\"wrong\",\"ready\":false}}'\ntrap '' TERM INT\nwhile :; do sleep 1; done\n",
-            pid_path.display(),
-            codexapp_socket.display(),
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
-    fs::write(
-        &record_path,
-        serde_json::json!({
-            "supervisor_enabled": true,
-            "supervisor_wrapper": supervisor_wrapper,
-            "daemon_config": daemon_config,
-            "bin_directory": bin_directory,
-            "install_root": root.path(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
-
-    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
-
-    assert!(sidecar.is_none());
-    assert!(detail.unwrap().contains("invalid readiness record"));
-    assert!(!codexapp_socket.exists());
-    let pid: libc::pid_t = fs::read_to_string(&pid_path)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    assert_eq!(unsafe { libc::kill(-pid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn failed_hooks_sidecar_cleans_descendant_after_wrapper_exits_before_readiness() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    let record_path = root.path().join("install.json");
-    let daemon_config = root.path().join("hooksd.json");
-    let supervisor_wrapper = root.path().join("supervisor-wrapper");
-    let bin_directory = root.path().join("bin");
-    let codexapp_socket = root.path().join("codexapp.sock");
-    let pid_path = root.path().join("supervisor-wrapper.pid");
-    let descendant_pid_path = root.path().join("descendant.pid");
-    fs::create_dir(&instance_dir).unwrap();
-    fs::create_dir(&bin_directory).unwrap();
-    fs::write(bin_directory.join("rccv3-codexapp"), "").unwrap();
-    fs::write(
-        &daemon_config,
-        serde_json::json!({"codexapp": {"socket": codexapp_socket}}).to_string(),
-    )
-    .unwrap();
-    fs::write(&codexapp_socket, "owned by the failed hooks startup").unwrap();
-    fs::write(
-        &supervisor_wrapper,
-        format!(
-            "#!/bin/sh\necho $$ > '{}'\n(trap '' TERM INT; while :; do sleep 1; done) &\necho $! > '{}'\nprintf '%s\\n' '{{\"protocol\":\"wrong\",\"ready\":false}}'\nexit 17\n",
-            pid_path.display(),
-            descendant_pid_path.display()
-        ),
-    )
-    .unwrap();
-    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
-    fs::write(
-        &record_path,
-        serde_json::json!({
-            "supervisor_enabled": true,
-            "supervisor_wrapper": supervisor_wrapper,
-            "daemon_config": daemon_config,
-            "bin_directory": bin_directory,
-            "install_root": root.path(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
-
-    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
-
-    assert!(sidecar.is_none());
-    assert!(detail.unwrap().contains("invalid readiness record"));
-    assert!(codexapp_socket.exists());
-    let pid: libc::pid_t = fs::read_to_string(&pid_path)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    let descendant_pid: libc::pid_t = fs::read_to_string(&descendant_pid_path)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    assert_eq!(unsafe { libc::kill(-pid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    assert_eq!(unsafe { libc::kill(descendant_pid, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn failed_hooks_stop_preserves_control_resources_and_reports_failure() {
+async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -353,32 +73,34 @@ async fn failed_hooks_stop_preserves_control_resources_and_reports_failure() {
         .await
         .unwrap();
 
-    let error = shutdown_managed_runtime(
+    shutdown_managed_runtime(
         &instance_dir,
         &declaration.instance_id,
         &socket_path,
         handle,
-        Some(sidecar),
+        V3HooksSidecarSupervisor::from_startup(
+            instance_dir.clone(),
+            tokio::spawn(async move { Ok(Some(sidecar)) }),
+        ),
     )
     .await
-    .unwrap_err();
+    .unwrap();
 
-    assert!(error.to_string().contains("process group id is invalid"));
     let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Failed);
+    assert_eq!(status.state, V3ManagedRunState::Stopped);
     assert!(status
         .detail
         .as_deref()
         .is_some_and(|detail| detail.contains("process group id is invalid")));
-    assert!(instance_dir.join("pid.cache").exists());
-    assert!(instance_dir.join("control.json").exists());
-    assert!(socket_path.exists());
+    assert!(!instance_dir.join("pid.cache").exists());
+    assert!(!instance_dir.join("control.json").exists());
+    assert!(!socket_path.exists());
     assert!(process_record_path.exists());
 }
 
 #[tokio::test]
 #[cfg(unix)]
-async fn failed_hooks_restart_preserves_old_control_and_does_not_exec_replacement() {
+async fn failed_hooks_restart_continues_to_replacement() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -408,7 +130,7 @@ async fn failed_hooks_restart_preserves_old_control_and_does_not_exec_replacemen
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
         declaration: declaration.clone(),
-        executable_path: executable.clone(),
+        executable_path: root.path().join("missing-replacement"),
         snapshots: false,
         snapshot_direct: false,
         snapshot_stages: None,
@@ -419,30 +141,35 @@ async fn failed_hooks_restart_preserves_old_control_and_does_not_exec_replacemen
         &instance_dir,
         &socket_path,
         handle,
-        Some(sidecar),
+        V3HooksSidecarSupervisor::from_startup(
+            instance_dir.clone(),
+            tokio::spawn(async move { Ok(Some(sidecar)) }),
+        ),
         restart_plan,
         false,
     )
     .await
     .unwrap_err();
 
-    assert!(error.to_string().contains("process group id is invalid"));
+    assert!(
+        matches!(error, V3LifecycleError::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
+        "restart must pass hooks cleanup failure and attempt replacement, got {error}"
+    );
     let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
     assert_eq!(status.state, V3ManagedRunState::Failed);
-    assert!(status
-        .detail
-        .as_deref()
-        .is_some_and(|detail| detail.contains("process group id is invalid")));
+    assert!(status.detail.as_deref().is_some_and(|detail| {
+        detail.contains("exec restart failed") && detail.contains("hooks sidecar shutdown failed")
+    }));
     assert!(instance_dir.join("pid.cache").exists());
-    assert!(instance_dir.join("control.json").exists());
-    assert!(socket_path.exists());
+    assert!(!instance_dir.join("control.json").exists());
+    assert!(!socket_path.exists());
     assert!(process_record_path.exists());
-    assert!(restart_plan_path.exists());
+    assert!(!restart_plan_path.exists());
 }
 
 #[tokio::test]
 #[cfg(unix)]
-async fn live_persisted_hooks_group_blocks_reaping_runtime_control() {
+async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_control() {
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -477,20 +204,39 @@ async fn live_persisted_hooks_group_blocks_reaping_runtime_control() {
     write_status(
         &instance_dir,
         &expected.instance_id,
-        V3ManagedRunState::Failed,
-        Some("hooks cleanup failed".to_string()),
+        V3ManagedRunState::Running,
+        Some("stale running state".to_string()),
     )
     .unwrap();
-    fs::write(instance_dir.join("pid.cache"), "managed-pid").unwrap();
-    fs::write(instance_dir.join("control.json"), "managed-control").unwrap();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: expected.instance_id.clone(),
+            pid: 42,
+            start_nonce: "stale".to_string(),
+            started_at_epoch_ms: 1,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: expected.instance_id.clone(),
+            socket_path: managed_control_socket_path(&expected.instance_id)
+                .display()
+                .to_string(),
+            start_nonce: "stale".to_string(),
+        },
+    )
+    .unwrap();
 
-    let error = reap_inactive_runtime_files(&instance_dir, &expected)
-        .unwrap_err()
-        .to_string();
+    reap_inactive_runtime_files(&instance_dir, &expected).unwrap();
 
-    assert!(error.contains("hooks sidecar process group is alive"));
-    assert!(instance_dir.join("pid.cache").exists());
-    assert!(instance_dir.join("control.json").exists());
+    assert!(!instance_dir.join("pid.cache").exists());
+    assert!(!instance_dir.join("control.json").exists());
     assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
     assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
     let _ = child.wait().await;
@@ -498,23 +244,139 @@ async fn live_persisted_hooks_group_blocks_reaping_runtime_control() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn live_persisted_hooks_group_blocks_managed_child_start() {
+async fn live_hooks_group_does_not_block_forced_stop() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let mut child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg("while :; do sleep 1; done")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let process_group_id = child.id().unwrap() as libc::pid_t;
+    fs::write(
+        instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
+        format!(
+            r#"{{"schema_version":1,"process_group_id":{process_group_id},"leader_pid":{process_group_id},"leader_start_token":"{}"}}"#,
+            process_start_token(process_group_id as u32).unwrap().unwrap()
+        ),
+    )
+    .unwrap();
+    let declaration = managed_test_declaration(
+        "forced-stop-live-hooks",
+        &root.path().join("config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        45_498,
+    );
+    let declaration = V3ManagedInstanceDeclaration {
+        listeners: Vec::new(),
+        ..declaration
+    };
+
+    let status = V3ManagedLifecycle::with_state_root(
+        &root.path().join("config.v3.toml"),
+        &root.path().join("state"),
+    )
+    .force_stop_after_graceful_timeout(&instance_dir, &declaration)
+    .await
+    .unwrap();
+
+    assert_eq!(status.state, V3ManagedRunState::Stopped);
+    assert!(status
+        .detail
+        .as_deref()
+        .is_some_and(|detail| detail.contains("hooks sidecar cleanup incomplete")));
+    assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
+    let _ = child.wait().await;
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let mut child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg("while :; do sleep 1; done")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let process_group_id = child.id().unwrap() as libc::pid_t;
+    // Persist a record whose leader token does not match the live group, so
+    // the strict probe cannot attribute the group to this instance. The
+    // lifecycle must not be blocked by the foreign group.
+    fs::write(
+        instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
+        format!(
+            r#"{{"schema_version":1,"process_group_id":{process_group_id},"leader_pid":{process_group_id},"leader_start_token":"not-the-anchor-token"}}"#,
+        ),
+    )
+    .unwrap();
+    let expected = managed_test_declaration(
+        "stale-hooks-group",
+        &root.path().join("config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        45_496,
+    );
+    write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
+    write_status(
+        &instance_dir,
+        &expected.instance_id,
+        V3ManagedRunState::Failed,
+        Some("prior run failed".to_string()),
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: expected.instance_id.clone(),
+            pid: 4_242_424,
+            start_nonce: "stale".to_string(),
+            started_at_epoch_ms: 1,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: expected.instance_id.clone(),
+            socket_path: managed_control_socket_path(&expected.instance_id)
+                .display()
+                .to_string(),
+            start_nonce: "stale".to_string(),
+        },
+    )
+    .unwrap();
+
+    reap_inactive_runtime_files(&instance_dir, &expected).unwrap();
+
+    // The foreign group must be untouched. The main runtime caches are reaped
+    // so startup can proceed, but the uncertain hooks record is preserved for
+    // an explicit next-start/operator cleanup decision.
+    assert_eq!(unsafe { libc::kill(-process_group_id, 0) }, 0);
+    assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert!(!instance_dir.join("pid.cache").exists());
+    assert!(!instance_dir.join("control.json").exists());
+    assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
+    let _ = child.wait().await;
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
-    let (config, executable, state) = fixture_with_port(&root, 45_497);
-    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
-    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
-    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
-    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
-    write_status(
-        &instance_dir,
-        &declaration.instance_id,
-        V3ManagedRunState::Starting,
-        None,
-    )
-    .unwrap();
     let mut child = tokio::process::Command::new("sh")
         .arg("-c")
         .arg("while :; do sleep 1; done")
@@ -531,34 +393,32 @@ async fn live_persisted_hooks_group_blocks_managed_child_start() {
     )
     .unwrap();
 
-    let error = lifecycle.run_managed_child(&executable).await.unwrap_err();
+    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
 
-    assert!(matches!(error, V3LifecycleError::HooksControlValidation(_)));
-    assert!(error
-        .to_string()
-        .contains("hooks sidecar process group from a previous run is still alive"));
-    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Failed);
-    assert!(status
-        .detail
-        .as_deref()
-        .is_some_and(|detail| detail.contains("hooks sidecar startup blocked")));
-    assert!(!instance_dir.join("pid.cache").exists());
-    assert!(!instance_dir.join("control.json").exists());
-    assert!(!instance_dir.join("managed-control.sock").exists());
+    assert!(sidecar.is_none(), "live stale group must not be adopted");
+    let detail = detail.expect("unavailable startup must carry a detail");
+    assert!(
+        detail.contains("hooks_unavailable:"),
+        "stale live group must report hooks_unavailable: {detail}"
+    );
+    assert!(
+        detail.contains("hooks sidecar process group from a previous run is still alive"),
+        "unavailable detail must keep the exact reason: {detail}"
+    );
+    // The foreign live group must never be signaled or reaped.
     assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
     assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
     let _ = child.wait().await;
 }
 
 #[test]
-fn degraded_hook_detail_survives_a_running_status_update() {
+fn unavailable_hook_detail_survives_a_running_status_update() {
     assert_eq!(
         append_status_detail(
-            Some("hooks sidecar unavailable: hooks sidecar exited before readiness"),
+            Some("hooks_unavailable:crashed: hooks sidecar exited before readiness"),
             "released listener ports 45499".to_string(),
         ),
-        "hooks sidecar unavailable: hooks sidecar exited before readiness; released listener ports 45499"
+        "hooks_unavailable:crashed: hooks sidecar exited before readiness; released listener ports 45499"
     );
     assert_eq!(
         append_status_detail(None, "released listener ports 45499".to_string()),
@@ -1430,48 +1290,4 @@ fn configured_codex_samples_authorization_survives_managed_declaration() {
     assert!(manifest.debug.codex_samples);
 }
 
-#[test]
-fn instance_residual_pids_are_discovered_even_when_ports_are_no_longer_listened() {
-    // 复现用户场景：`routecodex start` 抢占后，旧 run-managed-child 已释放端口
-    // 但进程残留并保持 tty 前台进程组，导致 Ctrl+C 信号发到错误进程。
-    // 当前实现只按 lsof 占用端口找 PID，找不到已释放端口的残留进程（红）。
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
-    let root = TempDir::new().unwrap();
-    let (config, executable, state) = fixture(&root);
-    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
-    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
-
-    let target_port = declaration.listeners[0].port;
-    let instance_dir = state.join("instances").join(&declaration.instance_id);
-    ensure_private_dir(&instance_dir).unwrap();
-    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
-
-    // 残留进程：存活、声明端口与目标重叠、但不监听任何端口（模拟 start 接管后的旧 child）。
-    let residual = Command::new("sleep")
-        .arg("300")
-        .spawn()
-        .expect("spawn residual process");
-    let residual_pid = residual.id();
-    write_json_atomic(
-        &instance_dir.join("pid.cache"),
-        &V3ManagedPidCache {
-            schema_version: SCHEMA_VERSION,
-            instance_id: declaration.instance_id.clone(),
-            pid: residual_pid,
-            start_nonce: "residual".to_string(),
-            started_at_epoch_ms: epoch_ms(),
-            process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
-        },
-    )
-    .unwrap();
-
-    let discovered = instance_residual_pids_for_listener_set(&state, &declaration.listeners)
-        .expect("residual discovery must succeed");
-    assert!(
-        discovered.contains(&residual_pid),
-        "residual managed child PID {residual_pid} must be discovered even without listening ports, got {discovered:?}"
-    );
-
-    let _ = unsafe { libc::kill(residual_pid as libc::pid_t, libc::SIGKILL) };
-}
+mod residual_pids;
