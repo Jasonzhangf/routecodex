@@ -1069,7 +1069,7 @@ fn openai_responses_wire_does_not_leak_client_metadata_and_projects_reasoning_ef
     assert!(request.get("metadata").is_none(), "{request}");
     assert_eq!(request["reasoning"], json!({"effort":"medium"}));
 }
-
+include!("request_outbound_mcp_tests.rs");
 #[test]
 fn openai_responses_wire_preserves_unknown_non_empty_reasoning_effort() {
     let payload = json!({
