@@ -46,8 +46,8 @@ const fixtures = [
   {
     name: 'provider compat branch numbering made ambiguous',
     relative: 'docs/architecture/v3-mainline-call-map.yml',
-    from: '  - step_id: v3-hub-req-07\n    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat06ProviderCompat',
-    to: '  - step_id: v3-hub-req-07\n    from_node: V3HubReqOutbound07ProviderSemantic\n    to_node: ProviderReqCompat07ProviderCompat',
+    from: '  - step_id: v3-hub-req-07\n    from_node: ProviderReqCompat06ProviderCompat\n    to_node: V3ProviderReqOutbound08WirePayload',
+    to: '  - step_id: v3-hub-req-07\n    from_node: ProviderReqCompat07ProviderCompat\n    to_node: V3ProviderReqOutbound08WirePayload',
     diagnostic: /v3-hub-req-07 must remain adjacent|ProviderReqCompat06ProviderCompat/,
   },
   {
