@@ -29,6 +29,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/app/views/usage.js", get(static_serve))
         .route("/app/views/providers.js", get(static_serve))
         .route("/app/views/routes.js", get(static_serve))
+        .route("/app/views/usage-state.js", get(static_serve))
+        .route("/app/views/usage-filters.js", get(static_serve))
+        .route("/app/views/usage-panels.js", get(static_serve))
+        .route("/app/views/usage-panel-views.js", get(static_serve))
+        .route("/app/views/usage-export.js", get(static_serve))
+        .route("/app/views/usage-summary.js", get(static_serve))
         .route("/index.html", get(static_serve))
         .route("/routes.html", get(static_serve))
         .route("/providers.html", get(static_serve))
@@ -84,6 +90,30 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
         ),
         "app/views/routes.js" => (
             crate::STATIC_VIEW_ROUTES_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-state.js" => (
+            crate::STATIC_VIEW_USAGE_STATE_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-filters.js" => (
+            crate::STATIC_VIEW_USAGE_FILTERS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-panels.js" => (
+            crate::STATIC_VIEW_USAGE_PANELS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-panel-views.js" => (
+            crate::STATIC_VIEW_USAGE_PANEL_VIEWS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-export.js" => (
+            crate::STATIC_VIEW_USAGE_EXPORT_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/usage-summary.js" => (
+            crate::STATIC_VIEW_USAGE_SUMMARY_JS,
             "text/javascript; charset=utf-8",
         ),
         _ => {
