@@ -5,6 +5,78 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
 
+pub(super) fn promote_tool_search_output_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let mut discovered = Vec::new();
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        for (index, message) in messages.iter().enumerate() {
+            let Some(row) = message.as_object() else {
+                continue;
+            };
+            let output_type = row
+                .get("routecodex_chat_extension")
+                .and_then(Value::as_object)
+                .and_then(|extension| extension.get("responses_tool_output_type"))
+                .and_then(Value::as_str);
+            if row.get("role").and_then(Value::as_str) != Some("tool")
+                || output_type != Some("tool_search_output")
+            {
+                continue;
+            }
+            let content = row.get("content").ok_or_else(|| {
+                format!(
+                    "MalformedOutboundField target_protocol=provider path=$.messages[{index}].content"
+                )
+            })?;
+            let tools = match content {
+                Value::String(text) => serde_json::from_str::<Value>(text).map_err(|error| {
+                    format!(
+                        "MalformedOutboundField target_protocol=provider path=$.messages[{index}].content: {error}"
+                    )
+                })?,
+                value => value.clone(),
+            };
+            let tools = tools.as_array().ok_or_else(|| {
+                format!(
+                    "MalformedOutboundField target_protocol=provider path=$.messages[{index}].content"
+                )
+            })?;
+            discovered.extend(tools.iter().cloned());
+        }
+    } else if let Some(input) = payload.get("input").and_then(Value::as_array) {
+        for (index, item) in input.iter().enumerate() {
+            if item.get("type").and_then(Value::as_str) != Some("tool_search_output") {
+                continue;
+            }
+            let tools = item.get("tools").and_then(Value::as_array).ok_or_else(|| {
+                format!(
+                    "MalformedOutboundField target_protocol=responses path=$.input[{index}].tools"
+                )
+            })?;
+            discovered.extend(tools.iter().cloned());
+        }
+    }
+    if discovered.is_empty() {
+        return Ok(());
+    }
+    let top_level = payload.as_object_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$: expected object".to_string()
+    })?;
+    let tools = top_level
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$.tools: expected array".to_string()
+    })?;
+    for tool in discovered {
+        if !tools.iter().any(|existing| existing == &tool) {
+            tools.push(tool);
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn project_openai_responses_custom_tools_to_function_schema(
     payload: &mut Value,
 ) -> Result<(), String> {

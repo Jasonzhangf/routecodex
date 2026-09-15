@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
+use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy, project_openai_chat_reasoning_summary_policy,
     project_openai_client_metadata_to_metadata, validate_openai_metadata,
@@ -129,6 +130,7 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     // Re-running it here would reapply public metadata limits to the provider
     // compatible slot. Client metadata is already consumed as local context.
     let mut normalized = payload.clone();
+    promote_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     let instructions = normalized
         .as_object_mut()
         .and_then(|row| row.remove("instructions"))
@@ -177,8 +179,12 @@ fn normalize_responses_input_content_parts(payload: &mut Value) {
     }
 }
 
-pub(crate) fn normalize_v3_openai_responses_provider_request_payload(payload: &mut Value) {
+pub(crate) fn normalize_v3_openai_responses_provider_request_payload(
+    payload: &mut Value,
+) -> Result<(), String> {
+    promote_tool_search_output_tools_to_provider_tools(payload)?;
     normalize_responses_input_content_parts(payload);
+    Ok(())
 }
 
 fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {
@@ -1296,6 +1302,7 @@ fn normalize_openai_chat_messages_payload(
         payload,
         V3OutboundTargetProtocol::OpenAiChat,
     )?;
+    promote_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     if let Some(row) = normalized.as_object_mut() {
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())

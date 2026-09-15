@@ -149,6 +149,25 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     }
 
+    if is_glm_no_prompt_cache_key_profile(profile_id) {
+        if provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) || provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-chat")
+        {
+            if let Some(root) = payload.as_object_mut() {
+                root.remove("prompt_cache_key");
+                root.remove("verbosity");
+            }
+            return Ok(CompatResult {
+                payload,
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(payload, None));
+    }
+
     if is_minimax_profile(profile_id) {
         if provider_protocol_matches(
             adapter_context.provider_protocol.as_ref(),
@@ -393,6 +412,11 @@ fn is_minimax_profile(profile: &str) -> bool {
 
 fn is_responses_temperature_unsupported_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:temperature-unsupported")
+}
+
+fn is_glm_no_prompt_cache_key_profile(profile: &str) -> bool {
+    profile_matches(profile, "chat:glm-no-prompt-cache-key")
+        || profile_matches(profile, "openai-chat:glm-no-prompt-cache-key")
 }
 
 fn is_lmstudio_profile(profile: &str) -> bool {
