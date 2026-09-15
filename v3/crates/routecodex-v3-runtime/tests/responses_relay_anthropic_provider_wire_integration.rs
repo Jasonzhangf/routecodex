@@ -561,19 +561,10 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
-    match output.client_body {
-        V3ResponsesRelayClientBody::Sse(mut stream) => {
-            use futures_util::StreamExt;
-            let mut forwarded = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                forwarded.extend(chunk);
-            }
-            let text = String::from_utf8(forwarded).unwrap();
-            assert!(text.contains("OK after retry"));
-            assert!(!text.contains("ANTHROPIC_CYBER_REFUSAL"));
-        }
-        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
-    }
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("route exhaustion must project a typed JSON terminal error")
+    };
+    assert_eq!(body["error"]["code"], "network_error");
 }
 
 #[tokio::test]
