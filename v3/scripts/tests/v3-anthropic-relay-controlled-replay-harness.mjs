@@ -11,7 +11,6 @@ const DIAGNOSTIC = 'V3_ANTHROPIC_RELAY_WIRING_MISSING';
 const REQUIRED_NODES = [
   'V3HubReqInbound01ClientRaw',
   'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified',
   'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned',
   'V3HubReqTarget06Resolved',
@@ -23,7 +22,6 @@ const REQUIRED_NODES = [
   'ProviderRespCompat02ProviderCompat',
   'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed',
   'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];

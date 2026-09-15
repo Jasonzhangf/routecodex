@@ -7,7 +7,7 @@ const paths = {
   response: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   responseCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   responseInbound02: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
-  responseContinuation04: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+  responseChatProcess03: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   hooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs',
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
@@ -29,7 +29,7 @@ const runtime = [
   text.response,
   text.responseCommon,
   text.responseInbound02,
-  text.responseContinuation04,
+  text.responseChatProcess03,
   text.request,
   text.hooks,
   text.servertoolHooks,
@@ -44,7 +44,7 @@ const responseContract = [
   text.response,
   text.responseCommon,
   text.responseInbound02,
-  text.responseContinuation04,
+  text.responseChatProcess03,
 ].join('\n');
 const failures = [];
 
@@ -68,15 +68,7 @@ function countMatches(source, pattern) {
 
 requireAll(responseContract, 'V3 split response node contract', [
   'struct V3HubResponsePayload(pub(crate) Arc<Value>);',
-  'Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())',
-  'payload: Arc::clone(&finalized_payload),',
   'V3HubTransportIntent::Sse => V3HubResponseNormalizedKind::Sse',
-]);
-requireAll(text.request, paths.request, [
-  'canonical_context: Arc<Value>',
-  'restore_local_context_at_req04',
-  '} => Ok(Some(Arc::clone(canonical_context))),',
-  'V3HubRelayRequestHookEvent::Req04LocalContextRestored',
 ]);
 requireAll(text.hooks, paths.hooks, [
   "pub struct V3HubCurrentNodeBorrowedView<'node, T>",
@@ -86,11 +78,6 @@ requireAll(text.hooks, paths.hooks, [
 requireAll(text.probes, paths.probes, [
   'relay_json_moves_one_business_payload_through_req04',
   'relay_sse_keeps_one_canonical_payload_without_materializing_stream',
-  'local_context_is_retained_until_req04_outcome_release',
-  'servertool_roundtrip_uses_one_resp04_context_and_restores_before_req04_hook',
-  'canonical_context_shares_finalized_payload',
-  'drop(lookup)',
-  'drop(outcome)',
 ]);
 requireAll(text.design, paths.design, [
   'unbounded `deep_clone`',
@@ -196,7 +183,7 @@ if (providerTerminalOutputReconstructions === 1) {
 forbid(
   runtime,
   'Relay runtime source',
-  /(?:continuation|request|response|business)[^\n]{0,100}(?:truth|payload)[^\n]{0,100}(?:debug_snapshot|snapshot_payload)|(?:debug_snapshot|snapshot_payload)[^\n]{0,100}(?:truth|payload)/i,
+  /(?:request|response|business)[^\n]{0,100}(?:truth|payload)[^\n]{0,100}(?:debug_snapshot|snapshot_payload)|(?:debug_snapshot|snapshot_payload)[^\n]{0,100}(?:truth|payload)/i,
   'Debug/snapshot truth substitution',
 );
 forbid(

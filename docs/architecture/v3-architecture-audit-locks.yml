@@ -76,19 +76,20 @@ locked_items:
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-07-23T20:05:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:8aef490e60aec1ba0e582d7e462a2f36c39979188736b374fb48ccccb2c2e7c0
-    last_manual_authorization_id: auth-20260824-v3-protocol-fields-hub-request
+    fingerprint: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-hub-request
   - item_id: chain:v3.hub_pipeline.v1.response
     chain_id: v3.hub_pipeline.v1.response
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-07-23T20:05:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:6c9652ec050d62e5c23e4f5b776ea2d531a720e2725064c1cad8daaf148857cb
+    fingerprint: sha256:1899934ce325350d557e63c210da5373e00a1c4504d859d7f28ae9511f811146
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-hub-response
   - item_id: chain:v3.debug_error_foundation.mainline
     chain_id: v3.debug_error_foundation.mainline
     status: audited_locked
@@ -167,18 +168,18 @@ locked_items:
     chain_id: v3.hub_pipeline.v1.relay_request_source_slice
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:58f6791db7d4d70a78dddc22a71bedf70a68f8a8b67339ff676c84a181550866
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:d2e58f7b5e4d0b2a23480ca16f93e2cdb4eafd15f1ed85b280712bea43802892
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-relay-request
   - item_id: chain:v3.hub_pipeline.v1.relay_response_source_slice
     chain_id: v3.hub_pipeline.v1.relay_response_source_slice
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:8f264f0aee7ba9dc5e5d463e3edcf0eaa23f4ccff94fbc753da6130fbc293a30
-    last_manual_authorization_id: auth-20260827-v3-sse-closeout-map-sync
+    fingerprint: sha256:0fb0676fde9752047d0d8fd7fb3df966804df31c017f9c591b00a2c82cee95cb
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-relay-response
   - item_id: chain:v3.protocol.anthropic.characterization
     chain_id: v3.protocol.anthropic.characterization
     status: audited_locked
@@ -207,42 +208,18 @@ locked_items:
     chain_id: v3.hub_pipeline.v1.relay_payload_copy_runtime_probes
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:251a25d50d6b7329ee66b7c51c96c193fde1cb63c042db3468322a01221f0e64
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
-  - item_id: chain:v3.responses_continuation.remote_contract_store
-    chain_id: v3.responses_continuation.remote_contract_store
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:267d883470cf0169e30fd80fe8ad2c45ab223032476586dc8af9777d94024b50
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
-  - item_id: chain:v3.responses_continuation.remote_locator_codec
-    chain_id: v3.responses_continuation.remote_locator_codec
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:6138365d55bade93a2b131af8bd977573a29bac668e88bd395e5e0c265bf4b62
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
-  - item_id: chain:v3.responses_direct.remote_continuation.integration
-    chain_id: v3.responses_direct.remote_continuation.integration
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:74a1775d82edd711ecdb83fcf9683ad85abee514aef8085788147ef1fe3ed247
-    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-continuation
+    fingerprint: sha256:1db038838f1553d54fb81891f1f57bb467fae90abe93dc58cf029d9501b4239a
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-relay-copy-probes
   - item_id: chain:v3.anthropic_relay.controlled_runtime
     chain_id: v3.anthropic_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
-    last_manual_authorization_id: auth-20260831-v3-anthropic-relay-lock-refresh
+    fingerprint: sha256:6a9a534d2058b31e0ead260c16c7e3b4103efaa38a2b3dd5a67af99508e5a268
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-anthropic-relay
   - item_id: chain:v3.responses.websocket_v2.transport_hardening
     chain_id: v3.responses.websocket_v2.transport_hardening
     status: audited_locked
@@ -251,30 +228,22 @@ locked_items:
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     fingerprint: sha256:ab4f1ac4877642539f2d68dbafea87e276fee712cb76107514398687760a337a
     last_manual_authorization_id: auth-20260816-v3-websocket-owner-path-isolation
-  - item_id: chain:v3.anthropic_relay.local_continuation
-    chain_id: v3.anthropic_relay.local_continuation
-    status: audited_locked
-    reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
-    review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:2197cd67d5acc175722500946144b4411d23868256e53099326cb9a7dc80a20f
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
   - item_id: chain:v3.openai_chat_relay.controlled_runtime
     chain_id: v3.openai_chat_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-09-02T08:25:54-07:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:3e256371053adc2487cb72c43af44a974d9473b2aa68bbfc9caedc5648bd4be5
-    last_manual_authorization_id: auth-20260902-v3-silent-failure-openai-chat
+    fingerprint: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-openai-chat-relay
   - item_id: chain:v3.gemini_relay.controlled_runtime
     chain_id: v3.gemini_relay.controlled_runtime
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-09-02T08:25:54-07:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:8c1c30122b323785c0aaf6a3c7d5856c0a54fa0864b50899f027e117e35f3471
-    last_manual_authorization_id: auth-20260902-v3-admission-owner-drift-gemini
+    fingerprint: sha256:fe3f9fe3728235c7dc805caa3ab23b5027c707a93d32453f0dd3ec53a531e7c4
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-gemini-relay
   - item_id: chain:v3.entry_protocol_registry_contract.mainline
     chain_id: v3.entry_protocol_registry_contract.mainline
     status: audited_locked
@@ -287,10 +256,10 @@ locked_items:
     chain_id: v3.hub_relay.runtime_closeout
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
-    last_manual_authorization_id: auth-20260817-v3-relay-remove-unowned-failure-edge
+    fingerprint: sha256:a17caf420809f314d8e038f2882e9a5cbb06e8ca2b464bb4a0b406b51da1dbfb
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-hub-closeout
   - item_id: chain:v3.hub_relay.response_failure_entry
     chain_id: v3.hub_relay.response_failure_entry
     status: audited_locked
@@ -311,18 +280,18 @@ locked_items:
     chain_id: v3.protocol_conversion_field_parity
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:5bd747d232db5fac3e28001be452c99e23f7b70211bb17fc533a31e158b88fe5
-    last_manual_authorization_id: auth-20260822-v3-runtime-handoff-map-refresh-protocol-parity
+    fingerprint: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-protocol-parity
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:ad3bc81d04b0ffe597a206604587b72572b9611fe81c25a1ac07efd888a3223a
-    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-responses-relay
+    fingerprint: sha256:bf36d0b1eea28a4cf3aa2ab9762c844689ae72e7776945d2f02e8377952e3709
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-responses-relay-entry
   - item_id: chain:v3.error.raw_wire_evidence
     chain_id: v3.error.raw_wire_evidence
     status: audited_locked
@@ -335,26 +304,26 @@ locked_items:
     chain_id: v3.servertool_center.skeleton
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:d9b7b760ba2a816c2228607da0d8a53e4a7b4d5aefaf07894ec0a53fd065cec0
-    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-servertool
+    fingerprint: sha256:5f164953cc647af9d25dd3b115652be3be6a368577503a22761d03120f0a6b78
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-servertool-center
   - item_id: chain:v3.hub_relay.tool_servertool_multiturn_parity
     chain_id: v3.hub_relay.tool_servertool_multiturn_parity
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:21b3ad19b2b7ff42370ffba6eefd304b9ab880bc4def6a0282d6f68ff507ddaa
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:6d923b9da6c48b768c07139d1b52a15f4054ecdf5c9ee54a3f845d14295b9b4c
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-tool-parity
   - item_id: chain:v3.resp03_tool_governance_gap_closeout
     chain_id: v3.resp03_tool_governance_gap_closeout
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:7950b8876b8d3cad534e7b2ca50f75fd05e93e5328aab90ab184e5abc99f12f9
-    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-resp03
+    fingerprint: sha256:02b1273a9573f68bc4f9d2b911b67055869a7303fda280df1f2a1a34f5da52f5
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-resp03-governance
   - item_id: chain:v3.live_provider_compat.parity
     chain_id: v3.live_provider_compat.parity
     status: audited_locked
@@ -375,10 +344,10 @@ locked_items:
     chain_id: v3.protocol_normalization_tool_governance_boundary
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:4537268f94a2d9e8f4e6f0e8d674f1b667da005d2038e5b0d9d0809df9d14c48
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:50868ef476fc01071f66891af7b15a28c047020020b81789a05a8b54b40e541a
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-protocol-boundary
   - item_id: chain:v3.selected_provider_model_binding
     chain_id: v3.selected_provider_model_binding
     status: audited_locked
@@ -407,10 +376,10 @@ locked_items:
     chain_id: v3.runtime_timing_observability.mainline
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:f028534b46300c81ae3d629b50191b18f6c0ee2f758f13b6289b733810662c5f
-    last_manual_authorization_id: auth-20260910-v3-stopless-retirement-timing
+    fingerprint: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-runtime-timing
   - item_id: chain:v3.responses_session_admission
     chain_id: v3.responses_session_admission
     status: audited_locked
@@ -431,10 +400,10 @@ locked_items:
     chain_id: v3.provider_action_gate.mainline
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
-    last_manual_authorization_id: auth-20260830-v3-execution-control-provider-action
+    fingerprint: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-provider-action
   - item_id: chain:v3.build_test_artifact_budget
     chain_id: v3.build_test_artifact_budget
     status: audited_locked
@@ -455,10 +424,10 @@ locked_items:
     chain_id: v3.sse.protocol_codec_projection_boundary
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
-    last_manual_authorization_id: auth-20260815-v3-sse-codec-file-decomposition-lock-refresh
+    fingerprint: sha256:95185e0a078702e130d8cc006c23ffb98128e5f88071a2953dc8d80ae8b5e24a
+    last_manual_authorization_id: auth-20260915-v3-remove-continuation-sse-codec
   - item_id: chain:vr.current_turn_typed_route_facts
     chain_id: vr.current_turn_typed_route_facts
     status: audited_locked
@@ -476,6 +445,132 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260915-v3-remove-continuation-hub-request
+    item_id: chain:v3.hub_pipeline.v1.request
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Hub request chain now goes directly from Req02 normalization to Req04 governance; the removed Req03 continuation classification node, ownership resource, restore edge, and stale caller/callee bindings are no longer part of the locked topology."
+    fingerprint_before: sha256:8aef490e60aec1ba0e582d7e462a2f36c39979188736b374fb48ccccb2c2e7c0
+    fingerprint_after: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
+  - authorization_id: auth-20260915-v3-remove-continuation-hub-response
+    item_id: chain:v3.hub_pipeline.v1.response
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Hub response chain now goes directly from Resp03 governance to Resp05 client projection; the removed Resp04 continuation commit node, local/remote continuation resources, and save interval are no longer part of the locked topology."
+    fingerprint_before: sha256:6c9652ec050d62e5c23e4f5b776ea2d531a720e2725064c1cad8daaf148857cb
+    fingerprint_after: sha256:1899934ce325350d557e63c210da5373e00a1c4504d859d7f28ae9511f811146
+  - authorization_id: auth-20260915-v3-remove-continuation-relay-request
+    item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Relay request source slice now binds Req02 normalization directly to Req04 governance and rejects previous_response_id at the boundary; the removed classify/restore continuation edges are no longer part of the locked topology."
+    fingerprint_before: sha256:58f6791db7d4d70a78dddc22a71bedf70a68f8a8b67339ff676c84a181550866
+    fingerprint_after: sha256:d2e58f7b5e4d0b2a23480ca16f93e2cdb4eafd15f1ed85b280712bea43802892
+  - authorization_id: auth-20260915-v3-remove-continuation-relay-response
+    item_id: chain:v3.hub_pipeline.v1.relay_response_source_slice
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Relay response source slice now binds Resp03 governance directly to the client semantic projection; the removed Resp04 continuation commit edge is no longer part of the locked topology."
+    fingerprint_before: sha256:8f264f0aee7ba9dc5e5d463e3edcf0eaa23f4ccff94fbc753da6130fbc293a30
+    fingerprint_after: sha256:0fb0676fde9752047d0d8fd7fb3df966804df31c017f9c591b00a2c82cee95cb
+  - authorization_id: auth-20260915-v3-remove-continuation-relay-copy-probes
+    item_id: chain:v3.hub_pipeline.v1.relay_payload_copy_runtime_probes
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Relay payload-copy probes now bind the direct Req02-to-Req04 and Resp03-to-client edges; the continuation context retention probes and restored-history interval are no longer part of the locked topology."
+    fingerprint_before: sha256:251a25d50d6b7329ee66b7c51c96c193fde1cb63c042db3468322a01221f0e64
+    fingerprint_after: sha256:1db038838f1553d54fb81891f1f57bb467fae90abe93dc58cf029d9501b4239a
+  - authorization_id: auth-20260915-v3-remove-continuation-anthropic-relay
+    item_id: chain:v3.anthropic_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Anthropic Relay controlled runtime now carries the fixed Req01-Req09 and Resp01-Resp06 topology without the removed continuation classification, commit, and local continuation chain."
+    fingerprint_before: sha256:f95c3a9aa845e97425fc0ccc7423244d47d49c44652bedef18f77bfdf201dc57
+    fingerprint_after: sha256:6a9a534d2058b31e0ead260c16c7e3b4103efaa38a2b3dd5a67af99508e5a268
+  - authorization_id: auth-20260915-v3-remove-continuation-openai-chat-relay
+    item_id: chain:v3.openai_chat_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The OpenAI Chat Relay controlled runtime now binds the fixed topology without continuation classification, continuation commit, or local continuation ownership."
+    fingerprint_before: sha256:3e256371053adc2487cb72c43af44a974d9473b2aa68bbfc9caedc5648bd4be5
+    fingerprint_after: sha256:7b3839cd5ac05ce2266e74742ed50b5126a2e67af82593392d7abc251a3187ea
+  - authorization_id: auth-20260915-v3-remove-continuation-gemini-relay
+    item_id: chain:v3.gemini_relay.controlled_runtime
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Gemini Relay controlled runtime now binds the fixed topology without continuation classification, continuation commit, or local continuation ownership."
+    fingerprint_before: sha256:8c1c30122b323785c0aaf6a3c7d5856c0a54fa0864b50899f027e117e35f3471
+    fingerprint_after: sha256:fe3f9fe3728235c7dc805caa3ab23b5027c707a93d32453f0dd3ec53a531e7c4
+  - authorization_id: auth-20260915-v3-remove-continuation-hub-closeout
+    item_id: chain:v3.hub_relay.runtime_closeout
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The runtime closeout now binds 14 adjacent response edges from Req01 through Resp06 without the Resp04 continuation commit step."
+    fingerprint_before: sha256:78e6260717130ee093f77dbf95c62d216bfa13cae7120c4565d4704c52df028c
+    fingerprint_after: sha256:a17caf420809f314d8e038f2882e9a5cbb06e8ca2b464bb4a0b406b51da1dbfb
+  - authorization_id: auth-20260915-v3-remove-continuation-protocol-parity
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. Protocol field parity now pins the direct Responses Relay integration without the removed local continuation integration test and continuation-only outbound owner."
+    fingerprint_before: sha256:5bd747d232db5fac3e28001be452c99e23f7b70211bb17fc533a31e158b88fe5
+    fingerprint_after: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
+  - authorization_id: auth-20260915-v3-remove-continuation-responses-relay-entry
+    item_id: chain:v3.responses_relay.source_server_entry
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The Responses Relay source server entry now binds the fixed topology and rejects a non-empty previous_response_id before provider send without a continuation owner."
+    fingerprint_before: sha256:ad3bc81d04b0ffe597a206604587b72572b9611fe81c25a1ac07efd888a3223a
+    fingerprint_after: sha256:bf36d0b1eea28a4cf3aa2ab9762c844689ae72e7776945d2f02e8377952e3709
+  - authorization_id: auth-20260915-v3-remove-continuation-servertool-center
+    item_id: chain:v3.servertool_center.skeleton
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The ServertoolCenter skeleton now describes only current-turn web_search and servertool CLI state, without continuation save/restore ownership."
+    fingerprint_before: sha256:d9b7b760ba2a816c2228607da0d8a53e4a7b4d5aefaf07894ec0a53fd065cec0
+    fingerprint_after: sha256:5f164953cc647af9d25dd3b115652be3be6a368577503a22761d03120f0a6b78
+  - authorization_id: auth-20260915-v3-remove-continuation-tool-parity
+    item_id: chain:v3.hub_relay.tool_servertool_multiturn_parity
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The tool/servertool multiturn parity chain now proves current-turn tool governance through Req04 and Resp03 without an immutable restored-history continuation interval."
+    fingerprint_before: sha256:21b3ad19b2b7ff42370ffba6eefd304b9ab880bc4def6a0282d6f68ff507ddaa
+    fingerprint_after: sha256:6d923b9da6c48b768c07139d1b52a15f4054ecdf5c9ee54a3f845d14295b9b4c
+  - authorization_id: auth-20260915-v3-remove-continuation-resp03-governance
+    item_id: chain:v3.resp03_tool_governance_gap_closeout
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. Resp03 remains the response governance endpoint and projects directly to the client semantic stage without a continuation commit."
+    fingerprint_before: sha256:7950b8876b8d3cad534e7b2ca50f75fd05e93e5328aab90ab184e5abc99f12f9
+    fingerprint_after: sha256:02b1273a9573f68bc4f9d2b911b67055869a7303fda280df1f2a1a34f5da52f5
+  - authorization_id: auth-20260915-v3-remove-continuation-protocol-boundary
+    item_id: chain:v3.protocol_normalization_tool_governance_boundary
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. The protocol normalization boundary now ends at Resp03 governance and client projection without continuation save/restore semantics."
+    fingerprint_before: sha256:4537268f94a2d9e8f4e6f0e8d674f1b667da005d2038e5b0d9d0809df9d14c48
+    fingerprint_after: sha256:50868ef476fc01071f66891af7b15a28c047020020b81789a05a8b54b40e541a
+  - authorization_id: auth-20260915-v3-remove-continuation-runtime-timing
+    item_id: chain:v3.runtime_timing_observability.mainline
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. Runtime timing remains a side-channel and no longer observes or reconstructs continuation state."
+    fingerprint_before: sha256:f028534b46300c81ae3d629b50191b18f6c0ee2f758f13b6289b733810662c5f
+    fingerprint_after: sha256:d3cf88658ce49c20b1c8be822e3b1ac8e7191d8ed4229c4a7b4c13872b114fe5
+  - authorization_id: auth-20260915-v3-remove-continuation-provider-action
+    item_id: chain:v3.provider_action_gate.mainline
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. Provider action admission now excludes continuation recovery paths while preserving the canonical Error01-Error06 and provider-action ownership."
+    fingerprint_before: sha256:6969ab703d50e0f71f8fdf68ddb7eac38f971c64105ef9a4467a29b539d6413c
+    fingerprint_after: sha256:78d79632e9ad17d590ec3c2f631ba01361706cea83a84914532e3e367c72531b
+  - authorization_id: auth-20260915-v3-remove-continuation-sse-codec
+    item_id: chain:v3.sse.protocol_codec_projection_boundary
+    approved_by: Jason
+    approved_at: '2026-09-15T00:00:00-07:00'
+    reason: "Jason authorized fully removing the Responses continuation feature from V3. SSE protocol projection now consumes the Resp03-governed payload directly and no longer binds a continuation commit owner."
+    fingerprint_before: sha256:f9cef82020d255ad1ca85add8fe970fcacdc2624de21ca2499215285f34df710
+    fingerprint_after: sha256:95185e0a078702e130d8cc006c23ffb98128e5f88071a2953dc8d80ae8b5e24a
   - authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
     item_id: chain:v3.server.managed_lifecycle
     approved_by: Jason

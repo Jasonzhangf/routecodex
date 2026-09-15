@@ -17,18 +17,17 @@ use super::responses_relay_runtime::{
 use super::V3HubRelayResponseError;
 use super::{
     build_provider_req_compat_06_from_v3_hub_req_outbound_07,
-    build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
-    build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
+    build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
     build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
     build_v3_hub_req_inbound_01_client_raw,
     build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
     build_v3_hub_req_target_06_from_v3_hub_req_execution_05,
     build_v3_provider_req_outbound_08_from_provider_req_compat_06,
-    build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08, V3HubContinuationOwnership,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution,
-    V3HubTransportIntent, V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin,
-    V3ServerToolInstanceState, V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
+    build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08, V3HubEntryProtocol,
+    V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
+    V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
+    V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
 use super::{
     build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
@@ -248,11 +247,7 @@ pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport + ?Sized>
                 "servertool followup canonicalization failed: {error}"
             ))
         })?;
-    let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-        req02,
-        V3HubContinuationOwnership::New,
-    );
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
     let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
         req04,
         V3HubExecutionMode::Relay,

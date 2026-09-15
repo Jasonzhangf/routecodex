@@ -3,16 +3,14 @@ use axum::http::HeaderMap;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-pub(crate) struct V3ResponsesContinuationEntryFacts {
-    pub(crate) previous_response_id: Option<String>,
+pub(crate) struct V3ResponsesEntryFacts {
     pub(crate) has_function_call_output: bool,
     pub(crate) has_unpaired_function_call_output: bool,
 }
 
-impl V3ResponsesContinuationEntryFacts {
+impl V3ResponsesEntryFacts {
     pub(crate) fn project(payload: &Value) -> Self {
         Self {
-            previous_response_id: responses_payload_previous_response_id(payload),
             has_function_call_output: payload_input_has_function_call_output(payload.get("input")),
             has_unpaired_function_call_output: payload_input_has_unpaired_function_call_output(
                 payload.get("input"),
@@ -22,14 +20,14 @@ impl V3ResponsesContinuationEntryFacts {
 }
 
 pub(crate) fn responses_entry_facts_allow_fresh_protocol_plan(
-    entry_facts: &V3ResponsesContinuationEntryFacts,
+    entry_facts: &V3ResponsesEntryFacts,
 ) -> bool {
-    entry_facts.previous_response_id.is_none() && !entry_facts.has_unpaired_function_call_output
+    !entry_facts.has_unpaired_function_call_output
 }
 
 pub(crate) fn responses_effective_execution_mode_for_entry_facts(
     configured_mode: V3EntryProtocolExecutionMode,
-    entry_facts: &V3ResponsesContinuationEntryFacts,
+    entry_facts: &V3ResponsesEntryFacts,
 ) -> V3EntryProtocolExecutionMode {
     match configured_mode {
         V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,
@@ -46,7 +44,7 @@ pub(crate) fn responses_effective_execution_mode_for_entry_facts(
 
 pub(crate) fn responses_effective_execution_mode_for_request_purpose(
     configured_mode: V3EntryProtocolExecutionMode,
-    entry_facts: &V3ResponsesContinuationEntryFacts,
+    entry_facts: &V3ResponsesEntryFacts,
     request_purpose: V3RequestPurpose,
 ) -> V3EntryProtocolExecutionMode {
     if request_purpose.is_compaction() {
@@ -55,30 +53,16 @@ pub(crate) fn responses_effective_execution_mode_for_request_purpose(
     responses_effective_execution_mode_for_entry_facts(configured_mode, entry_facts)
 }
 
-pub(crate) fn responses_payload_previous_response_id(payload: &Value) -> Option<String> {
-    payload
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-pub(crate) fn build_responses_direct_continuation_scope(
+pub(crate) fn build_responses_relay_server_tool_scope(
     headers: &HeaderMap,
     payload: Option<&Value>,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
-    entry_facts: &V3ResponsesContinuationEntryFacts,
-) -> Result<V3ResponsesDirectContinuationScope, String> {
-    let (session_id, conversation_id) = request_local_continuation_scope(
-        headers,
-        payload,
-        entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
-        request_id,
-    )?;
-    Ok(V3ResponsesDirectContinuationScope::responses(
+) -> Result<V3ResponsesRelayServerToolScope, String> {
+    let (session_id, conversation_id) =
+        request_local_server_tool_scope(headers, payload, false, request_id)?;
+    Ok(V3ResponsesRelayServerToolScope::new(
         endpoint,
         session_id,
         conversation_id,
@@ -87,21 +71,16 @@ pub(crate) fn build_responses_direct_continuation_scope(
     ))
 }
 
-pub(crate) fn build_responses_relay_local_continuation_scope(
+pub(crate) fn build_responses_direct_server_tool_scope(
     headers: &HeaderMap,
     payload: Option<&Value>,
     request_id: &str,
     server: &V3ServerManifest,
     endpoint: &str,
-    entry_facts: &V3ResponsesContinuationEntryFacts,
-) -> Result<V3ResponsesRelayLocalContinuationScope, String> {
-    let (session_id, conversation_id) = request_local_continuation_scope(
-        headers,
-        payload,
-        entry_facts.previous_response_id.is_some() || entry_facts.has_unpaired_function_call_output,
-        request_id,
-    )?;
-    Ok(V3ResponsesRelayLocalContinuationScope::responses(
+) -> Result<V3ResponsesDirectServerToolScope, String> {
+    let (session_id, conversation_id) =
+        request_local_server_tool_scope(headers, payload, false, request_id)?;
+    Ok(V3ResponsesDirectServerToolScope::new(
         endpoint,
         session_id,
         conversation_id,
@@ -110,45 +89,7 @@ pub(crate) fn build_responses_relay_local_continuation_scope(
     ))
 }
 
-pub(crate) fn build_responses_previous_response_owner_resolution_context(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    request_id: &str,
-    server: &V3ServerManifest,
-    endpoint: &str,
-    entry_facts: &V3ResponsesContinuationEntryFacts,
-) -> Result<Option<V3ResponsesPreviousResponseOwnerResolutionContext>, String> {
-    if entry_facts.previous_response_id.is_none() {
-        return Ok(None);
-    }
-    let direct_scope = build_responses_direct_continuation_scope(
-        headers,
-        payload,
-        request_id,
-        server,
-        endpoint,
-        entry_facts,
-    )?;
-    let relay_scope = build_responses_relay_local_continuation_scope(
-        headers,
-        payload,
-        request_id,
-        server,
-        endpoint,
-        entry_facts,
-    )?;
-    let now_epoch_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|error| format!("system time precedes Unix epoch: {error}"))?
-        .as_millis() as u64;
-    Ok(Some(V3ResponsesPreviousResponseOwnerResolutionContext {
-        direct_scope,
-        relay_scope,
-        now_epoch_ms,
-    }))
-}
-
-pub(crate) fn request_local_continuation_scope(
+pub(crate) fn request_local_server_tool_scope(
     headers: &HeaderMap,
     payload: Option<&Value>,
     requires_client_scope: bool,
@@ -166,7 +107,7 @@ pub(crate) fn request_local_continuation_scope(
             Ok((request_scope.clone(), request_scope))
         }
         _ => Err(
-            "Responses continuation requires typed session and conversation control identity in control headers, x-codex-turn-metadata, or request payload client_metadata; without those typed keys request payload and client metadata cannot construct continuation control identity"
+            "Responses server tool scope requires typed session and conversation control identity in control headers, x-codex-turn-metadata, or request payload client_metadata"
                 .to_string(),
         ),
     }

@@ -60,7 +60,7 @@ flowchart TD
   N5[&quot;&lt;b&gt;V3ProviderReqOutbound09TransportRequest&lt;/b&gt;&quot;]
   title_note --&gt; N0
   N0 --&gt;|dynamic endpoint classified as gemini| N1
-  N2 --&gt;|entry normalization, continuation, tool governance| N3
+  N2 --&gt;|entry normalization then current-turn tool governance| N3
   N3 --&gt;|Hub semantic to Gemini provider semantic| N4
   N4 --&gt;|Gemini wire URL/body transport| N5
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
@@ -76,7 +76,7 @@ flowchart TD
   title_note --&gt; N0
   N0 --&gt;|provider compat before Hub parse| N1
   N1 --&gt;|candidate/functionCall/finishReason governance owner| N2
-  N2 --&gt;|save then project client semantic| N3
+  N2 --&gt;|project client semantic after governance| N3
   N3 --&gt;|Body::from_stream / JSON body transport only| N4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   class N0,N1,N2,N3,N4 node;</pre></div></section>

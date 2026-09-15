@@ -6,15 +6,12 @@ pub mod hooks;
 pub mod hub_v1;
 mod internal;
 pub mod kernel;
-pub mod local_continuation;
 pub mod nodes;
 pub mod protocol_tables;
 mod provider_action_gate;
 mod provider_error_policy_matching;
 mod provider_failure_global_probe;
 mod provider_failure_runtime_policy;
-pub mod remote_continuation;
-pub mod responses_continuation_owner;
 pub mod route_policy;
 mod runtime_timing;
 mod selected_provider_model_binding;
@@ -47,27 +44,20 @@ pub use kernel::{
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel,
-    execute_v3_responses_direct_runtime_kernel_with_continuation,
-    execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state,
-    execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
     project_v3_protocol_execution_plan_failure, V3ChatDirectCodec, V3DirectProtocolCodec,
-    V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
     V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
     V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
     V3ResponsesProtocolRelayHandoff,
 };
-pub use local_continuation::*;
 pub use nodes::*;
 pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
     V3ProviderFailureRuntimeHealth,
 };
-pub use remote_continuation::*;
-pub use responses_continuation_owner::*;
 pub use route_policy::*;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

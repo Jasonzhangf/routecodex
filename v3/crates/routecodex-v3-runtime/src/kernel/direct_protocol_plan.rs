@@ -23,7 +23,7 @@ pub fn plan_v3_responses_protocol_execution_with_provider_health(
     {
         return Err(protocol_plan_failure(
             runtime_source(
-                "V3HubReqContinuation03Classified",
+                "V3HubReqInbound02Normalized",
                 "protocol execution plan only handles non-continuation responses requests",
             ),
             trace,
@@ -439,8 +439,8 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         .map(|server| server.port);
     let dry_pipeline_id = format!("dry-pipeline-{}", fixture.fixture_id);
     let core_state = match initial_plan {
-        Some(plan) => V3ResponsesDirectRuntimeCoreState::no_continuation().with_initial_plan(plan),
-        None => V3ResponsesDirectRuntimeCoreState::no_continuation(),
+        Some(plan) => V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(plan),
+        None => V3ResponsesDirectRuntimeCoreState::new(),
     }
     .with_provider_health_neutral()
     .with_exhaustion_rescue_probe_disabled();
@@ -548,10 +548,6 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         "object": "routecodex.provider_request_dry_run_terminal",
         "terminal_effect": "no_network_send",
         "provider_network_send": false,
-        "continuation": {
-            "owner": "none",
-            "continuable": false
-        },
         "message": "routecodex provider-request dry-run stopped before provider send"
     });
     let provider_request = captured_provider_request

@@ -17,7 +17,6 @@ const runtimeSourceRootRel = 'v3/crates/routecodex-v3-runtime/src';
 const runtimeExecutionControlRel = `${runtimeSourceRootRel}/execution_control.rs`;
 const runtimeNodesRel = `${runtimeSourceRootRel}/nodes.rs`;
 const providerFailurePolicyRel = `${runtimeSourceRootRel}/provider_failure_runtime_policy.rs`;
-const directContinuationCommitRel = `${runtimeSourceRootRel}/kernel/direct_continuation_commit.rs`;
 const directKernelRel = `${runtimeSourceRootRel}/kernel.rs`;
 const directCoreRel = `${runtimeSourceRootRel}/kernel/v3_direct_core.rs`;
 const responsesRelayRuntimeRel = `${runtimeSourceRootRel}/hub_v1/responses_relay_runtime.rs`;
@@ -190,11 +189,6 @@ function validateSuccessReceiptSource() {
   requireValue(
     /fn record_provider_success_in_failure_scope\([\s\S]{0,180}&crate::nodes::V3AttemptSuccessReceipt/u.test(providerFailurePolicy),
     `${providerFailurePolicyRel}: provider health success must require success receipt`,
-  );
-  const directContinuationCommit = readText(directContinuationCommitRel);
-  requireValue(
-    /fn commit_or_release_v3_direct_continuation\([\s\S]{0,120}&V3AttemptSuccessReceipt/u.test(directContinuationCommit),
-    `${directContinuationCommitRel}: continuation commit must require success receipt`,
   );
 }
 

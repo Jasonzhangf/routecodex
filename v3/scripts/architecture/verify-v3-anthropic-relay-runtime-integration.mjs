@@ -16,6 +16,7 @@ const hubPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
 const reqTarget06Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs';
 const providerReq09Path = 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_outbound_09_transport_request.rs';
 const codecPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs';
+const responseCloseoutPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs';
 const providerCompatPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs';
 const responsesRuntimePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs';
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
@@ -26,6 +27,8 @@ const designPath = 'docs/goals/v3-anthropic-relay-runtime-integration-test-desig
 const manifestPath = 'docs/architecture/manifests/v3.anthropic_relay.controlled_runtime.mainline.yml';
 const callMapPath = 'docs/architecture/v3-mainline-call-map.yml';
 const runtime = readRepo(runtimePath);
+const responseCloseout = readRepo(responseCloseoutPath);
+const runtimeSurface = `${runtime}\n${responseCloseout}`;
 const hub = readRepo(hubPath);
 const requestNodeSurface = [
   hub,
@@ -46,14 +49,14 @@ const failures = [];
 const expectedManifestNodes = [
   'V3ServerValidatedMessagesRequest',
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
+  'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
   'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
   'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
   'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
+  'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
 if (manifest.lifecycle_id !== 'v3.anthropic_relay.controlled_runtime') {
@@ -66,10 +69,27 @@ if (JSON.stringify(manifest.node_ids) !== JSON.stringify(expectedManifestNodes))
   failures.push(`${manifestPath}: fixed node order mismatch`);
 }
 const manifestEdges = Array.isArray(manifest.edges) ? manifest.edges : [];
-if (manifestEdges.length !== 17) failures.push(`${manifestPath}: expected 17 adjacent edges`);
+const expectedStepIds = [
+  'v3-anthropic-relay-01',
+  'v3-anthropic-relay-02',
+  'v3-anthropic-relay-03',
+  'v3-anthropic-relay-05',
+  'v3-anthropic-relay-06',
+  'v3-anthropic-relay-07',
+  'v3-anthropic-relay-08',
+  'v3-anthropic-relay-09',
+  'v3-anthropic-relay-10',
+  'v3-anthropic-relay-11',
+  'v3-anthropic-relay-12',
+  'v3-anthropic-relay-13',
+  'v3-anthropic-relay-14',
+  'v3-anthropic-relay-15',
+  'v3-anthropic-relay-16',
+];
+if (manifestEdges.length !== expectedStepIds.length) failures.push(`${manifestPath}: expected 15 adjacent edges`);
 for (let index = 0; index < manifestEdges.length; index += 1) {
   const edge = manifestEdges[index];
-  const expectedStep = `v3-anthropic-relay-${String(index + 1).padStart(2, '0')}`;
+  const expectedStep = expectedStepIds[index];
   if (edge.step_id !== expectedStep
       || edge.from_node !== expectedManifestNodes[index]
       || edge.to_node !== expectedManifestNodes[index + 1]
@@ -94,8 +114,12 @@ if (!callMapChain) {
       'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01',
     ],
     [
+      'v3-anthropic-relay-15',
+      'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
+    ],
+    [
       'v3-anthropic-relay-16',
-      'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+      'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
     ],
   ]);
   for (const [stepId, calleeSymbol] of expectedCallees) {
@@ -118,23 +142,22 @@ const adjacentBuilders = [
   'build_v3_provider_resp_inbound_01_raw',
   'hooks.normalize(resp01)',
   'hooks.govern(resp02',
-  'hooks.commit(resp03)',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
 ];
-for (const symbol of adjacentBuilders) requireText(runtime, runtimePath, symbol);
+for (const symbol of adjacentBuilders) requireText(runtimeSurface, `${runtimePath}+${responseCloseoutPath}`, symbol);
 for (const node of [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
+  'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
   'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
   'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
   'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
+  'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
-]) requireText(runtime, runtimePath, `trace.push("${node}")`);
+]) requireText(runtimeSurface, `${runtimePath}+${responseCloseoutPath}`, `trace.push("${node}")`);
 
 for (const phrase of [
   'compile_v3_hub_v1_static_registry()',
@@ -142,7 +165,7 @@ for (const phrase of [
   'V3_ERROR_CHAIN_NODE_IDS',
   'materialize_v3_provider_sse_as_canonical_response',
   'project_v3_responses_json_as_anthropic_events',
-  'project_v3_anthropic_events_after_resp04',
+  'project_v3_anthropic_client_events',
 ]) requireText(
   `${runtime}\n${codec}\n${providerCompat}\n${responsesRuntime}`,
   'runtime/codec/provider-compat',
@@ -153,12 +176,12 @@ requireOrder(runtime, runtimePath, [
   'closeout_anthropic_relay_sse_response(',
   'closeout_anthropic_relay_response(',
   'project_v3_responses_json_as_anthropic_events(finalized)?',
-  'project_v3_anthropic_events_after_resp04(client_events)',
+  'project_v3_anthropic_client_events(client_events)',
 ]);
 for (const phrase of [
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
   'resp06.into_client_payload()',
-]) requireText(runtime, runtimePath, phrase);
+]) requireText(runtimeSurface, `${runtimePath}+${responseCloseoutPath}`, phrase);
 for (const phrase of [
   'selected_target: routecodex_v3_target::V3TargetCandidate',
   'fn into_provider_semantic_payload(',
@@ -207,7 +230,7 @@ for (const phrase of [
 ]) requireText(design, designPath, phrase);
 
 forbid(runtime, runtimePath, [
-  /SUCCESS_TRACE|expected_node_trace|fixture/i,
+  /SUCCESS_TRACE|expected_node_trace|expected_client_response|expected_upstream_request/,
   /fallback/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,

@@ -35,7 +35,6 @@ routing_group = "default"
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.anthropic_first]
 type = "anthropic"
@@ -85,7 +84,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.relay_first]
 type = "anthropic"
@@ -179,7 +177,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
             payload: json!({"model": "client-model", "input": "hello"}),
         },
         &transport,
-        None,
         None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
@@ -278,7 +275,6 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         },
         &transport,
         None,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -350,7 +346,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
             }),
         },
         &transport,
-        None,
         None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
@@ -653,7 +648,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.glm]
 type = "openai_chat"
@@ -727,7 +721,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.minimax]
 type = "openai_chat"

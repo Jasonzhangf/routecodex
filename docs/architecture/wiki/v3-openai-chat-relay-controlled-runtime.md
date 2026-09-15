@@ -10,7 +10,7 @@
 - Feature: `v3.openai_chat_relay_runtime_integration`.
 - Evidence boundary: controlled Rust loopback JSON/SSE/error/isolation only.
 - Live provider compatibility, install, restart, release, and production cutover remain pending.
-- Responses Direct, Anthropic continuation, and Provider WebSocket owners are unchanged.
+- Responses Direct, Anthropic Relay, and Provider WebSocket owners are unchanged.
 
 ## Single lifecycle
 
@@ -18,8 +18,7 @@
 flowchart LR
   S[V3OpenAiChatRelayRuntimeInput] --> R1[V3HubReqInbound01ClientRaw]
   R1 --> R2[V3HubReqInbound02Normalized]
-  R2 --> R3[V3HubReqContinuation03Classified]
-  R3 --> R4[V3HubReqChatProcess04Governed]
+  R2 --> R4[V3HubReqChatProcess04Governed]
   R4 --> R5[V3HubReqExecution05Planned]
   R5 --> R6[V3HubReqTarget06Resolved]
   R6 --> R7[V3HubReqOutbound07ProviderSemantic]
@@ -29,12 +28,11 @@ flowchart LR
   P --> P1[V3ProviderRespInbound01Raw]
   P1 --> P2[V3HubRespInbound02Normalized]
   P2 --> P3[V3HubRespChatProcess03Governed]
-  P3 --> P4[V3HubRespContinuation04Committed]
-  P4 --> P5[V3HubRespOutbound05ClientSemantic]
+  P3 --> P5[V3HubRespOutbound05ClientSemantic]
   P5 --> P6[V3ServerRespOutbound06ClientFrame]
 ```
 
-The machine edge IDs are `v3-openai-chat-relay-01..15`. Server owns only HTTP entry and final
+Machine edges omit the retired continuation step slots. Server owns only HTTP entry and final
 transport. Runtime owns OpenAI Chat protocol characterization, adjacent Hub orchestration,
 provider invocation, response governance, and Error01–06 projection.
 

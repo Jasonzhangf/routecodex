@@ -120,15 +120,6 @@ edges:
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-09
-    from: V3ExecutionRetryOrReselect
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_exact_selected_provider_action
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-10
     from: V3Error05RecoveryWitness
     to: V3ProviderActionGateAdmission
@@ -442,14 +433,14 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: record_provider_success_after_resp04
+    callee_symbol: record_provider_success_after_response_governance
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - step_id: v3-provider-action-gate-47
     from: V3ProviderActionSuccessFinalize
     to: V3ProviderActionSuccessRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: record_provider_success_after_resp04
+    caller_symbol: record_provider_success_after_response_governance
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
     callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs

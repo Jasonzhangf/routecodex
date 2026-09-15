@@ -732,6 +732,18 @@ fn strip_v3_resp03_encrypted_reasoning_content(
 }
 
 impl V3HubRespChatProcess03Governed {
+    pub(crate) fn provider_payload(&self) -> &Value {
+        self.previous.provider_payload().as_ref()
+    }
+
+    pub fn finalized_payload(&self) -> &Value {
+        self.provider_payload()
+    }
+
+    pub(crate) fn provider_raw(&self) -> &V3ProviderRespInbound01Raw {
+        self.previous.provider_raw()
+    }
+
     pub fn terminality(&self) -> V3HubResponseTerminality {
         self.terminality
     }
@@ -991,9 +1003,6 @@ pub struct V3HubRelayResponseHookRegistry {
         V3HubRespInbound02Normalized,
         &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
-    commit: fn(
-        V3HubRespChatProcess03Outcome,
-    ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError>,
     typed_sse_catalog: V3RelaySseHookCatalog,
 }
 
@@ -1013,13 +1022,6 @@ impl V3HubRelayResponseHookRegistry {
         (self.govern)(input, profile)
     }
 
-    pub fn commit(
-        &self,
-        input: V3HubRespChatProcess03Outcome,
-    ) -> Result<V3HubRespContinuation04Outcome, V3HubRelayResponseError> {
-        (self.commit)(input)
-    }
-
     pub(crate) fn typed_sse_catalog(&self) -> V3RelaySseHookCatalog {
         self.typed_sse_catalog
     }
@@ -1029,7 +1031,6 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
     V3HubRelayResponseHookRegistry {
         normalize: normalize_v3_hub_relay_response,
         govern: govern_v3_hub_relay_response,
-        commit: commit_v3_hub_relay_response,
         typed_sse_catalog: V3RelaySseHookCatalog::new(),
     }
 }

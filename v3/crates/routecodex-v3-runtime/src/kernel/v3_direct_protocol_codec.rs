@@ -171,8 +171,7 @@ pub trait V3DirectProtocolCodec {
         Ok(false)
     }
 
-    /// 协议控制面：响应后的提交/释放（responses 的 continuation commit；
-    /// chat 等默认无）。
+    /// 协议控制面：响应后的提交/释放（当前默认无额外协议 commit）。
     fn commit_after_response(
         _receipt: &crate::nodes::V3AttemptSuccessReceipt,
         control: &Self::Control,
@@ -356,13 +355,7 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         if standardized.tool_thinking_turn_context.enabled_flag() {
             return Ok(true);
         }
-        if crate::hub_v1::is_v3_tool_thinking_output_continuation(
-            &standardized.body,
-            standardized
-                .body
-                .get("previous_response_id")
-                .and_then(Value::as_str),
-        ) {
+        if crate::hub_v1::is_v3_tool_thinking_output_continuation(&standardized.body) {
             return Ok(false);
         }
         let current_payload_start = crate::hub_v1::current_v3_tool_thinking_payload_start(

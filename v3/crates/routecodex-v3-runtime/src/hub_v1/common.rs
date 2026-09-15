@@ -50,13 +50,6 @@ pub enum V3HubRequestSemanticProtocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3HubContinuationOwnership {
-    New,
-    RemoteProviderOwned,
-    RouteCodexLocalOwned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3HubExecutionMode {
     Direct,
     Relay,
@@ -160,21 +153,6 @@ pub(crate) struct V3HubResponseToolCall {
     pub(crate) call_id: String,
     pub(crate) name: String,
     pub(crate) kind: V3HubRelayToolKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3HubContinuationCommit {
-    None,
-    RemoteBinding,
-    LocalContext,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct V3HubRelayCanonicalResponseContext {
-    pub(crate) payload: Arc<Value>,
-    pub(crate) terminality: V3HubResponseTerminality,
-    pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
-    pub(crate) servertool_action: V3HubServertoolResponseAction,
 }
 
 // ==== V3 ServerToolCenter：通用 servertool 状态注册中心（按 toolName+scope 隔离）====

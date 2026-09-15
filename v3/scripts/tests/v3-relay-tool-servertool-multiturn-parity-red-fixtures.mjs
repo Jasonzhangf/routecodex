@@ -22,7 +22,6 @@ const copyPaths = [
   verifierRelative,
   'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
@@ -65,13 +64,6 @@ const cases = [
     diagnostic: /historical payload rewrite or attachment placeholder owner/,
   },
   {
-    name: 'attachment history governance moved before Req04',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'merge_v3_relay_restored_local_context_at_req04(',
-    mutation: 'govern_attachment_history_at_req04(&mut serde_json::Value::Null);\nmerge_v3_relay_restored_local_context_at_req04(',
-    diagnostic: /historical payload rewrite or attachment placeholder owner/,
-  },
-  {
     name: 'tool kind classifier removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
     marker: 'pub(crate) fn classify_v3_hub_relay_tool_kind',
@@ -86,12 +78,12 @@ const cases = [
     diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
   },
   {
-    name: 'Resp04 semantic repair revived',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
-    marker: 'pub(crate) fn commit_v3_hub_relay_response',
+    name: 'Resp03 semantic repair reordered after apply_patch projection',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
+    marker: '    let input = complete_or_repair_v3_resp03_tool_frames(input);',
     mutation:
-      'fn canonicalize_v3_hub_resp04_finalized_payload() { let _ = "finish_reason requires_action"; }\npub(crate) fn commit_v3_hub_relay_response',
-    diagnostic: /Resp04 semantic repair|canonicalize_v3_hub_resp04_finalized_payload/,
+      '    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);\n    let input = complete_or_repair_v3_resp03_tool_frames(input);',
+    diagnostic: /Resp03 response governance/,
   },
   {
     name: 'Resp03 repair step removed',
@@ -141,14 +133,6 @@ const cases = [
     diagnostic: /missing Some\("failed"\)/,
   },
   {
-    name: 'SSE transport revives tool-call semantic finish inference',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'fn infer_v3_runtime_finish_reason(',
-    mutation:
-      'fn v3_runtime_sse_event_has_tool_call() {}\nfn infer_v3_runtime_finish_reason(',
-    diagnostic: /SSE transport tool-call semantic inference/,
-  },
-  {
     name: 'apply_patch request feedback normalization removed',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
     marker: 'fn normalize_apply_patch_output_text_at_req04',
@@ -156,11 +140,11 @@ const cases = [
     diagnostic: /normalize_apply_patch_output_text_at_req04/,
   },
   {
-    name: 'protocol transport continuation matrix removed',
+    name: 'protocol transport matrix removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs',
-    marker: 'protocol_transport_continuation_matrix_uses_one_chat_process_governance_path',
-    mutation: 'protocol_transport_continuation_matrix_removed',
-    diagnostic: /protocol_transport_continuation_matrix_uses_one_chat_process_governance_path/,
+    marker: 'protocol_transport_matrix_uses_one_chat_process_governance_path',
+    mutation: 'protocol_transport_matrix_removed',
+    diagnostic: /protocol_transport_matrix_uses_one_chat_process_governance_path/,
   },
   {
     name: 'focused parity test removed',
@@ -227,10 +211,11 @@ const failures = [];
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-relay-tool-parity-red-'));
   try {
-    const localNodeModules = resolve(repo, 'v3/node_modules');
-    const nodeModules = existsSync(localNodeModules)
-      ? localNodeModules
-      : resolve(repo, 'node_modules');
+    let nodeModules = resolve(repo, 'v3/node_modules');
+    for (let current = repo; !existsSync(nodeModules); current = dirname(current)) {
+      nodeModules = resolve(current, 'node_modules');
+      if (dirname(current) === current) break;
+    }
     if (existsSync(nodeModules)) {
       symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
     }

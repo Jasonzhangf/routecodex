@@ -50,7 +50,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = { attempt_max_bytes = 11, attempt_max_frames = 12, request_max_bytes = 13, process_max_bytes = 14, residence_timeout_ms = 15 }
 [providers.test]
 type = "responses"

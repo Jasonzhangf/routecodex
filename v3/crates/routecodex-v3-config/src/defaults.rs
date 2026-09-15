@@ -1,8 +1,8 @@
 use crate::{
-    V3ContinuationPolicyAuthoringConfig, V3EntryProtocolBindingAuthoringConfig,
-    V3EntryProtocolExecutionMode, V3HubFixedNode, V3HubHookAuthoringConfig, V3HubHookPhase,
-    V3HubHookProfile, V3HubHookRequirement, V3HubResourceAuthoringConfig, V3HubResourceKind,
-    V3HubResourceScope, V3HubV1AuthoringConfig, V3ServerExecutionAuthoringConfig,
+    V3EntryProtocolBindingAuthoringConfig, V3EntryProtocolExecutionMode, V3HubFixedNode,
+    V3HubHookAuthoringConfig, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
+    V3HubResourceAuthoringConfig, V3HubResourceKind, V3HubResourceScope, V3HubV1AuthoringConfig,
+    V3ServerExecutionAuthoringConfig,
 };
 use std::collections::BTreeMap;
 
@@ -30,7 +30,7 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
                     "Responses endpoint must not fall through to relay or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation"
+                    "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug"
                         .to_string(),
                 ),
                 runtime_owner_path: Some(
@@ -106,13 +106,6 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
                 },
             ),
             (
-                "continuation_store".to_string(),
-                V3HubResourceAuthoringConfig {
-                    kind: V3HubResourceKind::Continuation,
-                    scope: V3HubResourceScope::Server,
-                },
-            ),
-            (
                 "error_chain".to_string(),
                 V3HubResourceAuthoringConfig {
                     kind: V3HubResourceKind::Error,
@@ -162,17 +155,9 @@ fn default_hub_v1_hooks() -> Vec<V3HubHookAuthoringConfig> {
                 (V3HubFixedNode::V3HubReqInbound02Normalized, V3HubHookPhase::Entry) => {
                     vec!["metadata_center".to_string()]
                 }
-                (V3HubFixedNode::V3HubReqChatProcess04Governed, V3HubHookPhase::Entry)
-                | (V3HubFixedNode::V3HubRespChatProcess03Governed, V3HubHookPhase::Entry) => {
-                    vec!["continuation_store".to_string()]
-                }
                 _ => Vec::new(),
             };
-            let forbidden_resources = if optional_disabled {
-                vec!["continuation_store".to_string()]
-            } else {
-                Vec::new()
-            };
+            let forbidden_resources = Vec::new();
             hooks.push(V3HubHookAuthoringConfig {
                 hook_id: format!(
                     "hub_v1.{}.{}.not_implemented",
@@ -212,19 +197,6 @@ pub(crate) fn default_server_execution() -> V3ServerExecutionAuthoringConfig {
             "dry_run".to_string(),
         ],
         allowed_transports: vec!["json".to_string(), "sse".to_string()],
-        continuation: V3ContinuationPolicyAuthoringConfig {
-            allowed_owners: vec![
-                "none".to_string(),
-                "remote_provider".to_string(),
-                "routecodex_local".to_string(),
-            ],
-            scope_keys: vec![
-                "entry_protocol".to_string(),
-                "server".to_string(),
-                "routing_group".to_string(),
-                "session".to_string(),
-            ],
-        },
         attempt_store: Default::default(),
     }
 }

@@ -289,7 +289,6 @@ async fn direct_sse_projection_times_out_after_provider_stalls_between_frames() 
             stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(first)])
                 .chain(futures_util::stream::pending()),
         ),
-        V3SseRemoteContinuationObservationState::default(),
         V3RuntimeStreamObservation::default(),
         std::time::Duration::from_millis(20),
     );

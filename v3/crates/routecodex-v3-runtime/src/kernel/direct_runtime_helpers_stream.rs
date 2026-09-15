@@ -554,14 +554,6 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     compat_plan: &crate::direct_response_hooks::V3DirectResponseCompatPlan,
     hook_registry: &V3HookRegistry,
     failure_session_scope: &V3ProviderFailureSessionScope,
-    continuation_disabled: bool,
-    remote_continuation: &V3RemoteContinuationObservation,
-    continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
-    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
-    previous_response_id: Option<String>,
-    selected_pin: V3RemoteContinuationPin,
-    selected_capability_revision: String,
-    now_epoch_ms: u64,
     attempt_budget: V3AttemptBudget,
 ) -> Result<crate::nodes::V3CommittedClientSseStream, V3Error01SourceRaised> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
@@ -582,28 +574,8 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         Some(compat_plan.canonical_model_id.clone()),
         true,
     );
-    let client_stream = projected;
-    let client_stream =
-        if let (false, V3RemoteContinuationObservation::Streaming { state }, Some(scope)) = (
-            continuation_disabled,
-            remote_continuation,
-            continuation_scope.as_ref(),
-        ) {
-            wrap_v3_direct_sse_continuation_lifecycle(
-                client_stream,
-                state.clone(),
-                continuation_state,
-                Some(scope.clone()),
-                previous_response_id,
-                selected_pin,
-                selected_capability_revision,
-                now_epoch_ms,
-            )
-        } else {
-            client_stream
-        };
     collect_direct_sse_attempt_after_terminal_with_memory(
-        client_stream,
+        projected,
         compat_plan.provider_protocol,
         attempt_budget,
         Some(manifest),
@@ -764,39 +736,6 @@ fn provider_sse_failure_source(message: impl Into<String>) -> V3Error01SourceRai
     )
 }
 
-fn capability_revision_for_pin(
-    manifest: &V3Config05ManifestPublished,
-    pin: &V3RemoteContinuationPin,
-) -> Result<String, String> {
-    let provider = manifest.providers.get(&pin.provider_id).ok_or_else(|| {
-        format!(
-            "provider {} is absent for capability revision",
-            pin.provider_id
-        )
-    })?;
-    let model = provider.models.get(&pin.model_id).ok_or_else(|| {
-        format!(
-            "provider {} model {} is absent for capability revision",
-            pin.provider_id, pin.model_id
-        )
-    })?;
-    Ok(format!(
-        "provider={};type={};model={};wire={};capabilities={};streaming={};thinking={};thinking_mode={:?};max_tokens={:?};max_context_tokens={:?};provider_features={:?};model_features={:?}",
-        provider.id,
-        provider.provider_type,
-        model.id,
-        model.wire_name,
-        model.capabilities.join(","),
-        model.supports_streaming,
-        model.supports_thinking,
-        model.thinking,
-        model.max_tokens,
-        model.max_context_tokens,
-        provider.features,
-        model.features,
-    ))
-}
-
 pub(crate) fn runtime_source(
     stage: &'static str,
     error: impl std::fmt::Display,
@@ -878,129 +817,6 @@ mod request_invalid_compat_tests {
         let source = compat_source("V3ProviderRespInbound01Raw", &error);
         assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     }
-}
-
-struct V3ExactPinAvailabilityExhaustion<'pin> {
-    pin: &'pin V3RemoteContinuationPin,
-    reason: String,
-}
-
-impl V3ExactPinAvailabilityExhaustion<'_> {
-    fn decide_error_05(&self, hook_registry: &V3HookRegistry) -> V3Error05ExecutionDecision {
-        // 例外证明：`previous_response_id` exact-pin 的 continuation 必须续到
-        // 同一 provider/model（同 provider 才能续 remote continuation），因此
-        // pin 不可用时不存在任何可切候选（candidates_remaining=0、default 池
-        // 不可用、无同 provider retry 均是 pin 约束下的必然，而非路由决策）。
-        // 该决策仍须通过 `try_into_terminal` 的候选耗尽 gate 才能投影 Error06。
-        let source = build_v3_error_01_source_raised_external(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3HubReqTarget06Resolved",
-            "continuation_exact_pin_unavailable",
-            &self.reason,
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: Some(503),
-                code: Some("continuation_exact_pin_unavailable".to_string()),
-                provider_id: Some(self.pin.provider_id.clone()),
-                upstream_request_id: None,
-                message: Some(self.reason.clone()),
-            },
-        );
-        hook_registry.run_error(
-            source,
-            V3ErrorActionScope::CanonicalModel {
-                provider_id: self.pin.provider_id.clone(),
-                model_id: self.pin.model_id.clone(),
-            },
-            0,
-            false,
-            false,
-            None,
-        )
-    }
-}
-
-async fn exact_pin_unavailable_output(
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    pin: &V3RemoteContinuationPin,
-    continuation_scope: Option<&V3ResponsesDirectContinuationScope>,
-    previous_response_id: Option<&str>,
-    continuation_state: Option<&V3ResponsesDirectContinuationState>,
-    reason: String,
-    node_trace: Vec<&'static str>,
-    hook_registry: &V3HookRegistry,
-) -> V3ResponsesDirectRuntimeOutput {
-    let proof = V3ExactPinAvailabilityExhaustion { pin, reason };
-    let decision = proof.decide_error_05(hook_registry);
-    let terminal = match decision.try_into_terminal() {
-        Ok(terminal) => terminal,
-        Err(decision) => {
-            return error_output(
-                runtime_source(
-                    "V3Error05ExecutionDecision",
-                    format!(
-                        "exact-pin availability proof produced nonterminal {:?} Error05",
-                        decision.action
-                    ),
-                ),
-                node_trace,
-                hook_registry,
-            )
-        }
-    };
-    match provider_health
-        .wait_for_terminal_provider_projection_in_scope(
-            failure_session_scope,
-            &pin.provider_id,
-            Some(&pin.auth_handle_id),
-            Some(&pin.model_id),
-            "continuation_exact_pin_unavailable",
-        )
-        .await
-    {
-        Ok(_) => {}
-        Err(error) => {
-            return error_output(
-                runtime_source("V3ProviderActionGate", error),
-                node_trace,
-                hook_registry,
-            )
-        }
-    }
-    if let (Some(state), Some(scope), Some(response_id)) =
-        (continuation_state, continuation_scope, previous_response_id)
-    {
-        let release = state
-            .store
-            .lock()
-            .map_err(|error| error.to_string())
-            .map(|mut store| store.release_bound(response_id, &scope.key, pin));
-        match release {
-            Ok(true) => {}
-            Ok(false) => {
-                return error_output(
-                    runtime_source(
-                        "V3HubReqContinuation03Classified",
-                        format!("terminal exact-pin locator {response_id} was not present"),
-                    ),
-                    node_trace,
-                    hook_registry,
-                )
-            }
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3HubReqContinuation03Classified", error),
-                    node_trace,
-                    hook_registry,
-                )
-            }
-        }
-    }
-    projected_error_output(
-        V3ErrorHandlingCenter::project_terminal_decision(terminal),
-        node_trace,
-    )
 }
 
 pub(crate) fn error_output(
@@ -1322,13 +1138,9 @@ fn total_attempts(
 }
 
 fn validate_initial_direct_plan(
-    has_previous_response_id: bool,
     has_initial_target: bool,
     has_initial_protocol_decision: bool,
 ) -> Result<(), &'static str> {
-    if has_previous_response_id && has_initial_target {
-        return Err("direct continuation must be resolved from Req03 owner store, not from a non-continuation preselected target");
-    }
     if has_initial_target && !has_initial_protocol_decision {
         return Err("preselected direct target requires an initial protocol execution decision");
     }

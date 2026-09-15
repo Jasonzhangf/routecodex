@@ -61,8 +61,7 @@ const resp03ProtocolGovernance = [
   functionBody('build_v3_openai_chat_resp03_protocol_governance'),
   functionBody('build_v3_gemini_resp03_protocol_governance'),
 ].join('\n');
-const commit = functionBody('commit_v3_hub_relay_response');
-const resp05 = functionBody('build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04');
+const resp05 = functionBody('build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03');
 const resp06 = functionBody('build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05');
 const responseExit = functionBody('response_exit_node');
 
@@ -111,27 +110,13 @@ requireAll(resp03ProtocolGovernance, 'Resp03 Chat Process', [
 forbidAll(resp03ProtocolGovernance, 'Resp03 Chat Process', [
   /canonical_context/,
   /V3HubContinuationCommit/,
-  /Arc::clone/,
   /V3ServerRespOutbound06ClientFrame/,
   /provider[_-]?family/i,
   /unwrap_or\("completed"\)/,
 ]);
 
-requireAll(commit, 'Resp04 continuation commit', [
-  'V3HubResponseTerminality::Terminal',
-  'V3HubResponseTerminality::NonTerminal',
-  'V3HubContinuationCommit::LocalContext',
-  'V3HubRelayCanonicalResponseContext',
-  'Arc::clone',
-]);
-if ((commit.match(/Arc::clone/g) ?? []).length !== 1) {
-  fail('Resp04 continuation commit: canonical payload must use exactly one Arc::clone');
-}
-forbidAll(commit, 'Resp04 continuation commit', [
-  /serde_json::(?:to_vec|to_string|from_slice|from_str)/,
-  /payload\.clone\s*\(/,
-  /Value::clone/,
-  /V3ServerRespOutbound06ClientFrame/,
+requireAll(govern, 'Resp03 Chat Process endpoint', [
+  'V3HubRespChatProcess03Outcome',
 ]);
 
 forbidAll(`${resp05}\n${resp06}`, 'Resp05/Server immutable interval', [
@@ -147,7 +132,6 @@ requireAll(source, sourcePath, [
   'pub fn compile_v3_hub_relay_response_hooks()',
   'normalize: normalize_v3_hub_relay_response',
   'govern: govern_v3_hub_relay_response',
-  'commit: commit_v3_hub_relay_response',
   '"V3ServerRespOutbound06ClientFrame"',
 ]);
 requireAll(responseExit, 'single response exit', ['"V3ServerRespOutbound06ClientFrame"']);

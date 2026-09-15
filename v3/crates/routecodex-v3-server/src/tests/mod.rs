@@ -245,11 +245,7 @@ fn test_v3_listener_state_with_debug(
                 && !manifest.debug.full_codex_sampling
                 && !manifest.debug.codex_samples,
         )),
-        responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_local_continuation: Arc::new(
-            V3ResponsesRelayLocalContinuationState::default(),
-        ),
         responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
@@ -273,23 +269,14 @@ fn test_listener_state_owns_request_counter_path_beside_log_file() {
 
 #[test]
 fn responses_protocol_plan_only_accepts_fresh_requests() {
-    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+    let fresh = V3ResponsesEntryFacts::project(&json!({
         "model": "client-test",
         "previous_response_id": null,
         "input": "fresh"
     }));
     assert!(responses_entry_facts_allow_fresh_protocol_plan(&fresh));
 
-    let remote_continuation = V3ResponsesContinuationEntryFacts::project(&json!({
-        "model": "client-test",
-        "previous_response_id": "resp_remote",
-        "input": "continue"
-    }));
-    assert!(!responses_entry_facts_allow_fresh_protocol_plan(
-        &remote_continuation
-    ));
-
-    let relay_local_continuation = V3ResponsesContinuationEntryFacts::project(&json!({
+    let unpaired_tool_output = V3ResponsesEntryFacts::project(&json!({
         "model": "client-test",
         "input": [{
             "type": "function_call_output",
@@ -298,10 +285,10 @@ fn responses_protocol_plan_only_accepts_fresh_requests() {
         }]
     }));
     assert!(!responses_entry_facts_allow_fresh_protocol_plan(
-        &relay_local_continuation
+        &unpaired_tool_output
     ));
 
-    let paired_tool_turn = V3ResponsesContinuationEntryFacts::project(&json!({
+    let paired_tool_turn = V3ResponsesEntryFacts::project(&json!({
         "model": "client-test",
         "input": [
             {
@@ -324,7 +311,7 @@ fn responses_protocol_plan_only_accepts_fresh_requests() {
 
 #[test]
 fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
-    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+    let fresh = V3ResponsesEntryFacts::project(&json!({
         "model": "client-test",
         "input": "fresh"
     }));
@@ -355,7 +342,7 @@ fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
 
 #[test]
 fn compaction_preserves_direct_binding_for_route_pool_selection() {
-    let fresh = V3ResponsesContinuationEntryFacts::project(&json!({
+    let fresh = V3ResponsesEntryFacts::project(&json!({
         "model": "deepseek-v4-local",
         "input": "compact"
     }));
@@ -2009,7 +1996,7 @@ fn console_color_identity_uses_injected_project_when_session_is_absent() {
 }
 
 #[test]
-fn responses_continuation_scope_reads_codex_turn_metadata_header() {
+fn responses_control_scope_reads_codex_turn_metadata_header() {
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-codex-turn-metadata",
@@ -2026,7 +2013,7 @@ fn responses_continuation_scope_reads_codex_turn_metadata_header() {
 }
 
 #[test]
-fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadata() {
+fn responses_control_scope_prefers_explicit_headers_over_codex_turn_metadata() {
     let mut headers = HeaderMap::new();
     headers.insert("session-id", HeaderValue::from_static("explicit-session"));
     headers.insert("thread-id", HeaderValue::from_static("explicit-thread"));
@@ -2038,14 +2025,14 @@ fn responses_continuation_scope_prefers_explicit_headers_over_codex_turn_metadat
     );
 
     let (session_id, conversation_id) =
-        responses_control_scope_headers(&headers, None).expect("explicit continuation headers");
+        responses_control_scope_headers(&headers, None).expect("explicit control headers");
 
     assert_eq!(session_id.as_deref(), Some("explicit-session"));
     assert_eq!(conversation_id.as_deref(), Some("explicit-thread"));
 }
 
 #[test]
-fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
+fn responses_server_tool_scope_ignores_plugin_session_without_typed_conversation() {
     let mut headers = HeaderMap::new();
     headers.insert("session_id", HeaderValue::from_static("plugin-session"));
     headers.insert(
@@ -2053,7 +2040,7 @@ fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
         HeaderValue::from_static("plugin-request"),
     );
 
-    let scope = request_local_continuation_scope(&headers, None, false, "req-fresh")
+    let scope = request_local_server_tool_scope(&headers, None, false, "req-fresh")
         .expect("fresh request must not require a conversation header");
 
     assert_eq!(
@@ -2066,15 +2053,15 @@ fn responses_fresh_request_ignores_plugin_session_without_typed_conversation() {
 }
 
 #[test]
-fn responses_continuation_scope_accepts_body_client_metadata_as_fallback() {
+fn responses_server_tool_scope_accepts_body_client_metadata_as_fallback() {
     let headers = HeaderMap::new();
     let payload = json!({
         "input":[{"type":"function_call_output","call_id":"call-1","output":"{\"ok\":true}"}],
         "client_metadata":{"session_id":"zcode-session","thread_id":"zcode-thread"}
     });
 
-    let scope = request_local_continuation_scope(&headers, Some(&payload), true, "req-body-scope")
-        .expect("body client_metadata must construct continuation control identity as a fallback");
+    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-body-scope")
+        .expect("body client_metadata must construct server tool scope as a fallback");
 
     assert_eq!(
         scope,
@@ -2083,7 +2070,7 @@ fn responses_continuation_scope_accepts_body_client_metadata_as_fallback() {
 }
 
 #[test]
-fn responses_continuation_scope_prefers_headers_over_body_client_metadata() {
+fn responses_server_tool_scope_prefers_headers_over_body_client_metadata() {
     let mut headers = HeaderMap::new();
     headers.insert("session-id", HeaderValue::from_static("header-session"));
     headers.insert("thread-id", HeaderValue::from_static("header-thread"));
@@ -2092,7 +2079,7 @@ fn responses_continuation_scope_prefers_headers_over_body_client_metadata() {
         "client_metadata":{"session_id":"body-session","thread_id":"body-thread"}
     });
 
-    let scope = request_local_continuation_scope(&headers, Some(&payload), true, "req-precedence")
+    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-precedence")
         .expect("typed control headers must keep precedence over body client_metadata");
 
     assert_eq!(
@@ -2102,14 +2089,14 @@ fn responses_continuation_scope_prefers_headers_over_body_client_metadata() {
 }
 
 #[test]
-fn responses_paired_function_outputs_are_not_continuation_scope() {
+fn responses_paired_function_outputs_are_not_server_tool_scope() {
     let payload = json!({
         "input": [
             {"type": "function_call", "call_id": "call-1", "name": "tool", "arguments": "{}"},
             {"type": "function_call_output", "call_id": "call-1", "output": "ok"}
         ]
     });
-    let facts = V3ResponsesContinuationEntryFacts::project(&payload);
+    let facts = V3ResponsesEntryFacts::project(&payload);
 
     assert!(facts.has_function_call_output);
     assert!(!facts.has_unpaired_function_call_output);
@@ -3486,72 +3473,6 @@ async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
 }
 
 #[tokio::test]
-async fn direct_continuation_scope_error_for_stream_request_projects_sse_not_json() {
-    let log_file = test_v3_console_log_file("direct-continuation-scope-sse-error");
-    let state = test_v3_listener_state(&log_file, 5555);
-    let mut headers = HeaderMap::new();
-    headers.insert("accept", HeaderValue::from_static("text/event-stream"));
-    headers.insert("content-type", HeaderValue::from_static("application/json"));
-    let outcome = execute_responses_direct_server_outcome(
-        state.as_ref(),
-        &headers,
-        "POST".to_string(),
-        "/v1/responses".to_string(),
-        "req-direct-sse-scope-error".to_string(),
-        None,
-        "exec-direct-sse-scope-error".to_string(),
-        json!({
-            "model":"gpt-5.5",
-            "stream":true,
-            "previous_response_id":"never_committed",
-            "input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]
-        }),
-        None,
-        None,
-        None,
-        None,
-        None,
-        V3RequestPurpose::Conversation,
-    )
-    .await;
-    let frame = match outcome {
-        V3ResponsesDirectServerOutcome::DirectFrame(frame) => frame,
-        V3ResponsesDirectServerOutcome::RelayOutput(_) => {
-            panic!("direct continuation scope error must not relay")
-        }
-    };
-    assert_eq!(frame.status, 598);
-    assert_eq!(frame.content_type, "text/event-stream");
-    assert_eq!(
-        v3_server_frame_error_body_for_console(&frame)
-            .and_then(|body| body.pointer("/error/code"))
-            .and_then(Value::as_str),
-        Some("responses_direct_continuation_scope_incomplete")
-    );
-    assert!(format_v3_error_console_content(
-        "/v1/responses",
-        "req-direct-sse-scope-error",
-        frame.status,
-        &frame.error_chain,
-        v3_server_frame_error_body_for_console(&frame),
-    )
-    .contains("Responses continuation requires"));
-    match frame.body {
-        V3Server16Body::Bytes(bytes) => {
-            let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(
-                text.contains("responses_direct_continuation_scope_incomplete"),
-                "{text}"
-            );
-            assert!(text.contains("Responses continuation requires"), "{text}");
-        }
-        other => panic!("stream continuation scope error must project SSE body, got {other:?}"),
-    }
-    let _ = std::fs::remove_file(&log_file);
-}
-
-#[tokio::test]
 async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
     let mut headers = HeaderMap::new();
     headers.insert("accept", HeaderValue::from_static("text/event-stream"));
@@ -3650,11 +3571,7 @@ fn error_projection_appends_human_console_failure_line() {
             routecodex_v3_config::internal::v3_error_samples_only()
                 && !manifest.debug.full_codex_sampling,
         )),
-        responses_direct_continuation: Arc::new(V3ResponsesDirectContinuationState::default()),
         responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_local_continuation: Arc::new(
-            V3ResponsesRelayLocalContinuationState::default(),
-        ),
         responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),

@@ -20,7 +20,6 @@ const REQUIRED_CHAINS = new Map([
   ['v3.relay.request.stage_shapes', [
     ['V3HubReqInbound01ClientRaw', 'source_request_wire', 'source_request_wire'],
     ['V3HubReqInbound02Normalized', 'source_request_wire', 'canonical_chat_request'],
-    ['V3HubReqContinuation03Classified', 'canonical_chat_request', 'canonical_chat_request'],
     ['V3HubReqChatProcess04Governed', 'canonical_chat_request', 'canonical_chat_request'],
     ['V3HubReqExecution05Planned', 'canonical_chat_request', 'canonical_chat_request'],
     ['V3HubReqTarget06Resolved', 'canonical_chat_request', 'canonical_chat_request'],
@@ -34,7 +33,6 @@ const REQUIRED_CHAINS = new Map([
     ['ProviderRespCompat02ProviderCompat', 'provider_response_wire', 'provider_response_wire'],
     ['V3HubRespInbound02Normalized', 'provider_response_wire', 'canonical_chat_response'],
     ['V3HubRespChatProcess03Governed', 'canonical_chat_response', 'canonical_chat_response'],
-    ['V3HubRespContinuation04Committed', 'canonical_chat_response', 'canonical_chat_response'],
     ['V3HubRespOutbound05ClientSemantic', 'canonical_chat_response', 'client_response_semantic'],
     ['V3ServerRespOutbound06ClientFrame', 'client_response_semantic', 'client_response_semantic'],
   ]],
@@ -250,7 +248,11 @@ export function verifyV3StageProtocolShapes(root = process.cwd()) {
   }
 
   const packageJson = JSON.parse(read(root, PACKAGE));
-  if (!packageJson.scripts?.['verify:v3-architecture-ci']?.includes('verify-v3-architecture-ci.mjs')) failures.push(`${PACKAGE}: V3 architecture umbrella missing`);
+  const architectureCi = packageJson.scripts?.['verify:v3-architecture-ci'] ?? '';
+  if (!architectureCi.includes('verify-v3-architecture-ci.mjs')
+      && !architectureCi.includes('npm --prefix v3 run verify:v3-architecture-ci')) {
+    failures.push(`${PACKAGE}: V3 architecture umbrella missing`);
+  }
   if (!packageJson.scripts?.['build:v3-cli']?.startsWith('npm run verify:v3-architecture-ci')) failures.push(`${PACKAGE}: build:v3-cli must run architecture CI before Cargo`);
   const umbrella = read(root, UMBRELLA);
   for (const gate of ['verify:v3-stage-protocol-shapes', 'test:v3-stage-protocol-shapes-red-fixtures']) {

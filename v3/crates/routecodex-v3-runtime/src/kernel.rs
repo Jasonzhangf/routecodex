@@ -5,11 +5,11 @@ use crate::hub_v1::{
     build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
     build_v3_hub_resp_inbound_02_from_provider_resp_compat_02,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile, record_v3_provider_sse_json_frame,
-    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
-    V3HubProviderWireProtocol, V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile,
-    V3HubTransportIntent, V3ProviderRespInbound01RawContext, V3RuntimeObservability,
-    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
-    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
+    V3HubRelayRequestHookEvent, V3HubRelayResponseHookProfile, V3HubTransportIntent,
+    V3ProviderRespInbound01RawContext, V3RuntimeObservability, V3RuntimeProviderFailureEventSink,
+    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
+    V3RuntimeStreamObservation, V3ServerToolCenterWriteOrigin,
 };
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
@@ -17,14 +17,8 @@ use crate::provider_failure_runtime_policy::{
     select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
     V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue,
 };
-use crate::remote_continuation::{
-    V3RemoteContinuationCommitInput, V3RemoteContinuationLocator, V3RemoteContinuationPin,
-    V3RemoteContinuationScopeKey, V3RemoteContinuationStore,
-};
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
-use crate::shared::{
-    V3ProviderAttemptBody, V3RemoteContinuationObservation, V3SseRemoteContinuationObservationState,
-};
+use crate::shared::V3ProviderAttemptBody;
 use crate::sse_object_pipeline::process_sse_object_frame;
 use async_trait::async_trait;
 use futures_util::{stream, StreamExt};
@@ -112,8 +106,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
     let V3ResponsesDirectRuntimeCoreState {
-        continuation_state,
-        continuation_scope,
         server_tool_state,
         server_tool_scope,
         now_epoch_ms,
@@ -161,68 +153,18 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let previous_response_id = standardized
         .body
         .get("previous_response_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned);
-    let continuation_disabled = crate::shared::v3_responses_continuation_disabled_for_server(
-        manifest,
-        &standardized.server_id,
-    );
-    let pinned = match (
-        &previous_response_id,
-        continuation_state.as_ref(),
-        continuation_scope.as_ref(),
-    ) {
-        (Some(_), _, _) if continuation_disabled => {
-            return error_output(
-                runtime_source(
-                    "V3HubReqContinuation03Classified",
-                    "responses continuation disabled: previous_response_id restore rejected",
-                ),
-                trace,
-                &hook_registry,
-            )
-        }
-        (Some(response_id), Some(state), Some(scope)) => {
-            let locator = match state.store.lock() {
-                Ok(store) => store
-                    .load_for_req03(response_id, &scope.key, now_epoch_ms)
-                    .cloned(),
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3HubReqContinuation03Classified", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            };
-            match locator {
-                Ok(locator) => {
-                    trace.push("V3HubReqContinuation03Classified");
-                    Some(locator)
-                }
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3HubReqContinuation03Classified", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            }
-        }
-        (Some(_), _, _) => {
-            return error_output(
-                runtime_source(
-                    "V3HubReqContinuation03Classified",
-                    "continuation state/scope missing",
-                ),
-                trace,
-                &hook_registry,
-            )
-        }
-        _ => None,
-    };
+        .is_some_and(|value| !value.is_null());
+    if previous_response_id {
+        return error_output(
+            runtime_source(
+                "V3HubReqInbound02Normalized",
+                "Responses continuation is retired: previous_response_id is unsupported",
+            ),
+            trace,
+            &hook_registry,
+        );
+    }
     if let Err(message) = validate_initial_direct_plan(
-        previous_response_id.is_some(),
         initial_selected_target.is_some(),
         initial_protocol_decision.is_some(),
     ) {
@@ -238,106 +180,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let provider_health =
         provider_health.unwrap_or_else(|| V3ProviderFailureRuntimeHealth::from_manifest(manifest));
     let availability = provider_health.session_bound_availability(&direct_failure_session_scope);
-    let mut pinned_selected = if let Some(locator) = pinned {
-        let candidate = match target.resolve_exact_provider_model_auth(
-            manifest,
-            &locator.pin().provider_id,
-            &locator.pin().model_id,
-            &locator.pin().auth_handle_id,
-        ) {
-            Ok(candidate) => candidate,
-            Err(error) => {
-                return exact_pin_unavailable_output(
-                    &provider_health,
-                    &direct_failure_session_scope,
-                    locator.pin(),
-                    continuation_scope.as_ref(),
-                    previous_response_id.as_deref(),
-                    continuation_state.as_deref(),
-                    error.to_string(),
-                    trace,
-                    &hook_registry,
-                )
-                .await
-            }
-        };
-        let current_capability_revision = match capability_revision_for_pin(manifest, locator.pin())
-        {
-            Ok(revision) => revision,
-            Err(error) => {
-                return error_output(
-                    runtime_source("V3HubReqTarget06Resolved", error),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        };
-        if let Err(error) = locator.validate_capability_revision(&current_capability_revision) {
-            return error_output(
-                runtime_source("V3HubReqTarget06Resolved", error),
-                trace,
-                &hook_registry,
-            );
-        }
-        trace.push("V3HubReqTarget06Resolved");
-        let routing_group_id = match continuation_scope.as_ref() {
-            Some(scope) => scope.key.routing_group.clone(),
-            None => {
-                return error_output(
-                    runtime_source(
-                        "V3HubReqTarget06Resolved",
-                        "continuation scope missing after Req03 classification",
-                    ),
-                    trace,
-                    &hook_registry,
-                )
-            }
-        };
-        Some(routecodex_v3_target::V3Target10ConcreteProviderSelected {
-            route: routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce {
-                server_id: standardized.server_id.clone(),
-                routing_group_id,
-                pool_id: "continuation_exact_pin".to_string(),
-                route_classification_reason: "default:route-selected".to_string(),
-                target_index: 0,
-                target_kind: routecodex_v3_config::V3RouteTargetKind::ProviderModel,
-                target_id: None,
-                target_plan: Vec::new(),
-                request_client_model: None,
-                request_capabilities: BTreeSet::new(),
-                request_input_tokens: build_v3_router_request_facts_from_v3_req_04(
-                    &standardized,
-                    manifest,
-                )
-                .input_tokens,
-                hit_count: 1,
-            },
-            candidate,
-            unavailable_candidates: Vec::new(),
-            attempts: 1,
-            default_floor_protected: false,
-        })
-    } else {
-        None
-    };
+    let mut pinned_selected = None;
     let initial_selected_target_present = initial_selected_target.is_some();
     let route_policy_state = crate::route_policy::V3RoutePolicyRuntimeState::process_shared();
-    let mut route_policy_scope = match continuation_scope.as_ref() {
-        Some(scope) => crate::route_policy::V3RoutePolicyScope::without_conversation(
-            &standardized.server_id,
-            &scope.key.routing_group,
-            direct_failure_session_scope.session_id(),
-            scope.key.port.to_string(),
-        )
-        .with_conversation(scope.key.conversation_id.clone()),
-        None => crate::route_policy::V3RoutePolicyScope::without_conversation(
-            &standardized.server_id,
-            direct_failure_session_scope.routing_group(),
-            direct_failure_session_scope.session_id(),
-            &standardized.server_id,
-        )
-        .with_conversation(direct_failure_session_scope.session_id()),
-    };
+    let mut route_policy_scope = crate::route_policy::V3RoutePolicyScope::without_conversation(
+        &standardized.server_id,
+        direct_failure_session_scope.routing_group(),
+        direct_failure_session_scope.session_id(),
+        &standardized.server_id,
+    )
+    .with_conversation(direct_failure_session_scope.session_id());
     let expanded = if let Some(initial_expanded) = initial_expanded {
         // Server-side protocol plan already ran Router05..Target09; reuse its
         // candidate set for in-Target reselection instead of re-entering the
@@ -466,7 +318,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
-    let mut continuation_provider_action_lookup = previous_response_id.is_some();
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         let selected = match pinned_selected.take() {
@@ -525,14 +376,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 },
             },
         };
-        if previous_response_id.is_none() {
-            trace.push("V3Target10ConcreteProviderSelected");
-        }
-        let selected_pin = V3RemoteContinuationPin::new(
-            selected.candidate.provider_id.clone(),
-            selected.candidate.model_id.clone(),
-            selected.candidate.auth_alias.clone(),
-        );
+        trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized
                 .body
@@ -610,33 +454,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             }
         }
-        if continuation_provider_action_lookup {
-            continuation_provider_action_lookup = false;
-            match provider_health
-                .wait_for_exact_selected_provider_action(&direct_failure_session_scope, &selected)
-                .await
-            {
-                Ok(Some(admission))
-                    if admission.released_by_success || admission.reevaluate_after_terminal =>
-                {
-                    retry_selected = Some(selected);
-                    trace.push("V3ProviderActionGateTerminalReevaluation");
-                    continue;
-                }
-                Ok(Some(mut admission)) => {
-                    provider_action_permit = admission.take_permit();
-                    trace.push("V3ProviderActionGateAdmission");
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3ProviderActionGateAdmission", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            }
-        }
         let selected_available = v3_direct_selected_available_for_send(
             &selected,
             expanded.as_ref(),
@@ -660,7 +477,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     run_error: crate::hooks::responses_direct_error_hook,
                     availability: &availability,
                     expanded: expanded.as_ref(),
-                    provider_pinned: previous_response_id.is_some(),
+                    provider_pinned: false,
                     now_epoch_ms,
                 },
                 &selected,
@@ -711,21 +528,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     continue;
                 }
                 V3Error05ExecutionAction::ProjectTerminal => {
-                    if let Err(error) = release_terminal_failure_locator(
-                        continuation_state.as_deref(),
-                        continuation_scope.as_ref(),
-                        previous_response_id.as_deref(),
-                        &selected_pin,
-                    ) {
-                        return error_output(
-                            runtime_source("V3HubRespContinuation04Committed", error),
-                            trace,
-                            &hook_registry,
-                        );
-                    }
-                    if previous_response_id.is_some() {
-                        trace.push("V3HubRespContinuation04Committed");
-                    }
                     return projected_error_output_with_observability(
                         V3ErrorHandlingCenter::project_terminal(policy_result.decision),
                         trace,
@@ -761,16 +563,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             decision.mode,
             V3Execution11ProtocolDecisionMode::SameProtocolDirect
         ) {
-            if previous_response_id.is_some() {
-                return error_output(
-                    runtime_source(
-                        "V3Execution11ProtocolDecision",
-                        "Responses direct continuation cannot hand off to Relay after Req03 owner selected direct",
-                    ),
-                    trace,
-                    &hook_registry,
-                );
-            }
             let captured_target_09 = match expanded.as_ref() {
                 Some(expanded) => expanded.clone(),
                 None => {
@@ -831,38 +623,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             return error_output(source, trace, &hook_registry);
         }
 
-        let selected_capability_revision =
-            match capability_revision_for_pin(manifest, &selected_pin) {
-                Ok(revision) => revision,
-                Err(error) => {
-                    return error_output(
-                        runtime_source("V3HubRespContinuation04Committed", error),
-                        trace,
-                        &hook_registry,
-                    )
-                }
-            };
         let policy = hook_registry.run_route(selected, &standardized);
         trace.push("V3ResponsesDirect11Policy");
 
         let wire = match hook_registry.run_request_projection(&policy) {
             Ok(value) => value,
             Err(source) => {
-                if let Err(error) = release_terminal_failure_locator(
-                    continuation_state.as_deref(),
-                    continuation_scope.as_ref(),
-                    previous_response_id.as_deref(),
-                    &selected_pin,
-                ) {
-                    return error_output(
-                        runtime_source("V3HubRespContinuation04Committed", error),
-                        trace,
-                        &hook_registry,
-                    );
-                }
-                if previous_response_id.is_some() {
-                    trace.push("V3HubRespContinuation04Committed");
-                }
                 return error_output(source, trace, &hook_registry);
             }
         };
@@ -871,21 +637,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let transport_request = match hook_registry.run_provider_transport(wire) {
             Ok(value) => value,
             Err(source) => {
-                if let Err(error) = release_terminal_failure_locator(
-                    continuation_state.as_deref(),
-                    continuation_scope.as_ref(),
-                    previous_response_id.as_deref(),
-                    &selected_pin,
-                ) {
-                    return error_output(
-                        runtime_source("V3HubRespContinuation04Committed", error),
-                        trace,
-                        &hook_registry,
-                    );
-                }
-                if previous_response_id.is_some() {
-                    trace.push("V3HubRespContinuation04Committed");
-                }
                 return error_output(source, trace, &hook_registry);
             }
         };
@@ -1003,7 +754,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         run_error: crate::hooks::responses_direct_error_hook,
                         availability: &availability,
                         expanded: expanded.as_ref(),
-                        provider_pinned: previous_response_id.is_some(),
+                        provider_pinned: false,
                         now_epoch_ms,
                     },
                     &policy.target,
@@ -1053,21 +804,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         continue;
                     }
                     V3Error05ExecutionAction::ProjectTerminal => {
-                        if let Err(release_error) = release_terminal_failure_locator(
-                            continuation_state.as_deref(),
-                            continuation_scope.as_ref(),
-                            previous_response_id.as_deref(),
-                            &selected_pin,
-                        ) {
-                            return error_output(
-                                runtime_source("V3HubRespContinuation04Committed", release_error),
-                                trace,
-                                &hook_registry,
-                            );
-                        }
-                        if previous_response_id.is_some() {
-                            trace.push("V3HubRespContinuation04Committed");
-                        }
                         let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
                             "responses",
@@ -1160,21 +896,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     }
                 }
                 if !matches!(source.source_kind, V3ErrorSourceKind::ProviderFailure) {
-                    if let Err(error) = release_terminal_failure_locator(
-                        continuation_state.as_deref(),
-                        continuation_scope.as_ref(),
-                        previous_response_id.as_deref(),
-                        &selected_pin,
-                    ) {
-                        return error_output(
-                            runtime_source("V3HubRespContinuation04Committed", error),
-                            trace,
-                            &hook_registry,
-                        );
-                    }
-                    if previous_response_id.is_some() {
-                        trace.push("V3HubRespContinuation04Committed");
-                    }
                     return error_output(source, trace, &hook_registry);
                 }
                 drop(provider_action_permit.take());
@@ -1185,7 +906,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         run_error: crate::hooks::responses_direct_error_hook,
                         availability: &availability,
                         expanded: expanded.as_ref(),
-                        provider_pinned: previous_response_id.is_some(),
+                        provider_pinned: false,
                         now_epoch_ms,
                     },
                     &policy.target,
@@ -1239,21 +960,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         continue;
                     }
                     V3Error05ExecutionAction::ProjectTerminal => {
-                        if let Err(error) = release_terminal_failure_locator(
-                            continuation_state.as_deref(),
-                            continuation_scope.as_ref(),
-                            previous_response_id.as_deref(),
-                            &selected_pin,
-                        ) {
-                            return error_output(
-                                runtime_source("V3HubRespContinuation04Committed", error),
-                                trace,
-                                &hook_registry,
-                            );
-                        }
-                        if previous_response_id.is_some() {
-                            trace.push("V3HubRespContinuation04Committed");
-                        }
                         let mut observability = build_v3_direct_runtime_observability(
                             &policy.target,
                             "responses",
@@ -1460,14 +1166,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &response_projection.compat_plan,
                         &hook_registry,
                         &direct_failure_session_scope,
-                        continuation_disabled,
-                        &response_projection.remote_continuation,
-                        continuation_state.clone(),
-                        continuation_scope.clone(),
-                        previous_response_id.clone(),
-                        selected_pin.clone(),
-                        selected_capability_revision.clone(),
-                        now_epoch_ms,
                         attempt_budget.clone(),
                     )
                     .await
@@ -1482,18 +1180,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 );
                             }
                             drop(provider_action_permit.take());
-                            if let Err(error) = release_terminal_failure_locator(
-                                continuation_state.as_deref(),
-                                continuation_scope.as_ref(),
-                                previous_response_id.as_deref(),
-                                &selected_pin,
-                            ) {
-                                return error_output(
-                                    runtime_source("V3HubRespContinuation04Committed", error),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
                             return error_output(source, trace, &hook_registry);
                         }
                         Err(source) => {
@@ -1512,7 +1198,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     run_error: crate::hooks::responses_direct_error_hook,
                                     availability: &availability,
                                     expanded: expanded.as_ref(),
-                                    provider_pinned: previous_response_id.is_some(),
+                                    provider_pinned: false,
                                     now_epoch_ms,
                                 },
                                 &policy.target,
@@ -1558,21 +1244,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     continue;
                                 }
                                 V3Error05ExecutionAction::ProjectTerminal => {
-                                    if let Err(error) = release_terminal_failure_locator(
-                                        continuation_state.as_deref(),
-                                        continuation_scope.as_ref(),
-                                        previous_response_id.as_deref(),
-                                        &selected_pin,
-                                    ) {
-                                        return error_output(
-                                            runtime_source(
-                                                "V3HubRespContinuation04Committed",
-                                                error,
-                                            ),
-                                            trace,
-                                            &hook_registry,
-                                        );
-                                    }
                                     let mut observability = build_v3_direct_runtime_observability(
                                         &policy.target,
                                         "responses",
@@ -1634,26 +1305,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         };
         let live_client_sse = matches!(&client_payload.body, V3ClientBody::Sse(_));
         if !live_client_sse && !committed_client_sse {
-            if let (false, Some(_state), Some(scope)) = (
-                continuation_disabled,
-                continuation_state.as_ref(),
-                continuation_scope.as_ref(),
-            ) {
-                if let Err(projected) = commit_or_release_v3_direct_continuation(
-                    &attempt_success_receipt,
-                    continuation_state.as_deref(),
-                    scope,
-                    &response_projection.remote_continuation,
-                    previous_response_id.as_deref(),
-                    &selected_pin,
-                    &selected_capability_revision,
-                    now_epoch_ms,
-                    &mut trace,
-                    &hook_registry,
-                ) {
-                    return projected;
-                }
-            }
+            let _ = &attempt_success_receipt;
         }
         if !provider_health_neutral {
             if let Err(source) = record_v3_direct_provider_success(
@@ -1710,6 +1362,5 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
 
 include!("kernel/direct_runtime_helpers.rs");
 include!("kernel/v3_direct_core.rs");
-include!("kernel/direct_continuation_commit.rs");
 #[cfg(test)]
 mod tests;

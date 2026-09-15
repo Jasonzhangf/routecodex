@@ -1236,10 +1236,10 @@ fn relay_responses_wire_rejects_unconsumed_previous_response_id() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
-        "previous_response_id": "resp_must_be_resolved_at_req03"
+        "previous_response_id": "unsupported_previous_response_id"
     });
     let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("continuation owner state must not cross into Relay outbound");
+        .expect_err("Responses continuation must not cross into Relay outbound");
     assert!(error.contains("UnmappedOutboundFields"), "{error}");
     assert!(error.contains("$.previous_response_id"), "{error}");
 }

@@ -19,7 +19,6 @@ node_ids:
   - V3ServerValidatedMessagesRequest
   - V3HubReqInbound01ClientRaw
   - V3HubReqInbound02Normalized
-  - V3HubReqContinuation03Classified
   - V3HubReqChatProcess04Governed
   - V3HubReqExecution05Planned
   - V3HubReqTarget06Resolved
@@ -31,14 +30,12 @@ node_ids:
   - ProviderRespCompat02ProviderCompat
   - V3HubRespInbound02Normalized
   - V3HubRespChatProcess03Governed
-  - V3HubRespContinuation04Committed
   - V3HubRespOutbound05ClientSemantic
   - V3ServerRespOutbound06ClientFrame
 edges:
   - { step_id: v3-anthropic-relay-01, from_node: V3ServerValidatedMessagesRequest, to_node: V3HubReqInbound01ClientRaw, status: anchored }
   - { step_id: v3-anthropic-relay-02, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: anchored }
-  - { step_id: v3-anthropic-relay-03, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqContinuation03Classified, status: anchored }
-  - { step_id: v3-anthropic-relay-04, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored }
+  - { step_id: v3-anthropic-relay-03, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqChatProcess04Governed, status: anchored }
   - { step_id: v3-anthropic-relay-05, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqExecution05Planned, status: anchored }
   - { step_id: v3-anthropic-relay-06, from_node: V3HubReqExecution05Planned, to_node: V3HubReqTarget06Resolved, status: anchored }
   - { step_id: v3-anthropic-relay-07, from_node: V3HubReqTarget06Resolved, to_node: V3HubReqOutbound07ProviderSemantic, status: anchored }
@@ -49,9 +46,8 @@ edges:
   - { step_id: v3-anthropic-relay-12, from_node: V3ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: anchored }
   - { step_id: v3-anthropic-relay-13, from_node: ProviderRespCompat02ProviderCompat, to_node: V3HubRespInbound02Normalized, status: anchored }
   - { step_id: v3-anthropic-relay-14, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored }
-  - { step_id: v3-anthropic-relay-15, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, status: anchored }
-  - { step_id: v3-anthropic-relay-16, from_node: V3HubRespContinuation04Committed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored }
-  - { step_id: v3-anthropic-relay-17, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored }
+  - { step_id: v3-anthropic-relay-15, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored }
+  - { step_id: v3-anthropic-relay-16, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored }
 verification:
   required_gates:
     - npm run test:v3-anthropic-relay-runtime-integration

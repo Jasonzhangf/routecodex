@@ -343,15 +343,13 @@ mod tests {
     const VALID_1X1_PNG_DATA_URL: &str =
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
     use crate::hub_v1::{
-        build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03,
-        build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02,
+        build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
         build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
         build_v3_hub_req_inbound_01_client_raw,
         build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
         build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
-        build_v3_hub_req_target_06_from_v3_hub_req_execution_05, V3HubContinuationOwnership,
-        V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution,
-        V3HubTransportIntent,
+        build_v3_hub_req_target_06_from_v3_hub_req_execution_05, V3HubEntryProtocol,
+        V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
     };
     use routecodex_v3_config::{
         V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind, V3WebSearchExecutionMode,
@@ -417,11 +415,7 @@ mod tests {
             V3HubTransportIntent::Json,
         );
         let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-            req02,
-            V3HubContinuationOwnership::New,
-        );
-        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
         let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
             req04,
             V3HubExecutionMode::Relay,
@@ -446,11 +440,7 @@ mod tests {
             V3HubTransportIntent::Json,
         );
         let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
-        let req03 = build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02(
-            req02,
-            V3HubContinuationOwnership::New,
-        );
-        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(req03);
+        let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
         let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
             req04,
             V3HubExecutionMode::Relay,

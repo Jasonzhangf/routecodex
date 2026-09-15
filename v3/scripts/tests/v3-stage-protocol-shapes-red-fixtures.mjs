@@ -10,8 +10,8 @@ const root = fs.existsSync(path.join(process.cwd(), 'docs'))
   : path.resolve(process.cwd(), '..');
 const mutations = [
   { name: 'direct-protocol-conversion', mutateManifest: (doc) => { doc.chains[2].stages[1].exit_shape = 'canonical_chat_request'; }, expected: /Direct stage|must be V3Provider12ResponsesWirePayload/ },
-  { name: 'relay-source-wire-crosses-chat', mutateManifest: (doc) => { doc.chains[0].stages[2].entry_shape = 'source_request_wire'; }, expected: /must be V3HubReqContinuation03Classified|shape discontinuity/ },
-  { name: 'relay-outbound-leaves-chat-extension', mutateManifest: (doc) => { doc.chains[0].stages[7].exit_shape = 'canonical_chat_request'; }, expected: /must be ProviderReqCompat06ProviderCompat/ },
+  { name: 'relay-source-wire-crosses-chat', mutateManifest: (doc) => { doc.chains[0].stages[2].entry_shape = 'source_request_wire'; }, expected: /must be V3HubReqChatProcess04Governed|shape discontinuity/ },
+  { name: 'relay-outbound-leaves-chat-extension', mutateManifest: (doc) => { doc.chains[0].stages[6].exit_shape = 'canonical_chat_request'; }, expected: /must be ProviderReqCompat06ProviderCompat/ },
   { name: 'missing-stage-validator-owner', mutateManifest: (doc) => { doc.chains[1].stages[2].validator_owner = 'missing_owner_symbol'; }, expected: /validator owner is not a real Rust function in validator_source/ },
   { name: 'wrong-stage-validator-source', mutateManifest: (doc) => { doc.chains[1].stages[2].validator_source = 'v3/crates/routecodex-v3-runtime/src/hooks.rs'; }, expected: /validator owner is not a real Rust function in validator_source/ },
   {
@@ -41,9 +41,9 @@ const mutations = [
     name: 'mainline-adjacent-edge-drift',
     mutateMainline: (doc) => {
       const chain = doc.chains.find((candidate) => candidate.chain_id === 'v3.hub_pipeline.v1.request');
-      chain.edges.find((edge) => edge.step_id === 'v3-hub-req-07').to_node = 'V3ProviderReqOutbound08WirePayload';
+      chain.edges.find((edge) => edge.step_id === 'v3-hub-req-06').to_node = 'V3ProviderReqOutbound08WirePayload';
     },
-    expected: /v3-hub-req-07 must be anchored V3HubReqOutbound07ProviderSemantic -> ProviderReqCompat06ProviderCompat/,
+    expected: /v3-hub-req-06 must be anchored V3HubReqOutbound07ProviderSemantic -> ProviderReqCompat06ProviderCompat/,
   },
   { name: 'missing-control-field-lock', mutateManifest: (doc) => { delete doc.rules.control_fields; }, expected: /control fields/i },
   {

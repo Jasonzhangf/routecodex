@@ -22,66 +22,39 @@ pub(super) async fn execute_responses_direct_server_outcome(
     request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_request_wants_sse(request_headers, &payload);
-    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
-    let continuation_scope = match build_responses_direct_continuation_scope(
-        request_headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        &path,
-        &entry_facts,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let frame =
-                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
-                    "V3ServerReqChatProcess03Governed",
-                    "responses_direct_continuation_scope_incomplete",
-                    message,
-                    598,
-                ));
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
-    let relay_continuation_scope = match build_responses_relay_local_continuation_scope(
-        request_headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        &path,
-        &entry_facts,
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            let frame =
-                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
-                    "V3ServerReqChatProcess03Governed",
-                    "responses_relay_continuation_scope_incomplete",
-                    message,
-                    598,
-                ));
-            return V3ResponsesDirectServerOutcome::DirectFrame(
-                project_v3_responses_direct_stream_error_frame_if_requested(
-                    frame,
-                    requested_stream,
-                ),
-            );
-        }
-    };
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {
             let frame =
                 build_v3_server_16_http_frame_from_v3_foundation_output(project_v3_debug_failure(
-                    "V3HubReqContinuation03Classified",
+                    "V3ServerReqChatProcess03Governed",
                     V3DebugError::MalformedFixture(format!(
                         "system time precedes Unix epoch: {error}"
                     )),
+                ));
+            return V3ResponsesDirectServerOutcome::DirectFrame(
+                project_v3_responses_direct_stream_error_frame_if_requested(
+                    frame,
+                    requested_stream,
+                ),
+            );
+        }
+    };
+    let server_tool_scope = match build_responses_direct_server_tool_scope(
+        request_headers,
+        Some(&payload),
+        &request_id,
+        &state.server,
+        &path,
+    ) {
+        Ok(scope) => scope,
+        Err(message) => {
+            let frame =
+                build_v3_server_16_http_frame_from_v3_error_06(project_v3_server_runtime_failure(
+                    "V3ServerReqChatProcess03Governed",
+                    "responses_direct_server_tool_scope_incomplete",
+                    message,
+                    598,
                 ));
             return V3ResponsesDirectServerOutcome::DirectFrame(
                 project_v3_responses_direct_stream_error_frame_if_requested(
@@ -168,7 +141,6 @@ pub(super) async fn execute_responses_direct_server_outcome(
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_continuation,
                     &state.responses_direct_server_tool_state,
                     state.provider_health.runtime_health(),
                 )
@@ -184,7 +156,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 ),
                 &state.manifest,
                 raw,
-                continuation_scope,
+                server_tool_scope,
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
@@ -197,7 +169,6 @@ pub(super) async fn execute_responses_direct_server_outcome(
         None => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(
-                    &state.responses_direct_continuation,
                     &state.responses_direct_server_tool_state,
                     state.provider_health.runtime_health(),
                 )
@@ -213,7 +184,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 ),
                 &state.manifest,
                 raw,
-                continuation_scope,
+                server_tool_scope,
                 register_responses_direct_hooks(),
                 &state.debug,
                 now_epoch_ms,
@@ -228,19 +199,31 @@ pub(super) async fn execute_responses_direct_server_outcome(
             request_id: request_id.clone(),
             payload: payload.clone(),
         };
-        let mut local_server_tool = V3ResponsesRelayLocalServerToolInput::new(
-            &state.responses_relay_local_continuation,
-            &state.responses_relay_server_tool_state,
-            relay_continuation_scope,
-            now_epoch_ms,
-        );
-        if let Some(sink) = provider_failure_event_sink.as_ref() {
-            local_server_tool =
-                local_server_tool.with_provider_failure_event_sink(Arc::clone(sink));
-        }
-        if let Some(sink) = route_selection_event_sink.as_ref() {
-            local_server_tool = local_server_tool.with_route_selection_event_sink(Arc::clone(sink));
-        }
+        let relay_server_tool_scope = match build_responses_relay_server_tool_scope(
+            request_headers,
+            Some(&payload),
+            &request_id,
+            &state.server,
+            &path,
+        ) {
+            Ok(scope) => scope,
+            Err(message) => {
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                    project_v3_server_runtime_failure(
+                        "V3ServerReqChatProcess03Governed",
+                        "responses_relay_server_tool_scope_incomplete",
+                        message,
+                        598,
+                    ),
+                );
+                return V3ResponsesDirectServerOutcome::DirectFrame(
+                    project_v3_responses_direct_stream_error_frame_if_requested(
+                        frame,
+                        requested_stream,
+                    ),
+                );
+            }
+        };
         let capture_provider_request = state
             .debug
             .should_capture_snapshot_stage("provider-request");
@@ -248,30 +231,45 @@ pub(super) async fn execute_responses_direct_server_outcome(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let relay_result = if capture_provider_request || capture_provider_response {
-            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
+            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                local_server_tool,
+                &state.responses_relay_server_tool_state,
+                relay_server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(
                     capture_provider_request,
                     capture_provider_response,
                 ),
-                handoff.target,
-                handoff.expanded,
+                provider_failure_event_sink
+                    .as_ref()
+                    .map(std::sync::Arc::clone),
+                route_selection_event_sink
+                    .as_ref()
+                    .map(std::sync::Arc::clone),
+                Some(handoff.target),
+                Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
             )
             .await
         } else {
-            execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
+            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
-                local_server_tool,
-                handoff.target,
-                handoff.expanded,
+                &state.responses_relay_server_tool_state,
+                relay_server_tool_scope,
+                V3ResponsesRelayProviderSnapshotCapture::new(false, false),
+                provider_failure_event_sink
+                    .as_ref()
+                    .map(std::sync::Arc::clone),
+                route_selection_event_sink
+                    .as_ref()
+                    .map(std::sync::Arc::clone),
+                Some(handoff.target),
+                Some(handoff.expanded),
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),

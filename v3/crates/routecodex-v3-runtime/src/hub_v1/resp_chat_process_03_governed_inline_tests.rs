@@ -334,7 +334,6 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
             payload,
             V3HubEntryProtocol::Responses,
             V3HubProviderWireProtocol::Responses,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
