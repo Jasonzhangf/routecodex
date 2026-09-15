@@ -235,7 +235,7 @@ features:
   - Config-owned source identity is stable, source-sensitive, deterministic, and secret-free
   - deterministic identity and strict state schema
   - configured hooks sidecar starts only after CodexApp readiness and drains before CodexApp when ready; because hooks are an optional integration, missing/invalid readiness leaves the RouteCodex service Running with an explicit degraded detail, preserves lifecycle control resources, and never claims hooks readiness
-  - hooks sidecar stop/restart cleanup failure is explicit, persists the exact failure, retains lifecycle control resources, and never reports stopped or execs a replacement while the process group may remain alive
+  - hooks sidecar stop/restart cleanup failure is explicit as degraded lifecycle detail, completes the main stop or restart path, and preserves any hooks process record whose cleanup cannot be completed with persisted ownership evidence; hooks failure never blocks the main service lifecycle
   - exclusive operation lock and auth-handle preflight
   - no resolved secret in lifecycle projection
   - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures

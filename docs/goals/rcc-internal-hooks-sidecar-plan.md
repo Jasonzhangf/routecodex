@@ -57,6 +57,12 @@ transport when a native Codex App Server interface exists.
 - tmux may host TUI processes, but it is not a message channel. Sending,
   status reads, and continuation reads use the App Server control socket only.
 - Do not make hooks readiness a prerequisite for RouteCodex startup.
+- Hooks are optional at every lifecycle boundary. Missing, invalid, crashing,
+  timing-out, stale, identity-mismatched, or cleanup-failing hooks must leave
+  the main RouteCodex start, stop, restart, reap, and forced-stop paths
+  bounded and usable. Cleanup uncertainty is reported as degraded detail and
+  preserves the owned hooks record when its process group cannot be confirmed
+  dead; it must not hold a lifecycle operation open indefinitely.
 - A stale, invalid, or identity-mismatched hooks process record must degrade to
   `hooks_unavailable:<reason>` at every lifecycle boundary; it must never abort
   startup, reap, restart, or forced stop. The strict identity probe still

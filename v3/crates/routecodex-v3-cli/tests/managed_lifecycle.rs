@@ -1,8 +1,9 @@
 use serde_json::Value;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread::sleep;
@@ -14,6 +15,8 @@ const PORT_STATE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn managed_test_command(binary: &str) -> Command {
     let mut command = Command::new(binary);
+    let temp_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build-control/temp");
+    fs::create_dir_all(&temp_dir).unwrap();
     command
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("TMPDIR", "build-control/temp")
@@ -252,6 +255,31 @@ fn run_with_hooks_record(
         )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
+fn run_with_hooks_record_tmpdir(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    tmp_dir: &Path,
+) -> Output {
+    managed_test_command(binary)
+        .args(["server", command, "--config"])
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .env("TMPDIR", tmp_dir)
+        .env("TMP", tmp_dir)
+        .env("TEMP", tmp_dir)
         .output()
         .unwrap()
 }
@@ -760,6 +788,7 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
         &record_path,
         serde_json::json!({
             "supervisor_enabled": true,
+            "hooks_runtime": "legacy_supervisor",
             "supervisor_wrapper": supervisor_wrapper,
             "daemon_config": daemon_config,
             "bin_directory": bin_directory,
@@ -779,10 +808,25 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
     assert!(status.status.success());
     let status_json = last_json(&status);
     assert_eq!(status_json["state"], "running");
-    let detail = status_json["detail"].as_str().unwrap();
-    assert!(detail.contains("hooks sidecar unavailable:"));
-    assert!(detail.contains("hooks sidecar exited before readiness"));
     let instance_dir = single_instance_dir(&state_root);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = wait_status_file_state(&instance_dir, "running")
+            .get("detail")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if detail.contains("hooks sidecar unavailable:")
+            && detail.contains("hooks_unavailable:crashed")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "hooks failure detail was not published: {detail}"
+        );
+        sleep(Duration::from_millis(50));
+    }
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
     for port in ports {
@@ -798,6 +842,277 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
     for port in ports {
         wait_port(port, false);
     }
+}
+
+#[test]
+fn slow_hooks_sidecar_does_not_block_managed_stop() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !hooksd_started.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "slow hooksd did not start before stop"
+        );
+        sleep(Duration::from_millis(10));
+    }
+
+    let stop_started = Instant::now();
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        stop_started.elapsed() < Duration::from_secs(5),
+        "stop waited for hooks readiness timeout: {:?}",
+        stop_started.elapsed()
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+}
+
+#[test]
+fn slow_hooks_sidecar_does_not_block_managed_restart() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !hooksd_started.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "slow hooksd did not start before restart"
+        );
+        sleep(Duration::from_millis(10));
+    }
+
+    let restart_started = Instant::now();
+    let restart = run_with_hooks_record(binary, &state_root, &config, "restart", &record_path);
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    assert!(
+        restart_started.elapsed() < Duration::from_secs(5),
+        "restart waited for hooks readiness timeout: {:?}",
+        restart_started.elapsed()
+    );
+    assert_eq!(last_json(&restart)["state"], "running");
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+}
+
+#[test]
+fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup() {
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    let managed_tmp = root.path().join("tmp");
+    fs::create_dir_all(&managed_tmp).unwrap();
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "install_root": hooks_root,
+            "bin_directory": bin_directory,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        &managed_tmp,
+    );
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !hooksd_started.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "malformed-json test hooksd did not start"
+        );
+        sleep(Duration::from_millis(10));
+    }
+
+    let control: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("control.json")).unwrap()).unwrap();
+    let socket_path = PathBuf::from(control["socket_path"].as_str().unwrap());
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+    stream.write_all(b"{not-json}\n").unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    BufReader::new(&mut stream)
+        .read_line(&mut response)
+        .unwrap();
+    let rejection: Value = serde_json::from_str(response.trim()).unwrap();
+    assert_eq!(rejection["accepted"], false);
+    assert_eq!(rejection["state"], "running");
+    assert!(rejection["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid control request JSON"));
+
+    let status = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "status",
+        &record_path,
+        &managed_tmp,
+    );
+    assert!(status.status.success());
+    assert_eq!(last_json(&status)["state"], "running");
+    assert!(hooksd_started.exists());
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "stop",
+        &record_path,
+        &managed_tmp,
+    );
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
 }
 
 #[test]

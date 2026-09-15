@@ -16,23 +16,15 @@ pub(crate) fn reap_inactive_runtime_files(
     } else {
         None
     };
-    // Startup admission is the one boundary where the optional sidecar must
-    // never block RouteCodex. A positively verified live group still blocks
-    // (its runtime is active); an uncertain or stale record must not. The
-    // record is preserved on uncertainty so no cleanup obligation is silently
-    // discarded, and it is removed only when the group is confirmed gone.
+    // Hooks are optional at every lifecycle boundary. Reaping never signals
+    // the sidecar; preserve its record whenever a live or unverifiable group
+    // may remain so cleanup is not silently discarded.
     let hooks_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
-    let hooks_record_uncertain = match hooks_sidecar_process_group_is_alive(instance_dir) {
-        Ok(true) => {
-            return Err(V3LifecycleError::IdentityMismatch(
-                "refusing to reap lifecycle state while hooks sidecar process group is alive"
-                    .to_string(),
-            ));
-        }
-        Ok(false) => false,
-        Err(V3LifecycleError::HooksControlValidation(_)) => hooks_record_path.exists(),
-        Err(error) => return Err(error),
-    };
+    let hooks_record_uncertain = hooks_record_path.exists()
+        && !matches!(
+            hooks_sidecar_process_group_is_alive(instance_dir),
+            Ok(false)
+        );
     let terminal_status = status.as_ref().is_some_and(|status| {
         matches!(
             status.state,
@@ -136,15 +128,9 @@ pub(crate) fn owned_unreachable_runtime_state_is_reapable(
     expected: &V3ManagedInstanceDeclaration,
 ) -> Result<bool, V3LifecycleError> {
     // This predicate decides only whether the *main runtime* state is safely
-    // reapable. An uncertain hooks record is preserved by
-    // `reap_inactive_runtime_files`, and a positively live owned hooks group
-    // still means the instance is active. Hooks uncertainty must not make the
-    // main runtime unreapable, because that would block startup.
-    match hooks_sidecar_process_group_is_alive(instance_dir) {
-        Ok(true) => return Ok(false),
-        Ok(false) | Err(V3LifecycleError::HooksControlValidation(_)) => {}
-        Err(error) => return Err(error),
-    }
+    // reapable. Hooks are optional and their process record is preserved by
+    // `reap_inactive_runtime_files`; a live or unverifiable hooks group must
+    // never make startup wait on, or fail because of, the optional sidecar.
     let pid_path = instance_dir.join("pid.cache");
     let cached_pid = if pid_path.exists() {
         let pid: V3ManagedPidCache = read_json(&pid_path)?;

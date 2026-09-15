@@ -318,6 +318,62 @@ async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_
 
 #[tokio::test]
 #[cfg(unix)]
+async fn stale_record_without_control_socket_identity_is_reaped_before_internal_start() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+
+    // A previous run was killed before it could persist the control-socket
+    // identity and left its bound socket behind.
+    let control_socket = instance_dir.join("hooks-sidecar.sock");
+    let stale_socket = std::os::unix::net::UnixListener::bind(&control_socket).unwrap();
+    drop(stale_socket);
+    let mut dead_child = Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let process_group_id = dead_child.id() as libc::pid_t;
+    let leader_start_token = process_start_token(process_group_id as u32)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
+    dead_child.wait().unwrap();
+    fs::write(
+        instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
+        serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "process_group_id": process_group_id,
+            "leader_pid": process_group_id,
+            "leader_start_token": leader_start_token,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let sidecar = start_configured_hooks_sidecar(&instance_dir)
+        .await
+        .expect("stale control-socket cleanup must not fail startup")
+        .expect("the ready sidecar must start");
+    sidecar.stop().await.unwrap();
+
+    assert!(!control_socket.exists());
+    assert!(!instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn stale_live_hooks_group_is_unavailable_instead_of_aborting_start() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();

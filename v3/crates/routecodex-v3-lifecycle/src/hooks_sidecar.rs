@@ -10,11 +10,19 @@ use tokio::process::{Child, Command as TokioCommand};
 
 mod hooks_install;
 use hooks_install::*;
+mod process;
+use process::*;
+pub(crate) use process::{
+    hooks_sidecar_cleanup_incomplete_detail, hooks_sidecar_process_group_is_alive,
+};
 
 const HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 const HOOKS_INSTALL_RECORD_RELATIVE: &str = ".codex/routecodex-hooks/install.json";
 pub(crate) const HOOKS_SIDECAR_PROCESS_FILE: &str = "hooks-sidecar.pid";
 const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(15);
+// Hooks are optional. Bound the wait for the supervisor task so a broken
+// sidecar cleanup can never hold the main lifecycle open indefinitely.
+const SIDECAR_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +33,19 @@ struct V3HooksSidecarProcessRecord {
     leader_start_token: String,
     #[serde(default)]
     control_socket_identity: Option<CodexAppSocketIdentity>,
+    #[serde(default)]
+    codexapp_socket_cleanup: Option<PersistedCodexAppSocketCleanup>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PersistedCodexAppSocketCleanup {
+    path: PathBuf,
+    install_root: PathBuf,
+    #[serde(default)]
+    pre_start_identity: Option<CodexAppSocketIdentity>,
+    #[serde(default)]
+    startup_identity: Option<CodexAppSocketIdentity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +63,28 @@ struct CodexAppSocketCleanup {
     startup_identity: Option<CodexAppSocketIdentity>,
 }
 
+impl From<&CodexAppSocketCleanup> for PersistedCodexAppSocketCleanup {
+    fn from(cleanup: &CodexAppSocketCleanup) -> Self {
+        Self {
+            path: cleanup.path.clone(),
+            install_root: cleanup.install_root.clone(),
+            pre_start_identity: cleanup.pre_start_identity,
+            startup_identity: cleanup.startup_identity,
+        }
+    }
+}
+
+impl From<&PersistedCodexAppSocketCleanup> for CodexAppSocketCleanup {
+    fn from(cleanup: &PersistedCodexAppSocketCleanup) -> Self {
+        Self {
+            path: cleanup.path.clone(),
+            install_root: cleanup.install_root.clone(),
+            pre_start_identity: cleanup.pre_start_identity,
+            startup_identity: cleanup.startup_identity,
+        }
+    }
+}
+
 pub(crate) struct V3HooksSidecarProcess {
     child: Child,
     group_leader: Option<Child>,
@@ -53,6 +96,186 @@ pub(crate) struct V3HooksSidecarProcess {
     control_socket_identity: Option<CodexAppSocketIdentity>,
     degraded_detail: Option<String>,
     socket_cleanup: Option<CodexAppSocketCleanup>,
+}
+
+pub(crate) struct V3HooksSidecarSupervisor {
+    instance_dir: PathBuf,
+    stop_tx: Option<tokio::sync::watch::Sender<bool>>,
+    done_rx: tokio::sync::oneshot::Receiver<Result<(), V3LifecycleError>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl V3HooksSidecarSupervisor {
+    pub(crate) fn spawn(instance_dir: PathBuf, instance_id: String) -> Self {
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let supervisor_stop_rx = stop_rx.clone();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let task_instance_dir = instance_dir.clone();
+        let task = tokio::spawn(async move {
+            let result = run_managed_hooks_sidecar(
+                task_instance_dir,
+                instance_id,
+                stop_rx,
+                supervisor_stop_rx,
+            )
+            .await;
+            let _ = done_tx.send(result);
+        });
+        Self {
+            instance_dir,
+            stop_tx: Some(stop_tx),
+            done_rx,
+            task,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_startup(
+        _instance_dir: PathBuf,
+        startup: tokio::task::JoinHandle<Result<Option<V3HooksSidecarProcess>, V3LifecycleError>>,
+    ) -> Self {
+        let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let result = match startup.await {
+                Ok(Ok(Some(sidecar))) => {
+                    wait_for_sidecar_stop(&mut stop_rx).await;
+                    sidecar.stop().await
+                }
+                Ok(Ok(None)) => Ok(()),
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(V3LifecycleError::Validation(format!(
+                    "hooks sidecar startup task failed: {error}"
+                ))),
+            };
+            let _ = done_tx.send(result);
+        });
+        Self {
+            instance_dir: _instance_dir,
+            stop_tx: Some(stop_tx),
+            done_rx,
+            task,
+        }
+    }
+
+    pub(crate) async fn stop(mut self) -> Result<(), V3LifecycleError> {
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(true);
+        }
+        match tokio::time::timeout(SIDECAR_STOP_TIMEOUT, self.done_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => Err(V3LifecycleError::Validation(format!(
+                "hooks sidecar supervisor failed: {error}"
+            ))),
+            // The main lifecycle must stay bounded. Force-kill the persisted,
+            // identity-checked process group here so a later exec cannot orphan
+            // it; the still-running supervisor task observes the dead group and
+            // completes its own cleanup, and dropping its JoinHandle detaches
+            // it without dropping the owned Child handles.
+            Err(_) => {
+                let cleanup = force_terminate_sidecar_by_record(&self.instance_dir).await;
+                drop(self.task);
+                match cleanup {
+                    Ok(ForcedSidecarCleanup::RecordRemoved) => Err(V3LifecycleError::Timeout(
+                        "hooks sidecar supervisor stop".to_string(),
+                    )),
+                    Ok(ForcedSidecarCleanup::RecordPreserved) => Err(V3LifecycleError::Validation(
+                        "hooks sidecar supervisor stop timed out; process record preserved because control-socket identity is unavailable"
+                            .to_string(),
+                    )),
+                    Err(cleanup_error) => Err(V3LifecycleError::Validation(format!(
+                        "hooks sidecar supervisor stop timed out; forced cleanup failed: {cleanup_error}"
+                    ))),
+                }
+            }
+        }
+    }
+}
+
+async fn run_managed_hooks_sidecar(
+    instance_dir: PathBuf,
+    instance_id: String,
+    mut startup_stop_rx: tokio::sync::watch::Receiver<bool>,
+    mut supervisor_stop_rx: tokio::sync::watch::Receiver<bool>,
+) -> Result<(), V3LifecycleError> {
+    match start_managed_hooks_sidecar_cancelable(&instance_dir, Some(&mut startup_stop_rx)).await {
+        Ok((Some(sidecar), detail)) => {
+            if let Err(status_error) =
+                write_hooks_running_status(&instance_dir, &instance_id, detail)
+            {
+                return stop_sidecar_after_primary_error(sidecar, status_error).await;
+            }
+            wait_for_sidecar_stop(&mut supervisor_stop_rx).await;
+            sidecar.stop().await
+        }
+        Ok((None, detail)) => {
+            if detail.is_some() && !*supervisor_stop_rx.borrow() {
+                if let Err(error) = write_hooks_running_status(&instance_dir, &instance_id, detail)
+                {
+                    return Err(error);
+                }
+            }
+            Ok(())
+        }
+        Err(V3LifecycleError::HooksSidecarStartCancelled) => Ok(()),
+        Err(error) => {
+            if *supervisor_stop_rx.borrow() {
+                return Err(error);
+            }
+            let detail = Some(format!("hooks sidecar unavailable: {error}"));
+            write_hooks_running_status(&instance_dir, &instance_id, detail)
+        }
+    }
+}
+
+async fn stop_sidecar_after_primary_error(
+    sidecar: V3HooksSidecarProcess,
+    primary_error: V3LifecycleError,
+) -> Result<(), V3LifecycleError> {
+    match sidecar.stop().await {
+        Ok(()) => Err(primary_error),
+        Err(cleanup_error) => Err(V3LifecycleError::Validation(format!(
+            "{primary_error}; hooks sidecar cleanup failed: {cleanup_error}"
+        ))),
+    }
+}
+
+async fn wait_for_sidecar_stop(stop_rx: &mut tokio::sync::watch::Receiver<bool>) {
+    if *stop_rx.borrow() {
+        return;
+    }
+    while stop_rx.changed().await.is_ok() {
+        if *stop_rx.borrow() {
+            return;
+        }
+    }
+}
+
+fn sidecar_cancellation_requested(cancel_rx: Option<&tokio::sync::watch::Receiver<bool>>) -> bool {
+    cancel_rx.is_some_and(|cancel_rx| *cancel_rx.borrow())
+}
+
+async fn wait_for_sidecar_cancellation(cancel_rx: Option<&mut tokio::sync::watch::Receiver<bool>>) {
+    let Some(cancel_rx) = cancel_rx else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    if *cancel_rx.borrow() {
+        return;
+    }
+    while cancel_rx.changed().await.is_ok() {
+        if *cancel_rx.borrow() {
+            return;
+        }
+    }
+}
+
+fn write_hooks_running_status(
+    instance_dir: &Path,
+    instance_id: &str,
+    detail: Option<String>,
+) -> Result<(), V3LifecycleError> {
+    write_running_status_if_current(instance_dir, instance_id, detail)
 }
 
 pub(crate) async fn start_configured_hooks_sidecar(
@@ -92,19 +315,37 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
     instance_dir: &Path,
     start_timeout: Duration,
 ) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
+    start_configured_hooks_sidecar_with_timeout_and_cancel(instance_dir, start_timeout, None).await
+}
+
+async fn start_configured_hooks_sidecar_with_timeout_and_cancel(
+    instance_dir: &Path,
+    start_timeout: Duration,
+    mut cancel_rx: Option<&mut tokio::sync::watch::Receiver<bool>>,
+) -> Result<Option<V3HooksSidecarProcess>, V3LifecycleError> {
     let Some(record_path) = hooks_install_record_path()
         .map_err(|error| optional_hooks_error_reason(HooksUnavailableReason::Missing, error))?
     else {
         return Ok(None);
     };
-    let record_bytes = fs::read(&record_path).map_err(|error| {
-        optional_hooks_error_reason(HooksUnavailableReason::Missing, error.into())
-    })?;
+    let record_bytes = match fs::read(&record_path) {
+        Ok(record_bytes) => record_bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(optional_hooks_error_reason(
+                HooksUnavailableReason::Missing,
+                error.into(),
+            ));
+        }
+    };
     let record: Value = serde_json::from_slice(&record_bytes).map_err(|error| {
         optional_hooks_error_reason(HooksUnavailableReason::InvalidReadiness, error.into())
     })?;
     if record.get("supervisor_enabled").and_then(Value::as_bool) != Some(true) {
         return Ok(None);
+    }
+    if sidecar_cancellation_requested(cancel_rx.as_deref()) {
+        return Err(V3LifecycleError::HooksSidecarStartCancelled);
     }
     let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
     let mut stale_process_group_confirmed_dead = false;
@@ -117,10 +358,15 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
                 ),
             ));
         }
+        let stale_record = read_json::<V3HooksSidecarProcessRecord>(&process_record_path).ok();
+        if let Some(cleanup) = stale_record
+            .as_ref()
+            .and_then(|record| record.codexapp_socket_cleanup.as_ref())
+        {
+            cleanup_codexapp_socket(&cleanup.into())?;
+        }
         stale_control_socket_identity =
-            read_json::<V3HooksSidecarProcessRecord>(&process_record_path)
-                .ok()
-                .and_then(|record| record.control_socket_identity);
+            stale_record.and_then(|record| record.control_socket_identity);
         fs::remove_file(&process_record_path)?;
         stale_process_group_confirmed_dead = true;
     }
@@ -173,17 +419,17 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         None
     };
     let control_socket = instance_dir.join("hooks-sidecar.sock");
-    if internal_hooksd.is_some() {
+    if internal_hooksd.is_some() && stale_process_group_confirmed_dead {
         // Stale-socket cleanup belongs to the lifecycle owner, which has just
         // verified the persisted process-group identity: a record that exists
         // and is still alive already returned above, and an unverifiable
-        // record propagates before this point. A leftover control socket in
-        // this owned instance directory can therefore be removed without the
-        // control-server owner ever unlinking a path it cannot verify.
-        if control_socket.exists() && stale_process_group_confirmed_dead {
-            if let Some(identity) = stale_control_socket_identity {
-                remove_file_if_identity_matches(&control_socket, identity)?;
-            }
+        // record propagates before this point. The new sidecar has not been
+        // spawned yet, so any leftover socket in this owned instance directory
+        // is stale; remove it by recorded identity when available, otherwise
+        // only after confirming the path is still a socket.
+        match stale_control_socket_identity {
+            Some(identity) => remove_file_if_identity_matches(&control_socket, identity)?,
+            None => remove_control_socket_if_present(&control_socket)?,
         }
     }
     let appserver_socket = if internal_hooksd.is_some() {
@@ -217,6 +463,7 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .process_group(0)
+        .kill_on_drop(true)
         .spawn()
         .map_err(|error| {
             optional_hooks_error(V3LifecycleError::Validation(format!(
@@ -231,6 +478,20 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         )));
     };
     let leader_pid = process_group_id as u32;
+    if sidecar_cancellation_requested(cancel_rx.as_deref()) {
+        return finish_sidecar_start_failure(
+            V3LifecycleError::HooksSidecarStartCancelled,
+            None,
+            group_leader,
+            process_group_id,
+            leader_pid,
+            "",
+            &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+            socket_cleanup,
+        )
+        .await;
+    }
     let leader_start_token = match process_start_token(leader_pid) {
         Ok(Some(token)) => token,
         Ok(None) => {
@@ -309,7 +570,8 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         .stderr(sidecar_stderr)
         // Join the lifecycle-owned process group; the anchor remains the
         // persisted identity even if this wrapper exits early.
-        .process_group(process_group_id);
+        .process_group(process_group_id)
+        .kill_on_drop(true);
     let command_label = internal_hooksd
         .as_ref()
         .or(wrapper.as_ref())
@@ -335,6 +597,20 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
             .await;
         }
     };
+    if sidecar_cancellation_requested(cancel_rx.as_deref()) {
+        return finish_sidecar_start_failure(
+            V3LifecycleError::HooksSidecarStartCancelled,
+            Some(child),
+            group_leader,
+            process_group_id,
+            leader_pid,
+            &leader_start_token,
+            &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+            socket_cleanup,
+        )
+        .await;
+    }
     if let Err(error) = write_json_atomic(
         &process_record_path,
         &V3HooksSidecarProcessRecord {
@@ -343,6 +619,7 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
             leader_pid,
             leader_start_token: leader_start_token.clone(),
             control_socket_identity: None,
+            codexapp_socket_cleanup: socket_cleanup.as_ref().map(Into::into),
         },
     ) {
         return finish_sidecar_start_failure(
@@ -375,8 +652,23 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
         .await;
     };
     let mut reader = tokio::io::BufReader::new(stdout);
-    let readiness =
-        match tokio::time::timeout(start_timeout, read_sidecar_readiness(&mut reader)).await {
+    let readiness = tokio::select! {
+        _ = wait_for_sidecar_cancellation(cancel_rx.as_mut().map(|cancel_rx| &mut **cancel_rx)) => {
+            return finish_sidecar_start_failure(
+                V3LifecycleError::HooksSidecarStartCancelled,
+                Some(child),
+                group_leader,
+                process_group_id,
+                leader_pid,
+                &leader_start_token,
+                &process_record_path,
+                internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+                socket_cleanup,
+            )
+            .await;
+        }
+        readiness = tokio::time::timeout(start_timeout, read_sidecar_readiness(&mut reader)) => {
+            match readiness {
             Ok(Ok(readiness)) => readiness,
             Ok(Err(error)) => {
                 return finish_sidecar_start_failure(
@@ -409,7 +701,27 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
                 )
                 .await;
             }
-        };
+            }
+        }
+    };
+    if sidecar_cancellation_requested(cancel_rx.as_deref()) {
+        // Readiness can arrive in the same poll as the supervisor stop. A
+        // stop-requested startup must not adopt the sidecar or rewrite the
+        // process record after the bounded stop path may have already removed
+        // it; fall through to the in-memory failure cleanup instead.
+        return finish_sidecar_start_failure(
+            V3LifecycleError::HooksSidecarStartCancelled,
+            Some(child),
+            group_leader,
+            process_group_id,
+            leader_pid,
+            &leader_start_token,
+            &process_record_path,
+            internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+            socket_cleanup,
+        )
+        .await;
+    }
     let readiness_protocol = readiness.get("protocol").and_then(Value::as_str);
     if (readiness_protocol != Some("routecodex-hooks-supervisor/v1")
         && readiness_protocol != Some(RCC_HOOKS_SIDECAR_PROTOCOL))
@@ -453,9 +765,72 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
             .map(|metadata| codexapp_socket_identity(&metadata))
     });
     if internal_hooksd.is_some() {
-        let mut record: V3HooksSidecarProcessRecord = read_json(&process_record_path)?;
+        let mut record: V3HooksSidecarProcessRecord = match read_json(&process_record_path) {
+            Ok(record) => record,
+            Err(error) => {
+                return finish_sidecar_start_failure(
+                    optional_hooks_error(error),
+                    Some(child),
+                    group_leader,
+                    process_group_id,
+                    leader_pid,
+                    &leader_start_token,
+                    &process_record_path,
+                    Some(control_socket.as_path()),
+                    socket_cleanup,
+                )
+                .await;
+            }
+        };
         record.control_socket_identity = control_socket_identity;
-        write_json_atomic(&process_record_path, &record)?;
+        if let Err(error) = write_json_atomic(&process_record_path, &record) {
+            return finish_sidecar_start_failure(
+                optional_hooks_error(error),
+                Some(child),
+                group_leader,
+                process_group_id,
+                leader_pid,
+                &leader_start_token,
+                &process_record_path,
+                Some(control_socket.as_path()),
+                socket_cleanup,
+            )
+            .await;
+        }
+    }
+    if internal_hooksd.is_none() {
+        let mut record: V3HooksSidecarProcessRecord = match read_json(&process_record_path) {
+            Ok(record) => record,
+            Err(error) => {
+                return finish_sidecar_start_failure(
+                    optional_hooks_error(error),
+                    Some(child),
+                    group_leader,
+                    process_group_id,
+                    leader_pid,
+                    &leader_start_token,
+                    &process_record_path,
+                    internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+                    socket_cleanup,
+                )
+                .await;
+            }
+        };
+        record.codexapp_socket_cleanup = socket_cleanup.as_ref().map(Into::into);
+        if let Err(error) = write_json_atomic(&process_record_path, &record) {
+            return finish_sidecar_start_failure(
+                optional_hooks_error(error),
+                Some(child),
+                group_leader,
+                process_group_id,
+                leader_pid,
+                &leader_start_token,
+                &process_record_path,
+                internal_hooksd.as_ref().map(|_| control_socket.as_path()),
+                socket_cleanup,
+            )
+            .await;
+        }
     }
     tokio::spawn(async move {
         let mut lines = reader.lines();
@@ -478,12 +853,28 @@ pub(crate) async fn start_configured_hooks_sidecar_with_timeout(
 pub(crate) async fn start_managed_hooks_sidecar(
     instance_dir: &Path,
 ) -> Result<(Option<V3HooksSidecarProcess>, Option<String>), V3LifecycleError> {
-    match start_configured_hooks_sidecar(instance_dir).await {
+    start_managed_hooks_sidecar_cancelable(instance_dir, None).await
+}
+
+async fn start_managed_hooks_sidecar_cancelable(
+    instance_dir: &Path,
+    cancel_rx: Option<&mut tokio::sync::watch::Receiver<bool>>,
+) -> Result<(Option<V3HooksSidecarProcess>, Option<String>), V3LifecycleError> {
+    match start_configured_hooks_sidecar_with_timeout_and_cancel(
+        instance_dir,
+        SIDECAR_START_TIMEOUT,
+        cancel_rx,
+    )
+    .await
+    {
         Ok(sidecar) => {
             let detail = sidecar
                 .as_ref()
                 .and_then(|sidecar| sidecar.degraded_detail.clone());
             Ok((sidecar, detail))
+        }
+        Err(V3LifecycleError::HooksSidecarStartCancelled) => {
+            Err(V3LifecycleError::HooksSidecarStartCancelled)
         }
         Err(error @ V3LifecycleError::HooksOptionalUnavailable(_)) => {
             // Hooks are an optional integration. A broken hook supervisor
@@ -581,7 +972,7 @@ async fn finish_sidecar_start_failure(
                             None => detail,
                         });
                     }
-                } else if let Err(error) = remove_file_if_present(control_socket_path) {
+                } else if let Err(error) = remove_control_socket_if_present(control_socket_path) {
                     let detail = format!(
                         "hooks sidecar control socket cleanup failed: {}; {error}",
                         control_socket_path.display()
@@ -625,29 +1016,6 @@ async fn finish_sidecar_start_failure(
             ))),
         },
     }
-}
-
-fn remove_file_if_present(path: &Path) -> Result<(), V3LifecycleError> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn remove_file_if_identity_matches(
-    path: &Path,
-    identity: CodexAppSocketIdentity,
-) -> Result<(), V3LifecycleError> {
-    let current = match fs::symlink_metadata(path) {
-        Ok(metadata) => codexapp_socket_identity(&metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-    if current != identity {
-        return Ok(());
-    }
-    remove_file_if_present(path)
 }
 
 impl V3HooksSidecarProcess {
@@ -739,7 +1107,7 @@ impl V3HooksSidecarProcess {
         if let Some(control_socket_path) = self.control_socket_path.as_ref() {
             match self.control_socket_identity {
                 Some(identity) => remove_file_if_identity_matches(control_socket_path, identity)?,
-                None => remove_file_if_present(control_socket_path)?,
+                None => remove_control_socket_if_present(control_socket_path)?,
             }
         }
         if self.process_record_path.exists() {
@@ -747,586 +1115,6 @@ impl V3HooksSidecarProcess {
         }
         Ok(())
     }
-}
-
-async fn read_sidecar_readiness(
-    stdout: &mut (impl AsyncBufRead + Unpin),
-) -> Result<Value, V3LifecycleError> {
-    let mut line = String::new();
-    let read = stdout.read_line(&mut line).await?;
-    if read == 0 {
-        return Err(V3LifecycleError::Validation(
-            "hooks sidecar exited before readiness".to_string(),
-        ));
-    }
-    let line = line.trim_end_matches(['\r', '\n']);
-    if line.is_empty() {
-        return Err(V3LifecycleError::Validation(
-            "hooks sidecar emitted an empty readiness record".to_string(),
-        ));
-    }
-    Ok(serde_json::from_str(line)?)
-}
-
-async fn terminate_sidecar(
-    mut child: Option<&mut Child>,
-    group_leader: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-) -> Result<(), V3LifecycleError> {
-    if process_group_id <= 0 {
-        return Err(V3LifecycleError::Validation(
-            "hooks sidecar process group id is invalid".to_string(),
-        ));
-    }
-    let mut leader_reaped = group_leader.try_wait()?.is_some();
-    validate_active_process_group_identity(
-        group_leader,
-        process_group_id,
-        leader_pid,
-        leader_start_token,
-        &mut leader_reaped,
-    )?;
-    signal_process_group(process_group_id, libc::SIGTERM)?;
-    if wait_for_sidecar_graceful_shutdown(
-        &mut child,
-        group_leader,
-        process_group_id,
-        leader_pid,
-        leader_start_token,
-        &mut leader_reaped,
-    )
-    .await?
-    {
-        return Ok(());
-    }
-
-    validate_active_process_group_identity(
-        group_leader,
-        process_group_id,
-        leader_pid,
-        leader_start_token,
-        &mut leader_reaped,
-    )?;
-    signal_process_group(process_group_id, libc::SIGKILL)?;
-    if wait_for_process_group_shutdown(
-        &mut child,
-        group_leader,
-        process_group_id,
-        &mut leader_reaped,
-    )
-    .await?
-    {
-        return Ok(());
-    }
-    Err(V3LifecycleError::Timeout(format!(
-        "hooks sidecar forced stop process group {process_group_id}"
-    )))
-}
-
-fn signal_process(process_id: u32, signal: libc::c_int) -> Result<(), V3LifecycleError> {
-    let result = unsafe { libc::kill(process_id as libc::pid_t, signal) };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(V3LifecycleError::Io(error))
-}
-
-async fn wait_for_sidecar_graceful_shutdown(
-    child: &mut Option<&mut Child>,
-    group_leader: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-    leader_reaped: &mut bool,
-) -> Result<bool, V3LifecycleError> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut child_reaped = child.is_none();
-    loop {
-        if !child_reaped {
-            if let Some(wrapper) = child.as_deref_mut() {
-                if wrapper.try_wait()?.is_some() {
-                    child_reaped = true;
-                }
-            }
-        }
-        if !*leader_reaped && group_leader.try_wait()?.is_some() {
-            *leader_reaped = true;
-        }
-        if *leader_reaped {
-            return Ok(!process_group_exists(process_group_id)?);
-        }
-        if child_reaped && process_group_contains_only_leader(process_group_id, leader_pid)? {
-            validate_active_process_group_identity(
-                group_leader,
-                process_group_id,
-                leader_pid,
-                leader_start_token,
-                leader_reaped,
-            )?;
-            signal_process(leader_pid, libc::SIGUSR1)?;
-            return wait_for_process_group_shutdown(
-                child,
-                group_leader,
-                process_group_id,
-                leader_reaped,
-            )
-            .await;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok(false);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-fn process_group_contains_only_leader(
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-) -> Result<bool, V3LifecycleError> {
-    let output = std::process::Command::new("/bin/ps")
-        .args(["-axo", "pid=,pgid="])
-        .output()
-        .map_err(|error| {
-            V3LifecycleError::Validation(format!(
-                "cannot inspect hooks sidecar process group {process_group_id}: {error}"
-            ))
-        })?;
-    if !output.status.success() {
-        return Err(V3LifecycleError::Validation(format!(
-            "cannot inspect hooks sidecar process group {process_group_id}: ps exited with {}",
-            output.status
-        )));
-    }
-    let mut found_leader = false;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let mut fields = line.split_whitespace();
-        let Some(pid) = fields.next() else {
-            continue;
-        };
-        let Some(pgid) = fields.next() else {
-            return Err(V3LifecycleError::Validation(
-                "cannot parse hooks sidecar process-group inspection output".to_string(),
-            ));
-        };
-        let pid: u32 = pid.parse().map_err(|_| {
-            V3LifecycleError::Validation(
-                "cannot parse hooks sidecar process-group member PID".to_string(),
-            )
-        })?;
-        let pgid: libc::pid_t = pgid.parse().map_err(|_| {
-            V3LifecycleError::Validation(
-                "cannot parse hooks sidecar process-group member PGID".to_string(),
-            )
-        })?;
-        if pgid != process_group_id {
-            continue;
-        }
-        if pid == leader_pid {
-            found_leader = true;
-        } else {
-            return Ok(false);
-        }
-    }
-    Ok(found_leader)
-}
-
-#[cfg(test)]
-async fn terminate_sidecar_for_test(
-    child: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-) -> Result<(), V3LifecycleError> {
-    if process_group_id <= 0 {
-        return Err(V3LifecycleError::Validation(
-            "hooks sidecar process group id is invalid".to_string(),
-        ));
-    }
-    let mut child_reaped = child.try_wait()?.is_some();
-    validate_active_process_group_identity_for_test(
-        child,
-        process_group_id,
-        leader_pid,
-        leader_start_token,
-        &mut child_reaped,
-    )?;
-    signal_process_group(process_group_id, libc::SIGTERM)?;
-    if wait_for_process_group_shutdown_for_test(child, process_group_id, &mut child_reaped).await? {
-        return Ok(());
-    }
-    validate_active_process_group_identity_for_test(
-        child,
-        process_group_id,
-        leader_pid,
-        leader_start_token,
-        &mut child_reaped,
-    )?;
-    signal_process_group(process_group_id, libc::SIGKILL)?;
-    if wait_for_process_group_shutdown_for_test(child, process_group_id, &mut child_reaped).await? {
-        return Ok(());
-    }
-    Err(V3LifecycleError::Timeout(format!(
-        "hooks sidecar forced stop process group {process_group_id}"
-    )))
-}
-
-fn signal_process_group(
-    process_group_id: libc::pid_t,
-    signal: libc::c_int,
-) -> Result<(), V3LifecycleError> {
-    let result = unsafe { libc::kill(-process_group_id, signal) };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(V3LifecycleError::Io(error))
-}
-
-fn process_group_exists(process_group_id: libc::pid_t) -> Result<bool, V3LifecycleError> {
-    let result = unsafe { libc::kill(-process_group_id, 0) };
-    if result == 0 {
-        return Ok(true);
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(false);
-    }
-    if error.raw_os_error() == Some(libc::EPERM) {
-        return Ok(true);
-    }
-    Err(V3LifecycleError::Io(error))
-}
-
-fn validate_process_group_identity(
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-) -> Result<(), V3LifecycleError> {
-    if leader_pid == 0 || leader_start_token.is_empty() {
-        return Err(V3LifecycleError::HooksControlValidation(
-            "hooks sidecar process-group identity is incomplete".to_string(),
-        ));
-    }
-    if process_start_token(leader_pid)?.as_deref() != Some(leader_start_token) {
-        return Err(V3LifecycleError::HooksControlValidation(format!(
-            "hooks sidecar process-group identity no longer matches leader PID {leader_pid}"
-        )));
-    }
-    if unsafe { libc::getpgid(leader_pid as libc::pid_t) } != process_group_id {
-        return Err(V3LifecycleError::HooksControlValidation(format!(
-            "hooks sidecar leader PID {leader_pid} is not in process group {process_group_id}"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_active_process_group_identity(
-    group_leader: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-    leader_reaped: &mut bool,
-) -> Result<(), V3LifecycleError> {
-    let identity =
-        validate_process_group_identity(process_group_id, leader_pid, leader_start_token);
-    match identity {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            if !*leader_reaped && group_leader.try_wait()?.is_some() {
-                *leader_reaped = true;
-            }
-            if !*leader_reaped {
-                // A token probe can fail before the process record is
-                // persisted. The exact anchor Child plus a matching PGID is
-                // sufficient for this one in-memory startup cleanup attempt.
-                if leader_start_token.is_empty()
-                    && unsafe { libc::getpgid(leader_pid as libc::pid_t) } == process_group_id
-                {
-                    return Ok(());
-                }
-                return Err(error);
-            }
-            // Once the exact anchor has been reaped, a live numeric PGID may
-            // belong to an unrelated process group. Only a fully vanished
-            // group is safe to treat as already cleaned up.
-            if process_group_exists(process_group_id)? {
-                return Err(error);
-            }
-            Ok(())
-        }
-    }
-}
-
-#[cfg(test)]
-fn validate_active_process_group_identity_for_test(
-    child: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_pid: u32,
-    leader_start_token: &str,
-    child_reaped: &mut bool,
-) -> Result<(), V3LifecycleError> {
-    let identity =
-        validate_process_group_identity(process_group_id, leader_pid, leader_start_token);
-    match identity {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            // The leader can exit between the initial try_wait and the
-            // identity probe. Re-check the exact in-memory Child handle
-            // before using the captured process-group identity.
-            if !*child_reaped && child.try_wait()?.is_some() {
-                *child_reaped = true;
-            }
-            if !*child_reaped {
-                // A start-token probe can fail before the process record is
-                // persisted. While the exact Child handle still reports the
-                // leader alive, its captured PID plus PGID is sufficient for
-                // this one in-memory cleanup attempt; a persisted record
-                // never uses this path and still requires the token.
-                if leader_start_token.is_empty()
-                    && unsafe { libc::getpgid(leader_pid as libc::pid_t) } == process_group_id
-                {
-                    return Ok(());
-                }
-                return Err(error);
-            }
-            // The in-memory Child handle proves this is the group whose leader
-            // just exited during this cleanup attempt. Do not probe the
-            // reaped leader PID with kill(0): on macOS it can remain
-            // observable briefly even though the Child handle has already
-            // reaped that exact process. A stale persisted record never takes
-            // this branch; it must retain the strict leader-token check above.
-            let _ = process_group_exists(process_group_id)?;
-            Ok(())
-        }
-    }
-}
-
-pub(crate) fn hooks_sidecar_process_group_is_alive(
-    instance_dir: &Path,
-) -> Result<bool, V3LifecycleError> {
-    let path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
-    if !path.exists() {
-        return Ok(false);
-    }
-    let record: V3HooksSidecarProcessRecord = read_json(&path).map_err(|error| {
-        V3LifecycleError::HooksControlValidation(format!(
-            "invalid hooks sidecar process record: {}; {error}",
-            path.display()
-        ))
-    })?;
-    if record.schema_version != SCHEMA_VERSION || record.process_group_id <= 0 {
-        return Err(V3LifecycleError::HooksControlValidation(format!(
-            "invalid hooks sidecar process record: {}",
-            path.display()
-        )));
-    }
-    // A dead group makes the persisted record stale. Check this before the
-    // leader token: the leader may have exited and its PID may now be absent,
-    // which is safe to reap. If the group still exists, retain the strict
-    // leader-token and PGID checks so a reused PGID cannot be signaled.
-    if !process_group_exists(record.process_group_id)? {
-        return Ok(false);
-    }
-    validate_process_group_identity(
-        record.process_group_id,
-        record.leader_pid,
-        &record.leader_start_token,
-    )?;
-    Ok(true)
-}
-
-async fn wait_for_process_group_shutdown(
-    child: &mut Option<&mut Child>,
-    group_leader: &mut Child,
-    process_group_id: libc::pid_t,
-    leader_reaped: &mut bool,
-) -> Result<bool, V3LifecycleError> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut child_reaped = child.is_none();
-    loop {
-        if !child_reaped {
-            if let Some(wrapper) = child.as_deref_mut() {
-                if wrapper.try_wait()?.is_some() {
-                    child_reaped = true;
-                }
-            }
-        }
-        if !*leader_reaped && group_leader.try_wait()?.is_some() {
-            *leader_reaped = true;
-        }
-        if child_reaped && *leader_reaped && !process_group_exists(process_group_id)? {
-            return Ok(true);
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok(false);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-#[cfg(test)]
-async fn wait_for_process_group_shutdown_for_test(
-    child: &mut Child,
-    process_group_id: libc::pid_t,
-    child_reaped: &mut bool,
-) -> Result<bool, V3LifecycleError> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if !*child_reaped && child.try_wait()?.is_some() {
-            *child_reaped = true;
-        }
-        if *child_reaped && !process_group_exists(process_group_id)? {
-            return Ok(true);
-        }
-        if tokio::time::Instant::now() >= deadline {
-            return Ok(false);
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-fn hooks_install_record_path() -> Result<Option<PathBuf>, V3LifecycleError> {
-    let path = match std::env::var_os(HOOKS_INSTALL_RECORD_ENV) {
-        Some(path) => PathBuf::from(path),
-        None => {
-            let Some(home) = std::env::var_os("HOME") else {
-                return Ok(None);
-            };
-            PathBuf::from(home).join(HOOKS_INSTALL_RECORD_RELATIVE)
-        }
-    };
-    if path.exists() {
-        Ok(Some(fs::canonicalize(path)?))
-    } else {
-        Ok(None)
-    }
-}
-
-// d7cb31f：sidecar 失败时清理 codexapp unix socket——残留 socket 会让
-// 后续所有 restart 因 AddrInUse 失败（孤儿进程终止后 socket 文件仍在）。
-fn prepare_codexapp_socket_cleanup(
-    record: &Value,
-    daemon_config: &Path,
-    record_path: &Path,
-) -> Result<Option<CodexAppSocketCleanup>, V3LifecycleError> {
-    let Some(socket) = routecodex_v3_config::read_v3_daemon_codexapp_socket(daemon_config)? else {
-        return Ok(None);
-    };
-    let path = PathBuf::from(socket);
-    if !path.is_absolute() {
-        return Err(V3LifecycleError::Validation(
-            "hooks daemon codexapp.socket must be absolute".to_string(),
-        ));
-    }
-    let install_root = required_record_path(record, "install_root", record_path)?;
-    validate_install_owned_socket_path(&path, &install_root)?;
-    let pre_start_identity = match fs::symlink_metadata(&path) {
-        Ok(metadata) => Some(codexapp_socket_identity(&metadata)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(V3LifecycleError::Io(error)),
-    };
-    Ok(Some(CodexAppSocketCleanup {
-        path,
-        install_root,
-        pre_start_identity,
-        startup_identity: None,
-    }))
-}
-
-fn cleanup_codexapp_socket(cleanup: &CodexAppSocketCleanup) -> Result<(), V3LifecycleError> {
-    validate_install_owned_socket_path(&cleanup.path, &cleanup.install_root)?;
-    let metadata = match fs::symlink_metadata(&cleanup.path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(V3LifecycleError::Io(error)),
-    };
-    let identity = codexapp_socket_identity(&metadata);
-    if cleanup.pre_start_identity == Some(identity) {
-        // The startup attempt did not replace the previous/shared entry.
-        return Ok(());
-    }
-    if !identity.is_socket {
-        return Err(V3LifecycleError::Validation(format!(
-            "refusing to remove non-socket codexapp path: {}",
-            cleanup.path.display()
-        )));
-    }
-    if cleanup.startup_identity != Some(identity) {
-        return Err(V3LifecycleError::Validation(format!(
-            "refusing to remove codexapp socket with unverified startup identity: {}",
-            cleanup.path.display()
-        )));
-    }
-    fs::remove_file(&cleanup.path)?;
-    Ok(())
-}
-
-fn record_codexapp_socket_startup_identity(
-    cleanup: &mut Option<CodexAppSocketCleanup>,
-) -> Result<(), V3LifecycleError> {
-    let Some(cleanup) = cleanup.as_mut() else {
-        return Ok(());
-    };
-    cleanup.startup_identity = match fs::symlink_metadata(&cleanup.path) {
-        Ok(metadata) => Some(codexapp_socket_identity(&metadata)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(V3LifecycleError::Io(error)),
-    };
-    Ok(())
-}
-
-fn codexapp_socket_identity(metadata: &fs::Metadata) -> CodexAppSocketIdentity {
-    CodexAppSocketIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-        is_socket: metadata.file_type().is_socket(),
-    }
-}
-
-fn validate_install_owned_socket_path(
-    socket_path: &Path,
-    install_root: &Path,
-) -> Result<(), V3LifecycleError> {
-    let canonical_root = fs::canonicalize(install_root)?;
-    let parent = socket_path.parent().ok_or_else(|| {
-        V3LifecycleError::Validation(format!(
-            "codexapp socket has no parent directory: {}",
-            socket_path.display()
-        ))
-    })?;
-    let canonical_parent = fs::canonicalize(parent)?;
-    if !canonical_parent.starts_with(&canonical_root) {
-        return Err(V3LifecycleError::Validation(format!(
-            "codexapp socket is outside hooks install root: {}",
-            socket_path.display()
-        )));
-    }
-    Ok(())
-}
-
-// d7cb31f：sidecar stderr 落到实例目录诊断文件，退出原因可追溯。
-fn stderr_capture(instance_dir: &Path) -> Result<Stdio, V3LifecycleError> {
-    let path = instance_dir.join("hooks-sidecar.stderr.log");
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|error| {
-            V3LifecycleError::Validation(format!(
-                "hooks sidecar stderr capture {} unavailable: {error}",
-                path.display()
-            ))
-        })?;
-    Ok(Stdio::from(file))
 }
 
 #[cfg(test)]

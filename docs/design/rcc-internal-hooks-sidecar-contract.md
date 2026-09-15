@@ -153,11 +153,20 @@ Server that speaks the real Unix WebSocket JSON-RPC protocol proves
   through the native transport. The mock is a protocol fixture only;
   production still talks only to the Codex default TUI/Desktop App Server.
 - `cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle --lib`:
-  52 tests pass, including internal `rccv3-hooksd` missing/crash/timeout
+  67 tests pass, including internal `rccv3-hooksd` missing/crash/timeout
   degradation and stale/identity-mismatched hooks record handling. Startup
-  admission never blocks on the optional sidecar and preserves the uncertain
-  process record; cleanup boundaries (stop/restart/forced stop) keep the strict
-  fail-closed liveness probe.
+  admission never blocks on the optional sidecar. Stop, restart, reap, and
+  forced stop also complete the main RouteCodex lifecycle when hooks cleanup is
+  degraded; a hooks process record is preserved only when cleanup cannot be
+  completed with persisted ownership evidence, including a live group or an
+  unverified control socket. The strict identity probe still refuses to signal
+  a foreign process group. Status writes use a bounded `flock`, and a hooks
+  supervisor that exceeds the stop timeout is aborted instead of being left as
+  an unbounded background task. The forced-cleanup path consumes the persisted
+  record before deleting it: the internal `hooks-sidecar.sock` is removed only
+  through its recorded identity, and legacy-supervisor codexapp socket cleanup
+  is persisted with its startup identity so a dead process group cannot strand
+  an owned socket without a record to verify it.
 
 ### Process-group anchor lifetime
 
@@ -403,44 +412,69 @@ exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-lifecycle
 
 Executed in the integration worktree
 `/Users/fanzhang/Documents/github/routecodex/playground/rcc-internal-hooks-sidecar-main-0914`
-on source candidate commit `ef5fc05034341df5cc990bbf84e5fb6292201e33`, tree
-`573d8c3f9a793409f94152ce3896a968ae8f21ea`; base
-`origin/main` `c37a3946ae90641239fcfbef8ae7b118445a81ee`. The
-`delivery_evidence` cursor fix is included in this candidate, and later commits
-in this review branch are documentation-only and do not change the hooks source
-subtree. These are real command exit results for the `required_gates` in
-`docs/architecture/v3-verification-map.yml`; they are source, test, gate,
-build, and isolated installed-binary failure-injection evidence only, not
-production install, restart, or same-entry live replay evidence.
+on uncommitted source candidate `HEAD:d9b78d03785c9a0ff09e3a05168f2e852e864120`,
+HEAD tree `7bfc322a057e59c39cce5d8767a4601dbf99c5d9`, and uncommitted lifecycle
+source diff object `b9be7fc050425b9b35459d30eb8576daf101225a`; base
+`origin/main` `c37a3946ae90641239fcfbef8ae7b118445a81ee`. These are real
+command exit results for the `required_gates` in
+`docs/architecture/v3-verification-map.yml`; they are source, test, and mapped
+gate evidence only, not production install, restart, or same-entry live replay
+evidence. The lifecycle source diff object is computed over
+`v3/crates/routecodex-v3-lifecycle/src` and
+`v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs`, with the two new
+untracked lifecycle files added intent-to-add through a temporary
+`GIT_INDEX_FILE`, then piped through `git hash-object --stdin`.
 
 ```text
-2026-09-14T22:23Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
+2026-09-15  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-hooks
                      61 lib + 3 binary_handler_config + 1 binary_readiness
                      + 6 native_delivery_replay pass
-2026-09-14T22:24Z  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
-                     52 pass
-2026-09-14T22:23Z  exit 0  node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+2026-09-15  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-lifecycle --lib
+                     67 pass
+2026-09-15  exit 0  CARGO_NET_OFFLINE=true cargo test --locked -p routecodex-v3-cli
+                     --test managed_lifecycle -- --test-threads=1
+                     22 pass
+2026-09-15  exit 0  node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
                      6 pass
-2026-09-14T22:25Z  exit 0  npm run verify:v3-resource-map
-2026-09-14T22:25Z  exit 0  npm run verify:v3-mainline-caller-flow
-                     binding_pending edges 13; locked 55; pending 21
-2026-09-14T22:25Z  exit 0  npm run verify:v3-module-boundaries
-2026-09-14T22:25Z  exit 0  npm run verify:v3-architecture-docs
-                     docs 26; resources 171; edges 442
-2026-09-14T22:26Z  exit 0  git diff --check
-2026-09-14T22:26Z  exit 0  CARGO_NET_OFFLINE=true cargo clippy --locked -p routecodex-v3-hooks --all-targets
-                     0 errors
-2026-09-14T22:24Z  exit 0  CARGO_NET_OFFLINE=true cargo build --locked -p routecodex-v3-cli
-2026-09-14T22:26Z  isolated installed-binary failure injection
-                     ROUTECODEX_HOOKS_INSTALL_RECORD=$ROOT/install.json rccv3 start --config $ROOT/config.v3.toml --snap
-                     state=running; listeners started on 127.0.0.1:45464/45465/45466
-                     status detail=hooks sidecar unavailable: hooks_unavailable:crashed:
-                     managed lifecycle validation failed: hooks sidecar exited before readiness
+2026-09-15  exit 0  npm run verify:v3-file-size
+                     limit=1500; files=274
+2026-09-15  exit 0  npm run verify:v3-architecture-ci
+                     39/39 sub-gates green
+2026-09-15  exit 0  git diff --check
+```
+
+The changed owner `v3.managed_server_lifecycle` declares additional
+`required_gates` in `docs/architecture/v3-function-map.yml`. Their receipts for
+this candidate:
+
+```text
+2026-09-15  exit 0  npm run verify:v3-managed-server-lifecycle
+2026-09-15  exit 0  npm run test:v3-managed-server-lifecycle-red-fixtures
+                     69 fixtures
+2026-09-15  exit 0  npm run test:v3-managed-server-lifecycle
+                     22 pass
+2026-09-15  exit 0  npm run verify:v3-architecture-docs
+2026-09-15  exit 0  npm run verify:v3-resource-map
+2026-09-15  exit 0  npm run verify:v3-module-boundaries
+2026-09-15  exit 0  npm run verify:v3-rust-only
+2026-09-15  exit 0  npm run verify:function-map-compile-gate
+2026-09-15  exit 0  npm run verify:v3-cargo-fmt
+2026-09-15  exit 1  npm run verify:v3-clippy
+                     pre-existing failures in untouched crates
+                     routecodex-v3-route-classifier and
+                     routecodex-v3-config; scoped
+                     `cargo clippy -p routecodex-v3-lifecycle --all-targets`
+                     is warnings-only, 0 errors
 ```
 
 Review findings and their fixes are recorded in
 `docs/design/rcc-internal-hooks-sidecar-review-0914.md`, including the red
 evidence for each fix.
+
+The prior isolated installed-binary failure-injection receipt remains
+historical evidence bound to source candidate
+`ef5fc05034341df5cc990bbf84e5fb6292201e33`; it is not reused as evidence for
+the current uncommitted lifecycle-supervisor change.
 
 ### Live replay gap
 
