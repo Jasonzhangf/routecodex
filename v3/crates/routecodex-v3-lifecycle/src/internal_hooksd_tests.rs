@@ -192,7 +192,7 @@ async fn internal_hooksd_missing_binary_reports_hooks_unavailable_missing() {
     assert!(sidecar.is_none());
     assert!(
         detail.unwrap().contains("hooks_unavailable:missing"),
-        "missing internal hooksd must degrade with the missing reason"
+        "missing internal hooksd must report hooks_unavailable:missing"
     );
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
@@ -263,7 +263,7 @@ async fn internal_hooksd_crash_before_readiness_reports_hooks_unavailable_crashe
     assert!(sidecar.is_none());
     assert!(
         detail.unwrap().contains("hooks_unavailable:crashed"),
-        "internal hooksd crash must degrade with the crashed reason"
+        "internal hooksd crash must report hooks_unavailable:crashed"
     );
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
@@ -318,7 +318,7 @@ async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_
 
 #[tokio::test]
 #[cfg(unix)]
-async fn stale_live_hooks_group_degrades_instead_of_aborting_start() {
+async fn stale_live_hooks_group_is_unavailable_instead_of_aborting_start() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
@@ -352,14 +352,14 @@ async fn stale_live_hooks_group_degrades_instead_of_aborting_start() {
     let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
 
     assert!(sidecar.is_none(), "stale foreign group must not be adopted");
-    let detail = detail.expect("degraded startup must carry a detail");
+    let detail = detail.expect("unavailable startup must carry a detail");
     assert!(
         detail.contains("hooks_unavailable:"),
-        "stale live group must degrade with hooks_unavailable: {detail}"
+        "stale live group must report hooks_unavailable: {detail}"
     );
     assert!(
         detail.contains("still alive"),
-        "degraded detail must keep the exact reason: {detail}"
+        "unavailable detail must keep the exact reason: {detail}"
     );
     // The foreign group must be untouched and the main-service caches intact.
     assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
@@ -401,7 +401,7 @@ async fn internal_hooksd_readiness_timeout_reports_hooks_unavailable_timeout() {
 
     assert!(
         error.to_string().contains("hooks_unavailable:timeout"),
-        "internal hooksd readiness timeout must degrade with the timeout reason"
+        "internal hooksd readiness timeout must report hooks_unavailable:timeout"
     );
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());

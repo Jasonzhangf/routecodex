@@ -122,7 +122,7 @@ async fn delayed_hooks_stop_retries_owned_codexapp_socket_cleanup() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
+async fn failed_hooks_sidecar_is_unavailable_without_removing_runtime_control() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
@@ -175,13 +175,13 @@ async fn failed_hooks_sidecar_is_degraded_without_removing_runtime_control() {
     assert!(socket_path.exists());
     write_status(
         &instance_dir,
-        "degraded-instance",
+        "unavailable-instance",
         V3ManagedRunState::Running,
         Some("hooks_unavailable:crashed: hooks sidecar exited before readiness".to_string()),
     )
     .unwrap();
     assert_eq!(
-        read_live_status_detail(&instance_dir, "degraded-instance").unwrap(),
+        read_live_status_detail(&instance_dir, "unavailable-instance").unwrap(),
         Some("hooks_unavailable:crashed: hooks sidecar exited before readiness".to_string())
     );
     std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
@@ -578,7 +578,7 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn live_persisted_hooks_group_degrades_start_without_aborting() {
+async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -603,14 +603,14 @@ async fn live_persisted_hooks_group_degrades_start_without_aborting() {
     let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
 
     assert!(sidecar.is_none(), "live stale group must not be adopted");
-    let detail = detail.expect("degraded startup must carry a detail");
+    let detail = detail.expect("unavailable startup must carry a detail");
     assert!(
         detail.contains("hooks_unavailable:"),
-        "stale live group must degrade with a hooks_unavailable reason: {detail}"
+        "stale live group must report hooks_unavailable: {detail}"
     );
     assert!(
         detail.contains("hooks sidecar process group from a previous run is still alive"),
-        "degraded detail must keep the exact reason: {detail}"
+        "unavailable detail must keep the exact reason: {detail}"
     );
     // The foreign live group must never be signaled or reaped.
     assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
@@ -619,7 +619,7 @@ async fn live_persisted_hooks_group_degrades_start_without_aborting() {
 }
 
 #[test]
-fn degraded_hook_detail_survives_a_running_status_update() {
+fn unavailable_hook_detail_survives_a_running_status_update() {
     assert_eq!(
         append_status_detail(
             Some("hooks_unavailable:crashed: hooks sidecar exited before readiness"),

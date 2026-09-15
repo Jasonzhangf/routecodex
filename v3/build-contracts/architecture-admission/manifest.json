@@ -2857,7 +2857,7 @@
       "output_path": "repo/scripts/architecture/mainline-call-map-lib.mjs",
       "source_path": "scripts/architecture/mainline-call-map-lib.mjs",
       "source_commit": "6e282014395718880ba67943aba70f36798e3617",
-      "sha256": "7838e048d75971e026c82c9bba27b0a809de8f41d03a76f0e3f07e5a92222c7f"
+      "sha256": "6122991e8e52a97d1b52f0486296746cbfe02f450517c1c0d532bb2dd2f611e8"
     },
     {
       "output_path": "repo/scripts/architecture/v3-root-thin-dispatch-contract.mjs",
@@ -2890,5 +2890,5 @@
       "sha256": "f8f89a476148a03267719b974a5c66cecf0e88a05b9a650ad04d11a61b563d4b"
     }
   ],
-  "manifest_digest": "b9666f9a0e23b23d5dfc2bf2c9fade1c2f4ede837e1b0eda4c6c97d8ff7d10c5"
+  "manifest_digest": "5a6c6a365de4d73f1748906b29c2bfb726055b2075bcf8edbe3d7a85e80274a3"
 }
