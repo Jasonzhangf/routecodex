@@ -161,7 +161,7 @@ const cases = [
   {
     name: 'package verifier script removed',
     file: 'package.json',
-    marker: '    "verify:v3-live-provider-compat-parity": "node v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs",\n',
+    marker: '    "verify:v3-live-provider-compat-parity": "node scripts/architecture/verify-v3-live-provider-compat-parity.mjs",\n',
     mutation: '',
     diagnostic: /missing script verify:v3-live-provider-compat-parity/,
   },
@@ -189,7 +189,6 @@ const copyPaths = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-live-provider-compat-parity.md',
   'docs/goals/v3-live-provider-compat-parity-closeout-plan.md',
-  'package.json',
 ];
 
 const failures = [];
@@ -199,6 +198,7 @@ for (const testCase of cases) {
     for (const relative of copyPaths) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
     }
+    cpSync(resolve(repo, 'v3/package.json'), resolve(root, 'package.json'));
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (testCase.mutateYaml) {
