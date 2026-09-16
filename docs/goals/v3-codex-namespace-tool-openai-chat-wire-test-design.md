@@ -55,8 +55,9 @@ Negative:
 
 ## Runtime Replay
 
-- `npm run test:v3-responses-continuation-namespace-contract` is required by both `build:v3-cli`
-  and CI so V2/V3 shared-helper drift and Resp04 status-only regressions cannot merge as manual-only gates.
+- `npm run test:v3-responses-continuation-namespace-contract` is required by the root protocol
+  parity aggregate and by V3 architecture CI through the V3 parity aggregate, so V2/V3 shared-helper
+  drift and Resp04 status-only regressions cannot merge as manual-only gates.
 
 - Replay the captured 5520 request shape from
   `openai-responses-router-gpt-5.5-20260728T090459120-654392-1127` through provider-request dry-run.

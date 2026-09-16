@@ -1217,9 +1217,16 @@ const expectedParityCommand = pkg.name === 'routecodex-v3'
 if (!expectedParityCommand || pkg.scripts?.['test:v3-protocol-conversion-field-parity'] !== expectedParityCommand) {
   failures.push(`${paths.packageJson}: test:v3-protocol-conversion-field-parity must match its root dispatcher or V3 admission package`);
 }
+const expectedNamespaceContractCommand = pkg.name === 'routecodex-v3'
+  ? v3Pkg.scripts?.['test:v3-responses-continuation-namespace-contract']
+  : 'npm --prefix v3 run test:v3-responses-continuation-namespace-contract';
+if (!expectedNamespaceContractCommand || pkg.scripts?.['test:v3-responses-continuation-namespace-contract'] !== expectedNamespaceContractCommand) {
+  failures.push(`${paths.packageJson}: test:v3-responses-continuation-namespace-contract must match its root dispatcher or V3 admission package`);
+}
 for (const scriptName of [
   'render:v3-protocol-semantic-field-matrix',
   'test:v3-protocol-conversion-field-parity',
+  'test:v3-responses-continuation-namespace-contract',
   'verify:v3-protocol-conversion-field-parity',
   'test:v3-protocol-conversion-field-parity-red-fixtures',
 ]) {
@@ -1230,10 +1237,15 @@ for (const command of [
   'npm run verify:v3-protocol-conversion-field-parity',
   'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
   'npm run test:v3-protocol-conversion-field-parity',
+  'npm run test:v3-responses-continuation-namespace-contract',
 ]) {
   if (!parityCiScript.includes(command)) {
     failures.push(`${paths.v3PackageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
   }
+}
+const rootParityCiScript = String(pkg.scripts?.['verify:v3-protocol-conversion-field-parity-ci'] ?? '');
+if (!rootParityCiScript.includes('npm run test:v3-responses-continuation-namespace-contract')) {
+  failures.push(`${paths.packageJson}: verify:v3-protocol-conversion-field-parity-ci must include npm run test:v3-responses-continuation-namespace-contract`);
 }
 if (!String(text.v3ArchitectureCi ?? '').includes("'verify:v3-protocol-conversion-field-parity-ci'")) {
   failures.push(`${paths.v3ArchitectureCi}: verify:v3-architecture-ci must run verify:v3-protocol-conversion-field-parity-ci`);
