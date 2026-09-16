@@ -8,7 +8,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     manifest: &V3Config05ManifestPublished,
     mut input: V3ResponsesRelayRuntimeInput,
     transport: &T,
-    local: Option<V3ResponsesRelayLocalContinuationExecution<'_>>,
     server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
@@ -30,16 +29,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let client_response_transport_intent =
         v3_responses_relay_transport_intent_from_stream_field(&input.payload);
     let provider_request_transport_intent = client_response_transport_intent;
-    let mut local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
-    if crate::shared::v3_responses_continuation_disabled_for_server(manifest, &input.server_id) {
-        // 本地 continuation 关闭：不按 previous_response_id 恢复上下文，
-        // 请求按全量新请求处理（tool output 仍正常透传）。
-        local_tool_output_ids.restore_ids.clear();
-        if let Some(object) = input.payload.as_object_mut() {
-            // 同时从 provider wire 剥离 previous_response_id，避免上游按
-            // 该 id 续接已禁用的 continuation（重放 provider 400）。
-            object.remove("previous_response_id");
-        }
+    let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
+    if input
+        .payload
+        .get("previous_response_id")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+            "Responses continuation is retired: previous_response_id is unsupported".to_string(),
+        ));
     }
     apply_v3_responses_relay_web_search_control_completion(
         manifest,
@@ -61,53 +59,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let req02 = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01)
         .map_err(V3ResponsesRelayRuntimeError::ClientInboundCanonical)?;
     trace.push("V3HubReqInbound02Normalized");
-    let base_hub_scope = V3HubContinuationScope::new(
-        V3HubEntryProtocol::Responses,
-        &input.server_id,
-        server_routing_group(manifest, &input.server_id)?,
-        &input.request_id,
-    );
     let request_hook_profile = responses_relay_request_hook_profile(
         manifest,
         &input.server_id,
         request_web_search_execution_mode,
     );
     let request_outcome = {
-        let local_store_guard = if let (Some(local), Some(_)) =
-            (local.as_ref(), local_tool_output_ids.restore_ids.first())
-        {
-            Some(local.state.lock_store()?)
-        } else {
-            None
-        };
-        let lookup = if let (Some(local), Some(context_id)) =
-            (local.as_ref(), local_tool_output_ids.restore_ids.first())
-        {
-            if local.scope.routing_group != server_routing_group(manifest, &input.server_id)? {
-                return Err(V3ResponsesRelayRuntimeError::LocalContinuationScopeMismatch);
-            }
-            let store = local_store_guard
-                .as_deref()
-                .ok_or(V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned)?;
-            V3HubContinuationLookup::new(Some(context_id), local.scope.hub_scope(&input.server_id))
-                .with_local_context_from_req04_store(
-                    context_id,
-                    local.scope.hub_scope(&input.server_id),
-                    store,
-                    local.scope.local_key(),
-                    local.now_epoch_ms,
-                    &local_tool_output_ids.restore_ids[1..],
-                )?
-        } else {
-            V3HubContinuationLookup::new(None, base_hub_scope)
-        };
-        compile_v3_hub_relay_request_hooks().run_from_normalized(
-            req02,
-            &lookup,
-            &request_hook_profile,
-        )?
+        compile_v3_hub_relay_request_hooks().run_from_normalized(req02, &request_hook_profile)?
     };
-    trace.push("V3HubReqContinuation03Classified");
     trace.push("V3HubReqChatProcess04Governed");
     let request_web_search_state = request_outcome.web_search_state().cloned();
     store_v3_responses_relay_web_search_state(
@@ -702,7 +661,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         None => None,
                     },
                 };
-                let (action, mut finalized_provider_value, response_web_search_state) =
+                let (mut finalized_provider_value, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             session_id: input.failure_session_scope.session_id(),
@@ -798,7 +757,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 captured,
                                 V3ServerToolCenterWriteOrigin {
                                     module: "responses_relay_runtime",
-                                    symbol: "commit_or_release_responses_local_continuation",
+                                    symbol: "web_search_store_for_scope",
                                     stage: "resp03_commit_effects",
                                 },
                                 Some("resp03 commit effects persist captured web_search state"),
@@ -809,18 +768,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_buffered_terminal_attempt();
-                commit_or_release_responses_local_continuation(
+                let _ = (
                     &attempt_success_receipt,
-                    local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    provider_semantic_body.as_ref(),
-                    &finalized_provider_value,
-                    action,
-                    crate::shared::v3_responses_continuation_disabled_for_server(
-                        manifest,
-                        &input.server_id,
-                    ),
-                )?;
+                );
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
                         &attempt_success_receipt,
@@ -843,11 +794,14 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     read_v3_runtime_finish_reason(&finalized_provider_value)
                         .or_else(|| read_v3_runtime_finish_reason(&provider_value))
                         .or_else(|| {
-                            infer_v3_runtime_finish_reason(action, response_status.as_deref())
+                            infer_v3_runtime_finish_reason_from_provider_event_json(
+                                Some("response.completed"),
+                                response_status.as_deref(),
+                            )
                         });
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
-                // Resp03 response-side tool projection and continuation handling.
+                // Resp03 response-side tool projection.
                 observability.timing = Some(handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming)));
@@ -1014,7 +968,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     continue;
                 }
-                let (action, mut finalized_provider_value, response_web_search_state) =
+                let (mut finalized_provider_value, response_web_search_state) =
                     match run_json_response_hooks(
                         V3ResponsesRelayJsonResponseHookInput {
                             session_id: input.failure_session_scope.session_id(),
@@ -1128,7 +1082,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 captured,
                                 V3ServerToolCenterWriteOrigin {
                                     module: "responses_relay_runtime",
-                                    symbol: "commit_or_release_responses_local_continuation",
+                                    symbol: "web_search_store_for_scope",
                                     stage: "resp03_commit_effects",
                                 },
                                 Some("resp03 commit effects persist captured web_search state"),
@@ -1139,18 +1093,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
                 let attempt_success_receipt =
                     crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt();
-                commit_or_release_responses_local_continuation(
+                let _ = (
                     &attempt_success_receipt,
-                    local.as_ref(),
                     &local_tool_output_ids.consumed_ids,
-                    provider_semantic_body.as_ref(),
-                    &finalized_provider_value,
-                    action,
-                    crate::shared::v3_responses_continuation_disabled_for_server(
-                        manifest,
-                        &input.server_id,
-                    ),
-                )?;
+                );
                 handle_error_before_resp03!(provider_health
                     .record_provider_success_in_failure_scope(
                         &attempt_success_receipt,
@@ -1183,9 +1129,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 .snapshot()
                                 .ok()
                                 .and_then(|snapshot| snapshot.finish_reason)
-                        })
-                        .or_else(|| {
-                            infer_v3_runtime_finish_reason(action, response_status.as_deref())
                         });
                 if let Some(finish_reason) = observability.finish_reason.as_deref() {
                     stream_observation
@@ -1201,7 +1144,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .ok()
                             .and_then(|snapshot| snapshot.usage)
                     });
-                // Resp03 response-side tool projection and continuation handling.
+                // Resp03 response-side tool projection.
                 let timing = handle_error_before_resp03!(runtime_timing
                     .finish_runtime()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -1243,22 +1186,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
 
 #[derive(Debug, Default)]
 pub(crate) struct V3ResponsesRelayToolOutputIds {
-    pub(crate) restore_ids: Vec<String>,
     pub(crate) consumed_ids: Vec<String>,
 }
 
 pub(crate) fn find_responses_tool_output_ids(
     payload: &Value,
 ) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
-    let paired_call_ids = payload_input_paired_call_ids(payload);
-    let previous_response_id = payload
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty());
     let mut ids = V3ResponsesRelayToolOutputIds::default();
-    if let Some(previous_response_id) = previous_response_id {
-        ids.consumed_ids.push(previous_response_id.to_owned());
-    }
     for item in payload
         .get("input")
         .and_then(Value::as_array)
@@ -1283,12 +1217,6 @@ pub(crate) fn find_responses_tool_output_ids(
             })?;
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
-        }
-        if paired_call_ids.iter().any(|paired| paired == id) {
-            continue;
-        }
-        if !ids.restore_ids.iter().any(|existing| existing == id) {
-            ids.restore_ids.push(id.to_owned());
         }
     }
     Ok(ids)

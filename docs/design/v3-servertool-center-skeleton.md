@@ -12,7 +12,7 @@ retired; no Stopless branch belongs in this center.
 1. RouteCodex control logic is owned by the MetadataCenter/servertool hook
    boundary, never by SSE framing or provider payload code.
 2. Registered servertools use the same request/response Chat Process and
-   normal continuation/client projection boundaries as other tools.
+   client projection boundaries as other tools.
 3. Direct and Relay paths use the same registered hook semantics where the
    protocol contract permits it; they do not create a second response exit.
 4. Scope is explicit and includes entry/endpoint, port, routing group,
@@ -24,7 +24,7 @@ retired; no Stopless branch belongs in this center.
 
 ```text
 request:
-  V3HubReqContinuation03Classified
+  V3HubReqInbound02Normalized
     -> V3HubReqChatProcess04Governed
     -> ServertoolReq01ToolIdentified
     -> ServertoolReq02StateLoaded
@@ -37,7 +37,7 @@ response:
     -> ServertoolResp01ToolInspected
     -> ServertoolResp02StateTransitioned
     -> ServertoolResp03Projected
-    -> V3HubRespContinuation04Committed
+    -> V3HubRespOutbound05ClientSemantic
 ```
 
 `web_search` and ordinary servertool CLI projection are registered tool

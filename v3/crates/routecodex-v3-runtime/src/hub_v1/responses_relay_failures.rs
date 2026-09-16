@@ -501,7 +501,6 @@ mod tests {
             V3ResponsesRelayRuntimeError::RuntimeTiming(
                 "request residence deadline elapsed".to_string(),
             ),
-            V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned,
         ];
 
         for error in cases {
@@ -512,7 +511,6 @@ mod tests {
                 V3ResponsesRelayRuntimeError::ExecutionControl(_)
                     | V3ResponsesRelayRuntimeError::ExecutionControlResponse(_)
                     | V3ResponsesRelayRuntimeError::RuntimeTiming(_)
-                    | V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned
             ));
         }
     }

@@ -180,9 +180,8 @@ impl ResponsesTransport for JsonChatCompletionSseStreamTransport {
 fn manifest(server_id: &str, targets: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     ensure_isolated_provider_state_dir();
     compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            &format!(
-                r#"
+        parse_v3_config_02_authoring(&format!(
+            r#"
 version = 3
 
 [servers.{server_id}]
@@ -195,7 +194,6 @@ endpoints = ["anthropic"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 
 [providers.kdns]
 type = "openai_chat"
@@ -225,8 +223,7 @@ targets = [
 {targets}
 ]
 "#
-            ),
-        )
+        ))
         .unwrap(),
     )
     .unwrap()

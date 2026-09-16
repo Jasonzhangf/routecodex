@@ -110,7 +110,7 @@ pub fn project_v3_anthropic_client_response_for_provider(
     match transport_intent {
         V3HubTransportIntent::Sse => {
             let client_events = project_v3_anthropic_message_as_sse_events(&message)?;
-            Ok(project_v3_anthropic_events_after_resp04(client_events))
+            Ok(project_v3_anthropic_client_events(client_events))
         }
         V3HubTransportIntent::Json => Ok(message),
     }
@@ -225,7 +225,7 @@ pub fn project_v3_responses_error_as_anthropic_error(body: &[u8]) -> Value {
     }
 }
 
-pub fn project_v3_anthropic_events_after_resp04(client_events: Vec<Value>) -> Value {
+pub fn project_v3_anthropic_client_events(client_events: Vec<Value>) -> Value {
     json!({"events":client_events})
 }
 

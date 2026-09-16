@@ -29,7 +29,6 @@ const entries = [
   ...[
   'scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-controlled-replay-harness-red-fixtures.mjs',
-  'scripts/tests/v3-anthropic-relay-local-continuation-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-protocol-hooks-red-fixtures.mjs',
   'scripts/tests/v3-anthropic-relay-runtime-integration-red-fixtures.mjs',
   'scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs',
@@ -45,7 +44,6 @@ const entries = [
   'scripts/tests/v3-hub-skeleton-doc-red-fixtures.mjs',
   'scripts/tests/v3-hub-v1-node-file-topology-red-fixtures.mjs',
   'scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs',
-  'scripts/tests/v3-local-continuation-contract-store-red-fixtures.mjs',
   'scripts/tests/v3-mainline-caller-flow-red-fixtures.mjs',
   'scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs',
   'scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs',
@@ -62,7 +60,6 @@ const entries = [
   'scripts/tests/v3-relay-response-semantics-red-fixtures.mjs',
   'scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs',
   'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs',
-  'scripts/tests/v3-responses-direct-remote-continuation-red-fixtures.mjs',
   'scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs',
   'scripts/tests/v3-responses-session-admission-red-fixtures.mjs',
   'scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs',

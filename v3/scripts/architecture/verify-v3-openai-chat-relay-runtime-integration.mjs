@@ -61,8 +61,7 @@ for (const phrase of [
   'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
   'hooks.govern(resp02',
-  'hooks.commit(resp03)',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
   'V3_ERROR_CHAIN_NODE_IDS',
   'SseIncrementalDecoder',
@@ -70,14 +69,14 @@ for (const phrase of [
 
 for (const node of [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
+  'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
   'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
   'V3ProviderReqOutbound08WirePayload',
   'V3ProviderReqOutbound09TransportRequest', 'V3ProviderRespInbound01Raw',
   'ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
+  'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ]) requireText(runtimeSurface, `${runtimePath}+${relayCorePath}+${relaySharedPath}`, 'trace.push("' + node + '")');
 

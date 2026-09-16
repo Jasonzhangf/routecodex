@@ -20,7 +20,7 @@ const RESPONSE_DIRECT_ALLOWED_PREDECESSORS = new Set([
   'V3HubRespOutbound05ClientSemantic',
   'V3Resp15ClientPayload',
 ]);
-const RESPONSE_BYPASS_SOURCE_PATTERN = /(?:V3ProviderRespInbound01Raw|ProviderRespCompat02ProviderCompat|V3HubRespInbound02Normalized|V3HubRespChatProcess03Governed|V3HubRespContinuation04Committed|ProviderRespCompat02|RespInbound02|RespChatProcess03|RespContinuation04)/;
+const RESPONSE_BYPASS_SOURCE_PATTERN = /(?:V3ProviderRespInbound01Raw|ProviderRespCompat02ProviderCompat|V3HubRespInbound02Normalized|V3HubRespChatProcess03Governed|ProviderRespCompat02|RespInbound02|RespChatProcess03)/;
 const V3_DIRECT_HOOKS_PATH = 'v3/crates/routecodex-v3-runtime/src/hooks.rs';
 
 export function loadV3MainlineCallMap(root, relPath = V3_MAINLINE_CALL_MAP_PATH) {
@@ -156,23 +156,19 @@ const MAIN_SKELETON_NOTES = new Map([
   }],
   ['v3.servertool_center_skeleton', {
     title: '06 Servertool / Hook Governance',
-    note: 'Req04 restore/请求治理 + Resp03 响应治理 + Resp04 save；continuation 必须 save/restore 成对。',
+    note: 'Req04 请求治理 + Resp03 响应治理；两者共享固定 hook slot。',
   }],
   ['v3.hub_pipeline.v1.response', {
     title: '07 Hub Relay 响应链',
-    note: 'Provider raw → RespInbound → RespChatProcess → continuation save → client projection。',
+    note: 'Provider raw → RespInbound → RespChatProcess → client projection。',
   }],
   ['v3.req04.tool_governance_restore', {
     title: '06 Req04 Tool Governance / Restore',
-    note: '请求侧 Chat Process：恢复 continuation，治理工具列表/工具结果，注入必要 servertool 请求控制。',
+    note: '请求侧 Chat Process：治理工具列表/工具结果，注入必要 servertool 请求控制。',
   }],
   ['v3.resp03.tool_servertool_governance', {
     title: '07 Resp03 Tool / Servertool Governance',
     note: '响应侧 Chat Process：收割工具调用、处理 servertool/reasoning；唯一可治理响应语义的位置。',
-  }],
-  ['v3.resp04.continuation_save', {
-    title: '08 Resp04 Continuation Save',
-    note: '只提交/保存 Resp03 已治理结果；禁止重新解释响应、补工具、修 history。',
   }],
   ['v3.debug_error_foundation.mainline', {
     title: 'E Error handler / Health owner',
@@ -210,8 +206,7 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3Server16HttpFrame', ['HTTP frame', 'server 只发送最终 HTTP/SSE frame']],
   ['V3HubReqInbound01ClientRaw', ['Hub 请求入口 raw', 'Client raw 进入 Hub 的唯一入口']],
   ['V3HubReqInbound02Normalized', ['ReqInbound 归一化', '只做入口协议解析/非破坏性归一化']],
-  ['V3HubReqContinuation03Classified', ['Continuation 分类', '只判定 scope/owner/entry；不恢复错误路径']],
-  ['V3HubReqChatProcess04Governed', ['Req Chat Process', '请求侧工具/history/continuation restore 唯一治理点']],
+  ['V3HubReqChatProcess04Governed', ['Req Chat Process', '请求侧工具/history 唯一治理点']],
   ['V3HubReqExecution05Planned', ['执行计划', '决定 relay/direct/工具复入等执行形态']],
   ['V3HubReqTarget06Resolved', ['Target 已解析', '目标 provider/model/auth 已绑定']],
   ['V3HubReqOutbound07ProviderSemantic', ['Provider semantic', 'Hub 语义 envelope；还不是 provider wire']],
@@ -222,12 +217,11 @@ const CONTRACT_NODE_NOTES = new Map([
   ['ProviderRespCompat02ProviderCompat', ['Provider response compat', 'provider 原始响应兼容解析']],
   ['V3HubRespInbound02Normalized', ['RespInbound 归一化', '只解析 provider raw，不做工具治理']],
   ['V3HubRespChatProcess03Governed', ['Resp Chat Process', '响应侧工具收割、servertool、reasoning harvest 唯一治理点']],
-  ['V3HubRespContinuation04Committed', ['Continuation save', '响应侧 continuation 真相保存点；之后到下轮 restore 是不可变区']],
   ['V3HubRespOutbound05ClientSemantic', ['Client semantic', '按入口协议投影客户端语义']],
   ['V3ServerRespOutbound06ClientFrame', ['Server client frame', 'server 发送最终 client frame']],
   ['V3SseTransportIn01RawChunk', ['SSE raw chunk', '原始 transport bytes；只进入 framing，不读取 event/data 业务语义']],
   ['V3SseTransportIn02DecodedFrame', ['SSE decoded frame', '只完成 UTF-8、line、frame 字段解码；data JSON 仍保持 opaque']],
-  ['V3SseTransportIn03ValidatedFrameStream', ['SSE validated frame stream', '只验证 framing/limits/EOF/drop/error；不判断 completed/tool/continuation']],
+  ['V3SseTransportIn03ValidatedFrameStream', ['SSE validated frame stream', '只验证 framing/limits/EOF/drop/error；不判断 completed/tool 语义']],
   ['V3SseTransportOut04EncodedChunk', ['SSE encoded chunk', '把已验证 frame 重新编码为字节；不修改业务 JSON 或 terminal 语义']],
   ['V3ProviderHealthStateMutated', ['Provider health 更新', 'provider-runtime health owner 写入；Error chain 可触发，VR/Target 只读可用性']],
 
@@ -245,10 +239,6 @@ const CONTRACT_NODE_NOTES = new Map([
   ['V3DryRunNoNetworkTerminalEffect', ['Dry-run terminal effect', 'dry-run 终态效果，不发送 provider']],
   ['V3ProviderAvailabilityProjected', ['Provider availability', 'provider health 的可用性投影；由 target/router 读取']],
   ['V3ProviderFailureSessionScope', ['Provider failure session scope', 'Error-owned typed scope：serverId/routingGroup/sessionId；不是 provider health mutation']],
-  ['V3RemoteContinuationCommitInput', ['Remote continuation 输入', 'remote/direct continuation 待提交信息']],
-  ['V3RemoteContinuationLocator', ['Remote continuation locator', '按 protocol/owner/session/port 隔离的 continuation key']],
-  ['V3LocalContResp01ChatProcessGoverned', ['本地 continuation save 起点', 'RespChatProcess 后的本地 continuation 真相']],
-  ['V3LocalContReq04RestoredGoverned', ['本地 continuation restore 终点', '下一轮 ReqChatProcess 入口恢复']],
 ]);
 
 const EDGE_STEP_NOTES = new Map([
@@ -257,11 +247,7 @@ const EDGE_STEP_NOTES = new Map([
   ['v3-rd-13', '解析 provider raw 后进入 Direct 专属投影准备'],
   ['v3-rd-14', 'Direct 投影准备完成，形成 client payload ready'],
   ['v3-rd-15', 'Direct ready payload 才能转成客户端 payload'],
-  ['v3-rci-03', 'remote continuation 响应同样先进入 Direct 投影准备'],
-  ['v3-rci-04', '先提交 continuation，再准备 client payload'],
-  ['v3-rci-05', 'Resp04 之后只能走 Direct ready 节点，禁止直投'],
   ['v3-hub-resp-03', '响应侧工具/servertool/reasoning 治理唯一入口'],
-  ['v3-hub-resp-04', 'Chat Process 完成后保存 continuation'],
   ['v3-de-12', 'Error03 action 写入 health cooldown/disable'],
   ['v3-de-13', 'provider health 投影成 target/router 可读 availability'],
   ['v3-de-14', 'provider send/transport failure 记录 provider failure'],
@@ -436,7 +422,7 @@ function detectForbiddenDirectProjectionEdges(parsed) {
     const targetIsClient = RESPONSE_DIRECT_TO_CLIENT_TARGETS.has(to);
     const allowed = RESPONSE_DIRECT_ALLOWED_PREDECESSORS.has(from);
     const bypassByNode = targetIsClient && !allowed && RESPONSE_BYPASS_SOURCE_PATTERN.test(from);
-    const bypassBySymbol = targetIsClient && !allowed && /project|projection|client|sse/i.test(`${caller} ${callee}`) && /ProviderResp|RespInbound|RespChatProcess|RespContinuation|provider response/i.test(`${from} ${caller} ${callee}`);
+    const bypassBySymbol = targetIsClient && !allowed && /project|projection|client|sse/i.test(`${caller} ${callee}`) && /ProviderResp|RespInbound|RespChatProcess|provider response/i.test(`${from} ${caller} ${callee}`);
     if (bypassByNode || bypassBySymbol) {
       forbidden.push({
         chain_id: chain?.chain_id,
@@ -548,7 +534,6 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
     'V3ProviderRespInbound01Raw',
     'ProviderRespCompat02ProviderCompat',
     'V3HubRespChatProcess03Governed',
-    'V3HubRespContinuation04Committed',
     'V3Error01SourceRaised',
     'V3Error06ClientProjected',
     'SSE raw chunk',
@@ -801,7 +786,7 @@ export function renderV3MainlineCallerFlowMarkdown(root, relPath = V3_MAINLINE_C
     '',
     'This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.',
     '',
-    'Review rule: a provider/runtime response must not jump directly to client/server projection. It must pass through the response chain (`ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized -> V3HubRespChatProcess03Governed -> V3HubRespContinuation04Committed -> V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame`) unless it is an explicitly separate direct lifecycle with its own declared nodes.',
+    'Review rule: a provider/runtime response must not jump directly to client/server projection. It must pass through the response chain (`ProviderRespCompat02ProviderCompat -> V3HubRespInbound02Normalized -> V3HubRespChatProcess03Governed -> V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame`) unless it is an explicitly separate direct lifecycle with its own declared nodes.',
     '',
     renderModuleOverview(parsed),
     '## Auto audit /补救清单',
@@ -839,7 +824,7 @@ function chainSummary(chain) {
 
 function chainCategory(chainId) {
   if (/config|entry_protocol|models|server\.startup|server\.managed_lifecycle/u.test(chainId)) return 'Foundation / entry';
-  if (/responses_direct|responses\.websocket|responses\.inbound_websocket|remote_continuation|remote_locator|remote_contract/u.test(chainId)) return 'Responses direct';
+  if (/responses_direct|responses\.websocket|responses\.inbound_websocket/u.test(chainId)) return 'Responses direct';
   if (/hub_pipeline|relay|protocol\.|protocol_conversion|anthropic_relay|openai_chat_relay|gemini_relay/u.test(chainId)) return 'Hub relay / protocol';
   if (/servertool|tool_servertool|normalization_tool/u.test(chainId)) return 'Servertool / hooks';
   if (/debug|error|live_provider_compat/u.test(chainId)) return 'Debug / error / compat';
@@ -1638,7 +1623,7 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
 
     <section class="skeleton">
       <h2>Request skeleton / 请求主骨架</h2>
-      <p>请求主骨架只显示 Hub Relay 的真实 edge：<code>inbound → continuation classify → Chat Process → execution/target → outbound → compat → provider wire/transport</code>。VR/Target 属于 request chain 的 execution/target 阶段，provider outbound 必须经过 compat。</p>
+      <p>请求主骨架只显示 Hub Relay 的真实 edge：<code>inbound → Chat Process → execution/target → outbound → compat → provider wire/transport</code>。VR/Target 属于 request chain 的 execution/target 阶段，provider outbound 必须经过 compat。</p>
       <div class="diagram-shell">
         <pre class="mermaid">${escapeHtml(renderRequestSkeletonMermaid(chains))}</pre>
       </div>
@@ -1646,7 +1631,7 @@ export function renderV3MainlineCallerFlowHtml(root, relPath = V3_MAINLINE_CALL_
 
     <section class="skeleton">
       <h2>Response skeleton / 响应主骨架</h2>
-      <p>响应主骨架只显示 provider 回来后的真实 Relay edge：<code>provider raw → response compat → RespInbound → Resp03 Chat Process → Resp04 continuation save → RespOutbound → Server frame</code>。响应治理只能在 Resp03；Resp04 只保存 continuation。</p>
+      <p>响应主骨架只显示 provider 回来后的真实 Relay edge：<code>provider raw → response compat → RespInbound → Resp03 Chat Process → RespOutbound → Server frame</code>。响应语义治理只能在 Resp03；RespOutbound 只做 client 投影。</p>
       <div class="diagram-shell">
         <pre class="mermaid">${escapeHtml(renderResponseSkeletonMermaid(chains))}</pre>
       </div>

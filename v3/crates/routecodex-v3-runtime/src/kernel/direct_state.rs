@@ -2,40 +2,17 @@ use crate::hub_v1::{
     V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
 };
 
-const REMOTE_CONTINUATION_TTL_MS: u64 = 30 * 60 * 1_000;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ResponsesDirectContinuationScope {
-    key: V3RemoteContinuationScopeKey,
-}
-
-impl V3ResponsesDirectContinuationScope {
-    pub fn responses(
-        endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            key: V3RemoteContinuationScopeKey::responses(
-                endpoint,
-                session_id,
-                conversation_id,
-                port,
-                routing_group,
-            ),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectServerToolScope {
-    key: V3RemoteContinuationScopeKey,
+    entry_endpoint: String,
+    session_id: String,
+    conversation_id: String,
+    port: u16,
+    routing_group: String,
 }
 
 impl V3ResponsesDirectServerToolScope {
-    pub fn responses(
+    pub fn new(
         endpoint: impl Into<String>,
         session_id: impl Into<String>,
         conversation_id: impl Into<String>,
@@ -43,31 +20,21 @@ impl V3ResponsesDirectServerToolScope {
         routing_group: impl Into<String>,
     ) -> Self {
         Self {
-            key: V3RemoteContinuationScopeKey::responses(
-                endpoint,
-                session_id,
-                conversation_id,
-                port,
-                routing_group,
-            ),
+            entry_endpoint: endpoint.into(),
+            session_id: session_id.into(),
+            conversation_id: conversation_id.into(),
+            port,
+            routing_group: routing_group.into(),
         }
     }
 
     fn has_client_session_scope(&self) -> bool {
-        let session_id = self.key.session_id.trim();
-        let conversation_id = self.key.conversation_id.trim();
+        let session_id = self.session_id.trim();
+        let conversation_id = self.conversation_id.trim();
         if session_id.is_empty() || conversation_id.is_empty() {
             return false;
         }
         !(session_id == conversation_id && session_id.starts_with("request:"))
-    }
-}
-
-impl From<&V3ResponsesDirectContinuationScope> for V3ResponsesDirectServerToolScope {
-    fn from(scope: &V3ResponsesDirectContinuationScope) -> Self {
-        Self {
-            key: scope.key.clone(),
-        }
     }
 }
 
@@ -80,17 +47,16 @@ impl V3ResponsesDirectServerToolState {
     fn web_search_center_key(
         scope: &V3ResponsesDirectServerToolScope,
     ) -> V3ServerToolCenterKey {
-        let key = &scope.key;
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
             scope_key: format!(
                 "{:?}|{}|{}|{}|{}|{}",
-                key.entry_protocol,
-                key.entry_endpoint,
-                key.port,
-                key.routing_group,
-                key.session_id,
-                key.conversation_id
+                crate::hub_v1::V3HubEntryProtocol::Responses,
+                scope.entry_endpoint,
+                scope.port,
+                scope.routing_group,
+                scope.session_id,
+                scope.conversation_id
             ),
         }
     }
@@ -155,99 +121,7 @@ impl V3ResponsesDirectServerToolState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct V3ResponsesDirectContinuationState {
-    store: Arc<Mutex<V3RemoteContinuationStore>>,
-}
-
-impl V3ResponsesDirectContinuationState {
-    pub fn contains(&self, response_id: &str) -> Result<bool, String> {
-        self.store
-            .lock()
-            .map(|store| store.contains(response_id))
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn contains_for_req03(
-        &self,
-        response_id: &str,
-        scope: &V3ResponsesDirectContinuationScope,
-        now_epoch_ms: u64,
-    ) -> Result<bool, crate::remote_continuation::V3RemoteContinuationError> {
-        self.store
-            .lock()
-            .map_err(
-                |error| crate::remote_continuation::V3RemoteContinuationError::Codec {
-                    message: error.to_string(),
-                },
-            )
-            .and_then(
-                |store| match store.load_for_req03(response_id, &scope.key, now_epoch_ms) {
-                    Ok(_) => Ok(true),
-                    Err(
-                        crate::remote_continuation::V3RemoteContinuationError::NotFound { .. }
-                        | crate::remote_continuation::V3RemoteContinuationError::ScopeMismatch {
-                            ..
-                        }
-                        | crate::remote_continuation::V3RemoteContinuationError::Expired { .. },
-                    ) => Ok(false),
-                    Err(error) => Err(error),
-                },
-            )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn commit_for_req03_test(
-        &self,
-        response_id: &str,
-        scope: &V3ResponsesDirectContinuationScope,
-        now_epoch_ms: u64,
-    ) -> Result<(), String> {
-        self.commit_for_req03_test_with_pin(
-            response_id,
-            scope,
-            V3RemoteContinuationPin::new("direct-provider", "gpt-5.5", "key"),
-            now_epoch_ms,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn commit_for_req03_test_with_pin(
-        &self,
-        response_id: &str,
-        scope: &V3ResponsesDirectContinuationScope,
-        pin: V3RemoteContinuationPin,
-        now_epoch_ms: u64,
-    ) -> Result<(), String> {
-        let locator = V3RemoteContinuationLocator::new_direct(
-            response_id,
-            scope.key.clone(),
-            pin,
-            "test-capability-revision",
-            now_epoch_ms,
-            now_epoch_ms + REMOTE_CONTINUATION_TTL_MS,
-        );
-        self.store
-            .lock()
-            .map_err(|error| error.to_string())?
-            .commit(V3RemoteContinuationCommitInput::locator_only(locator))
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn len(&self) -> Result<usize, String> {
-        self.store
-            .lock()
-            .map(|store| store.len())
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn is_empty(&self) -> Result<bool, String> {
-        self.len().map(|len| len == 0)
-    }
-}
-
 pub struct V3ResponsesDirectRuntimeSharedState<'a> {
-    pub continuation_state: &'a V3ResponsesDirectContinuationState,
     pub server_tool_state: &'a V3ResponsesDirectServerToolState,
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
@@ -256,7 +130,6 @@ pub struct V3ResponsesDirectRuntimeSharedState<'a> {
 
 impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
     pub fn new<H>(
-        continuation_state: &'a V3ResponsesDirectContinuationState,
         server_tool_state: &'a V3ResponsesDirectServerToolState,
         provider_health: H,
     ) -> Self
@@ -264,7 +137,6 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
         H: Into<V3ProviderFailureRuntimeHealth>,
     {
         Self {
-            continuation_state,
             server_tool_state,
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
@@ -291,8 +163,6 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
 
 #[derive(Clone)]
 struct V3ResponsesDirectRuntimeCoreState {
-    continuation_state: Option<Arc<V3ResponsesDirectContinuationState>>,
-    continuation_scope: Option<V3ResponsesDirectContinuationScope>,
     server_tool_state: Option<Arc<V3ResponsesDirectServerToolState>>,
     server_tool_scope: Option<V3ResponsesDirectServerToolScope>,
     now_epoch_ms: u64,
@@ -316,39 +186,11 @@ struct V3ResponsesDirectRuntimeCoreState {
 }
 
 impl V3ResponsesDirectRuntimeCoreState {
-    fn no_continuation() -> Self {
+    fn new() -> Self {
         Self {
-            continuation_state: None,
-            continuation_scope: None,
             server_tool_state: None,
             server_tool_scope: None,
             now_epoch_ms: 0,
-            provider_health: None,
-            provider_health_neutral: false,
-            allow_exhaustion_rescue_probe: true,
-            initial_selected_target: None,
-            initial_protocol_decision: None,
-            initial_expanded: None,
-            initial_request_local_excluded_candidates: BTreeSet::new(),
-            observability_accumulator: None,
-            request_execution_control: None,
-            initial_plan_trace: None,
-            provider_failure_event_sink: None,
-            route_selection_event_sink: None,
-        }
-    }
-
-    fn with_continuation(
-        state: &V3ResponsesDirectContinuationState,
-        scope: V3ResponsesDirectContinuationScope,
-        now_epoch_ms: u64,
-    ) -> Self {
-        Self {
-            continuation_state: Some(Arc::new(state.clone())),
-            continuation_scope: Some(scope),
-            server_tool_state: None,
-            server_tool_scope: None,
-            now_epoch_ms,
             provider_health: None,
             provider_health_neutral: false,
             allow_exhaustion_rescue_probe: true,
@@ -389,7 +231,6 @@ impl V3ResponsesDirectRuntimeCoreState {
         self
     }
 
-    #[cfg(test)]
     fn with_now_epoch_ms(mut self, now_epoch_ms: u64) -> Self {
         self.now_epoch_ms = now_epoch_ms;
         self

@@ -195,7 +195,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/verify-no-fallback-diff.mjs',
     'scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs',
     'scripts/architecture/verify-repository-filesystem-governance.mjs',
-    'scripts/architecture/verify-responses-continuation-immutable-boundary.mjs',
     'scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs',
     'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs',
     'scripts/architecture/verify-runtime-responses-provider-compat.mjs',
@@ -203,7 +202,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/verify-sse-architecture-boundary.mjs',
     'scripts/architecture/verify-v3-dependency-projection.mjs',
     'scripts/architecture/verify-v3-provider-compat-module-boundary.mjs',
-    'scripts/architecture/verify-v3-responses-continuation-disabled.mjs',
     'scripts/architecture/verify-v3-simplified-user-config.mjs',
     'scripts/architecture/wiki-html-lib.mjs',
   ]);

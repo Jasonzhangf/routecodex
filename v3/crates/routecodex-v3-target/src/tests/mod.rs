@@ -972,27 +972,6 @@ fn tools_are_route_signals_not_target_capability_filters() {
 }
 
 #[test]
-fn continuation_signals_are_owner_paths_not_target_capability_filters() {
-    let expanded = expanded_tools();
-    let mut candidate = expanded
-        .candidates
-        .first()
-        .expect("tools route must expand candidates")
-        .clone();
-    candidate.required_capabilities = vec![
-        "tool_outputs".into(),
-        "remote_continuation".into(),
-        "local_materialization".into(),
-    ];
-    candidate.model_capabilities = vec!["text".into()];
-
-    assert!(
-        candidate_satisfies_required_capabilities(&candidate),
-        "previous_response_id must be resolved by continuation owner (direct remote vs relay local), not by Target model capability_mismatch"
-    );
-}
-
-#[test]
 fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
     let expanded = expanded_tools();
     let mut search_candidate = expanded

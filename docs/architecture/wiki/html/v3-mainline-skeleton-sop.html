@@ -55,32 +55,30 @@
 flowchart TD
   R0[&quot;&lt;b&gt;V3HubReqInbound01ClientRaw&lt;/b&gt;&lt;br/&gt;&lt;small&gt;client raw request / server entry facts only&lt;/small&gt;&quot;]
   R1[&quot;&lt;b&gt;V3HubReqInbound02Normalized&lt;/b&gt;&lt;br/&gt;&lt;small&gt;non-destructive entry protocol normalization&lt;/small&gt;&quot;]
-  R2[&quot;&lt;b&gt;V3HubReqContinuation03Classified&lt;/b&gt;&lt;br/&gt;&lt;small&gt;entry + owner + scope classification, no payload restore&lt;/small&gt;&quot;]
-  R3[&quot;&lt;b&gt;V3HubReqChatProcess04Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;request-side continuation restore and tool governance owner&lt;/small&gt;&quot;]
-  R4[&quot;&lt;b&gt;V3HubReqExecution05Planned&lt;/b&gt;&lt;br/&gt;&lt;small&gt;execution plan only&lt;/small&gt;&quot;]
-  R5[&quot;&lt;b&gt;V3HubReqTarget06Resolved&lt;/b&gt;&lt;br/&gt;&lt;small&gt;target selected, no payload patch&lt;/small&gt;&quot;]
-  R6[&quot;&lt;b&gt;V3HubReqOutbound07ProviderSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider semantic envelope&lt;/small&gt;&quot;]
-  R7[&quot;&lt;b&gt;ProviderReqCompat06ProviderCompat&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider compat boundary&lt;/small&gt;&quot;]
-  R8[&quot;&lt;b&gt;V3ProviderReqOutbound08WirePayload&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider wire JSON/body&lt;/small&gt;&quot;]
-  R9[&quot;&lt;b&gt;V3ProviderReqOutbound09TransportRequest&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP transport request&lt;/small&gt;&quot;]
-  R0 --&gt;|server accept| R1 --&gt;|classify continuation owner/scope| R2 --&gt;|restore/govern at Req04| R3 --&gt;|plan| R4 --&gt;|resolve target| R5 --&gt;|build semantic| R6 --&gt;|compat only| R7 --&gt;|wire codec| R8 --&gt;|transport| R9
+  R2[&quot;&lt;b&gt;V3HubReqChatProcess04Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;current-turn tool and history governance owner&lt;/small&gt;&quot;]
+  R3[&quot;&lt;b&gt;V3HubReqExecution05Planned&lt;/b&gt;&lt;br/&gt;&lt;small&gt;execution plan only&lt;/small&gt;&quot;]
+  R4[&quot;&lt;b&gt;V3HubReqTarget06Resolved&lt;/b&gt;&lt;br/&gt;&lt;small&gt;target selected, no payload patch&lt;/small&gt;&quot;]
+  R5[&quot;&lt;b&gt;V3HubReqOutbound07ProviderSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider semantic envelope&lt;/small&gt;&quot;]
+  R6[&quot;&lt;b&gt;ProviderReqCompat06ProviderCompat&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider compat boundary&lt;/small&gt;&quot;]
+  R7[&quot;&lt;b&gt;V3ProviderReqOutbound08WirePayload&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider wire JSON/body&lt;/small&gt;&quot;]
+  R8[&quot;&lt;b&gt;V3ProviderReqOutbound09TransportRequest&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP transport request&lt;/small&gt;&quot;]
+  R0 --&gt;|server accept| R1 --&gt;|normalize then govern at Req04| R2 --&gt;|plan| R3 --&gt;|resolve target| R4 --&gt;|build semantic| R5 --&gt;|compat only| R6 --&gt;|wire codec| R7 --&gt;|transport| R8
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   classDef owner fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;
-  class R0,R1,R2,R4,R5,R6,R7,R8,R9 node;
-  class R3 owner;</pre></div></section>
+  class R0,R1,R3,R4,R5,R6,R7,R8 node;
+  class R2 owner;</pre></div></section>
         <section><h3>Response skeleton</h3><div class="flow-box"><pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 105, &quot;nodeSpacing&quot;: 65}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;20px&quot;}} }%%
 flowchart TD
   S0[&quot;&lt;b&gt;V3ProviderRespInbound01Raw&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider raw response/event bytes already received&lt;/small&gt;&quot;]
   S1[&quot;&lt;b&gt;ProviderRespCompat02ProviderCompat&lt;/b&gt;&lt;br/&gt;&lt;small&gt;provider-specific compat before Hub parse&lt;/small&gt;&quot;]
   S2[&quot;&lt;b&gt;V3HubRespInbound02Normalized&lt;/b&gt;&lt;br/&gt;&lt;small&gt;Hub response semantic input&lt;/small&gt;&quot;]
   S3[&quot;&lt;b&gt;V3HubRespChatProcess03Governed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;response tool/servertool governance owner&lt;/small&gt;&quot;]
-  S4[&quot;&lt;b&gt;V3HubRespContinuation04Committed&lt;/b&gt;&lt;br/&gt;&lt;small&gt;continuation save endpoint only&lt;/small&gt;&quot;]
-  S5[&quot;&lt;b&gt;V3HubRespOutbound05ClientSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;client protocol projection only&lt;/small&gt;&quot;]
-  S6[&quot;&lt;b&gt;V3ServerRespOutbound06ClientFrame&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP/SSE frame handoff only&lt;/small&gt;&quot;]
-  S0 --&gt;|compat first| S1 --&gt;|normalize| S2 --&gt;|govern at Resp03| S3 --&gt;|save only| S4 --&gt;|project| S5 --&gt;|frame/stream| S6
+  S4[&quot;&lt;b&gt;V3HubRespOutbound05ClientSemantic&lt;/b&gt;&lt;br/&gt;&lt;small&gt;client protocol projection only&lt;/small&gt;&quot;]
+  S5[&quot;&lt;b&gt;V3ServerRespOutbound06ClientFrame&lt;/b&gt;&lt;br/&gt;&lt;small&gt;HTTP/SSE frame handoff only&lt;/small&gt;&quot;]
+  S0 --&gt;|compat first| S1 --&gt;|normalize| S2 --&gt;|govern at Resp03| S3 --&gt;|project| S4 --&gt;|frame/stream| S5
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;
   classDef owner fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;
-  class S0,S1,S2,S4,S5,S6 node;
+  class S0,S1,S2,S4,S5 node;
   class S3 owner;</pre></div></section>
       </div>
     </section>
@@ -91,12 +89,12 @@ flowchart TD
         <article class="logic-card">
     <div class="node-card-top"><span>ReqInbound</span></div>
     <h3>Non-destructive entry normalization</h3>
-    <p>Server and ReqInbound capture entry facts and normalize protocol shape only; they do not restore continuation or repair history.</p>
+    <p>Server and ReqInbound capture entry facts and normalize protocol shape only; they do not repair history.</p>
   </article>
         <article class="logic-card">
     <div class="node-card-top"><span>Req04</span></div>
     <h3>Request Chat Process owner</h3>
-    <p>Continuation restore, current-turn tool governance, and tool declaration merge live here.</p>
+    <p>Current-turn tool governance and tool declaration merge live here.</p>
   </article>
         <article class="logic-card">
     <div class="node-card-top"><span>ReqOutbound / Compat / Wire</span></div>
@@ -120,9 +118,9 @@ flowchart TD
     <p>Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.</p>
   </article>
         <article class="logic-card">
-    <div class="node-card-top"><span>Resp04 / RespOutbound / Server frame</span></div>
-    <h3>Save then project then frame</h3>
-    <p>Resp04 only saves governed continuation truth; RespOutbound projects client semantic; server/SSE only frames/transports.</p>
+    <div class="node-card-top"><span>Resp03 / RespOutbound / Server frame</span></div>
+    <h3>Govern then project then frame</h3>
+    <p>Resp03 owns response governance; RespOutbound projects client semantic; server/SSE only frames/transports.</p>
   </article>
       </div>
     </section>
@@ -165,7 +163,7 @@ flowchart TD
 
     <section class="panel">
       <h2>Locked chain fingerprints</h2>
-      <table><thead><tr><th>Chain</th><th>Lock status</th><th>Edges</th><th>Owner</th><th>Fingerprint</th></tr></thead><tbody><tr><td><code>v3.config.compile</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48ff5c7cdb3e…</code></td></tr><tr><td><code>v3.config.compact_hub_v1_defaults</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a3acf3ebdf…</code></td></tr><tr><td><code>v3.entry_protocol_endpoint_binding.mainline</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.entry_protocol_endpoint_binding</code></td><td><code>sha256:15ecb6de58935a4c1d3bf…</code></td></tr><tr><td><code>v3.server.startup</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:edd1d4d6c653ef4db4002…</code></td></tr><tr><td><code>v3.responses_direct.required_mainline</code></td><td><span class="status">audited_locked</span></td><td>17</td><td><code>v3.responses_direct_mvp_architecture</code></td><td><code>sha256:6d464f4c7a5db684d4798…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.request</code></td><td><span class="status">audited_locked</span></td><td>9</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:8aef490e60aec1ba0e582…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.response</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:6c9652ec050d62e5c23e4…</code></td></tr><tr><td><code>v3.debug_error_foundation.mainline</code></td><td><span class="status">audited_locked</span></td><td>22</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:c520e6d65c78c6dea0d8f…</code></td></tr><tr><td><code>v3.sse.transport_boundary</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:c93ca1386d58b91b17f73…</code></td></tr></tbody></table>
+      <table><thead><tr><th>Chain</th><th>Lock status</th><th>Edges</th><th>Owner</th><th>Fingerprint</th></tr></thead><tbody><tr><td><code>v3.config.compile</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48ff5c7cdb3e…</code></td></tr><tr><td><code>v3.config.compact_hub_v1_defaults</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:2bb01d432d2a3acf3ebdf…</code></td></tr><tr><td><code>v3.entry_protocol_endpoint_binding.mainline</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.entry_protocol_endpoint_binding</code></td><td><code>sha256:15ecb6de58935a4c1d3bf…</code></td></tr><tr><td><code>v3.server.startup</code></td><td><span class="status">audited_locked</span></td><td>6</td><td><code>v3.foundation_p0_p2</code></td><td><code>sha256:edd1d4d6c653ef4db4002…</code></td></tr><tr><td><code>v3.responses_direct.required_mainline</code></td><td><span class="status">audited_locked</span></td><td>17</td><td><code>v3.responses_direct_mvp_architecture</code></td><td><code>sha256:6d464f4c7a5db684d4798…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.request</code></td><td><span class="status">audited_locked</span></td><td>8</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:066f368a851c78f829302…</code></td></tr><tr><td><code>v3.hub_pipeline.v1.response</code></td><td><span class="status">audited_locked</span></td><td>5</td><td><code>v3.hub_pipeline_static_skeleton</code></td><td><code>sha256:1899934ce325350d557e6…</code></td></tr><tr><td><code>v3.debug_error_foundation.mainline</code></td><td><span class="status">audited_locked</span></td><td>22</td><td><code>v3.debug_error_foundation</code></td><td><code>sha256:c520e6d65c78c6dea0d8f…</code></td></tr><tr><td><code>v3.sse.transport_boundary</code></td><td><span class="status">audited_locked</span></td><td>4</td><td><code>v3.sse_transport_core_independent</code></td><td><code>sha256:c93ca1386d58b91b17f73…</code></td></tr></tbody></table>
     </section>
 
     <section class="panel">

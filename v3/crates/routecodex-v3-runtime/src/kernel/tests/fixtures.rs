@@ -13,7 +13,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.openai]
 type = "responses"
@@ -52,7 +51,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.first]
 type = "responses"
@@ -108,7 +106,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.first]
 type = "responses"
@@ -156,7 +153,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.grok]
 type = "responses"
@@ -194,7 +190,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.optional]
 type = "responses"
@@ -243,7 +238,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.openai]
 type = "responses"
@@ -288,7 +282,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.ds]
 type = "responses"

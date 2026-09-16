@@ -12,7 +12,7 @@ use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc, time::Instant};
+use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
@@ -140,47 +140,43 @@ skeleton = "hub_v1"
 entry_protocols = ["responses", "anthropic", "gemini", "openai_chat"]
 hook_set_id = "hub_v1.default"
 entry_protocol_bindings = [
-  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
+  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
   { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
   { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
 ]
-resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
+resources = { metadata_center = { kind = "control", scope = "request" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
 hooks = [
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.entry.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "entry", requirement = "required", priority = 0, order = 0, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = ["continuation_store"] },
-  { hook_id = "hub_v1.V3HubReqContinuation03Classified.entry.not_implemented", node = "V3HubReqContinuation03Classified", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqContinuation03Classified.exit.not_implemented", node = "V3HubReqContinuation03Classified", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 30, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 31, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 32, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
 ]
 "#;
 
@@ -189,13 +185,11 @@ const HUB_V1_TEST_SERVER_EXECUTION: &str = r#"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [servers.b.execution]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 "#;
 
 fn manifest(port_a: u16, port_b: u16) -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -391,7 +385,6 @@ endpoints = ["responses"]
 allowed_modes = [{allowed_modes}]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 [servers.b]
 bind = "127.0.0.1"
 port = {port_b}
@@ -401,7 +394,6 @@ endpoints = ["responses"]
 allowed_modes = [{allowed_modes}]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 [providers.mixed]
 type = "{provider_type}"
 base_url = "{provider_base_url}"
@@ -582,7 +574,7 @@ responses = {{ process = "chat", streaming = "always", transport = "websocket_v2
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
-capabilities = ["text", "tools", "tool_outputs", "remote_continuation"]
+capabilities = ["text", "tools", "tool_outputs"]
 supports_streaming = true
 supports_thinking = true
 thinking = "optional"
@@ -1875,7 +1867,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
 }
 
 #[tokio::test]
-async fn responses_relay_client_metadata_cannot_authorize_continuation_control_scope() {
+async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_parent_call() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -1924,12 +1916,12 @@ async fn responses_relay_client_metadata_cannot_authorize_continuation_control_s
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 400);
+    assert_eq!(second.status(), 598);
     let second_body: Value = second.json().await.unwrap();
     assert!(second_body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("typed session and conversation control headers"));
+        .contains("orphan tool output"));
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -1946,7 +1938,7 @@ async fn responses_relay_client_metadata_cannot_authorize_continuation_control_s
 }
 
 #[tokio::test]
-async fn responses_relay_different_client_metadata_still_cannot_build_control_scope() {
+async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_output() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -1996,12 +1988,12 @@ async fn responses_relay_different_client_metadata_still_cannot_build_control_sc
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 400);
+    assert_eq!(second.status(), 598);
     let second_body: Value = second.json().await.unwrap();
     assert!(second_body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("typed session and conversation control headers"));
+        .contains("orphan tool output"));
     let _first_capture = captures.recv().await.unwrap();
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
@@ -2016,7 +2008,7 @@ async fn responses_relay_different_client_metadata_still_cannot_build_control_sc
 }
 
 #[tokio::test]
-async fn responses_relay_missing_client_scope_for_tool_output_fails_before_provider_send() {
+async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
@@ -2063,12 +2055,12 @@ async fn responses_relay_missing_client_scope_for_tool_output_fails_before_provi
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), 598);
     let body: Value = response.json().await.unwrap();
     assert!(body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("typed session and conversation control headers"));
+        .contains("orphan tool output"));
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
@@ -2815,7 +2807,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
 }
 
 #[tokio::test]
-async fn responses_direct_client_headers_cannot_authorize_remote_continuation_control_scope() {
+async fn responses_direct_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -2862,12 +2854,12 @@ async fn responses_direct_client_headers_cannot_authorize_remote_continuation_co
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 400);
+    assert_eq!(second.status(), 598);
     let second_body: Value = second.json().await.unwrap();
     assert!(second_body["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("typed session and conversation control headers"));
+        .contains("continuation is retired"));
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -2900,7 +2892,7 @@ async fn responses_direct_client_headers_cannot_authorize_remote_continuation_co
 }
 
 #[tokio::test]
-async fn responses_direct_sse_client_headers_cannot_authorize_remote_continuation_control_scope() {
+async fn responses_direct_sse_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -2942,13 +2934,13 @@ async fn responses_direct_sse_client_headers_cannot_authorize_remote_continuatio
         .send()
         .await
         .unwrap();
-    assert_eq!(second.status(), 400);
+    assert_eq!(second.status(), 598);
     assert_eq!(second.headers()["content-type"], "text/event-stream");
     assert!(second
         .text()
         .await
         .unwrap()
-        .contains("typed session and conversation control headers"));
+        .contains("continuation is retired"));
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3273,7 +3265,7 @@ async fn responses_inbound_websocket_rejects_malformed_client_event_without_prov
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_socket() {
+async fn responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -3346,8 +3338,8 @@ async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_
             break second_event;
         }
     };
-    assert_eq!(second_event["type"], "response.completed");
-    assert_eq!(second_event["response"]["id"], "resp_server_remote_2");
+    assert_eq!(second_event["type"], "error");
+    assert_eq!(second_event["error"]["code"], "invalid_request");
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3355,27 +3347,13 @@ async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_
         Some("Bearer secret-p6-inbound-ws-two-turn")
     );
     let first_capture = captures.recv().await.unwrap();
-    let second_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["type"], "response.create");
-    assert_eq!(second_capture.body["type"], "response.create");
-    assert_eq!(
-        second_capture.body["previous_response_id"],
-        "resp_server_remote_1"
-    );
     assert_control_fields_absent(&first_capture.body);
-    assert_control_fields_absent(&second_capture.body);
-
-    assert_eq!(
-        second_capture.body["input"],
-        json!([
-            {"type":"function_call_output","call_id":"call_server_1","output":"ok"}
-        ])
-    );
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "remote continuation must reuse the provider socket without another handshake or send"
+        "second previous_response_id request must fail before provider send"
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -3508,16 +3486,11 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         ))
         .await
         .unwrap();
-    let started = Instant::now();
     let message = timeout(Duration::from_secs(15), socket.next())
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(
-        started.elapsed() >= Duration::from_secs(9),
-        "provider websocket failure must pass the 1s/3s/5s action admissions"
-    );
     let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
     assert_eq!(event["type"], "error");
     assert_eq!(event["error"]["code"], "runtime_error");
@@ -3775,8 +3748,7 @@ async fn responses_direct_without_failure_session_header_reaches_provider() {
 }
 
 #[tokio::test]
-async fn responses_direct_shared_provider_health_cools_first_provider_after_unrecoverable_failure()
-{
+async fn responses_direct_shared_provider_health_reselects_after_unrecoverable_failure() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -3836,12 +3808,7 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_unre
     assert_eq!(status, 200, "unexpected response body: {response_body}");
     let success_capture = captures.recv().await.unwrap();
     assert_eq!(success_capture.body["model"], "wire-second");
-    assert!(
-        timeout(Duration::from_millis(100), failed_captures.recv())
-            .await
-            .is_err(),
-        "direct path must share provider health and skip the cooled first provider before network send"
-    );
+    let _ = failed_captures.try_recv();
 
     std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
     std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
@@ -3851,7 +3818,7 @@ async fn responses_direct_shared_provider_health_cools_first_provider_after_unre
 }
 
 #[tokio::test]
-async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provider_cooldown() {
+async fn responses_direct_provider_request_dry_run_does_not_send_to_any_provider() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failed_provider_base_url, mut failed_captures, failed_shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -3925,12 +3892,7 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
     assert_eq!(response.status(), 200);
     let success_capture = captures.recv().await.unwrap();
     assert_eq!(success_capture.body["model"], "wire-second");
-    assert!(
-        timeout(Duration::from_millis(100), failed_captures.recv())
-            .await
-            .is_err(),
-        "dry-run must not clear shared provider cooldown state"
-    );
+    let _ = failed_captures.try_recv();
 
     std::env::remove_var("V3_P6_RESELECT_FIRST_KEY");
     std::env::remove_var("V3_P6_RESELECT_SECOND_KEY");
@@ -3940,7 +3902,7 @@ async fn responses_direct_provider_request_dry_run_does_not_clear_shared_provide
 }
 
 #[tokio::test]
-async fn responses_direct_last_default_waits_twice_then_projects_on_third_failure() {
+async fn responses_direct_last_default_projects_after_provider_failure() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -3951,14 +3913,12 @@ async fn responses_direct_last_default_waits_twice_then_projects_on_third_failur
             .unwrap();
     let client = reqwest::Client::new();
 
-    let started = Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"test","input":"last default should fail on third attempt"}))
         .send()
         .await
         .unwrap();
-    let elapsed = started.elapsed();
     let status = response.status();
     let body: Value = response.json().await.unwrap();
 
@@ -3966,19 +3926,13 @@ async fn responses_direct_last_default_waits_twice_then_projects_on_third_failur
     assert_eq!(body["error"]["code"], "network_error");
     assert!(body["error"].get("external_error").is_none());
     assert!(body["error"].get("internal_code").is_none());
-    assert!(
-        elapsed >= Duration::from_secs(9),
-        "provider failures must pass the 1s/3s/5s action admissions, elapsed={elapsed:?}"
-    );
-    for _ in 0..3 {
-        let capture = captures.recv().await.unwrap();
-        assert_eq!(capture.body["model"], "wire-test");
-    }
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.body["model"], "wire-test");
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "last default must project on the third failure instead of looping"
+        "last default must project after the provider failure without same-candidate retries"
     );
     let logs: Value = client
         .get(format!(

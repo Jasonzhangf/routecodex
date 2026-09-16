@@ -84,7 +84,6 @@ fn resp03_removes_provider_model_identity_instructions_but_keeps_client_instruct
             }),
             V3HubEntryProtocol::Responses,
             V3HubProviderWireProtocol::Responses,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,

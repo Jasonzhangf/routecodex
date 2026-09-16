@@ -13,7 +13,6 @@ const skeletonPaths = [
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_compat_shared.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs'),
-  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs'),
@@ -25,7 +24,6 @@ const skeletonPaths = [
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs'),
-  repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs'),
   repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs'),
   hookPath,
@@ -48,7 +46,6 @@ function rustFiles(dir, output = []) {
 const nodeOwners = {
   V3HubReqInbound01ClientRaw: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs'),
   V3HubReqInbound02Normalized: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs'),
-  V3HubReqContinuation03Classified: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_continuation_03_classified.rs'),
   V3HubReqChatProcess04Governed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs'),
   V3HubReqExecution05Planned: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_execution_05_planned.rs'),
   V3HubReqTarget06Resolved: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/req_target_06_resolved.rs'),
@@ -60,7 +57,6 @@ const nodeOwners = {
   ProviderRespCompat02ProviderCompat: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs'),
   V3HubRespInbound02Normalized: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs'),
   V3HubRespChatProcess03Governed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs'),
-  V3HubRespContinuation04Committed: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs'),
   V3HubRespOutbound05ClientSemantic: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs'),
   V3ServerRespOutbound06ClientFrame: repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs'),
 };
@@ -78,8 +74,7 @@ const builders = [
   'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
   'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
   'build_v3_hub_req_inbound_02_responses_chat_canonical_from_v3_hub_req_inbound_01',
-  'build_v3_hub_req_continuation_03_from_v3_hub_req_inbound_02',
-  'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
+  'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02',
   'build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04',
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
@@ -91,8 +86,7 @@ const builders = [
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',
   'build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02',
-  'build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
 ];
 for (const builder of builders) {
@@ -102,7 +96,7 @@ for (const builder of builders) {
 const conversionBuilders = [...production.matchAll(/pub fn (build_(?:v3_)?[a-z0-9_]+_from_(?:v3_)?[a-z0-9_]+)\b/g)].map((match) => match[1]);
 for (const builder of conversionBuilders) if (!builders.includes(builder)) failures.push(`non-adjacent or duplicate builder ${builder}`);
 
-const axes = ['V3HubEntryProtocol', 'V3HubContinuationOwnership', 'V3HubExecutionMode', 'V3HubProviderWireProtocol'];
+const axes = ['V3HubEntryProtocol', 'V3HubExecutionMode', 'V3HubProviderWireProtocol'];
 for (const axis of axes) if (!production.includes(`pub enum ${axis}`)) failures.push(`missing independent axis ${axis}`);
 if (/entry_protocol[\s\S]{0,120}(?:Direct|RemoteProviderOwned)|provider_protocol[\s\S]{0,120}RemoteProviderOwned|same_protocol/i.test(production)) {
   failures.push('protocol fact is used to infer execution or continuation ownership');

@@ -11,9 +11,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::hub_v1::{
-    execute_v3_responses_relay_runtime_with_local_continuation, V3ResponsesRelayClientBody,
-    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -54,7 +52,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.minimax]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -93,7 +90,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 [providers.minimax]
 type = "anthropic"
 base_url = "https://api.minimaxi.com/anthropic"
@@ -123,15 +119,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_projects_result() {
     let manifest = anthropic_mode_a_manifest();
     let captures = Arc::new(Mutex::new(Vec::new()));
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let scope = V3ResponsesRelayLocalContinuationScope::responses(
-        "/v1/responses",
-        "session-ws-anthropic-relay",
-        "conversation-ws-anthropic-relay",
-        5555,
-        "chatwire",
-    );
-    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+    let output = execute_v3_responses_relay_runtime(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -149,9 +137,6 @@ async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_project
             }),
         },
         &WireCaptureTransport(captures.clone()),
-        &state,
-        scope,
-        12_000,
     )
     .await
     .expect("relay runtime must execute");
@@ -251,15 +236,7 @@ impl ResponsesTransport for SearchHopWireCaptureTransport {
 async fn search_hop_wire_is_clean_hosted_web_search_only() {
     let manifest = anthropic_mode_b_manifest();
     let captures = Arc::new(Mutex::new(Vec::new()));
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let scope = V3ResponsesRelayLocalContinuationScope::responses(
-        "/v1/responses",
-        "session-ws-search-hop",
-        "conversation-ws-search-hop",
-        5555,
-        "chatwire",
-    );
-    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+    let output = execute_v3_responses_relay_runtime(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -280,9 +257,6 @@ async fn search_hop_wire_is_clean_hosted_web_search_only() {
             captures: captures.clone(),
             sends: std::sync::Arc::new(std::sync::Mutex::new(0)),
         },
-        &state,
-        scope,
-        12_000,
     )
     .await
     .expect("relay runtime must execute");

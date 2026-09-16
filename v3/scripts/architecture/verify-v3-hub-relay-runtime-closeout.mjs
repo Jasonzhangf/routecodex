@@ -20,7 +20,6 @@ const providerFailurePolicyPath = 'v3/crates/routecodex-v3-runtime/src/provider_
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverTestPath = 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs';
 const testPath = 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs';
-const localContinuationTestPath = 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs';
 const manifestPath = 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml';
 const functionMapPath = 'docs/architecture/v3-function-map.yml';
 const mainlinePath = 'docs/architecture/v3-mainline-call-map.yml';
@@ -56,8 +55,6 @@ const server = readFileSync(serverPath, 'utf8')
   + '\n' + readFileSync('v3/crates/routecodex-v3-server/src/websocket.rs', 'utf8');
 const serverTests = readFileSync(serverTestPath, 'utf8');
 const tests = readFileSync(testPath, 'utf8');
-const localContinuationTests = readFileSync(testPath, 'utf8')
-  + '\n' + readFileSync(localContinuationTestPath, 'utf8');
 const manifest = YAML.parse(readFileSync(manifestPath, 'utf8'));
 const functionMap = readFileSync(functionMapPath, 'utf8');
 const mainline = readFileSync(mainlinePath, 'utf8');
@@ -71,7 +68,6 @@ const failures = [];
 const expectedNodes = [
   'V3HubReqInbound01ClientRaw',
   'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified',
   'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned',
   'V3HubReqTarget06Resolved',
@@ -83,7 +79,6 @@ const expectedNodes = [
   'ProviderRespCompat02ProviderCompat',
   'V3HubRespInbound02Normalized',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed',
   'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
@@ -153,7 +148,7 @@ for (const phrase of [
 ]) requireText(focusedGate, `${packagePath}: test:v3-5520-duplicate-tool-identity`, phrase);
 requireCount(workflow, workflowPath, 'run: npm --prefix v3 run verify:ci', 1);
 
-requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile');
+requireText(runtime, runtimePath, 'execute_v3_anthropic_relay_runtime_with_servertool_profile');
 requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHookProfile');
 // anthropic 失败策略已共享：完整语义（run_v3_relay_provider_failure_policy/Error05 action
 // /ordered SSE 失败路径）在 relay_runtime_shared；协议文件只要求调用共享 handle_provider_failure。
@@ -163,24 +158,22 @@ requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
 requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 1);
 requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 2);
 requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
-requireCount(runtime, runtimePath, 'let resp04 = hooks.commit(resp03)?;', 1);
-requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(', 1);
+requireCount(runtime, runtimePath, 'let resp03 = hooks.govern(resp02, response_hook_profile)?;', 1);
+requireCount(runtime, runtimePath, 'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(', 1);
 requireCount(runtime, runtimePath, 'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)', 1);
 requireOrderedSequence(runtime, runtimePath, [
   'fn closeout_anthropic_relay_normalized_response<F>(',
   'let hooks = compile_v3_hub_relay_response_hooks();',
   'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
-  'let resp04 = hooks.commit(resp03)?;',
-  'commit_or_release_local_continuation(',
-  'let client_payload = project_client_response(resp04.finalized_payload())?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(',
+  'let client_payload = project_client_response(resp03.provider_payload())?;',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05)',
 ]);
 requireOrdered(
   runtime,
   runtimePath,
-  'let resp04 = hooks.commit(resp03)?;',
-  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(',
+  'let resp03 = hooks.govern(resp02, response_hook_profile)?;',
+  'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(',
   1,
 );
 requireText(runtime, runtimePath, 'servertool_followup_required');
@@ -193,23 +186,17 @@ forbid(runtime, runtimePath, [
   /fallback/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
-  /build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload[\s\S]{0,240}hooks\.commit\(resp03\)/,
+  /build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03[\s\S]{0,240}hooks\.commit\(resp03\)/,
 ]);
 
 for (const phrase of [
   'EXPECTED_RELAY_TRACE',
   'controlled_json_and_sse_e2e_use_fixed_topology_and_one_response_exit',
   'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
-  'local_continuation_servertool_roundtrip_is_runtime_e2e',
   'provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging',
-  'execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile',
   'execute_v3_responses_relay_runtime',
   'servertool.exec',
-  'assert!(first.servertool_followup_required);',
   'V3_ERROR_CHAIN_NODE_IDS',
-  'session-closeout',
-  'conversation-closeout',
-  'metadata_center',
 ]) requireText(tests, testPath, phrase);
 for (const node of expectedNodes) requireText(tests, testPath, node);
 forbid(tests, testPath, [
@@ -221,12 +208,6 @@ forbid(tests, testPath, [
 
 for (const phrase of [
   'execute_v3_responses_relay_runtime_with_default_transport',
-  'execute_v3_responses_relay_runtime_with_local_continuation',
-  'V3ResponsesRelayLocalContinuationState',
-  'V3ResponsesRelayLocalContinuationScope',
-  'find_responses_tool_output_ids',
-  'with_local_context_from_req04_store(',
-  'commit_or_release_v3_relay_local_continuation_at_resp04',
   'execute_v3_responses_relay_runtime',
   'execute_v3_responses_relay_dry_run_runtime',
   'project_v3_responses_relay_runtime_failure',
@@ -238,8 +219,7 @@ for (const phrase of [
   'run_json_response_hooks',
   'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
   'ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)',
-  'let (action, mut finalized_provider_value, response_web_search_state) =',
-  'commit_or_release_responses_local_continuation(',
+  'let (mut finalized_provider_value, response_web_search_state) =',
   'build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
   'V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame',
 ]) requireText(responsesRuntime, responsesRuntimePath, phrase);
@@ -303,7 +283,7 @@ for (const node of expectedNodes.slice(10)) {
 requireCount(
   responsesRuntime,
   responsesRuntimePath,
-  'let (action, mut finalized_provider_value, response_web_search_state) =',
+  'let (mut finalized_provider_value, response_web_search_state) =',
   2,
 );
 requireOrderedSequence(
@@ -311,10 +291,9 @@ requireOrderedSequence(
   responsesRuntimePath + '::inner',
   [
     'V3ProviderResponseBody::Sse(stream) => {',
-    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
-    'let (action, mut finalized_provider_value, response_web_search_state) =',
+    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context',
+    'let (mut finalized_provider_value, response_web_search_state) =',
     'run_json_response_hooks(',
-    'commit_or_release_responses_local_continuation(',
   ],
 );
 requireText(
@@ -395,13 +374,11 @@ for (const phrase of [
   'execute_v3_responses_relay_request',
   'responses_relay_output_response',
   'fn finalize_v3_responses_relay_server_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target',
-  'responses_relay_local_continuation',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state',
   'server_tool_state',
   'project_v3_responses_relay_runtime_failure',
   'is_provider_request_dry_run(&request_headers)',
-  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state',
+  'execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state',
   'wrap_v3_committed_relay_sse_console_stream',
   'V3CommittedSseTerminal::Completed => finalizer.complete_relay_sse()',
   'V3CommittedSseTerminal::Dropped => finalizer.client_disconnected()',
@@ -416,13 +393,6 @@ requireText(
   `${serverPath}: finalize_v3_responses_relay_server_output`,
   'responses_relay_output_response(',
 );
-for (const phrase of [
-  'json_two_turn_restores_tool_call_pairs_output_and_preserves_tools',
-  'wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context',
-  'assert_eq!(captures[1]["input"]',
-  '"type":"function_call_output"',
-  'assert_eq!(transport.captures.lock().unwrap().len(), 1);',
-]) requireText(localContinuationTests, localContinuationTestPath, phrase);
 requireOrdered(
   server,
   serverPath,
@@ -447,7 +417,7 @@ for (const [path, text] of [
 ]) {
   requireText(text, path, 'v3.hub_relay_runtime_closeout');
   requireText(text, path, 'v3-hub-relay-closeout-01');
-  requireText(text, path, 'v3-hub-relay-closeout-16');
+  requireText(text, path, 'v3-hub-relay-closeout-14');
   requireText(text, path, 'Responses Relay source');
 }
 for (const phrase of [

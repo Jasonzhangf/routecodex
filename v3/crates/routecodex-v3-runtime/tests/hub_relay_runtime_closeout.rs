@@ -10,11 +10,9 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
-    execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile,
     execute_v3_responses_relay_runtime,
     execute_v3_responses_relay_runtime_with_health_and_retry_policy,
-    execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayLocalContinuationScope,
-    V3AnthropicRelayLocalContinuationState, V3AnthropicRelayRuntimeInput,
+    execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayRuntimeInput,
     V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
     V3ResponsesRelayRuntimeInput,
 };
@@ -28,10 +26,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const EXPECTED_RELAY_TRACE: [&str; 17] = [
+const EXPECTED_RELAY_TRACE: [&str; 15] = [
     "V3HubReqInbound01ClientRaw",
     "V3HubReqInbound02Normalized",
-    "V3HubReqContinuation03Classified",
     "V3HubReqChatProcess04Governed",
     "V3HubReqExecution05Planned",
     "V3HubReqTarget06Resolved",
@@ -43,7 +40,6 @@ const EXPECTED_RELAY_TRACE: [&str; 17] = [
     "ProviderRespCompat02ProviderCompat",
     "V3HubRespInbound02Normalized",
     "V3HubRespChatProcess03Governed",
-    "V3HubRespContinuation04Committed",
     "V3HubRespOutbound05ClientSemantic",
     "V3ServerRespOutbound06ClientFrame",
 ];
@@ -992,140 +988,6 @@ async fn responses_relay_client_json_request_projects_json_even_when_provider_re
         V3ResponsesRelayClientBody::Sse(_) => {
             panic!("client stream=false must not be upgraded to SSE when provider returned SSE")
         }
-    }
-}
-
-struct ServertoolContinuationTransport {
-    captures: Mutex<Vec<Value>>,
-    responses: Mutex<VecDeque<Value>>,
-}
-
-#[async_trait]
-impl ResponsesTransport for ServertoolContinuationTransport {
-    async fn send(
-        &self,
-        request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.captures.lock().unwrap().push(request.body().clone());
-        let response = self.responses.lock().unwrap().pop_front().unwrap();
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            serde_json::to_vec(&response).unwrap(),
-        ))
-    }
-}
-
-#[tokio::test]
-async fn local_continuation_servertool_roundtrip_is_runtime_e2e() {
-    let transport = ServertoolContinuationTransport {
-        captures: Mutex::new(Vec::new()),
-        responses: Mutex::new(VecDeque::from([
-            json!({
-                "id":"resp_servertool_1",
-                "status":"requires_action",
-                "output":[{
-                    "type":"function_call",
-                    "call_id":"call_servertool_1",
-                    "name":"servertool.exec",
-                    "arguments":"{\"cmd\":\"pwd\"}"
-                }]
-            }),
-            json!({
-                "id":"resp_servertool_2",
-                "status":"completed",
-                "output":[{"type":"output_text","text":"done"}]
-            }),
-        ])),
-    };
-    let state = V3AnthropicRelayLocalContinuationState::default();
-    let scope = V3AnthropicRelayLocalContinuationScope::anthropic(
-        "/v1/messages",
-        "session-closeout",
-        "conversation-closeout",
-        5555,
-        "controlled",
-    );
-
-    let first = execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile(
-        &manifest(),
-        request(
-            "req-servertool-1",
-            json!([{"role":"user","content":"run pwd"}]),
-            false,
-        ),
-        &transport,
-        &state,
-        scope.clone(),
-        1_000,
-        ["servertool.exec"],
-    )
-    .await
-    .unwrap();
-    assert_relay_trace(&first.node_trace);
-    assert!(first.servertool_followup_required);
-    assert_eq!(first.client_response["stop_reason"], "tool_use");
-    assert_eq!(state.len().unwrap(), 1);
-
-    let second = execute_v3_anthropic_relay_runtime_with_local_continuation_and_servertool_profile(
-        &manifest(),
-        request(
-            "req-servertool-2",
-            json!([{"role":"user","content":[{
-                "type":"tool_result",
-                "tool_use_id":"call_servertool_1",
-                "content":"ok"
-            }]}]),
-            false,
-        ),
-        &transport,
-        &state,
-        scope,
-        2_000,
-        ["servertool.exec"],
-    )
-    .await
-    .unwrap();
-    assert_relay_trace(&second.node_trace);
-    assert!(!second.servertool_followup_required);
-    assert!(state.is_empty().unwrap());
-
-    let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2);
-    assert_eq!(
-        captures[1]["input"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| {
-                let mut item = item.clone();
-                item.as_object_mut().unwrap().remove("id");
-                item
-            })
-            .collect::<Vec<_>>(),
-        vec![
-            {
-                json!({"type":"function_call","call_id":"call_servertool_1","name":"servertool__exec","arguments":"{\"cmd\":\"pwd\"}"})
-            },
-            { json!({"type":"function_call_output","call_id":"call_servertool_1","output":"ok"}) }
-        ]
-    );
-    let provider_wire = serde_json::to_string(&captures[1]).unwrap();
-    let client_wire = serde_json::to_string(&second.client_response).unwrap();
-    for forbidden in [
-        "session-closeout",
-        "conversation-closeout",
-        "routecodex",
-        "continuation_store",
-        "metadata_center",
-    ] {
-        assert!(!provider_wire.contains(forbidden));
-        assert!(!client_wire.contains(forbidden));
     }
 }
 
@@ -2510,7 +2372,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.limited]
 type = "responses"
@@ -2569,7 +2430,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.limited]
 type = "anthropic"
@@ -2627,7 +2487,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.compat_storm_anthropic]
 type = "anthropic"
@@ -2689,7 +2548,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.limited]
 type = "responses"
@@ -2754,7 +2612,6 @@ endpoints = ["anthropic"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.controlled]
 type = "responses"
@@ -2766,7 +2623,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "web_search"]
 [route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
@@ -2797,7 +2654,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.chat]
 type = "openai_chat"
@@ -2808,7 +2664,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "chat-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "web_search"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chat", model = "chat-wire-model", key = "controlled", priority = 1 }]

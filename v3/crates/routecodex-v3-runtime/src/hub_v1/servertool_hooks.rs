@@ -141,13 +141,7 @@ pub(crate) fn current_v3_tool_thinking_payload_start(payload: &Value) -> Result<
     Ok(0)
 }
 
-pub(crate) fn is_v3_tool_thinking_output_continuation(
-    payload: &Value,
-    previous_response_id: Option<&str>,
-) -> bool {
-    if !previous_response_id.is_some_and(|value| !value.trim().is_empty()) {
-        return false;
-    }
+pub(crate) fn is_v3_tool_thinking_output_continuation(payload: &Value) -> bool {
     payload
         .get("input")
         .and_then(Value::as_array)

@@ -447,7 +447,7 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
     .unwrap();
 
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 17, "trace={:?}", output.node_trace);
+    assert_eq!(output.node_trace.len(), 15, "trace={:?}", output.node_trace);
     let events = output.client_response["events"]
         .as_array()
         .expect("Anthropic provider SSE must project to Anthropic client SSE events");
@@ -561,7 +561,6 @@ endpoints = ["responses", "anthropic"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 
 [providers.minimax]
 type = "anthropic"

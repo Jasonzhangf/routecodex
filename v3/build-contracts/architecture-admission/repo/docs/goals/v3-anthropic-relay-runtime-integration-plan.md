@@ -23,7 +23,7 @@ In scope：
 
 Out of scope：
 
-- remote/local continuation E2E、servertool runtime、live 5555 endpoint cutover。
+- servertool runtime、live 5555 endpoint cutover。
 - SSE transport core 内部实现；如基础接口缺失，只提交 handoff，不在本 owner 重造。
 - V2、`~/.rcc`、provider credentials、global install、restart/release。
 - provider-specific Hub 分支、dynamic hooks、fallback、第二 lifecycle。
@@ -35,7 +35,7 @@ Claim：`feature_id:v3.anthropic_relay_runtime_integration`
 - 固定 15-node Hub v1 topology，不新增/重编号节点。
 - Anthropic 协议差异只在 entry/exit codec；Hub Chat Process 使用 provider-neutral canonical semantics。
 - request/response payload borrow/move-first；禁止完整 JSON/SSE clone/materialize 作为 hook/debug truth。
-- continuation 未接线时显式 none/not implemented，不做 handler/provider 补偿。
+- continuation 已退休；非空 `previous_response_id` 在 routing/provider 前显式拒绝，不做 handler/provider 补偿。
 - Server、Provider、Debug、Error 都不能成为第二业务 owner。
 
 ## 4. 技术方案与文件清单
@@ -63,10 +63,10 @@ Worker 必须先核实现有 symbol 与并行 diff；不得覆盖 request/respon
 
 - 为绿 harness 写 fixture transformer：harness 必须捕获一次真实 controlled upstream 请求并校验 node trace。
 - 扩展 P6/创建��二 kernel：freeze/source gate 必须保持绿。
-- SSE 语义落 handler：source gate 禁止 handler event allowlist、terminal/tool/continuation 判断。
+- SSE 语义落 handler：source gate 禁止 handler event allowlist、terminal/tool 判断。
 - provider error 包成成功：Error01-06 正反 fixture。
 - payload/control 泄漏：provider/client side-channel negative fixture。
-- 与 SSE/continuation worker 冲突：只消费公开 contract；缺口走 handoff，不跨 claim 修改。
+- 与 SSE worker 冲突：只消费公开 contract；缺口走 handoff，不跨 claim 修改。
 
 ## 6. 测试计划
 
@@ -87,10 +87,10 @@ Worker 必须先核实现有 symbol 与并行 diff；不得覆盖 request/respon
 4. 接 provider raw -> Hub response nodes -> Anthropic client projection。
 5. 实现真实 external driver，绿化四类 controlled fixtures。
 6. 同步 maps/wiki/manifest/gates，运行 combined checker。
-7. architecture review：无第二 lifecycle/P6 扩展/fallback/handler 业务语义/continuation 越界。
+7. architecture review：无第二 lifecycle/P6 扩展/fallback/handler 业务语义/continuation revival。
 
 ## 8. 完成定义
 
 - controlled-upstream harness 四类 fixture 全绿且每例恰好捕获一次 provider 请求。
 - 固定 request/response node trace 完整、Error01-06 正确、payload isolation 通过。
-- `/v1/messages` Runtime integration 在源码与 controlled blackbox 完成；不冒充 live 5555 或 continuation 完成。
+- `/v1/messages` Runtime integration 在源码与 controlled blackbox 完成；不冒充 live 5555。

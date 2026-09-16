@@ -1,17 +1,16 @@
 lifecycle_id: v3.apply_patch_guidance_provider_compat.mainline
-summary: Responses Req04 rejects leaked internal Codex apply_patch guidance in normal payload; provider transport remains forbidden from schema compatibility or protocol reshaping.
+summary: Req04 rejects leaked internal Codex apply_patch guidance in normal payload; provider transport remains forbidden from schema compatibility or protocol reshaping.
 owner_feature_id: v3.apply_patch_guidance_provider_compat
 entrypoint:
-  node_id: V3HubReqContinuation03Classified
+  node_id: V3HubReqChatProcess04Governed
   call_map_chain_id: v3.apply_patch_guidance_provider_compat.mainline
 return_path:
   node_id: V3HubReqChatProcess04Governed
 node_ids:
-  - V3HubReqContinuation03Classified
   - V3HubReqChatProcess04Governed
 edges:
   - step_id: v3-apply-patch-guidance-01
-    from_node: V3HubReqContinuation03Classified
+    from_node: V3HubReqChatProcess04Governed
     to_node: V3HubReqChatProcess04Governed
     status: anchored
     owner_feature_id: v3.apply_patch_guidance_provider_compat

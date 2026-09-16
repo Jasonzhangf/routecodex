@@ -26,7 +26,6 @@ fn lease(now: Instant) -> V3FrontRequestLease {
     V3FrontRequestLease {
         key: key(),
         execution_mode: V3FrontExecutionMode::Relay,
-        continuation_owner: V3FrontContinuationOwner::Relay,
         runtime_generation: 4,
         state: V3FrontLeaseState::Running,
         semantic_commit: false,
@@ -48,7 +47,7 @@ fn frame_sequence_rejects_duplicate_and_out_of_order_frames() {
     assert_eq!(sequence.observe_client(1), V3FrontFrameDecision::New);
 }
 #[test]
-fn reattach_preserves_mode_owner_commit_and_sequence() {
+fn reattach_preserves_mode_commit_and_sequence() {
     let now = Instant::now();
     let mut lease = lease(now);
     assert_eq!(
@@ -63,7 +62,6 @@ fn reattach_preserves_mode_owner_commit_and_sequence() {
     let checkpoint = lease.checkpoint(now + Duration::from_secs(1));
     let restored = V3FrontRequestLease::reattach(&checkpoint, now + Duration::from_secs(2), 5);
     assert_eq!(restored.execution_mode, V3FrontExecutionMode::Relay);
-    assert_eq!(restored.continuation_owner, V3FrontContinuationOwner::Relay);
     assert!(restored.semantic_commit);
     assert_eq!(restored.runtime_generation, 5);
     assert_eq!(restored.key.generation, 5);
@@ -377,7 +375,6 @@ async fn stable_front_rejects_client_frame_after_absolute_deadline() {
     let expired = V3FrontRequestLease {
         key: key(),
         execution_mode: V3FrontExecutionMode::Direct,
-        continuation_owner: V3FrontContinuationOwner::Direct,
         runtime_generation: 1,
         state: V3FrontLeaseState::Running,
         semantic_commit: false,

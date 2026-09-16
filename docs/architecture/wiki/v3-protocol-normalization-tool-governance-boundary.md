@@ -2,7 +2,7 @@
 
 ## Contract
 
-Normalization maps adjacent protocols and validates shape only. Tool identity pairing, uniqueness checks, orphan tool output detection, servertool, apply_patch, hook governance, and continuation save/restore semantics belong to Chat Process govern nodes.
+Normalization maps adjacent protocols and validates shape only. Tool identity pairing, uniqueness checks, orphan tool output detection, servertool, apply_patch, and hook governance belong to Chat Process govern nodes. Responses continuation is retired and never re-enters normalization.
 
 ## Request chain
 
@@ -23,9 +23,8 @@ flowchart LR
   A[ProviderRespInbound01Raw] --> B[ProviderRespCompat02ProviderCompat]
   B --> C[HubRespInbound03Parsed]
   C --> D[HubRespChatProcess04Governed]
-  D --> E[HubRespContinuation05Committed]
-  E --> F[HubRespOutbound06ClientSemantic]
-  F --> G[ServerRespOutbound07ClientFrame]
+  D --> E[HubRespOutbound06ClientSemantic]
+  E --> F[ServerRespOutbound07ClientFrame]
 ```
 
 ## Known repaired violations

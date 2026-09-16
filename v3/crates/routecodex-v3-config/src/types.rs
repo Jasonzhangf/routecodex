@@ -124,7 +124,6 @@ pub struct V3HubHookAuthoringConfig {
 pub enum V3HubFixedNode {
     V3HubReqInbound01ClientRaw,
     V3HubReqInbound02Normalized,
-    V3HubReqContinuation03Classified,
     V3HubReqChatProcess04Governed,
     V3HubReqExecution05Planned,
     V3HubReqTarget06Resolved,
@@ -136,16 +135,14 @@ pub enum V3HubFixedNode {
     ProviderRespCompat02ProviderCompat,
     V3HubRespInbound02Normalized,
     V3HubRespChatProcess03Governed,
-    V3HubRespContinuation04Committed,
     V3HubRespOutbound05ClientSemantic,
     V3ServerRespOutbound06ClientFrame,
 }
 
 impl V3HubFixedNode {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 15] = [
         Self::V3HubReqInbound01ClientRaw,
         Self::V3HubReqInbound02Normalized,
-        Self::V3HubReqContinuation03Classified,
         Self::V3HubReqChatProcess04Governed,
         Self::V3HubReqExecution05Planned,
         Self::V3HubReqTarget06Resolved,
@@ -157,7 +154,6 @@ impl V3HubFixedNode {
         Self::ProviderRespCompat02ProviderCompat,
         Self::V3HubRespInbound02Normalized,
         Self::V3HubRespChatProcess03Governed,
-        Self::V3HubRespContinuation04Committed,
         Self::V3HubRespOutbound05ClientSemantic,
         Self::V3ServerRespOutbound06ClientFrame,
     ];
@@ -166,7 +162,6 @@ impl V3HubFixedNode {
         match self {
             Self::V3HubReqInbound01ClientRaw => "V3HubReqInbound01ClientRaw",
             Self::V3HubReqInbound02Normalized => "V3HubReqInbound02Normalized",
-            Self::V3HubReqContinuation03Classified => "V3HubReqContinuation03Classified",
             Self::V3HubReqChatProcess04Governed => "V3HubReqChatProcess04Governed",
             Self::V3HubReqExecution05Planned => "V3HubReqExecution05Planned",
             Self::V3HubReqTarget06Resolved => "V3HubReqTarget06Resolved",
@@ -180,7 +175,6 @@ impl V3HubFixedNode {
             Self::ProviderRespCompat02ProviderCompat => "ProviderRespCompat02ProviderCompat",
             Self::V3HubRespInbound02Normalized => "V3HubRespInbound02Normalized",
             Self::V3HubRespChatProcess03Governed => "V3HubRespChatProcess03Governed",
-            Self::V3HubRespContinuation04Committed => "V3HubRespContinuation04Committed",
             Self::V3HubRespOutbound05ClientSemantic => "V3HubRespOutbound05ClientSemantic",
             Self::V3ServerRespOutbound06ClientFrame => "V3ServerRespOutbound06ClientFrame",
         }
@@ -222,7 +216,6 @@ pub enum V3HubHookProfile {
 #[serde(rename_all = "snake_case")]
 pub enum V3HubResourceKind {
     Control,
-    Continuation,
     Debug,
     Error,
     Snapshot,
@@ -533,16 +526,8 @@ pub struct V3ServerExecutionAuthoringConfig {
     pub allowed_modes: Vec<String>,
     pub allowed_invocation_sources: Vec<String>,
     pub allowed_transports: Vec<String>,
-    pub continuation: V3ContinuationPolicyAuthoringConfig,
     #[serde(default)]
     pub attempt_store: V3AttemptStorePolicyAuthoringConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct V3ContinuationPolicyAuthoringConfig {
-    pub allowed_owners: Vec<String>,
-    pub scope_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1170,14 +1155,7 @@ pub struct V3ServerExecutionManifest {
     pub allowed_modes: Vec<String>,
     pub allowed_invocation_sources: Vec<String>,
     pub allowed_transports: Vec<String>,
-    pub continuation: V3ContinuationPolicyManifest,
     pub attempt_store: V3AttemptStorePolicyManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ContinuationPolicyManifest {
-    pub allowed_owners: Vec<String>,
-    pub scope_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

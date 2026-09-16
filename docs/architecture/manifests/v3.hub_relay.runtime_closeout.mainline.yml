@@ -9,7 +9,6 @@ call_map_chain_id: v3.hub_relay.runtime_closeout
 node_ids:
   - V3HubReqInbound01ClientRaw
   - V3HubReqInbound02Normalized
-  - V3HubReqContinuation03Classified
   - V3HubReqChatProcess04Governed
   - V3HubReqExecution05Planned
   - V3HubReqTarget06Resolved
@@ -21,26 +20,23 @@ node_ids:
   - ProviderRespCompat02ProviderCompat
   - V3HubRespInbound02Normalized
   - V3HubRespChatProcess03Governed
-  - V3HubRespContinuation04Committed
   - V3HubRespOutbound05ClientSemantic
   - V3ServerRespOutbound06ClientFrame
 edges:
   - { step_id: v3-hub-relay-closeout-01, from_node: V3HubReqInbound01ClientRaw, to_node: V3HubReqInbound02Normalized, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-02, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqContinuation03Classified, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-04, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqExecution05Planned, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-05, from_node: V3HubReqExecution05Planned, to_node: V3HubReqTarget06Resolved, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-06, from_node: V3HubReqTarget06Resolved, to_node: V3HubReqOutbound07ProviderSemantic, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-07, from_node: V3HubReqOutbound07ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-08, from_node: ProviderReqCompat06ProviderCompat, to_node: V3ProviderReqOutbound08WirePayload, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-09, from_node: V3ProviderReqOutbound08WirePayload, to_node: V3ProviderReqOutbound09TransportRequest, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-10, from_node: V3ProviderReqOutbound09TransportRequest, to_node: V3ProviderRespInbound01Raw, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-11, from_node: V3ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-12, from_node: ProviderRespCompat02ProviderCompat, to_node: V3HubRespInbound02Normalized, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-13, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-14, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespContinuation04Committed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-15, from_node: V3HubRespContinuation04Committed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
-  - { step_id: v3-hub-relay-closeout-16, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-02, from_node: V3HubReqInbound02Normalized, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqExecution05Planned, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-04, from_node: V3HubReqExecution05Planned, to_node: V3HubReqTarget06Resolved, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-05, from_node: V3HubReqTarget06Resolved, to_node: V3HubReqOutbound07ProviderSemantic, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-06, from_node: V3HubReqOutbound07ProviderSemantic, to_node: ProviderReqCompat06ProviderCompat, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-07, from_node: ProviderReqCompat06ProviderCompat, to_node: V3ProviderReqOutbound08WirePayload, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-08, from_node: V3ProviderReqOutbound08WirePayload, to_node: V3ProviderReqOutbound09TransportRequest, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-09, from_node: V3ProviderReqOutbound09TransportRequest, to_node: V3ProviderRespInbound01Raw, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-10, from_node: V3ProviderRespInbound01Raw, to_node: ProviderRespCompat02ProviderCompat, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-11, from_node: ProviderRespCompat02ProviderCompat, to_node: V3HubRespInbound02Normalized, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-12, from_node: V3HubRespInbound02Normalized, to_node: V3HubRespChatProcess03Governed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-13, from_node: V3HubRespChatProcess03Governed, to_node: V3HubRespOutbound05ClientSemantic, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
+  - { step_id: v3-hub-relay-closeout-14, from_node: V3HubRespOutbound05ClientSemantic, to_node: V3ServerRespOutbound06ClientFrame, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }
 error_path:
   entry_edge:
     step_id: v3-hub-relay-response-failure-01

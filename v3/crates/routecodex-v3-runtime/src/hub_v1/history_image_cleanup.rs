@@ -802,7 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_save_cleans_all_images_any_turn() {
+    fn provider_compat_cleans_all_images_for_non_vision_target() {
         // continuation save 专用：全量清理（不分当前轮/历史轮）——保存的上下文
         // 只允许存图片占位符，图片 base64 绝不进入 continuation（下一轮 restore
         // 会把它重新注入 wire → context 400）。
@@ -826,7 +826,7 @@ mod tests {
             for part in content {
                 assert!(
                     part.get("image_url").is_none() && part.get("data").is_none(),
-                    "continuation save must not keep any image part: {part}"
+                    "provider compat must not keep any image part: {part}"
                 );
                 assert_eq!(
                     part.get("text").and_then(Value::as_str),

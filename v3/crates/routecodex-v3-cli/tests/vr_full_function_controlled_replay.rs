@@ -20,7 +20,7 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-#[path = "../../../tests/support/hub_v1_fixture.rs"]
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 

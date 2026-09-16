@@ -248,15 +248,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    let continuation_lookup = V3HubContinuationLookup::new(
-        None,
-        V3HubContinuationScope::new(
-            V3HubEntryProtocol::OpenAiChat,
-            &input.server_id,
-            routing_group,
-            &input.request_id,
-        ),
-    );
     execute_v3_relay_runtime_core::<V3OpenAiChatRelayCodec, T>(
         manifest,
         &input.server_id,
@@ -268,7 +259,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         transport,
         provider_health,
         retry_policy,
-        continuation_lookup,
         Vec::new(),
         true,
         request_execution_control,
@@ -414,7 +404,6 @@ fn project_json_response(
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::OpenAiChat,
             provider_protocol,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             transport_intent,
@@ -452,28 +441,26 @@ fn project_json_response(
     }
     let resp03 = hooks.govern(resp02, &response_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
+    let (resp03, web_search_transition) = resp03.into_parts();
     // Mode B 拦截后必须同轮投影：websearch call 已剥离，若 transition 存在
     // 说明 Resp03 拦截了搜索调用但当前 Chat 入口尚无结果投影路径——禁止
     // 静默剥离（fail-fast），由后续响应侧 hop/投影工程补全。
-    if resp04.web_search_transition().is_some() {
+    if web_search_transition.is_some() {
         return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
     }
-    let resp04 = resp04.into_data();
-    let client_payload = if resp04
-        .finalized_payload()
+    let client_payload = if resp03
+        .provider_payload()
         .get("output")
         .and_then(Value::as_array)
         .is_some()
     {
-        project_v3_openai_chat_client_response_from_canonical(resp04.finalized_payload())
+        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload())
             .map_err(V3OpenAiChatRelayRuntimeError::Target)?
     } else {
-        resp04.finalized_payload().clone()
+        resp03.provider_payload().clone()
     };
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(
-        resp04,
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+        resp03,
         client_payload,
     );
     trace.push("V3HubRespOutbound05ClientSemantic");

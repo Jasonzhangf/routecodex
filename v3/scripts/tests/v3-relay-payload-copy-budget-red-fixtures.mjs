@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-relay-payload-copy-budget.mjs');
+const repoRoot = [process.cwd(), resolve(process.cwd(), '..')]
+  .find((candidate) => existsSync(resolve(candidate, 'v3/scripts/architecture/verify-v3-relay-payload-copy-budget.mjs')));
+if (!repoRoot) throw new Error('RouteCodex repository root not found');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-relay-payload-copy-budget.mjs');
 const fixtures = [
   {
     name: 'unbounded deep copy',
@@ -102,7 +104,7 @@ const fixtures = [
     name: 'Debug snapshot truth substitution',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
     marker: 'use serde_json::Value;',
-    mutation: 'use serde_json::Value;\nfn forbidden_snapshot(debug_snapshot: &Value) { let continuation_truth_payload = debug_snapshot; let _ = continuation_truth_payload; }',
+    mutation: 'use serde_json::Value;\nfn forbidden_snapshot(debug_snapshot: &Value) { let forbidden_debug_truth_payload = debug_snapshot; let _ = forbidden_debug_truth_payload; }',
     diagnostic: /forbidden Debug\/snapshot truth substitution/,
   },
   {
@@ -111,20 +113,6 @@ const fixtures = [
     marker: 'use std::',
     mutation: 'struct HookPlan { retained_payload: serde_json::Value }\nuse std::',
     diagnostic: /forbidden hook planning payload retention or clone/,
-  },
-  {
-    name: 'canonical payload sharing assertion removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
-    marker: 'Arc::ptr_eq(&context.payload, self.previous.previous.provider_payload())',
-    mutation: 'true',
-    diagnostic: /missing Arc::ptr_eq/,
-  },
-  {
-    name: 'Req04 restore ownership removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: '} => Ok(Some(Arc::clone(canonical_context))),',
-    mutation: 'Ok(None)',
-    diagnostic: /missing .*Arc::clone\(canonical_context\)/,
   },
 ];
 

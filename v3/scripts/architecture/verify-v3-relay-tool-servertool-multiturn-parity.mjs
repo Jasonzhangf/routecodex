@@ -27,8 +27,6 @@ const files = {
   responseCommon: 'v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs',
   responseChatProcess:
     'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-  responseContinuation:
-    'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
   request: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
   responsesRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   servertoolHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs',
@@ -51,10 +49,9 @@ const text = Object.fromEntries(Object.entries(files).map(([key, file]) => [key,
 const responseOwnerSource = [
   text.responseCommon,
   text.responseChatProcess,
-  text.responseContinuation,
 ].join('\n');
 const responseSplitOwner =
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/{common.rs,resp_chat_process_03_governed.rs,resp_continuation_04_committed.rs}';
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/{common.rs,resp_chat_process_03_governed.rs}';
 const manifest = YAML.parse(text.manifest);
 const packageJson = JSON.parse(text.packageJson);
 const failures = [];
@@ -186,16 +183,6 @@ if (resp03GovernStart < 0 || resp03GovernEnd < 0) {
     'retired stopless response hook in Resp03 orchestrator',
   );
 }
-requireAll(text.responseContinuation, files.responseContinuation, [
-  'canonical_tool_call_kinds',
-  'canonical_context_shares_provider_payload',
-]);
-forbid(
-  text.responseContinuation,
-  files.responseContinuation,
-  /canonicalize_v3_hub_resp04_finalized_payload|finish_reason|finishReason|stop_reason|stopReason|requires_action/,
-  'Resp04 semantic repair of status/finish_reason/tool frames',
-);
 const clientSseProjectionStart = text.responsesRelayRuntime.indexOf(
   'fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05',
 );
@@ -239,28 +226,21 @@ forbid(
 
 const runFromNormalizedStart = text.request.indexOf('pub fn run_from_normalized(');
 const req04Start = text.request.indexOf('fn run_from_normalized_with_events');
-const classifyStart = text.request.indexOf('fn classify_continuation');
-if (
-  runFromNormalizedStart < 0 ||
-  req04Start < 0 ||
-  classifyStart < 0 ||
-  !(runFromNormalizedStart < req04Start && req04Start < classifyStart)
-) {
+if (runFromNormalizedStart < 0 || req04Start < 0 || !(runFromNormalizedStart < req04Start)) {
   fail(`${files.request}: unable to isolate Req04 request governance owner`);
 } else {
-  const req04Owner = text.request.slice(req04Start, classifyStart);
+  const req04Owner = text.request.slice(req04Start);
   requireOrdered(req04Owner, files.request, [
-    'restore_local_context_at_req04',
     'current_payload_start',
     'govern_tool_outputs_at_req04',
     'run_servertool_profile',
+    'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02',
   ]);
 }
 requireAll(text.tests, files.tests, [
-  'protocol_transport_continuation_matrix_uses_one_chat_process_governance_path',
-  'request_governance_matches_function_custom_servertool_and_internal_tool_outputs_to_restored_context',
-  'apply_patch_response_is_projected_to_freeform_custom_tool_before_commit',
-  'apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output',
+  'protocol_transport_matrix_uses_one_chat_process_governance_path',
+  'apply_patch_response_is_projected_to_freeform_custom_tool_before_client_projection',
+  'apply_patch_tool_output_error_is_normalized_without_continuation_state',
   'apply_patch_legacy_function_call_accepts_custom_output_after_client_projection',
   'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
   'response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit',
@@ -273,15 +253,13 @@ requireAll(text.tests, files.tests, [
   'V3HubEntryProtocol::OpenAiChat',
   'V3HubEntryProtocol::Gemini',
   'V3HubTransportIntent::Sse',
-  'V3HubContinuationOwnership::RemoteProviderOwned',
-  'V3HubContinuationOwnership::RouteCodexLocalOwned',
   'data:image/png;base64,CURRENT',
   'attachment_history_is_preserved_without_placeholder_cleanup',
   'attachment_history_missing_resource_is_preserved_as_client_data',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
   'resp03_repairs_tool_call_finish_reason_before_tool_governance',
-  'resp04_reuses_resp03_repaired_payload_without_semantic_repair',
+  'resp05_consumes_resp03_repaired_payload_without_semantic_repair',
 ]);
 requireAll(text.requestSemanticsTests, files.requestSemanticsTests, [
 ]);
@@ -297,10 +275,10 @@ requireAll(text.mainlineMap, files.mainlineMap, [
 ]);
 requireAll(text.verificationMap, files.verificationMap, [
   'feature_id: v3.resp03_tool_governance_gap_closeout',
-  'Resp04 reuses Resp03 governed provider payload',
+  'Resp03 owns response tool/servertool governance before client projection',
 ]);
 requireAll(text.responsesLocalTests, files.responsesLocalTests, [
-  'local_continuation_servertool_roundtrip_is_runtime_e2e',
+  'provider_error_closeout_returns_terminal_exhaustion_instead_of_hanging',
   'responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes',
   'assert_eq!(captures.len(), 2);',
   'Responses Relay client SSE transport must not raw-pass provider argument event payloads around Hub',
@@ -338,7 +316,7 @@ const metadataCenterLegalIdentifierStripped = metadataCenterLeakOwnerSource.repl
 );
 forbid(metadataCenterLegalIdentifierStripped, 'V3 Relay tool parity Rust owner', /metadata_center[\s\S]{0,120}(?:insert|write|payload)|payload[\s\S]{0,120}metadata_center/i, 'MetadataCenter payload/control leakage');
 forbid(text.tests, files.tests, /fallback/i, 'fallback in parity tests');
-forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay local continuation tests');
+forbid(text.responsesLocalTests, files.responsesLocalTests, /fallback/i, 'fallback in Responses Relay closeout tests');
 
 if (failures.length) {
   console.error('[verify:v3-relay-tool-servertool-multiturn-parity-closeout] failed');

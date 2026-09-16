@@ -125,7 +125,7 @@ const fixtures = [
     diagnostic: /cannot derive routing or MetadataCenter control from client payload metadata/,
   },
   {
-    name: 'server reconstructs continuation control from client payload metadata',
+    name: 'server reconstructs admission control scope from client payload metadata',
     file: 'v3/crates/routecodex-v3-server/src/lib.rs',
     mutation: '\nfn extract_responses_client_scope(payload: &serde_json::Value) { let _ = payload.get("client_metadata"); }\n',
     diagnostic: /Server cannot rebuild continuation or admission control scope from client payload metadata/,
@@ -146,10 +146,10 @@ const fixtures = [
     diagnostic: /Req04 cannot rebuild Chat semantics from a stored non-Chat continuation payload/,
   },
   {
-    name: 'continuation response control enters chat payload',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
+    name: 'response control enters chat payload',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
     mutation: '\nconst FORBIDDEN_CONTROL_PAYLOAD_KEY: &str = "continuation_response_id";\n',
-    diagnostic: /continuation control identity cannot be embedded in Chat canonical payload/,
+    diagnostic: /Resp03 continuation control identity cannot be embedded in Chat canonical payload/,
   },
   {
     name: 'provider identity special case',

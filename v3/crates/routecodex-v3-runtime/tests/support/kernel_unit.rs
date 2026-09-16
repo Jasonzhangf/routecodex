@@ -145,7 +145,7 @@ async fn direct_response_hook_injects_tool_thinking_but_keeps_client_projection_
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -176,7 +176,7 @@ async fn runtime_executes_adjacent_responses_direct_chain() {
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -460,7 +460,7 @@ pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provide
     let output = tokio::time::timeout(
         Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS / 2),
         execute_v3_responses_direct_runtime_kernel_core(
-            V3ResponsesDirectRuntimeCoreState::no_continuation()
+            V3ResponsesDirectRuntimeCoreState::new()
                 .with_provider_health(provider_health.clone())
                 .with_initial_plan(&plan),
             &manifest,
@@ -523,7 +523,7 @@ async fn provider_error_enters_error_chain_not_success() {
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -576,7 +576,7 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -686,7 +686,7 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -872,7 +872,7 @@ async fn provider_failure_reselects_without_router_reentry() {
     let sink_events = Arc::clone(&realtime_events);
     let route_sink_events = Arc::clone(&route_events);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan)
             .with_provider_failure_event_sink(Some(Arc::new(move |_observability, event| {
@@ -1082,7 +1082,7 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -1202,7 +1202,7 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         "the immutable preplanned Target10 must begin with the priority-1 candidate"
     );
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -1370,7 +1370,6 @@ routing_group = "tcp_lifecycle"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = {{ allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }}
 attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
 
 [providers.tcp_first]
@@ -1424,7 +1423,7 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
         V3RequestExecutionControl::from_manifest(&manifest, "test").expect("request control");
     let attempt_budget = request_execution_control.attempt_budget();
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan)
             .with_request_execution_control(Some(request_execution_control)),
@@ -1574,7 +1573,7 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -1688,7 +1687,7 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     let debug = V3DebugRuntime::new(Default::default()).unwrap();
     let calls = Arc::new(Mutex::new(0));
     let output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -1772,7 +1771,7 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::no_continuation()
+        V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
@@ -1793,132 +1792,6 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
         1
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-}
-
-#[tokio::test]
-async fn pinned_unavailable_provider_consumes_error05_gate_before_terminal_release() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{Duration, Instant};
-
-    struct NoSendTransport {
-        sends: AtomicUsize,
-    }
-
-    #[async_trait]
-    impl ResponsesTransport for NoSendTransport {
-        async fn send(
-            &self,
-            _request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
-            panic!("health-unavailable exact pin must never enter provider transport")
-        }
-    }
-
-    let mut manifest = test_manifest();
-    let gate_routing_group = "pinned_unavailable_provider_terminal_release";
-    manifest.servers.get_mut("test").unwrap().routing_group = gate_routing_group.to_string();
-    let continuation_state = V3ResponsesDirectContinuationState::default();
-    let continuation_scope = V3ResponsesDirectContinuationScope::responses(
-        "/v1/responses",
-        "session-pinned-unavailable",
-        "conversation-pinned-unavailable",
-        4444,
-        gate_routing_group,
-    );
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = NoSendTransport {
-        sends: AtomicUsize::new(0),
-    };
-    let pin = V3RemoteContinuationPin::new("openai", "gpt-test", "key1");
-    let capability_revision = capability_revision_for_pin(&manifest, &pin).unwrap();
-    continuation_state
-        .store
-        .lock()
-        .unwrap()
-        .commit(V3RemoteContinuationCommitInput::locator_only(
-            V3RemoteContinuationLocator::new_direct(
-                "resp_pinned_unavailable",
-                continuation_scope.key.clone(),
-                pin,
-                capability_revision,
-                1_000,
-                60_000,
-            ),
-        ))
-        .unwrap();
-    assert_eq!(continuation_state.len().unwrap(), 1);
-
-    for failure_at in 2_000..2_003 {
-        provider_health
-            .record_provider_failure_record(
-                &V3ProviderFailureSessionScope::new(
-                    "test",
-                    gate_routing_group,
-                    "session-pinned-unavailable",
-                )
-                .expect("test failure session scope"),
-                "openai",
-                Some("key1"),
-                Some("gpt-test"),
-                Some("controlled health failure"),
-                failure_at,
-            )
-            .unwrap();
-    }
-    let started = Instant::now();
-    let terminal = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::with_continuation(
-            &continuation_state,
-            continuation_scope,
-            2_001,
-        )
-        .with_provider_health(provider_health),
-        &manifest,
-        V3Server03HttpRequestRaw {
-            request_purpose: V3RequestPurpose::Conversation,
-            port: None,
-            pipeline_id: None,
-            server_id: "test".to_string(),
-            failure_session_scope: test_failure_session_scope("test"),
-            request_id: "req-pinned-unavailable-retry".to_string(),
-            execution_id: "exec-pinned-unavailable-retry".to_string(),
-            method: "POST".to_string(),
-            path: "/v1/responses".to_string(),
-            body: json!({
-                "model":"client-model",
-                "previous_response_id":"resp_pinned_unavailable",
-                "input":[{
-                    "type":"function_call_output",
-                    "call_id":"call_pinned_unavailable",
-                    "output":"ok"
-                }]
-            }),
-        },
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        terminal.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
-    // 统一错误模型：pinned 目标已进入健康冷却时，不再消耗 isolated/sustained
-    // gate 等待（不给不可用 provider 制造额外延迟），立即以类型化错误链终止。
-    assert!(
-        started.elapsed() < Duration::from_millis(2_000),
-        "health cooldown must short-circuit the isolated/sustained gate waits"
-    );
-    assert_eq!(
-        continuation_state.len().unwrap(),
-        0,
-        "typed terminal Error05 must release only the matching continuation locator"
-    );
-    assert!(!terminal
-        .node_trace
-        .contains(&"V3Router07OpaqueTargetHitOnce"));
 }
 
 /// direct 模式 Mode B websearch 全链：Req04 激活（web_search 声明本地化为
@@ -1975,7 +1848,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.openai]
 type = "responses"
@@ -2013,9 +1885,8 @@ targets = [
 #[tokio::test]
 async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     let manifest = direct_web_search_mode_b_manifest();
-    let continuation_state = V3ResponsesDirectContinuationState::default();
     let server_tool_state = V3ResponsesDirectServerToolState::default();
-    let continuation_scope = V3ResponsesDirectContinuationScope::responses(
+    let scope = V3ResponsesDirectServerToolScope::new(
         "/v1/responses",
         "session-ws-direct",
         "conversation-ws-direct",
@@ -2032,15 +1903,14 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
             "tools": [{"type": "web_search"}]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
-        &continuation_state,
-        &server_tool_state,
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_server_tool_state(&server_tool_state, scope.clone())
+            .with_now_epoch_ms(1_000),
         &manifest,
         raw,
-        continuation_scope.clone(),
         crate::register_responses_direct_hooks(),
         &WebSearchHopTransport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");
@@ -2073,7 +1943,6 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     assert_eq!(paired["call_id"], "call_ws_1");
     assert_eq!(paired["output"], "search result for routecodex");
     // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     let state = server_tool_state
         .web_search_load_for_scope(&scope)
         .expect("center load")

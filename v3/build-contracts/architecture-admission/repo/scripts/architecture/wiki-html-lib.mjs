@@ -93,14 +93,14 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     responseTitle: 'OpenAI Chat response lifecycle',
     requestEdges: [
       ['V3OpenAiChatRelayRuntimeInput', 'V3HubReqInbound01ClientRaw', 'entry owner receives typed input'],
-      ['V3HubReqInbound01ClientRaw', 'V3HubReqChatProcess04Governed', 'normalize, classify, restore/govern'],
+      ['V3HubReqInbound01ClientRaw', 'V3HubReqChatProcess04Governed', 'normalize then govern current request'],
       ['V3HubReqChatProcess04Governed', 'V3HubReqTarget06Resolved', 'plan and resolve target'],
       ['V3HubReqTarget06Resolved', 'V3ProviderReqOutbound09TransportRequest', 'provider semantic → wire → transport'],
     ],
     responseEdges: [
       ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat before Hub parse'],
       ['ProviderRespCompat02ProviderCompat', 'V3HubRespChatProcess03Governed', 'normalize then govern response'],
-      ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'save continuation then project client semantic'],
+      ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'project client semantic after governance'],
       ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'Body::from_stream / JSON body transport only'],
     ],
     logicCards: [
@@ -124,14 +124,14 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     responseTitle: 'Gemini response lifecycle',
     requestEdges: [
       ['Client Gemini endpoint', 'V3EntryProtocolBindingRegistry', 'dynamic endpoint classified as gemini'],
-      ['V3GeminiRelayRuntimeInput', 'V3HubReqChatProcess04Governed', 'entry normalization, continuation, tool governance'],
+      ['V3GeminiRelayRuntimeInput', 'V3HubReqChatProcess04Governed', 'entry normalization then current-turn tool governance'],
       ['V3HubReqChatProcess04Governed', 'V3HubReqOutbound07ProviderSemantic', 'Hub semantic to Gemini provider semantic'],
       ['V3HubReqOutbound07ProviderSemantic', 'V3ProviderReqOutbound09TransportRequest', 'Gemini wire URL/body transport'],
     ],
     responseEdges: [
       ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat before Hub parse'],
       ['ProviderRespCompat02ProviderCompat', 'V3HubRespChatProcess03Governed', 'candidate/functionCall/finishReason governance owner'],
-      ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'save then project client semantic'],
+      ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic', 'project client semantic after governance'],
       ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame', 'Body::from_stream / JSON body transport only'],
     ],
     logicCards: [
@@ -150,7 +150,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     id: 'v3-protocol-normalization-tool-governance-boundary',
     eyebrow: 'normalization boundary review · dedicated surface',
     title: 'V3 Protocol Normalization / Tool Governance Boundary Review',
-    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, servertool, and continuation semantics stay in Chat Process govern nodes.',
+    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, servertool, and current-turn governance stay in Chat Process govern nodes.',
     requestTitle: 'Request normalization vs Req04 governance',
     responseTitle: 'Response normalization vs Resp03 governance',
     requestEdges: [
@@ -163,12 +163,12 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat only'],
       ['ProviderRespCompat02ProviderCompat', 'HubRespInbound03Parsed', 'response shape normalization only'],
       ['HubRespInbound03Parsed', 'HubRespChatProcess04Governed', 'tool/servertool governance'],
-      ['HubRespChatProcess04Governed', 'HubRespOutbound06ClientSemantic', 'save then project after governance'],
+      ['HubRespChatProcess04Governed', 'HubRespOutbound06ClientSemantic', 'project after governance'],
     ],
     logicCards: [
       ['Normalization is not governance', 'Codecs map protocols and preserve invalid tool identity shapes for Chat Process rejection or governance.'],
       ['Compat is not fallback', 'Provider compat nodes perform provider micro-adjustments only; no route, model, tool, or fallback policy.'],
-      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, servertool, and continuation belong to Req04/Resp03.'],
+      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, and servertool belong to Req04/Resp03.'],
     ],
     resources: [
       ['v3.hub.tool_governance_truth', 'Req04 / Resp03 Chat Process', 'Tool identity and governance result.'],
@@ -356,19 +356,18 @@ function v3SopMermaid(kind) {
       'flowchart TD',
       '  R0["<b>V3HubReqInbound01ClientRaw</b><br/><small>client raw request / server entry facts only</small>"]',
       '  R1["<b>V3HubReqInbound02Normalized</b><br/><small>non-destructive entry protocol normalization</small>"]',
-      '  R2["<b>V3HubReqContinuation03Classified</b><br/><small>entry + owner + scope classification, no payload restore</small>"]',
-      '  R3["<b>V3HubReqChatProcess04Governed</b><br/><small>request-side continuation restore and tool governance owner</small>"]',
-      '  R4["<b>V3HubReqExecution05Planned</b><br/><small>execution plan only</small>"]',
-      '  R5["<b>V3HubReqTarget06Resolved</b><br/><small>target selected, no payload patch</small>"]',
-      '  R6["<b>V3HubReqOutbound07ProviderSemantic</b><br/><small>provider semantic envelope</small>"]',
-      '  R7["<b>ProviderReqCompat06ProviderCompat</b><br/><small>provider compat boundary</small>"]',
-      '  R8["<b>V3ProviderReqOutbound08WirePayload</b><br/><small>provider wire JSON/body</small>"]',
-      '  R9["<b>V3ProviderReqOutbound09TransportRequest</b><br/><small>HTTP transport request</small>"]',
-      '  R0 -->|server accept| R1 -->|classify continuation owner/scope| R2 -->|restore/govern at Req04| R3 -->|plan| R4 -->|resolve target| R5 -->|build semantic| R6 -->|compat only| R7 -->|wire codec| R8 -->|transport| R9',
+      '  R2["<b>V3HubReqChatProcess04Governed</b><br/><small>current-turn tool and history governance owner</small>"]',
+      '  R3["<b>V3HubReqExecution05Planned</b><br/><small>execution plan only</small>"]',
+      '  R4["<b>V3HubReqTarget06Resolved</b><br/><small>target selected, no payload patch</small>"]',
+      '  R5["<b>V3HubReqOutbound07ProviderSemantic</b><br/><small>provider semantic envelope</small>"]',
+      '  R6["<b>ProviderReqCompat06ProviderCompat</b><br/><small>provider compat boundary</small>"]',
+      '  R7["<b>V3ProviderReqOutbound08WirePayload</b><br/><small>provider wire JSON/body</small>"]',
+      '  R8["<b>V3ProviderReqOutbound09TransportRequest</b><br/><small>HTTP transport request</small>"]',
+      '  R0 -->|server accept| R1 -->|normalize then govern at Req04| R2 -->|plan| R3 -->|resolve target| R4 -->|build semantic| R5 -->|compat only| R6 -->|wire codec| R7 -->|transport| R8',
       '  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;',
       '  classDef owner fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;',
-      '  class R0,R1,R2,R4,R5,R6,R7,R8,R9 node;',
-      '  class R3 owner;',
+      '  class R0,R1,R3,R4,R5,R6,R7,R8 node;',
+      '  class R2 owner;',
     ].join('\n');
   }
   return [
@@ -378,13 +377,12 @@ function v3SopMermaid(kind) {
     '  S1["<b>ProviderRespCompat02ProviderCompat</b><br/><small>provider-specific compat before Hub parse</small>"]',
     '  S2["<b>V3HubRespInbound02Normalized</b><br/><small>Hub response semantic input</small>"]',
     '  S3["<b>V3HubRespChatProcess03Governed</b><br/><small>response tool/servertool governance owner</small>"]',
-    '  S4["<b>V3HubRespContinuation04Committed</b><br/><small>continuation save endpoint only</small>"]',
-    '  S5["<b>V3HubRespOutbound05ClientSemantic</b><br/><small>client protocol projection only</small>"]',
-    '  S6["<b>V3ServerRespOutbound06ClientFrame</b><br/><small>HTTP/SSE frame handoff only</small>"]',
-    '  S0 -->|compat first| S1 -->|normalize| S2 -->|govern at Resp03| S3 -->|save only| S4 -->|project| S5 -->|frame/stream| S6',
+    '  S4["<b>V3HubRespOutbound05ClientSemantic</b><br/><small>client protocol projection only</small>"]',
+    '  S5["<b>V3ServerRespOutbound06ClientFrame</b><br/><small>HTTP/SSE frame handoff only</small>"]',
+    '  S0 -->|compat first| S1 -->|normalize| S2 -->|govern at Resp03| S3 -->|project| S4 -->|frame/stream| S5',
     '  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.6px,color:#0f172a;',
     '  classDef owner fill:#ecfdf5,stroke:#047857,stroke-width:2px,color:#064e3b;',
-    '  class S0,S1,S2,S4,S5,S6 node;',
+    '  class S0,S1,S2,S4,S5 node;',
     '  class S3 owner;',
   ].join('\n');
 }
@@ -659,8 +657,8 @@ function renderV3MainlineSkeletonSopHtml(root) {
     <section class="panel">
       <h2>Request node logic</h2>
       <div class="logic-grid">
-        ${v3SopNodeCard('ReqInbound', 'Non-destructive entry normalization', 'Server and ReqInbound capture entry facts and normalize protocol shape only; they do not restore continuation or repair history.')}
-        ${v3SopNodeCard('Req04', 'Request Chat Process owner', 'Continuation restore, current-turn tool governance, and tool declaration merge live here.')}
+        ${v3SopNodeCard('ReqInbound', 'Non-destructive entry normalization', 'Server and ReqInbound capture entry facts and normalize protocol shape only; they do not repair history.')}
+        ${v3SopNodeCard('Req04', 'Request Chat Process owner', 'Current-turn tool governance and tool declaration merge live here.')}
         ${v3SopNodeCard('ReqOutbound / Compat / Wire', 'Provider-bound request owner', 'Provider field legality is fixed in outbound/provider codec; not by deleting transcript truth earlier.')}
       </div>
     </section>
@@ -670,7 +668,7 @@ function renderV3MainlineSkeletonSopHtml(root) {
       <div class="logic-grid">
         ${v3SopNodeCard('ProviderRespCompat02ProviderCompat', 'Compat before RespInbound', 'Provider-specific response shape differences are normalized before Hub response parsing.')}
         ${v3SopNodeCard('Resp03', 'Response Chat Process owner', 'Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.')}
-        ${v3SopNodeCard('Resp04 / RespOutbound / Server frame', 'Save then project then frame', 'Resp04 only saves governed continuation truth; RespOutbound projects client semantic; server/SSE only frames/transports.')}
+        ${v3SopNodeCard('Resp03 / RespOutbound / Server frame', 'Govern then project then frame', 'Resp03 owns response governance; RespOutbound projects client semantic; server/SSE only frames/transports.')}
       </div>
     </section>
 
@@ -697,7 +695,7 @@ function renderV3MainlineSkeletonSopHtml(root) {
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>RUSTUP_TOOLCHAIN=stable npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
           <tr><td>Config/restart</td><td><code>rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml</code>, then <code>rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml</code>. Legacy <code>routecodex restart --port</code> is not authoritative for this V3 instance.</td></tr>
           <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for all member ports, including 4444 and 5555.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>

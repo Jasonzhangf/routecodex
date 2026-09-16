@@ -169,8 +169,8 @@ pub struct V3Req04StandardizedResponses {
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
-/// 校验 chat 协议必需字段（messages），应用唯一登记的历史图片占位清理，
-/// 不携带 continuation locator（chat 无 previous_response_id）。
+/// 校验 chat 协议必需字段（messages），应用唯一登记的历史图片占位清理；
+/// chat 不携带 Responses continuation 字段。
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedChat {
     pub body: Value,
@@ -851,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn req04_preserves_responses_data_and_extracts_typed_continuation_locator() {
+    fn req04_preserves_responses_data_for_retired_previous_response_id() {
         let raw = build_v3_server_03_http_request_raw(
             "server".to_string(),
             V3ProviderFailureSessionScope::new("server", "default", "request")
@@ -1000,7 +1000,7 @@ mod tests {
             );
 
             let error = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
-                .expect_err("malformed continuation locator must fail before routing");
+                .expect_err("malformed previous_response_id must fail before routing");
             assert_eq!(
                 error,
                 "previous_response_id must be null or a non-empty string"

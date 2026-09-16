@@ -1,13 +1,12 @@
 use routecodex_v3_runtime::{
-    build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04,
+    build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03,
     build_v3_provider_resp_inbound_01_raw,
     build_v3_provider_resp_inbound_01_raw_with_compat_profile,
     build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05,
-    compile_v3_hub_relay_response_hooks, V3HubContinuationCommit, V3HubContinuationOwnership,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
-    V3HubRelayResponseError, V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind,
-    V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTransportIntent,
-    V3ProviderRespInbound01RawContext,
+    compile_v3_hub_relay_response_hooks, V3HubEntryProtocol, V3HubExecutionMode,
+    V3HubInvocationSource, V3HubProviderWireProtocol, V3HubRelayResponseError,
+    V3HubRelayResponseHookProfile, V3HubResponseNormalizedKind, V3HubResponseTerminality,
+    V3HubServertoolResponseAction, V3HubTransportIntent, V3ProviderRespInbound01RawContext,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path};
@@ -20,7 +19,6 @@ fn relay_raw(
         payload,
         V3HubEntryProtocol::Responses,
         V3HubProviderWireProtocol::Responses,
-        V3HubContinuationOwnership::New,
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         transport,
@@ -64,7 +62,6 @@ fn provider_resp_compat_profile_loads_before_chat_process_tool_governance() {
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             V3HubProviderWireProtocol::Responses,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
@@ -110,14 +107,12 @@ fn passthrough_profile_does_not_harvest_minimax_text_tool_calls() {
         .unwrap();
     assert_eq!(resp03.tool_call_count(), 0);
 
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    let serialized = serde_json::to_string(resp03.finalized_payload()).unwrap();
     assert!(serialized.contains("<function_calls>"));
 }
 
 #[test]
-fn relay_hooks_normalize_govern_and_commit_one_canonical_context() {
+fn relay_hooks_normalize_and_govern_one_canonical_payload() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let profile = V3HubRelayResponseHookProfile::new(["servertool.exec"]);
     let resp02 = hooks
@@ -147,16 +142,15 @@ fn relay_hooks_normalize_govern_and_commit_one_canonical_context() {
         V3HubServertoolResponseAction::FollowupRequired
     );
 
-    let resp04 = hooks
-        .commit(resp03)
-        .expect("Resp03 -> Resp04 continuation commit");
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert_eq!(resp04.canonical_context_count(), 1);
-    assert!(resp04.canonical_context_shares_finalized_payload());
+    assert_eq!(resp03.finalized_payload()["status"], "requires_action");
+    assert_eq!(
+        resp03.finalized_payload()["output"][0]["name"],
+        "servertool.exec"
+    );
 }
 
 #[test]
-fn terminal_response_commits_no_continuation() {
+fn terminal_response_stays_terminal_after_governance() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -169,9 +163,7 @@ fn terminal_response_commits_no_continuation() {
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
     assert_eq!(resp03.tool_call_count(), 0);
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    assert_eq!(resp04.canonical_context_count(), 0);
+    assert_eq!(resp03.finalized_payload()["status"], "completed");
 }
 
 #[test]
@@ -204,9 +196,7 @@ fn response_reasoning_summary_and_text_stay_separate_through_chat_process() {
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
     assert_eq!(resp03.tool_call_count(), 0);
 
-    let resp04 = hooks.commit(resp03).unwrap();
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    let payload = resp04.finalized_payload();
+    let payload = resp03.finalized_payload();
     assert_eq!(
         payload["output"][0],
         provider_payload["output"][0],
@@ -251,8 +241,7 @@ fn resp03_repairs_tool_call_finish_reason_before_tool_governance() {
         resp03.servertool_action(),
         V3HubServertoolResponseAction::None
     );
-    let resp04 = hooks.commit(resp03).unwrap();
-    let payload = resp04.finalized_payload();
+    let payload = resp03.finalized_payload();
     assert_eq!(payload["status"], "requires_action");
     assert_eq!(payload["finish_reason"], "tool_calls");
     assert_eq!(payload["output"][0]["call_id"], "call_real_exec");
@@ -260,7 +249,7 @@ fn resp03_repairs_tool_call_finish_reason_before_tool_governance() {
 }
 
 #[test]
-fn resp04_reuses_resp03_repaired_payload_without_semantic_repair() {
+fn resp05_consumes_resp03_repaired_payload_without_semantic_repair() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -282,16 +271,10 @@ fn resp04_reuses_resp03_repaired_payload_without_semantic_repair() {
         .govern(resp02, &V3HubRelayResponseHookProfile::empty())
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
-    let resp04 = hooks.commit(resp03).unwrap();
-
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    assert!(resp04.canonical_context_shares_provider_payload());
-    assert_eq!(resp04.finalized_payload()["status"], "requires_action");
-    assert_eq!(resp04.finalized_payload()["finish_reason"], "tool_calls");
-    assert_eq!(
-        resp04.finalized_payload()["output"][0]["type"],
-        "custom_tool_call"
-    );
+    let payload = resp03.finalized_payload();
+    assert_eq!(payload["status"], "requires_action");
+    assert_eq!(payload["finish_reason"], "tool_calls");
+    assert_eq!(payload["output"][0]["type"], "custom_tool_call");
 }
 
 #[test]
@@ -381,7 +364,6 @@ fn response_chat_process_preserves_tool_search_tool_call_without_script_conversi
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             V3HubProviderWireProtocol::Responses,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,
@@ -402,9 +384,7 @@ fn response_chat_process_preserves_tool_search_tool_call_without_script_conversi
     );
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
 
-    let resp04 = hooks.commit(resp03).expect("tool_search response commit");
-    assert_eq!(resp04.action(), V3HubContinuationCommit::LocalContext);
-    let finalized = resp04.finalized_payload();
+    let finalized = resp03.finalized_payload();
     assert_eq!(finalized["output"][0]["name"], "tool_search");
     assert_eq!(finalized["output"][0]["call_id"], "call_tool_search");
     assert_eq!(
@@ -446,9 +426,7 @@ fn passthrough_response_chat_process_does_not_turn_shell_fence_text_into_tool_ca
     assert_eq!(resp03.tool_call_count(), 0);
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::Terminal);
 
-    let resp04 = hooks.commit(resp03).expect("terminal response commit");
-    assert_eq!(resp04.action(), V3HubContinuationCommit::None);
-    let serialized = serde_json::to_string(resp04.finalized_payload()).unwrap();
+    let serialized = serde_json::to_string(resp03.finalized_payload()).unwrap();
     assert!(serialized.contains("```bash\\npwd\\n```"));
     assert!(!serialized.contains("requires_action"));
     assert!(!serialized.contains("exec_command"));
@@ -467,9 +445,8 @@ fn json_and_sse_use_the_same_single_response_exit() {
         let resp03 = hooks
             .govern(resp02, &V3HubRelayResponseHookProfile::empty())
             .unwrap();
-        let resp04 = hooks.commit(resp03).unwrap();
         let resp05 =
-            build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
+            build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03.into_parts().0);
         let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
         assert_eq!(
             resp06.response_exit_node(),
@@ -486,7 +463,6 @@ fn direct_response_cannot_enter_relay_response_hooks() {
         json!({"status":"completed"}),
         V3HubEntryProtocol::Responses,
         V3HubProviderWireProtocol::Responses,
-        V3HubContinuationOwnership::RemoteProviderOwned,
         V3HubExecutionMode::Direct,
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Json,
