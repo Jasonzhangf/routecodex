@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -25,25 +25,11 @@ const cases = [
     diagnostic: /expected 1 occurrences|forbidden|missing ordered SSE response path phrase/,
   },
   {
-    name: 'servertool followup evidence removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
-    marker: 'assert!(first.servertool_followup_required);',
-    mutation: '',
-    diagnostic: /missing assert!\(first\.servertool_followup_required\);|missing servertool_followup_required/,
-  },
-  {
     name: 'non-adjacent closeout shortcut appears',
     file: 'docs/architecture/manifests/v3.hub_relay.runtime_closeout.mainline.yml',
-    marker: '  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqChatProcess04Governed, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }',
-    mutation: '  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqContinuation03Classified, to_node: V3HubReqExecution05Planned, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }',
+    marker: '  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqExecution05Planned, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }',
+    mutation: '  - { step_id: v3-hub-relay-closeout-03, from_node: V3HubReqChatProcess04Governed, to_node: V3HubReqTarget06Resolved, status: anchored, owner_feature_id: v3.hub_relay_runtime_closeout }',
     diagnostic: /edge v3-hub-relay-closeout-03 mismatch/,
-  },
-  {
-    name: 'continuation commit moves after Resp05',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime/response_closeout.rs',
-    marker: 'let resp04 = hooks.commit(resp03)?;',
-    mutation: 'let _forbidden_resp05_before_commit = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(resp04, client_payload);\n    let resp04 = hooks.commit(resp03)?;',
-    diagnostic: /expected 1 occurrences|forbidden/,
   },
   {
     name: 'second response exit appears',
@@ -118,9 +104,9 @@ const cases = [
   {
     name: 'responses relay SSE skips response hooks before client projection',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    marker: 'let (action, mut finalized_provider_value, response_web_search_state) =',
-    mutation: 'let (action, mut forbidden_finalized_provider_value, response_web_search_state) =',
-    diagnostic: /expected 2 occurrences of let \(action, mut finalized_provider_value, response_web_search_state\) =/,
+    marker: 'let (mut finalized_provider_value, response_web_search_state) =',
+    mutation: 'let (mut forbidden_finalized_provider_value, response_web_search_state) =',
+    diagnostic: /expected 2 occurrences of let \(mut finalized_provider_value, response_web_search_state\) =/,
   },
   {
     name: 'responses relay SSE resurrects raw pass-through projector',
@@ -142,34 +128,6 @@ const cases = [
     marker: 'pub struct V3ResponsesRelayRetryPolicy {',
     mutation: 'fn observe_v3_runtime_responses_sse_transport_chunk() {}\npub struct V3ResponsesRelayRetryPolicy {',
     diagnostic: /observe_v3_runtime_responses_sse_transport_chunk|forbidden/,
-  },
-  {
-    name: 'responses relay local continuation restore removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    marker: 'with_local_context_from_req04_store(',
-    mutation: 'removed_relay_restore_at_req04(',
-    diagnostic: /missing with_local_context_from_req04_store/,
-  },
-  {
-    name: 'responses relay runtime restores local continuation outside Req04 owner',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    marker: 'let store = local_store_guard',
-    mutation: 'let _forbidden_runtime_restore = store.restore_at_req04(&request)?;\n            let store = local_store_guard',
-    diagnostic: /restore_at_req04|forbidden/,
-  },
-  {
-    name: 'responses relay local continuation commit removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker: 'commit_or_release_v3_relay_local_continuation_at_resp04',
-    mutation: 'removed_relay_commit_at_resp04',
-    diagnostic: /missing commit_or_release_v3_relay_local_continuation_at_resp04/,
-  },
-  {
-    name: 'responses relay tools preservation assertion removed',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
-    marker: 'fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools()',
-    mutation: 'fn removed_tool_pair_regression()',
-    diagnostic: /missing json_two_turn_restores_tool_call_pairs_output_and_preserves_tools/,
   },
   {
     name: 'server dispatch runs responses direct before relay',
@@ -282,7 +240,6 @@ const copyPaths = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
-  'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
   'v3/crates/routecodex-v3-server/src/live_snapshot.rs',
   'v3/crates/routecodex-v3-server/src/executors.rs',
@@ -300,9 +257,21 @@ const copyPaths = [
 ];
 
 const failures = [];
+const findNodeModules = (start) => {
+  let current = resolve(start);
+  while (true) {
+    const candidate = join(current, 'node_modules');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+};
+const nodeModules = findNodeModules(repo);
 for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-hub-relay-closeout-red-'));
   try {
+    if (nodeModules) symlinkSync(nodeModules, join(root, 'node_modules'), 'dir');
     for (const relative of copyPaths) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
     }

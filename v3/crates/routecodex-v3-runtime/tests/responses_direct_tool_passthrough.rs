@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
@@ -6,8 +7,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     build_v3_server_03_http_request_raw as build_v3_server_03_http_request_raw_with_scope,
-    execute_v3_responses_direct_runtime_kernel_with_continuation, register_responses_direct_hooks,
-    V3ClientBody, V3ResponsesDirectContinuationScope, V3ResponsesDirectContinuationState,
+    execute_v3_responses_direct_runtime_kernel, register_responses_direct_hooks, V3ClientBody,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -86,6 +86,122 @@ impl ResponsesTransport for PassthroughTransport {
 
 struct ClientDisconnectTransport;
 
+struct DirectMalformedSseAttemptTransport;
+
+#[async_trait]
+impl ResponsesTransport for DirectMalformedSseAttemptTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok(concat!(
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_attempt_malformed\",\"delta\":\"partial\"}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+                Ok(b"data: {malformed-json}\n\n".to_vec()),
+            ])),
+        ))
+    }
+}
+
+struct DirectFailedTerminalSseAttemptTransport;
+
+#[async_trait]
+impl ResponsesTransport for DirectFailedTerminalSseAttemptTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![
+                Ok(concat!(
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_failed_attempt_event\",\"delta\":\"partial\"}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+                Ok(concat!(
+                    "event: response.failed\n",
+                    "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_attempt_event\",\"status\":\"failed\",\"error\":{\"code\":\"HTTP_503\",\"message\":\"provider failed after delta\"}}}\n\n",
+                )
+                .as_bytes()
+                .to_vec()),
+            ])),
+        ))
+    }
+}
+
+struct DirectCompletedJsonTransport;
+
+#[async_trait]
+impl ResponsesTransport for DirectCompletedJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id": "resp_after_failed_attempt",
+                "status": "completed",
+                "output": [{"type": "output_text", "text": "recovered"}]
+            }))
+            .expect("serialize completed response"),
+        ))
+    }
+}
+
+struct DirectTerminalSseTransport;
+
+#[async_trait]
+impl ResponsesTransport for DirectTerminalSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![Ok(concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_terminal_reset\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n",
+                "data: [DONE]\n\n",
+            )
+            .as_bytes()
+            .to_vec())])),
+        ))
+    }
+}
+
 #[async_trait]
 impl ResponsesTransport for ClientDisconnectTransport {
     async fn send(
@@ -114,7 +230,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct"]
 allowed_invocation_sources = ["client", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.p]
 enabled = true
@@ -148,14 +263,135 @@ fn request(body: Value) -> routecodex_v3_runtime::V3Server03HttpRequestRaw {
     )
 }
 
-fn scope() -> V3ResponsesDirectContinuationScope {
-    V3ResponsesDirectContinuationScope::responses(
-        "/v1/responses",
-        "session-pt",
-        "conversation-pt",
-        5555,
-        "g",
+fn recovery_request(
+    request_id: &str,
+    body: Value,
+) -> routecodex_v3_runtime::V3Server03HttpRequestRaw {
+    build_v3_server_03_http_request_raw(
+        "s".into(),
+        request_id.into(),
+        format!("exec-{request_id}"),
+        "POST".into(),
+        "/v1/responses".into(),
+        body,
     )
+}
+
+async fn assert_failed_attempt_does_not_poison_fresh_request<T: ResponsesTransport>(
+    failed_transport: &T,
+    failed_request_id: &str,
+    fresh_request_id: &str,
+) {
+    let manifest = manifest();
+    let first = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        recovery_request(
+            failed_request_id,
+            json!({"model": "gpt-5.5", "stream": true, "input": "stream"}),
+        ),
+        register_responses_direct_hooks(),
+        failed_transport,
+    )
+    .await;
+    assert_eq!(first.client_payload.status, 502, "{first:?}");
+    let V3ClientBody::Json(body) = first.client_payload.body else {
+        panic!("failed provider attempt must project JSON Error06")
+    };
+    assert_eq!(
+        body,
+        json!({"error": {"code": "network_error", "message": "network error"}})
+    );
+
+    let second = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        recovery_request(
+            fresh_request_id,
+            json!({"model": "gpt-5.5", "input": "next"}),
+        ),
+        register_responses_direct_hooks(),
+        &DirectCompletedJsonTransport,
+    )
+    .await;
+    assert_eq!(second.client_payload.status, 200, "{second:?}");
+}
+
+#[tokio::test]
+async fn malformed_sse_attempt_never_commits_partial_bytes_and_fresh_request_remains_independent() {
+    assert_failed_attempt_does_not_poison_fresh_request(
+        &DirectMalformedSseAttemptTransport,
+        "req-direct-malformed-attempt",
+        "req-direct-after-malformed-attempt",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn failed_terminal_sse_attempt_never_commits_partial_bytes_and_exhausts_to_error06() {
+    assert_failed_attempt_does_not_poison_fresh_request(
+        &DirectFailedTerminalSseAttemptTransport,
+        "req-direct-failed-terminal-attempt",
+        "req-direct-after-failed-terminal-attempt",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn terminal_sse_success_seals_replay_without_blocking_a_fresh_request() {
+    let manifest = manifest();
+    let failed = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        recovery_request(
+            "req-direct-seed-active-gate",
+            json!({"model": "gpt-5.5", "stream": true, "input": "seed"}),
+        ),
+        register_responses_direct_hooks(),
+        &DirectMalformedSseAttemptTransport,
+    )
+    .await;
+    assert_eq!(failed.client_payload.status, 502, "{failed:?}");
+
+    let terminal = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        recovery_request(
+            "req-direct-terminal-reset",
+            json!({"model": "gpt-5.5", "stream": true, "input": "reset"}),
+        ),
+        register_responses_direct_hooks(),
+        &DirectTerminalSseTransport,
+    )
+    .await;
+    assert_eq!(terminal.client_payload.status, 200, "{terminal:?}");
+
+    let waiting_manifest = manifest.clone();
+    let waiter = tokio::spawn(async move {
+        execute_v3_responses_direct_runtime_kernel(
+            &waiting_manifest,
+            recovery_request(
+                "req-direct-released-by-terminal-success",
+                json!({"model": "gpt-5.5", "input": "released"}),
+            ),
+            register_responses_direct_hooks(),
+            &DirectCompletedJsonTransport,
+        )
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        waiter.is_finished(),
+        "fresh Direct request consumed an unrelated Error05 recovery lane"
+    );
+    let fresh = waiter.await.expect("fresh Direct request task panicked");
+    assert_eq!(fresh.client_payload.status, 200, "{fresh:?}");
+
+    let V3ClientBody::CommittedSse(mut body) = terminal.client_payload.body else {
+        panic!("terminal Direct response must remain SSE")
+    };
+    let mut text = String::new();
+    while let Some(chunk) = body.next().await {
+        text.push_str(&String::from_utf8(chunk).expect("UTF-8"));
+    }
+    assert!(text.contains("response.completed"), "{text}");
+    assert!(text.contains("[DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -163,8 +399,7 @@ async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait
     let manifest = manifest();
     for index in 0..3 {
         let started = std::time::Instant::now();
-        let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-            &V3ResponsesDirectContinuationState::default(),
+        let output = execute_v3_responses_direct_runtime_kernel(
             &manifest,
             build_v3_server_03_http_request_raw(
                 "s".into(),
@@ -174,10 +409,8 @@ async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait
                 "/v1/responses".into(),
                 json!({"model":"gpt-5.5","input":"disconnect","stream":false}),
             ),
-            scope(),
             register_responses_direct_hooks(),
             &ClientDisconnectTransport,
-            index,
         )
         .await;
         assert_eq!(output.client_payload.status, 499);
@@ -191,8 +424,7 @@ async fn direct_client_disconnect_is_health_neutral_and_never_enters_action_wait
 async fn assert_direct_response_request_preserves_client_tools(response: Value, label: &str) {
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(json!({
             "model": "gpt-5.5",
@@ -200,10 +432,8 @@ async fn assert_direct_response_request_preserves_client_tools(response: Value, 
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
@@ -243,8 +473,7 @@ async fn assert_direct_response_passthrough_without_relay_governance(response: V
     let expected_status = response.get("status").cloned();
     let manifest = manifest();
     let transport = PassthroughTransport::with_response(response);
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(json!({
             "model": "gpt-5.5",
@@ -252,10 +481,8 @@ async fn assert_direct_response_passthrough_without_relay_governance(response: V
             "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
             "stream": false
         })),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{label}: {:#?}", output);
@@ -314,14 +541,11 @@ async fn direct_kernel_preserves_tool_choice_parallel_tool_calls_and_tools_in_wi
         "metadata": {"client": "kept", "session": "abc"}
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -396,14 +620,11 @@ async fn responses_openai_chat_field_parity_direct_kernel_preserves_responses_in
         "stream": false
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -446,14 +667,11 @@ async fn direct_kernel_preserves_service_tier_reasoning_effort_and_prompt_cache_
         "prompt_cache_key": "client-cache-1"
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -499,14 +717,11 @@ async fn direct_kernel_maps_unknown_responses_reasoning_effort_to_protocol_neutr
         "reasoning": {"effort": "definitely_invalid"}
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -531,14 +746,11 @@ async fn direct_kernel_response_propagates_provider_output_text_to_client_unchan
         "tools": [{"type": "function", "name": "search"}]
     });
 
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(body),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);
@@ -587,14 +799,11 @@ async fn direct_kernel_passes_completed_response_without_summary_when_schema_gui
         "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}],
         "stream": false
     });
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation(
-        &V3ResponsesDirectContinuationState::default(),
+    let output = execute_v3_responses_direct_runtime_kernel(
         &manifest,
         request(original_request.clone()),
-        scope(),
         register_responses_direct_hooks(),
         &transport,
-        1_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{:#?}", output);

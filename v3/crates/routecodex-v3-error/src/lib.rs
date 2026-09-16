@@ -28,7 +28,6 @@ pub enum V3InternalErrorCode {
     V3DirectResp15ClientPayloadReady,
     V3Server16HttpFrame,
     V3DebugArtifact,
-    V3ContinuationStore,
     V3ConfigManifestRuntime,
     V3StaticHookRegistry,
 }
@@ -197,14 +196,6 @@ impl V3InternalErrorCode {
                 owner_feature_id: "v3.debug_error_foundation",
                 module_block: "500-30x",
                 title: "debug artifact internal failure",
-            },
-            V3InternalErrorCode::V3ContinuationStore => V3InternalErrorRegistryEntry {
-                code: "500-310",
-                lane: V3InternalErrorLane::Other,
-                node_id: "V3HubRespContinuation04Committed",
-                owner_feature_id: "v3.responses_direct_remote_continuation_integration",
-                module_block: "500-31x",
-                title: "continuation store internal failure",
             },
             V3InternalErrorCode::V3ConfigManifestRuntime => V3InternalErrorRegistryEntry {
                 code: "500-320",

@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
@@ -71,49 +71,6 @@ pub type V3RuntimeProviderFailureEventSink = Arc<
 
 pub type V3RuntimeRouteSelectionEventSink =
     Arc<dyn Fn(&V3RuntimeObservability) + Send + Sync + 'static>;
-
-pub struct V3ResponsesRelayLocalServerToolInput<'a> {
-    pub state: &'a V3ResponsesRelayLocalContinuationState,
-    pub server_tool_state: &'a V3ResponsesRelayServerToolState,
-    pub scope: V3ResponsesRelayLocalContinuationScope,
-    pub now_epoch_ms: u64,
-    pub provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
-    pub route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
-}
-
-impl<'a> V3ResponsesRelayLocalServerToolInput<'a> {
-    pub fn new(
-        state: &'a V3ResponsesRelayLocalContinuationState,
-        server_tool_state: &'a V3ResponsesRelayServerToolState,
-        scope: V3ResponsesRelayLocalContinuationScope,
-        now_epoch_ms: u64,
-    ) -> Self {
-        Self {
-            state,
-            server_tool_state,
-            scope,
-            now_epoch_ms,
-            provider_failure_event_sink: None,
-            route_selection_event_sink: None,
-        }
-    }
-
-    pub fn with_provider_failure_event_sink(
-        mut self,
-        sink: V3RuntimeProviderFailureEventSink,
-    ) -> Self {
-        self.provider_failure_event_sink = Some(sink);
-        self
-    }
-
-    pub fn with_route_selection_event_sink(
-        mut self,
-        sink: V3RuntimeRouteSelectionEventSink,
-    ) -> Self {
-        self.route_selection_event_sink = Some(sink);
-        self
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct V3ResponsesRelayProviderSnapshotCapture {
@@ -563,109 +520,6 @@ fn semantic_terminal_from_response_status(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ResponsesRelayLocalContinuationScope {
-    pub(crate) entry_endpoint: String,
-    pub(crate) session_id: String,
-    pub(crate) conversation_id: String,
-    pub(crate) port: u16,
-    pub(crate) routing_group: String,
-}
-
-impl V3ResponsesRelayLocalContinuationScope {
-    pub fn responses(
-        entry_endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            entry_endpoint: entry_endpoint.into(),
-            session_id: session_id.into(),
-            conversation_id: conversation_id.into(),
-            port,
-            routing_group: routing_group.into(),
-        }
-    }
-
-    pub(crate) fn local_key(&self) -> V3LocalContinuationScopeKey {
-        V3LocalContinuationScopeKey::responses(
-            self.entry_endpoint.clone(),
-            self.session_id.clone(),
-            self.conversation_id.clone(),
-            self.port,
-            self.routing_group.clone(),
-        )
-    }
-
-    pub(crate) fn hub_scope(&self, server_id: &str) -> V3HubContinuationScope {
-        V3HubContinuationScope::new(
-            V3HubEntryProtocol::Responses,
-            server_id,
-            self.routing_group.clone(),
-            self.session_id.clone(),
-        )
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct V3ResponsesRelayLocalContinuationState {
-    store: Mutex<V3LocalContinuationStore>,
-}
-
-impl V3ResponsesRelayLocalContinuationState {
-    pub fn contains(&self, continuation_id: &str) -> Result<bool, V3ResponsesRelayRuntimeError> {
-        Ok(self.lock_store()?.contains(continuation_id))
-    }
-
-    pub fn contains_for_req03(
-        &self,
-        continuation_id: &str,
-        scope: &V3ResponsesRelayLocalContinuationScope,
-    ) -> Result<bool, V3ResponsesRelayRuntimeError> {
-        Ok(self
-            .lock_store()?
-            .contains_in_scope(&scope.local_key(), continuation_id))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn commit_for_req03_test(
-        &self,
-        continuation_id: &str,
-        scope: &V3ResponsesRelayLocalContinuationScope,
-        now_epoch_ms: u64,
-    ) -> Result<(), V3ResponsesRelayRuntimeError> {
-        self.lock_store()?
-            .commit_at_resp04(V3LocalContinuationResp04SaveInput::new(
-                continuation_id,
-                scope.local_key(),
-                json!({"output":[]}),
-                V3LocalContinuationTerminalOutcome::NonTerminal,
-                now_epoch_ms,
-                now_epoch_ms + V3_RESPONSES_RELAY_LOCAL_CONTINUATION_TTL_MS,
-            ))
-            .map(|_| ())
-            .map_err(V3ResponsesRelayRuntimeError::LocalContinuation)
-    }
-
-    pub fn len(&self) -> Result<usize, V3ResponsesRelayRuntimeError> {
-        Ok(self.lock_store()?.len())
-    }
-
-    pub fn is_empty(&self) -> Result<bool, V3ResponsesRelayRuntimeError> {
-        Ok(self.lock_store()?.is_empty())
-    }
-
-    pub(crate) fn lock_store(
-        &self,
-    ) -> Result<MutexGuard<'_, V3LocalContinuationStore>, V3ResponsesRelayRuntimeError> {
-        self.store
-            .lock()
-            .map_err(|_| V3ResponsesRelayRuntimeError::LocalContinuationStatePoisoned)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ResponsesRelayServerToolScope {
     pub(crate) entry_endpoint: String,
@@ -699,18 +553,6 @@ impl V3ResponsesRelayServerToolScope {
             return false;
         }
         !(session_id == conversation_id && session_id.starts_with("request:"))
-    }
-}
-
-impl From<&V3ResponsesRelayLocalContinuationScope> for V3ResponsesRelayServerToolScope {
-    fn from(scope: &V3ResponsesRelayLocalContinuationScope) -> Self {
-        Self::new(
-            scope.entry_endpoint.clone(),
-            scope.session_id.clone(),
-            scope.conversation_id.clone(),
-            scope.port,
-            scope.routing_group.clone(),
-        )
     }
 }
 
@@ -1234,12 +1076,6 @@ pub enum V3ResponsesRelayRuntimeError {
         code: String,
         message: String,
     },
-    #[error(transparent)]
-    LocalContinuation(#[from] V3LocalContinuationError),
-    #[error("V3 Responses Relay local continuation scope routing group does not match server")]
-    LocalContinuationScopeMismatch,
-    #[error("V3 Responses Relay local continuation state lock is poisoned")]
-    LocalContinuationStatePoisoned,
     #[error("V3 Responses Relay server tool state lock is poisoned")]
     ServerToolStatePoisoned,
 }

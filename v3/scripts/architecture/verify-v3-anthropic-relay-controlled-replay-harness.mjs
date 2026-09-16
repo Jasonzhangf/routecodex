@@ -7,20 +7,20 @@ const root = process.cwd();
 const fixtureRoot = resolve(root, 'v3/fixtures/anthropic-relay-controlled-upstream');
 const manifest = json('v3/fixtures/anthropic-relay-controlled-upstream/manifest.json');
 const schema = json('docs/schemas/v3-anthropic-relay-controlled-replay-evidence.schema.json');
-const harness = text('scripts/tests/v3-anthropic-relay-controlled-replay-harness.mjs');
+const harness = text('v3/scripts/tests/v3-anthropic-relay-controlled-replay-harness.mjs');
 const requiredNodesBlock = harness.match(/const REQUIRED_NODES = \[([\s\S]*?)\n\];/)?.[1] ?? '';
 const design = text('docs/goals/v3-anthropic-relay-controlled-replay-harness-test-design.md');
 const failures = [];
 const requiredCases = ['json_thinking_tool_use', 'provider_error', 'side_channel_isolation', 'sse_thinking_tool_use'];
 const requiredNodes = [
   'V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized',
-  'V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed',
+  'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved',
   'V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat',
   'V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest',
   'V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat',
   'V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic',
+  'V3HubRespOutbound05ClientSemantic',
   'V3ServerRespOutbound06ClientFrame',
 ];
 const forbiddenFields = ['routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol', 'resource_handle', 'runtime_control', 'selected_target'];

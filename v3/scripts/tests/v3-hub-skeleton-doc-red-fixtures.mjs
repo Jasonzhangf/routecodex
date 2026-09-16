@@ -7,18 +7,18 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = process.cwd();
 const fixtures = [
   {
-    name: 'continuation classification node removed',
-    file: 'docs/design/v3-hub-pipeline-static-skeleton-contract.md',
-    from: 'V3HubReqContinuation03Classified',
-    to: 'V3HubReqContinuation03Removed',
-    diagnostic: /missing invariant V3HubReqContinuation03Classified/,
+    name: 'continuation retirement heading removed',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: '## Continuation retirement',
+    to: '## Continuation restoration',
+    diagnostic: /missing invariant Continuation retirement/,
   },
   {
-    name: 'immutable interval equality removed',
-    file: 'docs/design/v3-hub-pipeline-static-skeleton-contract.md',
-    from: 'restore(normalize(save(context))) == context',
-    to: 'context may be reconstructed later',
-    diagnostic: /missing invariant restore\(normalize\(save\(context\)\)\) == context/,
+    name: 'request-side continuation restore re-enabled',
+    file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
+    from: 'No request-side restore',
+    to: 'Request-side restore is allowed',
+    diagnostic: /missing invariant No request-side restore/,
   },
   {
     name: 'old P6 physical deletion removed',
@@ -35,14 +35,6 @@ const fixtures = [
     diagnostic: /v3-hub-req-01 must remain adjacent/,
   },
   {
-    name: 'anchored continuation truth falsely returned to pending',
-    file: 'docs/architecture/v3-resource-operation-map.yml',
-    resourceId: 'v3.continuation.local_context_truth',
-    bindingFrom: 'anchored',
-    bindingTo: 'binding_pending',
-    diagnostic: /implemented Hub v1 H1 resource must be anchored/,
-  },
-  {
     name: 'relay worker split removed',
     file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
     from: 'feature_id:v3.hub_relay_request_semantics',
@@ -50,17 +42,17 @@ const fixtures = [
     diagnostic: /Relay contract docs: missing invariant feature_id:v3\.hub_relay_request_semantics/,
   },
   {
-    name: 'relay immutable interval normalization rule removed',
+    name: 'relay previous_response_id fail-fast removed',
     file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
-    from: 'semantic-equivalent normalization',
-    to: 'arbitrary processing',
-    diagnostic: /Relay contract docs: missing invariant semantic-equivalent normalization/,
+    from: 'previous_response_id',
+    to: 'provider_response_id',
+    diagnostic: /missing invariant previous_response_id/,
   },
   {
     name: 'relay fractional node ID introduced',
     file: 'docs/design/v3-hub-relay-fixed-pipeline-contract.md',
-    from: 'V3HubReqChatProcess04Governed: restore local context',
-    to: 'V3HubReqChatProcess03_1Governed: restore local context',
+    from: 'V3HubReqChatProcess04Governed: run tools',
+    to: 'V3HubReqChatProcess03_1Governed: run tools',
     diagnostic: /fractional\/reused Hub node ID is forbidden/,
   },
   {

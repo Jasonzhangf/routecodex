@@ -4,8 +4,6 @@ pub(super) async fn closeout_anthropic_relay_sse_response<F>(
     resp01: V3ProviderRespInbound01Raw,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
-    local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
-    requested_local_ids: &[String],
     project_client_response: F,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -21,8 +19,6 @@ where
         resp02,
         response_hook_profile,
         trace,
-        local,
-        requested_local_ids,
         project_client_response,
     )
 }
@@ -31,8 +27,6 @@ pub(super) fn closeout_anthropic_relay_response<F>(
     resp01: V3ProviderRespInbound01Raw,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
-    local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
-    requested_local_ids: &[String],
     project_client_response: F,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -47,8 +41,6 @@ where
         resp02,
         response_hook_profile,
         trace,
-        local,
-        requested_local_ids,
         project_client_response,
     )
 }
@@ -57,8 +49,6 @@ fn closeout_anthropic_relay_normalized_response<F>(
     resp02: V3HubRespInbound02Normalized,
     response_hook_profile: &V3HubRelayResponseHookProfile,
     trace: &mut Vec<&'static str>,
-    local: Option<&V3AnthropicRelayLocalContinuationExecution<'_>>,
-    requested_local_ids: &[String],
     project_client_response: F,
 ) -> Result<(Value, bool, V3RuntimeStreamObservation), V3AnthropicRelayRuntimeError>
 where
@@ -79,10 +69,9 @@ where
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
     let resp03 = hooks.govern(resp02, response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
+    let (resp03, web_search_transition) = resp03.into_parts();
     let servertool_followup_required =
-        resp04.previous.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
+        resp03.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
     // Mode B 拦截：websearch call 已由 Resp03 剥离（web_search_transition 存在）。
     // 区分两种形状：
     // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
@@ -90,7 +79,7 @@ where
     //   给客户端（claude code 等）执行搜索并回传结果；
     // - 本地 `websearch`（function name=websearch，无客户端投影路径）——
     //   禁止静默剥离，fail-fast。
-    if resp04.web_search_transition().is_some() {
+    if web_search_transition.is_some() {
         // 区分两种形状：
         // - hosted `web_search`（anthropic wire server tool `web_search_20250305`，
         //   模型调用 name=web_search）——标准 Anthropic 工具调用协议，透传 tool_use
@@ -110,15 +99,9 @@ where
             stream_observation,
         ));
     }
-    commit_or_release_local_continuation(
-        local,
-        requested_local_ids,
-        resp04.finalized_payload(),
-        resp04.action(),
-    )?;
-    let client_payload = project_client_response(resp04.finalized_payload())?;
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload(
-        resp04.into_data(),
+    let client_payload = project_client_response(resp03.provider_payload())?;
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+        resp03,
         client_payload,
     );
     trace.push("V3HubRespOutbound05ClientSemantic");

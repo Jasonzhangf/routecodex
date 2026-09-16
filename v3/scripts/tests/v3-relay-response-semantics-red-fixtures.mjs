@@ -23,12 +23,6 @@ const fixtures = [
   ],
   ['Resp03 continuation save', 'let object = payload\n        .as_object()', 'let canonical_context = Some(payload.clone());\n    let object = payload\n        .as_object()', /Resp03 Chat Process/],
   ['missing status fallback', '.ok_or(V3HubRelayResponseError::MissingStatus)?', '.unwrap_or("completed")', /Resp03 Chat Process/],
-  [
-    'full response clone',
-    'V3HubResponseTerminality::NonTerminal => (\n            V3HubContinuationCommit::LocalContext,\n            Some(V3HubRelayCanonicalResponseContext {\n                payload: Arc::clone(&finalized_payload),',
-    'V3HubResponseTerminality::NonTerminal => (\n            V3HubContinuationCommit::LocalContext,\n            Some(V3HubRelayCanonicalResponseContext {\n                payload: Arc::new(finalized_payload.as_ref().clone()),',
-    /missing Arc::clone|exactly one Arc::clone/
-  ],
 ];
 
 const failures = [];
@@ -49,7 +43,6 @@ for (const [name, from, to, diagnostic] of fixtures) {
       'provider compat tool_search rejection': 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_compat_02_provider_compat.rs',
       'Resp03 continuation save': 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
       'missing status fallback': 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-      'full response clone': 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs',
     };
     const relative = fixtureFiles[name] ?? 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs';
     const target = join(root, relative);

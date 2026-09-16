@@ -1,7 +1,6 @@
 use routecodex_v3_runtime::{
-    build_v3_hub_req_inbound_01_client_raw, compile_v3_hub_relay_request_hooks,
-    V3HubContinuationLookup, V3HubContinuationOwnership, V3HubContinuationScope,
-    V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
+    build_v3_hub_req_inbound_01_client_raw, compile_v3_hub_relay_request_hooks, V3HubEntryProtocol,
+    V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
     V3HubRequestSemanticProtocol, V3HubServertoolRequestProfile, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
@@ -22,13 +21,6 @@ fn raw_for(
     )
 }
 
-fn scope() -> V3HubContinuationScope {
-    scope_for(V3HubEntryProtocol::Responses)
-}
-
-fn scope_for(entry_protocol: V3HubEntryProtocol) -> V3HubContinuationScope {
-    V3HubContinuationScope::new(entry_protocol, "server-a", "group-a", "session-a")
-}
 fn serialized_contains_tool_type(payload: &Value, tool_type: &str) -> bool {
     serde_json::to_string(payload)
         .unwrap()
@@ -42,7 +34,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let governed = hooks
         .run(
             raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
-            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -51,8 +42,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
         governed.semantic_protocol(),
         V3HubRequestSemanticProtocol::Chat
     );
-    assert_eq!(governed.continuation(), V3HubContinuationOwnership::New);
-    assert!(!governed.restored_local_context());
     assert_eq!(
         governed.hook_events(),
         &[
@@ -60,8 +49,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req01Exit,
             V3HubRelayRequestHookEvent::Req02Entry,
             V3HubRelayRequestHookEvent::Req02Exit,
-            V3HubRelayRequestHookEvent::Req03Entry,
-            V3HubRelayRequestHookEvent::Req03Exit,
             V3HubRelayRequestHookEvent::Req04Entry,
             V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
@@ -92,7 +79,6 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
                     }
                 ]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -134,7 +120,6 @@ fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
                 "instructions":"Base instructions.",
                 "input":[{"role":"user","content":"hello"}]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &profile,
         )
         .unwrap();
@@ -157,7 +142,6 @@ fn responses_relay_memory_guidance_injection_fails_fast_on_bad_instructions() {
                 "messages":[{"role":"user","content":"hello"}],
                 "instructions": 7
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &profile,
         )
         .unwrap_err();
@@ -205,7 +189,6 @@ fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
                     }
                 ]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -258,7 +241,6 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::OpenAiChat),
-            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -281,7 +263,6 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
         assert!(matches!(
             hooks.run(
                 raw_for(invalid, V3HubEntryProtocol::OpenAiChat),
-                &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::OpenAiChat)),
                 &V3HubServertoolRequestProfile::disabled(),
             ),
             Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
@@ -305,7 +286,6 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::Gemini),
-            &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::Gemini)),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -321,7 +301,6 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
         assert!(matches!(
             hooks.run(
                 raw_for(invalid, V3HubEntryProtocol::Gemini),
-                &V3HubContinuationLookup::new(None, scope_for(V3HubEntryProtocol::Gemini)),
                 &V3HubServertoolRequestProfile::disabled(),
             ),
             Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
@@ -340,7 +319,6 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
             raw(json!({
                 "messages":[{"role":"tool","tool_call_id":"shape_only","content":"preserve"}]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -363,7 +341,6 @@ fn apply_patch_guidance_is_not_injected_into_payload_at_req04() {
                     "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
                 }]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -382,7 +359,6 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Patch a file"}],
                 "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -397,7 +373,6 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Lookup"}],
                 "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
             })),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::disabled(),
         )
         .unwrap();
@@ -405,139 +380,17 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
 }
 
 #[test]
-fn remote_binding_is_classified_without_local_restore() {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("resp_remote"), scope())
-        .with_remote_binding("resp_remote", scope());
-    let governed = hooks
-        .run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &lookup,
-            &V3HubServertoolRequestProfile::disabled(),
-        )
-        .unwrap();
-    assert_eq!(
-        governed.continuation(),
-        V3HubContinuationOwnership::RemoteProviderOwned
-    );
-    assert!(!governed.restored_local_context());
-}
-
-#[test]
-fn local_context_restores_at_req04_before_servertool_governance() {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("rcc_local"), scope()).with_local_context(
-        "rcc_local",
-        scope(),
-        json!({
-            "messages":[
-                {
-                    "role":"assistant",
-                    "content":"prior",
-                    "tool_calls":[{
-                        "id":"c1",
-                        "type":"function",
-                        "function":{"name":"lookup","arguments":"{}"}
-                    }]
-                }
-            ]
-        }),
-    );
-    let governed = hooks
-        .run(
-            raw(json!({"input":[{"type":"function_call_output","call_id":"c1","output":"ok"}]})),
-            &lookup,
-            &V3HubServertoolRequestProfile::enabled(["servertool.request"]),
-        )
-        .unwrap();
-    assert_eq!(
-        governed.continuation(),
-        V3HubContinuationOwnership::RouteCodexLocalOwned
-    );
-    assert!(governed.restored_local_context());
-    assert_eq!(
-        governed.local_context().unwrap()["messages"][0]["content"],
-        "prior"
-    );
-    let events = governed.hook_events();
-    let restore = events
-        .iter()
-        .position(|e| *e == V3HubRelayRequestHookEvent::Req04LocalContextRestored)
-        .unwrap();
-    let servertool = events
-        .iter()
-        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ServertoolGoverned)
-        .unwrap();
-    assert!(restore < servertool);
-}
-
-#[test]
-fn classification_is_fail_fast_for_missing_or_cross_scope_binding() {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let missing = V3HubContinuationLookup::new(Some("missing"), scope());
-    assert!(matches!(
-        hooks.run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &missing,
-            &V3HubServertoolRequestProfile::disabled()
-        ),
-        Err(V3HubRelayRequestError::ContinuationNotFound { .. })
-    ));
-
-    let other_scope = V3HubContinuationScope::new(
-        V3HubEntryProtocol::Responses,
-        "server-b",
-        "group-a",
-        "session-a",
-    );
-    let mismatch = V3HubContinuationLookup::new(Some("rcc_local"), scope()).with_local_context(
-        "rcc_local",
-        other_scope,
-        json!({"input":[]}),
-    );
-    assert!(matches!(
-        hooks.run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &mismatch,
-            &V3HubServertoolRequestProfile::disabled()
-        ),
-        Err(V3HubRelayRequestError::ContinuationScopeMismatch { .. })
-    ));
-}
-
-#[test]
-fn classification_rejects_dual_local_and_remote_owners() {
-    let hooks = compile_v3_hub_relay_request_hooks();
-    let lookup = V3HubContinuationLookup::new(Some("duplicate"), scope())
-        .with_local_context("duplicate", scope(), json!({"input":[]}))
-        .with_remote_binding("duplicate", scope());
-    assert!(matches!(
-        hooks.run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &lookup,
-            &V3HubServertoolRequestProfile::disabled()
-        ),
-        Err(V3HubRelayRequestError::AmbiguousContinuationOwnership { .. })
-    ));
-}
-
-#[test]
 fn malformed_tool_output_and_required_hook_failure_are_explicit() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let malformed = json!({"input":[{"type":"function_call_output","output":"missing call id"}]});
     assert!(matches!(
-        hooks.run(
-            raw(malformed),
-            &V3HubContinuationLookup::new(None, scope()),
-            &V3HubServertoolRequestProfile::disabled()
-        ),
+        hooks.run(raw(malformed), &V3HubServertoolRequestProfile::disabled()),
         Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
     ));
 
     assert!(matches!(
         hooks.run(
             raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &V3HubContinuationLookup::new(None, scope()),
             &V3HubServertoolRequestProfile::required_failure("req04.required")
         ),
         Err(V3HubRelayRequestError::RequiredHookFailed { .. })

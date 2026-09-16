@@ -5,9 +5,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::hub_v1::{
-    execute_v3_responses_relay_runtime_with_local_continuation, V3ResponsesRelayClientBody,
-    V3ResponsesRelayLocalContinuationScope, V3ResponsesRelayLocalContinuationState,
-    V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -77,8 +75,7 @@ async fn responses_chat_anthropic_glm_compat_uses_configured_anthropic_target_an
     );
 
     let projection = Arc::new(Mutex::new(None));
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let output = execute_v3_responses_relay_runtime_with_local_continuation(
+    let output = execute_v3_responses_relay_runtime(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "glm_test".to_string(),
@@ -116,15 +113,6 @@ async fn responses_chat_anthropic_glm_compat_uses_configured_anthropic_target_an
         &GlmAnthropicWireCaptureTransport {
             projection: projection.clone(),
         },
-        &state,
-        V3ResponsesRelayLocalContinuationScope::responses(
-            "/v1/responses",
-            "session-glm-anthropic-outbound-compat",
-            "conversation-glm-anthropic-outbound-compat",
-            15555,
-            "glm_test",
-        ),
-        12_000,
     )
     .await
     .expect("Responses relay must reach GLM through Anthropic outbound");

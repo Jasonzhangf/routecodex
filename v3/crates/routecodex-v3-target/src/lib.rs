@@ -160,35 +160,6 @@ struct V3TargetExpansionScope {
 }
 
 impl V3TargetInterpreter {
-    pub fn resolve_exact_provider_model_auth(
-        &self,
-        manifest: &V3Config05ManifestPublished,
-        provider_id: &str,
-        model_id: &str,
-        auth_alias: &str,
-    ) -> Result<V3TargetCandidate, V3TargetError> {
-        self.expand_provider(
-            manifest,
-            Some(provider_id),
-            Some(model_id),
-            Some(auth_alias),
-            0,
-            1,
-            0,
-            V3TargetExpansionScope {
-                path: vec!["continuation:exact_pin".to_string()],
-                pool_ids: vec!["continuation_exact_pin".to_string()],
-                default_pool_member: false,
-                required_capabilities: Vec::new(),
-                requested_model_filter: None,
-                visible_model_ids: Vec::new(),
-            },
-        )?
-        .into_iter()
-        .next()
-        .ok_or(V3TargetError::CandidateSetEmpty)
-    }
-
     pub fn classify_kind(&self, route: V3Router07OpaqueTargetHitOnce) -> V3Target08KindClassified {
         V3Target08KindClassified { route }
     }

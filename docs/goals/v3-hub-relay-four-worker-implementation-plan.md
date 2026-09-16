@@ -6,23 +6,23 @@ Canonical contract: [V3 Hub Relay Fixed Pipeline Contract](../design/v3-hub-rela
 
 Make Relay implementable without changing the fixed Hub v1 topology by splitting the work into four
 parallel, non-overlapping worker slices: request semantics, response semantics, runtime
-resources/hooks, and maps/gates/wiki. All slices are Rust-first and must preserve the continuation
-immutable interval.
+resources/hooks, and maps/gates/wiki. All slices are Rust-first and must preserve the retired
+continuation boundary.
 
 ## Shared rules for all workers
 
 - Do not add, remove, renumber, or reuse Hub node IDs.
 - Do not create a second lifecycle, second Runtime kernel, or second response exit.
-- Do not put semantic logic between continuation save and restore except round-trip-equivalent
-  normalization, scope validation, storage/transport, expiry, and release.
+- Do not restore, save, store, or reconstruct Responses continuation; non-empty
+  `previous_response_id` fails before routing or provider transport.
 - Do not add TypeScript business semantics; TS may only remain an IO/bridge/diagnostic shell when
   explicitly allowed by the owner map.
 - Do not change V2, `~/.rcc`, global install, live server, provider credentials, or release runtime.
 - Claim semantic ownership in `.agent-collab/` before writing implementation.
 - Use borrow-first, move-at-boundary payload ownership. Do not deep-copy full request, response,
-  context, provider wire, SSE, snapshot, or continuation payloads for hooks, classification, Debug,
-  Error, retry, or resource config. Any required full copy needs an owner node, size bound, release
-  point, and gate.
+  context, provider wire, SSE, or snapshot payloads for hooks, classification, Debug, Error, retry,
+  or resource config. Any required full copy needs an owner node, size bound, release point, and
+  gate.
 
 ## Worker A — Relay request semantic chain
 
@@ -42,7 +42,6 @@ Scope:
 - implement or stub request entry/exit hooks for Req01-Req07;
 - implement Relay request Chat Process typed effects only inside
   `V3HubReqChatProcess04Governed`;
-- classify local/remote/new continuation without restoring outside Req04;
 - produce `V3HubReqExecution05Planned` and `V3HubReqTarget06Resolved` through the standard nodes;
 - build provider semantic request without provider-family branches.
 
@@ -50,7 +49,7 @@ Forbidden:
 
 - request shortcut from Server to Provider;
 - direct provider call from request hooks;
-- context restore in Req02/Req03/Server/Provider/Debug;
+- continuation restore or `previous_response_id` resolution in Req02/Req04/Server/Provider/Debug;
 - tool/history repair outside Req04;
 - dynamic hooks or config file reads.
 
@@ -66,7 +65,7 @@ Required gates:
 Completion signal:
 
 - request worker can say only: Relay request-side source slice is implemented/verified. It cannot
-  claim response, runtime resources, live Relay, or continuation end-to-end.
+  claim response, runtime resources, live Relay, or continuation support.
 
 ## Worker B — Relay response semantic chain
 
@@ -85,13 +84,13 @@ Scope:
 - implement or stub response entry/exit hooks for Resp01-Resp06;
 - keep tool harvest, servertool response hooks, terminal/non-terminal judgment, and response logic
   inside `V3HubRespChatProcess03Governed`;
-- commit continuation only in `V3HubRespContinuation04Committed`;
-- project client semantics only after continuation commit;
+- keep response governance inside `V3HubRespChatProcess03Governed`;
+- project client semantics only after Resp03 governance;
 - keep JSON/SSE framing as transport-only.
 
 Forbidden:
 
-- continuation save in Resp05/Resp06/SSE/handler/store;
+- continuation save in Resp03/Resp05/Resp06/SSE/handler/store;
 - required_action inference after Resp03;
 - second response exit for servertool or Relay;
 - internal metadata/debug/error carrier in client normal payload;
@@ -101,15 +100,15 @@ Required gates:
 
 - focused Rust response hook tests;
 - client-facing JSON/SSE blackbox proving one response exit;
-- negative fixture for continuation save after Resp04;
+- negative fixture for continuation save or restore revival;
 - response payload ownership tests proving response governance does not materialize full SSE/body
-  clones and continuation save stores one canonical context truth;
+  clones;
 - shared gates from the canonical contract.
 
 Completion signal:
 
 - response worker can say only: Relay response-side source slice is implemented/verified. It cannot
-  claim request, live Relay, or continuation end-to-end.
+  claim request, live Relay, or continuation support.
 
 ## Worker C — Runtime resource configuration and static hooks
 
@@ -127,7 +126,7 @@ Allowed paths:
 Scope:
 
 - extend `config.v3.toml` declarations for runtime resources, hook sets, servertool hook profiles,
-  continuation policies, execution modes, and protocol capabilities;
+  execution modes, and protocol capabilities;
 - compile declarations into deterministic Manifest resources;
 - validate static entry/exit hook registry for every node;
 - ensure Runtime consumes only Manifest resources;
@@ -177,7 +176,7 @@ Scope:
 
 - keep feature IDs, resources, mainline edges, verification gates, and wiki review surface
   queryable;
-- add red fixtures for shortcut, dynamic hook, wrong continuation placement, second response exit,
+- add red fixtures for shortcut, dynamic hook, continuation revival, second response exit,
   and P6 extension;
 - keep P6 frozen until Hub v1 Direct cutover and old-chain deletion are separately verified;
 - produce the merge checklist for workers A-C.
@@ -209,10 +208,9 @@ Completion signal:
 2. Merge Worker C after Config/Manifest/static hook gates pass.
 3. Merge Workers A and B after their focused whitebox and blackbox gates pass.
 4. Run combined workspace gates.
-5. Run payload-copy budget probes for Relay JSON, Relay SSE, local continuation, and servertool
-   roundtrip before claiming latency/memory safety.
-6. Only after Direct Hub v1 equivalence and sole-entry cutover are verified, add live Relay replay
-   and continuation end-to-end gates.
+5. Run payload-copy budget probes for Relay JSON, Relay SSE, and servertool roundtrip before
+   claiming latency/memory safety.
+6. Only after Direct Hub v1 equivalence and sole-entry cutover are verified, add live Relay replay.
 
 ## Phase completion rule
 

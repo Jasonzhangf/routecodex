@@ -82,7 +82,6 @@ fn resp03_anthropic_signature_survives_govern_path() {
         payload,
         V3HubEntryProtocol::Responses,
         V3HubProviderWireProtocol::Anthropic,
-        V3HubContinuationOwnership::New,
         V3HubExecutionMode::Relay,
         V3HubInvocationSource::Client,
         V3HubTransportIntent::Json,

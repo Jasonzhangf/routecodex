@@ -140,7 +140,6 @@ pub(crate) fn apply_v3_responses_direct_web_search_json_response_control(
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             V3HubProviderWireProtocol::Responses,
-            V3HubContinuationOwnership::RemoteProviderOwned,
             V3HubExecutionMode::Direct,
             V3HubInvocationSource::Client,
             V3HubTransportIntent::Json,

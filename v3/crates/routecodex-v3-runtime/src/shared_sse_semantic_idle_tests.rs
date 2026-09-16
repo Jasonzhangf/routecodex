@@ -10,7 +10,6 @@ async fn direct_sse_projection_does_not_keep_alive_on_comments_only() {
                 index.wrapping_add(1),
             ))
         })),
-        V3SseRemoteContinuationObservationState::default(),
         V3RuntimeStreamObservation::default(),
         std::time::Duration::from_millis(20),
     );

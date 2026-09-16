@@ -57,8 +57,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     let toolreason_observation_session_id =
         resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
             .session_id;
-    let responses_entry_facts = (entry_protocol == "responses")
-        .then(|| V3ResponsesContinuationEntryFacts::project(&payload));
+    let responses_entry_facts =
+        (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
     let requested_stream = v3_request_wants_sse(&request_headers, &payload);
     let execution_id = state.debug.next_execution_id(&state.server.id);
     let trace_scope = match state
@@ -95,110 +95,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             "V3Server03HttpRequestRaw",
             error,
         ));
-    }
-    if entry_protocol == "responses" {
-        let owner_resolution_context =
-            match build_responses_previous_response_owner_resolution_context(
-                &request_headers,
-                Some(&payload),
-                &request_id,
-                &state.server,
-                &path,
-                responses_entry_facts
-                    .as_ref()
-                    .expect("Responses entry facts are projected for Responses requests"),
-            ) {
-                Ok(context) => context,
-                Err(message) => {
-                    let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    );
-                    if let Some(response) = record_and_emit_v3_error_projection(
-                        &state,
-                        &trace_scope,
-                        V3ErrorProjectionConsoleInput {
-                            endpoint: &path,
-                            request_id: &request_id,
-                            entry_protocol: &entry_protocol,
-                            session_id: None,
-                            status: frame.status,
-                            error_chain: &frame.error_chain,
-                            body: match &frame.body {
-                                V3Server16Body::Json(value) => Some(value),
-                                V3Server16Body::Bytes(_)
-                                | V3Server16Body::Sse(_)
-                                | V3Server16Body::CommittedSse(_) => None,
-                            },
-                            project_path: resolve_v3_console_project_path(
-                                &request_headers,
-                                &payload,
-                            )
-                            .as_deref(),
-                        },
-                    ) {
-                        return response;
-                    }
-                    let frame = project_v3_responses_error_frame_for_request_if_sse(
-                        frame,
-                        &request_headers,
-                        Some(&payload),
-                    );
-                    return responses_direct_output_response(frame, client_keepalive_interval);
-                }
-            };
-        match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            responses_entry_facts
-                .as_ref()
-                .and_then(|facts| facts.previous_response_id.as_deref()),
-            execution_mode,
-            &state.responses_direct_continuation,
-            &state.responses_relay_local_continuation,
-            owner_resolution_context
-                .as_ref()
-                .map(|context| &context.direct_scope),
-            owner_resolution_context
-                .as_ref()
-                .map(|context| &context.relay_scope),
-            owner_resolution_context
-                .as_ref()
-                .map(|context| context.now_epoch_ms)
-                .unwrap_or(0),
-        ) {
-            Ok(resolved) => execution_mode = resolved,
-            Err(error) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
-                    project_v3_responses_previous_response_owner_resolution_error(error),
-                );
-                if let Some(response) = record_and_emit_v3_error_projection(
-                    &state,
-                    &trace_scope,
-                    V3ErrorProjectionConsoleInput {
-                        endpoint: &path,
-                        request_id: &request_id,
-                        entry_protocol: &entry_protocol,
-                        session_id: None,
-                        status: frame.status,
-                        error_chain: &frame.error_chain,
-                        body: match &frame.body {
-                            V3Server16Body::Json(value) => Some(value),
-                            V3Server16Body::Bytes(_)
-                            | V3Server16Body::Sse(_)
-                            | V3Server16Body::CommittedSse(_) => None,
-                        },
-                        project_path: resolve_v3_console_project_path(&request_headers, &payload)
-                            .as_deref(),
-                    },
-                ) {
-                    return response;
-                }
-                let frame = project_v3_responses_error_frame_for_request_if_sse(
-                    frame,
-                    &request_headers,
-                    Some(&payload),
-                );
-                return responses_direct_output_response(frame, client_keepalive_interval);
-            }
-        }
     }
     let provider_failure_session_scope =
         match get_failure_session_scope(&state.server, &request_headers, &request_id) {
@@ -424,15 +320,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         && entry_protocol == "responses"
         && execution_mode == V3EntryProtocolExecutionMode::Relay
     {
-        let continuation_scope = match build_responses_relay_local_continuation_scope(
+        let server_tool_scope = match build_responses_relay_server_tool_scope(
             &request_headers,
             Some(&payload),
             &request_id,
             &state.server,
             &path,
-            responses_entry_facts
-                .as_ref()
-                .expect("Responses entry facts are projected for Responses requests"),
         ) {
             Ok(scope) => scope,
             Err(message) => {
@@ -447,62 +340,50 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 );
             }
         };
-        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        {
-            Ok(duration) => duration.as_millis() as u64,
-            Err(error) => {
-                return foundation_output_response(project_v3_debug_failure(
-                    "V3HubReqContinuation03Classified",
-                    V3DebugError::MalformedFixture(format!(
-                        "system time precedes Unix epoch: {error}"
-                    )),
-                ));
-            }
-        };
-        let output = match execute_v3_responses_relay_dry_run_orchestration_outcome_with_local_continuation_and_server_tool_state(
-            &state.manifest,
-            V3ResponsesRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                failure_session_scope: provider_failure_session_scope.clone(),
-                request_id: request_id.clone(),
-                payload: payload.clone(),
-            },
-            &state.responses_relay_local_continuation,
-            &state.responses_relay_server_tool_state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .await
-        {
-            V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
-            V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
-                let fixture = V3DryRunFixture {
-                    fixture_id: request_id.clone(),
+        let output =
+            match execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
+                &state.manifest,
+                V3ResponsesRelayRuntimeInput {
                     server_id: state.server.id.clone(),
-                    method: method.clone(),
-                    path: path.clone(),
-                    request_payload: handoff.request_payload,
-                    response_payload: json!({
-                        "object": "response",
-                        "status": "completed",
-                        "output_text": "routecodex provider-request dry-run stopped before provider send",
-                        "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-                    }),
-                };
-                let mut output = execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                    fixture,
-                    &state.manifest,
-                    &state.debug,
-                    &handoff.plan,
-                )
-                .await;
-                prepend_v3_protocol_plan_trace_to_foundation_output(
-                    &mut output,
-                    &handoff.node_trace,
-                );
-                output
-            }
-        };
+                    failure_session_scope: provider_failure_session_scope.clone(),
+                    request_id: request_id.clone(),
+                    payload: payload.clone(),
+                },
+                &state.responses_relay_server_tool_state,
+                server_tool_scope,
+            )
+            .await
+            {
+                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
+                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
+                    let fixture = V3DryRunFixture {
+                        fixture_id: request_id.clone(),
+                        server_id: state.server.id.clone(),
+                        method: method.clone(),
+                        path: path.clone(),
+                        request_payload: handoff.request_payload,
+                        response_payload: json!({
+                            "object": "response",
+                            "status": "completed",
+                            "output_text": "routecodex provider-request dry-run stopped before provider send",
+                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                        }),
+                    };
+                    let mut output =
+                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                            fixture,
+                            &state.manifest,
+                            &state.debug,
+                            &handoff.plan,
+                        )
+                        .await;
+                    prepend_v3_protocol_plan_trace_to_foundation_output(
+                        &mut output,
+                        &handoff.node_trace,
+                    );
+                    output
+                }
+            };
         let raw_input_items = payload
             .get("input")
             .and_then(Value::as_array)
@@ -903,15 +784,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         );
     }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let continuation_scope = match build_responses_relay_local_continuation_scope(
+        let server_tool_scope = match build_responses_relay_server_tool_scope(
             &request_headers,
             Some(&payload),
             &request_id,
             &state.server,
             &path,
-            responses_entry_facts
-                .as_ref()
-                .expect("Responses entry facts are projected for Responses requests"),
         ) {
             Ok(scope) => scope,
             Err(message) => {
@@ -924,18 +802,6 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     Some(&payload),
                     request_console_project_path.as_deref(),
                 );
-            }
-        };
-        let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        {
-            Ok(duration) => duration.as_millis() as u64,
-            Err(error) => {
-                return foundation_output_response(project_v3_debug_failure(
-                    "V3HubReqContinuation03Classified",
-                    V3DebugError::MalformedFixture(format!(
-                        "system time precedes Unix epoch: {error}"
-                    )),
-                ));
             }
         };
         let console_payload = payload.clone();
@@ -963,24 +829,20 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let capture_provider_response = true;
         let mut output = if capture_provider_request || capture_provider_response {
             match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_provider_snapshots_and_initial_target(
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalServerToolInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_server_tool_state,
-                        continuation_scope.clone(),
-                        now_epoch_ms,
-                    )
-                    .with_provider_failure_event_sink(provider_failure_event_sink.clone())
-                    .with_route_selection_event_sink(route_selection_event_sink.clone()),
+                    &state.responses_relay_server_tool_state,
+                    server_tool_scope.clone(),
                     V3ResponsesRelayProviderSnapshotCapture::new(
                         capture_provider_request,
                         capture_provider_response,
                     ),
-                    plan.decision.target.clone(),
-                    plan.expanded.clone(),
+                    Some(provider_failure_event_sink.clone()),
+                    Some(route_selection_event_sink.clone()),
+                    Some(plan.decision.target.clone()),
+                    Some(plan.expanded.clone()),
                     BTreeSet::new(),
                     None,
                     None,
@@ -996,22 +858,23 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_provider_snapshots(
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalServerToolInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_server_tool_state,
-                        continuation_scope.clone(),
-                        now_epoch_ms,
-                    )
-                    .with_provider_failure_event_sink(provider_failure_event_sink.clone())
-                    .with_route_selection_event_sink(route_selection_event_sink.clone()),
+                    &state.responses_relay_server_tool_state,
+                    server_tool_scope.clone(),
                     V3ResponsesRelayProviderSnapshotCapture::new(
                         capture_provider_request,
                         capture_provider_response,
                     ),
+                    Some(provider_failure_event_sink.clone()),
+                    Some(route_selection_event_sink.clone()),
+                    None,
+                    None,
+                    BTreeSet::new(),
+                    None,
+                    None,
                 )
                 .await
                 {
@@ -1021,20 +884,17 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         } else {
             match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
+                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalServerToolInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_server_tool_state,
-                        continuation_scope.clone(),
-                        now_epoch_ms,
-                    )
-                    .with_provider_failure_event_sink(provider_failure_event_sink.clone())
-                    .with_route_selection_event_sink(route_selection_event_sink.clone()),
-                    plan.decision.target.clone(),
-                    plan.expanded.clone(),
+                    &state.responses_relay_server_tool_state,
+                    server_tool_scope.clone(),
+                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
+                    Some(provider_failure_event_sink.clone()),
+                    Some(route_selection_event_sink.clone()),
+                    Some(plan.decision.target.clone()),
+                    Some(plan.expanded.clone()),
                     BTreeSet::new(),
                     None,
                     None,
@@ -1050,18 +910,20 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     }
                     Err(error) => project_v3_responses_relay_runtime_failure(error, None),
                 },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input(
+                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
                     &state.manifest,
                     runtime_input,
                     &state.provider_health,
-                    V3ResponsesRelayLocalServerToolInput::new(
-                        &state.responses_relay_local_continuation,
-                        &state.responses_relay_server_tool_state,
-                        continuation_scope,
-                        now_epoch_ms,
-                    )
-                    .with_provider_failure_event_sink(provider_failure_event_sink.clone())
-                    .with_route_selection_event_sink(route_selection_event_sink.clone()),
+                    &state.responses_relay_server_tool_state,
+                    server_tool_scope,
+                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
+                    Some(provider_failure_event_sink.clone()),
+                    Some(route_selection_event_sink.clone()),
+                    None,
+                    None,
+                    BTreeSet::new(),
+                    None,
+                    None,
                 )
                 .await
                 {

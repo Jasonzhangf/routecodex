@@ -28,7 +28,6 @@ impl V3HubReqOutbound07ProviderSemantic {
             .previous
             .previous
             .previous
-            .previous
             .entry_protocol
     }
 

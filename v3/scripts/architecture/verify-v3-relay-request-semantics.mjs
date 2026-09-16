@@ -49,9 +49,7 @@ function filesBelow(relative) {
 }
 
 const req02 = functionBody(reqInbound02, 'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01');
-const req03 = functionBody(request, 'fn classify_continuation');
 const req04 = functionBody(request, 'fn run_from_normalized_with_events');
-const restore = functionBody(request, 'fn restore_local_context_at_req04');
 const servertool = functionBody(request, 'fn run_servertool_profile');
 
 requireAll(req02, 'Req02 lossless Chat normalization', [
@@ -64,50 +62,19 @@ forbidAll(req02, 'Req02 lossless Chat normalization', [
   /servertool/i,
 ]);
 
-requireAll(req03, 'Req03 continuation classification', [
-  'V3HubContinuationOwnership::New',
-  'V3HubContinuationOwnership::RemoteProviderOwned',
-  'V3HubContinuationOwnership::RouteCodexLocalOwned',
-  'ContinuationScopeMismatch',
-]);
-forbidAll(req03, 'Req03 continuation classification', [
-  /Arc::clone/,
-  /canonical_context/,
-  /restore/i,
-  /servertool/i,
-  /govern_tool_outputs/,
-  /build_v3_hub_req_chat_process_04/,
-]);
-
 requireAll(req04, 'Req04 Chat Process governance', [
-  'restore_local_context_at_req04',
   'govern_tool_outputs',
   'run_servertool_profile',
   'Req04Entry',
   'Req04Exit',
-  'build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03',
+  'build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02',
 ]);
-if (req04.indexOf('restore_local_context_at_req04') > req04.indexOf('run_servertool_profile')) {
-  fail('Req04 Chat Process governance: servertool ran before local continuation restore');
-}
 forbidAll(req04, 'Req04 Chat Process governance', [
   /build_v3_hub_req_execution_05/,
   /V3HubReqExecution05Planned/,
   /provider[_-]?family/i,
   /model_prefix|starts_with\(/,
-]);
-
-requireAll(restore, 'Req04 local restore', [
-  'V3HubContinuationOwnership::RouteCodexLocalOwned',
-  'LocalContext::Req04Store',
-  'restore_local_context_from_store_at_req04',
-  'LocalContextMissingAtRestore',
-]);
-if ((restore.match(/restore_local_context_from_store_at_req04/g) ?? []).length < 1) fail('Req04 local restore must restore store-backed context inside Req04 owner');
-forbidAll(restore, 'Req04 local restore', [
-  /serde_json::(?:to_value|from_value|to_string|from_str|to_vec|from_slice)/,
-  /payload\.clone\s*\(/,
-  /Value::clone/,
+  /restore_local_context|continuation|Continuation/,
 ]);
 
 requireAll(servertool, 'Req04 static servertool hook profile', [
@@ -134,8 +101,6 @@ requireAll(request, requestPath, [
   'V3HubRelayRequestHookEvent::Req01Exit',
   'V3HubRelayRequestHookEvent::Req02Entry',
   'V3HubRelayRequestHookEvent::Req02Exit',
-  'V3HubRelayRequestHookEvent::Req03Entry',
-  'V3HubRelayRequestHookEvent::Req03Exit',
   'V3HubRelayRequestHookEvent::Req04Entry',
   'V3HubRelayRequestHookEvent::Req04Exit',
 ]);

@@ -344,7 +344,6 @@ pub fn push_sse_response_chain_trace(trace: &mut Vec<&'static str>) {
         "ProviderRespCompat02ProviderCompat",
         "V3HubRespInbound02Normalized",
         "V3HubRespChatProcess03Governed",
-        "V3HubRespContinuation04Committed",
         "V3HubRespOutbound05ClientSemantic",
         "V3ServerRespOutbound06ClientFrame",
     ]);

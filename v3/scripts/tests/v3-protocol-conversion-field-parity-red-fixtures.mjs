@@ -53,7 +53,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
-  'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+  'v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs',
@@ -661,8 +661,8 @@ const cases = [
   {
     name: 'Protocol parity incorrectly claims MetadataCenter owner',
     file: 'docs/architecture/v3-function-map.yml',
-    from: '  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs\n  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
-    to: '  - v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs\n  - MetadataCenter\n  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
+    from: '  - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs\n  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
+    to: '  - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs\n  - MetadataCenter\n  - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
     diagnostic: /MetadataCenter|metadata_center/,
   },
   {
@@ -700,7 +700,7 @@ const cases = [
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
     callee_symbol: project_v3_responses_arguments_to_openai_chat_wire`,
     to: `caller_symbol: responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect
-    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs
+    caller_file: v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
     callee_symbol: project_v3_responses_arguments_to_openai_chat_wire`,
     diagnostic: /malformed-arguments runtime edge caller_symbol|build_v3_openai_chat_assistant_tool_call_message/u,
   },
@@ -749,7 +749,7 @@ const cases = [
   },
   {
     name: 'Malformed OpenAI Chat arguments incorrectly assert Error05 reselect',
-    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_local_continuation_integration.rs',
+    file: 'v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs',
     from: `assert!(
         !result.node_trace.contains(&"V3TargetLocalReselected"),
         "unpaired malformed OpenAI Chat arguments must not trigger Error05 reselect: {:?}",

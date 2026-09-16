@@ -1,21 +1,16 @@
-pub(crate) use crate::{
-    V3LocalContinuationError, V3LocalContinuationScopeKey, V3LocalContinuationStore,
-};
-
 mod common;
 pub(crate) use common::{
     v3_feature_enabled_for_server, v3_tool_thinking_enabled_for_server,
-    v3_toolreason_client_projection_enabled_for_server, V3HubOpaquePayload,
-    V3HubRelayCanonicalResponseContext, V3HubResponsePayload, V3HubResponseToolCall,
+    v3_toolreason_client_projection_enabled_for_server, V3HubOpaquePayload, V3HubResponsePayload,
+    V3HubResponseToolCall,
 };
 pub use common::{
-    V3HubContinuationCommit, V3HubContinuationOwnership, V3HubEntryProtocol, V3HubInvocationSource,
-    V3HubRelayToolKind, V3HubRequestSemanticProtocol, V3HubResponseNormalizedKind,
-    V3HubResponseTerminality, V3HubServertoolResponseAction, V3HubTargetResolution,
-    V3HubTransportIntent, V3ProviderCompatProfileId, V3ServerToolCenter, V3ServerToolCenterKey,
-    V3ServerToolCenterPoisoned, V3ServerToolCenterWriteAction, V3ServerToolCenterWriteAuditEntry,
-    V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState, V3ServerToolName,
-    V3WebSearchCenterPhase, V3WebSearchCenterState,
+    V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayToolKind, V3HubRequestSemanticProtocol,
+    V3HubResponseNormalizedKind, V3HubResponseTerminality, V3HubServertoolResponseAction,
+    V3HubTargetResolution, V3HubTransportIntent, V3ProviderCompatProfileId, V3ServerToolCenter,
+    V3ServerToolCenterKey, V3ServerToolCenterPoisoned, V3ServerToolCenterWriteAction,
+    V3ServerToolCenterWriteAuditEntry, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
+    V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
 pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol};
 mod provider_compat_error;
@@ -86,11 +81,8 @@ mod req_inbound_01_client_raw;
 pub use req_inbound_01_client_raw::*;
 mod req_inbound_02_normalized;
 pub use req_inbound_02_normalized::*;
-mod req_continuation_03_classified;
-pub use req_continuation_03_classified::*;
 mod req_chat_process_04_governed;
-pub use req_chat_process_04_governed::build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03;
-pub(crate) use req_chat_process_04_governed::merge_v3_relay_restored_local_context_at_req04;
+pub use req_chat_process_04_governed::build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02;
 pub use req_chat_process_04_governed::V3HubReqChatProcess04Governed;
 mod req_execution_05_planned;
 pub use req_execution_05_planned::*;
@@ -116,16 +108,7 @@ mod resp_inbound_02_normalized;
 pub use resp_inbound_02_normalized::*;
 mod resp_chat_process_03_governed;
 pub use resp_chat_process_03_governed::*;
-mod resp_continuation_04_committed;
-pub use resp_continuation_04_committed::{
-    build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03,
-    V3HubRespContinuation04Committed, V3HubRespContinuation04Outcome,
-};
-pub(crate) use resp_continuation_04_committed::{
-    build_v3_relay_local_continuation_context_at_resp04,
-    build_v3_relay_local_response_continuation_context_at_resp04,
-    commit_or_release_v3_relay_local_continuation_at_resp04, commit_v3_hub_relay_response,
-};
+pub use responses_relay_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state;
 mod resp_outbound_05_client_semantic;
 pub use resp_outbound_05_client_semantic::*;
 mod server_resp_outbound_06_client_frame;

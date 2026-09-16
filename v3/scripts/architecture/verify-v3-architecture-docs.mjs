@@ -51,7 +51,6 @@ const requiredFiles = [
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
   'docs/architecture/wiki/v3-config-server-full-function.md',
   'docs/architecture/wiki/v3-config-server-full-function.html',
-  'docs/architecture/wiki/v3-responses-direct-remote-continuation.html',
 ];
 const requiredNodes = [
   'V3Config01FileSource', 'V3Config02AuthoringParsed', 'V3Config03SchemaValidated',
@@ -113,39 +112,34 @@ const hubV1AnchoredResourceIds = new Set([
   'v3.config.hub_pipeline_declarations',
   'v3.hub.static_hook_registry',
   'v3.hub.entry_protocol',
-  'v3.hub.continuation_ownership',
   'v3.hub.execution_plan',
   'v3.hub.resolved_target',
   'v3.hub.provider_protocol',
   'v3.request.provider_semantic',
   'v3.hub.provider_wire_payload',
   'v3.hub.response_semantic',
-  'v3.continuation.local_context_truth',
 ]);
 const hubV1PendingResourceIds = new Set([]);
 const hubV1AnchoredStepIds = new Set([
   'v3-hub-req-01', 'v3-hub-req-02', 'v3-hub-req-03', 'v3-hub-req-04',
   'v3-hub-req-05', 'v3-hub-req-06', 'v3-hub-req-07', 'v3-hub-req-08',
-  'v3-hub-req-09',
   'v3-hub-resp-01', 'v3-hub-resp-02', 'v3-hub-resp-03', 'v3-hub-resp-04',
-  'v3-hub-resp-05', 'v3-hub-resp-06',
+  'v3-hub-resp-05',
 ]);
 const hubV1EdgePairs = new Map([
   ['v3-hub-req-01', ['V3HubReqInbound01ClientRaw', 'V3HubReqInbound02Normalized']],
-  ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqContinuation03Classified']],
-  ['v3-hub-req-03', ['V3HubReqContinuation03Classified', 'V3HubReqChatProcess04Governed']],
-  ['v3-hub-req-04', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned']],
-  ['v3-hub-req-05', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved']],
-  ['v3-hub-req-06', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic']],
-  ['v3-hub-req-07', ['V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat']],
-  ['v3-hub-req-08', ['ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload']],
-  ['v3-hub-req-09', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest']],
+  ['v3-hub-req-02', ['V3HubReqInbound02Normalized', 'V3HubReqChatProcess04Governed']],
+  ['v3-hub-req-03', ['V3HubReqChatProcess04Governed', 'V3HubReqExecution05Planned']],
+  ['v3-hub-req-04', ['V3HubReqExecution05Planned', 'V3HubReqTarget06Resolved']],
+  ['v3-hub-req-05', ['V3HubReqTarget06Resolved', 'V3HubReqOutbound07ProviderSemantic']],
+  ['v3-hub-req-06', ['V3HubReqOutbound07ProviderSemantic', 'ProviderReqCompat06ProviderCompat']],
+  ['v3-hub-req-07', ['ProviderReqCompat06ProviderCompat', 'V3ProviderReqOutbound08WirePayload']],
+  ['v3-hub-req-08', ['V3ProviderReqOutbound08WirePayload', 'V3ProviderReqOutbound09TransportRequest']],
   ['v3-hub-resp-01', ['V3ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat']],
   ['v3-hub-resp-02', ['ProviderRespCompat02ProviderCompat', 'V3HubRespInbound02Normalized']],
   ['v3-hub-resp-03', ['V3HubRespInbound02Normalized', 'V3HubRespChatProcess03Governed']],
-  ['v3-hub-resp-04', ['V3HubRespChatProcess03Governed', 'V3HubRespContinuation04Committed']],
-  ['v3-hub-resp-05', ['V3HubRespContinuation04Committed', 'V3HubRespOutbound05ClientSemantic']],
-  ['v3-hub-resp-06', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
+  ['v3-hub-resp-04', ['V3HubRespChatProcess03Governed', 'V3HubRespOutbound05ClientSemantic']],
+  ['v3-hub-resp-05', ['V3HubRespOutbound05ClientSemantic', 'V3ServerRespOutbound06ClientFrame']],
 ]);
 const clientBodyProjectionResources = new Set([
   'v3.response.client_payload',
@@ -189,13 +183,10 @@ const hubV1ContractDocs = [
 const hubV1CanonicalContract = read('docs/design/v3-hub-pipeline-static-skeleton-contract.md');
 const hubV1ExistingPathAudit = read('docs/design/v3-existing-hub-provider-path-audit.md');
 for (const phrase of [
-  'V3HubReqContinuation03Classified',
   'V3HubReqChatProcess04Governed',
   'V3HubReqExecution05Planned',
   'V3HubReqTarget06Resolved',
   'V3HubRespChatProcess03Governed',
-  'V3HubRespContinuation04Committed',
-  'restore(normalize(save(context))) == context',
   'Static hook slots',
   'Provider wire protocol',
   'servertool followup re-entry',
@@ -231,16 +222,18 @@ for (const phrase of [
   'feature_id:v3.hub_relay_gate_review_surface',
   'V3HubReqChatProcess04Governed',
   'V3HubRespChatProcess03Governed',
-  'restore(normalize(save(context))) == context',
-  'Between save and restore',
-  'semantic-equivalent normalization',
   'Servertool is a Chat Process hook profile',
   'Runtime consumes only Manifest resources',
   'Live Relay remains pending',
+  'Continuation retirement',
+  'previous_response_id',
+  'No request-side restore',
 ]) if (!hubRelayContractDocs.includes(phrase)) fail(`Relay contract docs: missing invariant ${phrase}`);
 for (const phrase of [
   'feature_id:v3.hub_relay_request_semantics',
-  'semantic-equivalent normalization',
+  'Continuation retirement',
+  'previous_response_id',
+  'No request-side restore',
 ]) if (!hubRelayContract.includes(phrase)) fail(`Relay contract docs: missing invariant ${phrase}`);
 if (!hubRelayContractDocs.includes('Do not create a second lifecycle')) {
   fail('Relay contract docs: missing second lifecycle ban');
@@ -248,6 +241,11 @@ if (!hubRelayContractDocs.includes('Do not create a second lifecycle')) {
 if (!hubRelayContractDocs.includes('dynamic hook discovery')) {
   fail('Relay contract docs: missing dynamic hook discovery ban');
 }
+for (const forbidden of [
+  /V3HubReqContinuation03Classified/,
+  /V3HubRespContinuation04Committed/,
+  /restore\(normalize\(save\(context\)\)\)/,
+]) if (forbidden.test(hubRelayContractDocs)) fail(`Relay contract docs: retired continuation residue ${forbidden}`);
 
 for (const file of requiredFiles.filter((entry) => entry.endsWith('.md'))) {
   const text = read(file);

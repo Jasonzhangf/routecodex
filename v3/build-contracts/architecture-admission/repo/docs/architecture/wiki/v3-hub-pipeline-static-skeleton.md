@@ -13,8 +13,7 @@ Relay contract: [V3 Hub Relay Fixed Pipeline Review](v3-hub-relay-fixed-pipeline
 ```mermaid
 flowchart TD
   R1[V3HubReqInbound01ClientRaw] --> R2[V3HubReqInbound02Normalized]
-  R2 --> R3[V3HubReqContinuation03Classified]
-  R3 --> R4[V3HubReqChatProcess04Governed]
+  R2 --> R4[V3HubReqChatProcess04Governed]
   R4 --> R5[V3HubReqExecution05Planned]
   R5 --> R6[V3HubReqTarget06Resolved]
   R6 --> R7[V3HubReqOutbound07ProviderSemantic]
@@ -23,8 +22,7 @@ flowchart TD
   R9 --> P1[V3ProviderRespInbound01Raw]
   P1 --> S2[V3HubRespInbound02Normalized]
   S2 --> S3[V3HubRespChatProcess03Governed]
-  S3 --> S4[V3HubRespContinuation04Committed]
-  S4 --> S5[V3HubRespOutbound05ClientSemantic]
+  S3 --> S5[V3HubRespOutbound05ClientSemantic]
   S5 --> S6[V3ServerRespOutbound06ClientFrame]
 ```
 
@@ -33,7 +31,6 @@ flowchart TD
 | Axis | Closed values | Must not be inferred from |
 | --- | --- | --- |
 | Entry protocol | Responses, Anthropic, Gemini, OpenAI Chat | Provider identity |
-| Continuation ownership | new, remote-provider-owned, RouteCodex-local-owned | GPT family or wire protocol |
 | Execution mode | Direct, Relay | same-protocol equality |
 | Provider wire protocol | Responses, Anthropic, Gemini, OpenAI Chat | Direct/Relay mode |
 
@@ -44,23 +41,16 @@ Cross-cutting branches are fixed too: client/servertool/Dry Run invocation sourc
 transport, and success/global-Error outcome. They occupy existing hook slots and never add a
 lifecycle or response exit.
 
-## Immutable interval
+## Continuation retirement
 
-```mermaid
-flowchart LR
-  Save[V3HubRespContinuation04Committed<br/>LocalContext save]
-  Store[Immutable envelope<br/>normalize/store/scope only]
-  Restore[V3HubReqChatProcess04Governed<br/>LocalContext restore]
-  Save --> Store --> Restore
-```
-
-No business logic, tool/history repair, request rebuild, routing, Provider adaptation, Debug replay,
-or fallback is allowed between save and restore.
+Responses continuation is retired in V3. A non-empty `previous_response_id` fails before routing or
+provider transport. There is no local context save/restore, remote locator, immutable interval, or
+continuation-owned target path.
 
 ## Current-state review
 
 - P6 Responses Direct: implemented and verified, but not the final Hub topology.
-- P6 freeze: source gate plus eight mutation fixtures reject Chat Process, Relay, continuation,
+- P6 freeze: source gate plus mutation fixtures reject Chat Process, Relay, continuation revival,
   additional protocol, provider-specific branching, dynamic hook, second lifecycle, and second
   response exit expansion.
 - Hub v1 H1 nodes: implemented in Rust as opaque types with private fields. Thirteen adjacent
@@ -72,8 +62,8 @@ or fallback is allowed between save and restore.
 - Config declarations: `V3Config02AuthoringParsed -> V3Config04ResourceRegistryBuilt ->
   V3Config05ManifestPublished` publishes the closed skeleton, protocols, hooks, capabilities, and
   allowed server execution facts. It publishes no selected request branch.
-- Remote continuation: pending hook implementation.
-- Local continuation/Relay: pending hook implementation.
+- Responses continuation: retired; non-empty `previous_response_id` fails explicitly.
+- Relay: pending hook implementation.
 - Other protocols: pending hook implementation.
 - P6 deletion: required after Hub v1 Direct cutover; permanent dual paths are forbidden.
 

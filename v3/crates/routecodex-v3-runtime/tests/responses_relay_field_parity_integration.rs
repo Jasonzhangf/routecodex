@@ -1,14 +1,17 @@
-include!("hub_relay_runtime_closeout.rs");
+//! Responses -> OpenAI Chat provider-wire field parity.
+//!
+//! Continuation was removed from V3: these cases only pin request/response field
+//! projection and malformed-argument preservation on the current Relay runtime.
 
 use routecodex_v3_runtime::{
     characterize_v3_openai_chat_client_input_to_hub_semantic,
     characterize_v3_openai_chat_hub_response_semantic_to_client_projection,
     characterize_v3_openai_chat_hub_semantic_to_provider_wire,
     characterize_v3_openai_chat_provider_raw_to_hub_response_semantic,
-    execute_v3_responses_relay_runtime_with_local_continuation, V3HubEntryProtocol,
-    V3HubProviderWireProtocol, V3HubTransportIntent, V3ResponsesRelayLocalContinuationScope,
-    V3ResponsesRelayLocalContinuationState,
+    execute_v3_responses_relay_runtime, V3HubEntryProtocol, V3HubProviderWireProtocol,
+    V3HubTransportIntent,
 };
+use std::sync::Mutex;
 
 struct ProviderProjectionJsonTransport {
     captures: Mutex<Vec<(String, serde_json::Value)>>,
@@ -44,8 +47,8 @@ impl routecodex_v3_provider_responses::ResponsesTransport for ProviderProjection
 }
 
 fn manifest_openai_chat_wire() -> routecodex_v3_config::V3Config05ManifestPublished {
-    compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
+    routecodex_v3_config::compile_v3_config_05_manifest(
+        routecodex_v3_config::parse_v3_config_02_authoring(
             r#"
 version = 3
 [servers.chatwire]
@@ -57,7 +60,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.chatwire]
 type = "openai_chat"
@@ -82,8 +84,8 @@ targets = [{ kind = "provider_model", provider = "chatwire", model = "chat-wire-
 fn responses_relay_input(
     request_id: &str,
     payload: serde_json::Value,
-) -> V3ResponsesRelayRuntimeInput {
-    V3ResponsesRelayRuntimeInput {
+) -> routecodex_v3_runtime::V3ResponsesRelayRuntimeInput {
+    routecodex_v3_runtime::V3ResponsesRelayRuntimeInput {
         server_id: "chatwire".into(),
         failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
             "test-server",
@@ -96,33 +98,8 @@ fn responses_relay_input(
     }
 }
 
-fn responses_scope(session_id: &str) -> V3ResponsesRelayLocalContinuationScope {
-    V3ResponsesRelayLocalContinuationScope::responses(
-        "/v1/responses",
-        session_id,
-        format!("conversation-{session_id}"),
-        5555,
-        "chatwire",
-    )
-}
-
 fn provider_projection_body(capture: &(String, serde_json::Value)) -> &serde_json::Value {
     &capture.1
-}
-
-#[test]
-fn json_two_turn_restores_tool_call_pairs_output_and_preserves_tools() {
-    local_continuation_servertool_roundtrip_is_runtime_e2e();
-}
-
-#[test]
-fn json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback() {
-    responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nodes();
-}
-
-#[test]
-fn wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context() {
-    responses_relay_provider_duplicate_tool_identity_projects_typed_error_after_exhaustion();
 }
 
 #[test]
@@ -182,8 +159,7 @@ async fn responses_openai_chat_field_parity_request_matrix_runtime() {
             "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
         }),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let result = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-responses-openai-chat-field-request",
@@ -208,9 +184,6 @@ async fn responses_openai_chat_field_parity_request_matrix_runtime() {
             }),
         ),
         &transport,
-        &state,
-        responses_scope("session-responses-openai-chat-field-request"),
-        12_000,
     )
     .await
     .expect("Responses -> OpenAI Chat request field parity must execute");
@@ -239,8 +212,7 @@ async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_be
         captures: Mutex::new(Vec::new()),
         response: serde_json::json!({}),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let error = execute_v3_responses_relay_runtime_with_local_continuation(
+    let error = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-responses-openai-chat-client-metadata-reject",
@@ -252,9 +224,6 @@ async fn responses_openai_chat_field_parity_rejects_malformed_client_metadata_be
             }),
         ),
         &transport,
-        &state,
-        responses_scope("session-responses-openai-chat-client-metadata-reject"),
-        12_000,
     )
     .await
     .expect_err("malformed client_metadata must fail before provider send");
@@ -284,8 +253,7 @@ async fn responses_openai_chat_field_parity_paired_malformed_arguments_preserve_
             "choices":[{"index":0,"message":{"role":"assistant","content":"projected paired malformed arguments"},"finish_reason":"stop"}]
         }),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let result = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-malformed-feedback",
@@ -299,9 +267,6 @@ async fn responses_openai_chat_field_parity_paired_malformed_arguments_preserve_
             }),
         ),
         &transport,
-        &state,
-        responses_scope("session-malformed-feedback"),
-        12_000,
     )
     .await
     .expect("paired malformed OpenAI Chat arguments must preserve their exact string without provider reselect");
@@ -357,14 +322,13 @@ async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_preserv
     let transport = ProviderProjectionJsonTransport {
         captures: Mutex::new(Vec::new()),
         response: serde_json::json!({
-            "id":"chatcmpl-malformed-projected-unpaired",
+            "id":"chatcmml-malformed-projected-unpaired",
             "object":"chat.completion",
             "model":"chat-wire-model",
             "choices":[{"index":0,"message":{"role":"assistant","content":"projected unpaired malformed arguments"},"finish_reason":"stop"}]
         }),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let result = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-malformed-unpaired",
@@ -375,9 +339,6 @@ async fn responses_openai_chat_field_parity_unpaired_malformed_arguments_preserv
             }),
         ),
         &transport,
-        &state,
-        responses_scope("session-malformed-unpaired"),
-        12_000,
     )
     .await
     .expect("unpaired malformed OpenAI Chat arguments must preserve their exact string without provider reselect");
@@ -421,8 +382,7 @@ async fn responses_openai_chat_field_parity_web_search_call_history_projects_too
             "choices":[{"index":0,"message":{"role":"assistant","content":"continued"},"finish_reason":"stop"}]
         }),
     };
-    let state = V3ResponsesRelayLocalContinuationState::default();
-    let result = execute_v3_responses_relay_runtime_with_local_continuation(
+    let result = execute_v3_responses_relay_runtime(
         &manifest_openai_chat_wire(),
         responses_relay_input(
             "req-responses-openai-chat-web-search-history",
@@ -436,9 +396,6 @@ async fn responses_openai_chat_field_parity_web_search_call_history_projects_too
             }),
         ),
         &transport,
-        &state,
-        responses_scope("session-responses-openai-chat-web-search-history"),
-        12_000,
     )
     .await
     .expect("Responses web_search_call history must reach OpenAI Chat provider wire");

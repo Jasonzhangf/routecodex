@@ -149,6 +149,18 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
+    if payload
+        .get("previous_response_id")
+        .is_some_and(|value| !value.is_null())
+    {
+        let _ = send_responses_websocket_error(
+            socket,
+            "invalid_request",
+            "Responses continuation is retired: previous_response_id is unsupported",
+        )
+        .await;
+        return Err(());
+    }
     let request_identity =
         match next_v3_console_request_identity(state, "/v1/responses", Some(&payload)) {
             Ok(identity) => identity,
@@ -159,51 +171,10 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
         };
     let request_id = request_identity.request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
-    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
+    let entry_facts = V3ResponsesEntryFacts::project(&payload);
     let protocol_plan = None;
-    let owner_resolution_context = match build_responses_previous_response_owner_resolution_context(
-        headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        "/v1/responses",
-        &entry_facts,
-    ) {
-        Ok(context) => context,
-        Err(message) => {
-            let _ = send_responses_websocket_error(socket, "invalid_request", message).await;
-            return Err(());
-        }
-    };
     let effective_execution_mode =
-        match resolve_v3_responses_previous_response_owner_execution_mode_at_req03(
-            entry_facts.previous_response_id.as_deref(),
-            execution_mode,
-            &state.responses_direct_continuation,
-            &state.responses_relay_local_continuation,
-            owner_resolution_context
-                .as_ref()
-                .map(|context| &context.direct_scope),
-            owner_resolution_context
-                .as_ref()
-                .map(|context| &context.relay_scope),
-            owner_resolution_context
-                .as_ref()
-                .map(|context| context.now_epoch_ms)
-                .unwrap_or(0),
-        ) {
-            Ok(mode) => responses_effective_execution_mode_for_entry_facts(mode, &entry_facts),
-            Err(error) => {
-                let message = project_v3_responses_previous_response_owner_resolution_error(error)
-                    .body
-                    .pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Responses continuation owner resolution failed")
-                    .to_string();
-                let _ = send_responses_websocket_error(socket, "invalid_request", message).await;
-                return Err(());
-            }
-        };
+        responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts);
     match effective_execution_mode {
         V3EntryProtocolExecutionMode::Direct => {
             let outcome = execute_responses_direct_server_outcome(
@@ -275,14 +246,12 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     payload: Value,
     protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> V3ResponsesDirectServerOutcome {
-    let entry_facts = V3ResponsesContinuationEntryFacts::project(&payload);
-    let continuation_scope = match build_responses_relay_local_continuation_scope(
+    let server_tool_scope = match build_responses_relay_server_tool_scope(
         headers,
         Some(&payload),
         &request_id,
         &state.server,
         "/v1/responses",
-        &entry_facts,
     ) {
         Ok(scope) => scope,
         Err(message) => {
@@ -306,19 +275,6 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 );
             }
         };
-    let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_millis() as u64,
-        Err(error) => {
-            return V3ResponsesDirectServerOutcome::RelayOutput(
-                project_v3_responses_relay_runtime_failure(
-                    V3ResponsesRelayRuntimeError::ProviderWireEncoding(format!(
-                        "system time precedes Unix epoch: {error}"
-                    )),
-                    None,
-                ),
-            );
-        }
-    };
     let input = V3ResponsesRelayRuntimeInput {
         server_id: state.server.id.clone(),
         failure_session_scope: provider_failure_session_scope.clone(),
@@ -326,33 +282,42 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         payload: payload.clone(),
     };
     let output = match protocol_plan {
-        Some(plan) => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_server_tool_input_and_initial_target(
-            &state.manifest,
-            input,
-            &state.provider_health,
-            V3ResponsesRelayLocalServerToolInput::new(
-                &state.responses_relay_local_continuation,
+        Some(plan) => {
+            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+                &state.manifest,
+                input,
+                &state.provider_health,
                 &state.responses_relay_server_tool_state,
-                continuation_scope,
-                now_epoch_ms,
-            ),
-            plan.decision.target.clone(),
-            plan.expanded.clone(),
-            BTreeSet::new(),
-            None,
-            None,
-        )
-        .await,
-        None => execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state(
-            &state.manifest,
-            input,
-            &state.provider_health,
-            &state.responses_relay_local_continuation,
-            &state.responses_relay_server_tool_state,
-            continuation_scope,
-            now_epoch_ms,
-        )
-        .await,
+                server_tool_scope,
+                V3ResponsesRelayProviderSnapshotCapture::new(false, false),
+                None,
+                None,
+                Some(plan.decision.target.clone()),
+                Some(plan.expanded.clone()),
+                BTreeSet::new(),
+                None,
+                None,
+            )
+            .await
+        }
+        None => {
+            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+                &state.manifest,
+                input,
+                &state.provider_health,
+                &state.responses_relay_server_tool_state,
+                server_tool_scope,
+                V3ResponsesRelayProviderSnapshotCapture::new(false, false),
+                None,
+                None,
+                None,
+                None,
+                BTreeSet::new(),
+                None,
+                None,
+            )
+            .await
+        }
     };
     let mut relay_output = match output {
         Ok(output) => output,

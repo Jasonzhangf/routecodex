@@ -22,7 +22,6 @@ impl V3ServerRespOutbound06ClientFrame {
         self.previous
             .previous
             .previous
-            .previous
             .provider_raw()
             .transport_intent
     }

@@ -11,18 +11,18 @@ const repoRoot = process.cwd();
 const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-relay-request-semantics.mjs');
 const fixtures = [
   {
-    name: 'Req03 restore residue',
+    name: 'Req04 continuation restore residue',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'return Ok(V3HubContinuationOwnership::RouteCodexLocalOwned);',
-    to: 'let _restore = Arc::clone(&local.canonical_context);\n        return Ok(V3HubContinuationOwnership::RouteCodexLocalOwned);',
-    diagnostic: /Req03 continuation classification/,
+    from: 'events.push(V3HubRelayRequestHookEvent::Req04Entry);',
+    to: 'let _continuation = true;\n        events.push(V3HubRelayRequestHookEvent::Req04Entry);',
+    diagnostic: /serde_json|Req04 Chat Process governance/,
   },
   {
     name: 'Req04 execution bypass',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(classified);',
-    to: 'let _bypass = "V3HubReqExecution05Planned";\n        let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_continuation_03(classified);',
-    diagnostic: /Req04 Chat Process governance/,
+    from: 'let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(normalized);',
+    to: 'let _bypass = "V3HubReqExecution05Planned";\n        let governed = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(normalized);',
+    diagnostic: /serde_json|Req04 Chat Process governance/,
   },
   {
     name: 'dynamic hook discovery',
@@ -34,16 +34,9 @@ const fixtures = [
   {
     name: 'Req04 JSON round trip clone',
     relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'let context = restore_local_context_from_store_at_req04(',
-    to: 'let _copy = serde_json::to_string(store_scope).unwrap();\n            let context = restore_local_context_from_store_at_req04(',
-    diagnostic: /Req04 local restore|relay_request\.rs/,
-  },
-  {
-    name: 'servertool before restore',
-    relative: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    from: 'let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
-    to: 'run_servertool_profile(profile, &mut events)?;\n        let local_context = restore_local_context_at_req04(ownership, lookup)?;\n        if local_context.is_some()',
-    diagnostic: /servertool ran before local continuation restore/,
+    from: 'let tool_output_count = govern_tool_outputs_at_req04(',
+    to: 'let _copy = serde_json::to_string(normalized.payload()).unwrap();\n        let tool_output_count = govern_tool_outputs_at_req04(',
+    diagnostic: /serde_json|Req04 Chat Process governance/,
   },
   {
     name: 'server escaped request owner',

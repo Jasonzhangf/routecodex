@@ -3,9 +3,9 @@
 ## Objective
 
 Replace the extend-only P6 Direct lifecycle with one fixed Rust Hub v1 skeleton whose typed branch
-contracts and static hook slots already cover Direct, Relay, remote/local continuation, routed/pinned
-targets, all four configured protocols, JSON/SSE, Error, Debug, and Dry Run. Relay and new providers
-must later fill hooks without changing topology.
+contracts and static hook slots cover Direct, Relay, routed targets, all four configured protocols,
+JSON/SSE, Error, Debug, and Dry Run. Relay and new providers must later fill hooks without changing
+topology.
 
 Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pipeline-static-skeleton-contract.md).
 
@@ -13,8 +13,9 @@ Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pi
 
 - V3 P6 is source/local-live verified for single-turn Responses Direct.
 - V3 has no Request/Response Chat Process runtime implementation.
-- V3 has no continuation ownership classifier, remote binding, local context store, execution-mode
-  plan, routed/pinned target merge, or complete Hub static hook registry.
+- Responses continuation is retired; non-empty `previous_response_id` fails before routing or
+  provider transport.
+- V3 has no execution-mode plan, routed target merge, or complete Hub static hook registry.
 - V2 Rust Hub Pipeline contains the semantic stage families, but Server Direct and host executor
   remain separate orchestration surfaces. V3 must use them as audit evidence, not copy their split.
 
@@ -22,11 +23,11 @@ Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pi
 
 ### H0 — Contract and red gates
 
-- Lock Hub v1 request/response nodes, four independent branch axes, resources, mainline edges,
+- Lock Hub v1 request/response nodes, three independent branch axes, resources, mainline edges,
   verification map, Wiki, and compile-fail/source red fixtures.
-- Freeze P6 against Relay/continuation/protocol expansion.
+- Freeze P6 against Relay, continuation revival, and protocol expansion.
 - Gate provider-family branches, dynamic hooks, Server shortcuts, alternate exits, owner fallback,
-  and immutable-interval logic.
+  continuation restore/save/store, and immutable-interval logic.
 
 ### H1 — Typed skeleton and static registry
 
@@ -50,20 +51,12 @@ Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pi
 - Physically delete old P6 lifecycle types/builders/maps after red gate proves they cannot revive.
 - No fallback or runtime toggle to the deleted path.
 
-### H4 — Remote continuation hooks
+### H4 — Relay hooks
 
-- Implement remote binding commit, immutable locator storage, scope validation, pinned target
-  resolution, and same-provider/model continuation.
-- Do not save/restore local Chat Process context.
-- Provider unavailability is explicit; no cross-provider reselection or local-owner fallback.
-
-### H5 — Local continuation and Relay hooks
-
-- Implement response Chat Process save and next request Chat Process restore.
-- Enforce the immutable interval and four-axis classification.
 - Relay uses the existing request/response nodes and response exit; no topology change.
+- Provider unavailability is explicit; no continuation-owned target path or cross-owner fallback.
 
-### H6 — Additional protocol hooks
+### H5 — Additional protocol hooks
 
 - Register generic Anthropic, generic Gemini, and OpenAI Chat input/wire/raw/client hooks.
 - Provider instances reference protocol/capability declarations only.
@@ -74,6 +67,6 @@ Canonical design: [V3 Hub Pipeline Static Skeleton Contract](../design/v3-hub-pi
 - Design, resource map, mainline map, verification map, Wiki, and architecture gate agree.
 - New Hub v1 nodes/resources/edges are honestly `binding_pending`.
 - Existing P6/V2 source evidence is linked without inventing V3 symbols.
-- The gate rejects removal of the four axes, immutable interval, static registry, migration deletion
-  plan, or no-fallback rule.
-- No runtime implementation, Relay, continuation, provider config, install, or restart is claimed.
+- The gate rejects removal of the three axes, continuation retirement, static registry, migration
+  deletion plan, or no-fallback rule.
+- No runtime implementation, Relay, provider config, install, or restart is claimed.

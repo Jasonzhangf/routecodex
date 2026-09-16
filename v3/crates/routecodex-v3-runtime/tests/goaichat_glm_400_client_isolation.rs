@@ -46,7 +46,6 @@ endpoints = ["responses"]
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 attempt_store = {}
 [providers.goaichat]
 type = "responses"

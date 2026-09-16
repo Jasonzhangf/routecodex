@@ -213,7 +213,7 @@ resources:
     owner_node: V3Req04StandardizedResponses
     identity: [requestId, endpoint]
     allowed_writers: [V3Req04StandardizedResponses, V3HubReqInbound02Normalized]
-    allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy, V3HubReqContinuation03Classified, V3HubReqChatProcess04Governed]
+    allowed_readers: [V3Router05RequestClassified, V3ResponsesDirect11Policy, V3HubReqChatProcess04Governed]
     forbidden_writers: [V3ProviderResp14Raw, V3Resp15ClientPayload, V3DebugArtifact]
     may_enter_provider_body: true
     may_enter_client_body: false
@@ -226,8 +226,8 @@ resources:
     identity: [serverId, entryProtocol, clientModel, capabilities, inputTokens]
     semantic_contract:
       target_hard_capabilities: [multimodal, vision, search, web_search]
-      route_signals: [text, tools, tool_outputs, reasoning, thinking, coding, longcontext, remote_continuation, local_materialization]
-      continuation_rule: previous_response_id owner chooses direct remote exact-pin or relay local restore; continuation ownership is not a model capability
+      route_signals: [text, tools, tool_outputs, reasoning, thinking, coding, longcontext, local_materialization]
+      previous_response_id_rule: non-null previous_response_id is rejected before routing and is never a model capability
       rule: route_signals may select a route/pool but must not become Target capability_mismatch; only target_hard_capabilities can reject a candidate for semantic loss
     allowed_writers: [build_v3_router_request_facts_from_v3_req_04]
     allowed_readers: [V3VirtualRouter::classify_request_with_facts]
@@ -246,7 +246,7 @@ resources:
       weighted_scope: SWRR applies only within one equal-priority tier
       state_scope: [serverId, routeGroupId, poolId, priority]
       session_boundary: session-bound Provider availability is consumed later by Target and cannot be collapsed into process-global cooldown truth
-      continuation_boundary: previous_response_id owner constrains Direct versus Relay before ordinary route allocation
+      previous_response_id_boundary: non-null previous_response_id is rejected before ordinary route allocation
     allowed_writers: [V3VirtualRouter::resolve_route_pool_plan]
     allowed_readers: [V3VirtualRouter::hit_opaque_target_plan_once]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error]
@@ -317,9 +317,9 @@ resources:
     lifecycle: v3.responses_direct.mainline
     owner_crate: routecodex-v3-runtime
     owner_node: V3ResponsesDirect11Policy
-    identity: [requestId, targetId, providerId, modelId, previousResponseId]
+    identity: [requestId, targetId, providerId, modelId]
     semantic_contract:
-      continuation_locator_source: previousResponseId is extracted once at Req04 from the standard Responses field, removed from the normal payload, and projected to Direct provider wire only through this typed policy
+      previous_response_id_rule: non-null previous_response_id is rejected before provider wire construction
       same_protocol_payload: Responses Direct preserves client input/include/tool history and binds only the selected provider wire model; it does not synthesize Chat messages
     allowed_writers: [V3ResponsesDirect11Policy]
     allowed_readers: [V3Provider12ResponsesWirePayload, V3Resp15ClientPayload]
@@ -359,7 +359,7 @@ resources:
     identity: [providerId, transportKind, websocketEndpoint]
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, V3RemoteContinuationStore]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -371,7 +371,7 @@ resources:
     identity: [providerId, modelId, authAlias, websocketEndpoint]
     allowed_writers: [ProviderResponsesTransport]
     allowed_readers: [ProviderResponsesTransport]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, V3RemoteContinuationStore]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -538,7 +538,7 @@ resources:
     owner_node: V3HubReqInbound02Normalized
     identity: [requestId, entryEndpoint, protocol]
     allowed_writers: [V3HubReqInbound02Normalized]
-    allowed_readers: [V3HubReqContinuation03Classified, V3HubRespOutbound05ClientSemantic]
+    allowed_readers: [V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -584,7 +584,7 @@ resources:
     lifecycle: v3.config.compile
     owner_crate: routecodex-v3-config
     owner_node: V3Config04ResourceRegistryBuilt
-    identity: [skeletonVersion, hookSetId, fixedNodeIds, hookPhases, hookIds, resourceIds, capabilityIds, executionModes, continuationScopeKeys]
+    identity: [skeletonVersion, hookSetId, fixedNodeIds, hookPhases, hookIds, resourceIds, capabilityIds, executionModes]
     allowed_writers: [compile_hub_v1, compile_server_execution]
     allowed_readers: [V3Config05ManifestPublished, compile_v3_hub_v1_static_registry_from_config, V3HubRuntimeKernel]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, dynamic_loader]
@@ -612,18 +612,6 @@ resources:
     allowed_writers: [read_json_payload]
     allowed_readers: [build_v3_server_03_http_request_raw, build_v3_provider_failure_session_scope_for_request, project_v3_http_boundary_error]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, routecodex-v3-debug]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-  - resource_id: v3.hub.continuation_ownership
-    resource_kind: side_channel
-    lifecycle: v3.hub_pipeline.v1
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3HubReqContinuation03Classified
-    identity: [requestId, ownerKind, scopeId]
-    allowed_writers: [V3HubReqContinuation03Classified, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3HubRespContinuation04Committed]
-    allowed_readers: [pending_endpoint, V3HubReqChatProcess04Governed, V3HubReqExecution05Planned, V3HubReqTarget06Resolved]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubRespOutbound05ClientSemantic]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -722,12 +710,12 @@ resources:
       guidance_contract: Req04 selects one protocol-pure provider-facing guidance slice and requires reason and goal_alignment_confidence; model_id is not injected into provider-facing guidance or schemas, while legacy Resp03 responses may still be stripped of it, and Anthropic native tool_use/input instructions and Responses/OpenAI Chat arguments instructions never share wire examples.
       response_owner: Resp03 consumes the same-turn provenance after Phase 1 compatibility classification; only one valid nonempty reason authorizes all-or-nothing removal of supplied auxiliary keys and reasoning, while a valid custom input wrapper is mechanically restored for every terminal status.
       parser_boundary: protocol and SSE adapters may carry complete native parameter containers but may not parse, strip, infer, or project Tool-Thinking semantics.
-      payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, continuation, response JSON, or client SSE.
+      payload_boundary: this context is never serialized into request JSON, provider wire/options, protocol metadata, history, response JSON, or client SSE.
       lifetime: request-local and immutable after Req04; released after Resp03/client projection for the same request.
       retry_rule: Direct provider attempts reuse the context compiled before the first wire build; retries never rebuild provenance from the mutated tool list, while a Direct-to-Relay handoff recompiles from the untouched client request at Relay Req04.
     allowed_writers: [compile_v3_tool_thinking_turn_context_at_req04]
     allowed_readers: [V3DirectToolThinkingReq04Outcome, V3DirectResponseCompatContext, V3HubRelayRequestOutcome, V3HubRelayResponseHookProfile, V3HubRespChatProcess03Governed]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, continuation_store, generic_sse_transport]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, generic_sse_transport]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -747,11 +735,11 @@ resources:
       invalid_shape: MISSING, INVALID, and MISPLACED carry no projection text and authorize no reasoning or active reason/confidence redaction; Resp03 may still remove legacy model_id at an identified native tool-call envelope/parameter boundary, while malformed JSON/custom wrappers remain unchanged.
       projection_boundary: registered client-protocol projectors consume this typed result without inspecting visible IDs, prefixes, markers, ordinary reasoning, or history.
       observation_boundary: exactly one canonical terminal observation consumes the same finalized result; projection diagnostics do not create a second terminal status.
-      payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, continuation, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.
+      payload_boundary: the typed result never enters provider/client payload, protocol metadata, history, debug payload, or MetadataCenter; only its registered normal reasoning projection may enter the client payload for OK.
       lifetime: request-local; released after terminal observation and at-most-once client projection.
     allowed_writers: [finalize_v3_tool_thinking_turn_at_resp03]
     allowed_readers: [project_v3_tool_thinking_turn_result_at_resp03, log_v3_toolreason_observation_at_resp03_with_context]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, continuation_store, generic_sse_transport, protocol_adapter]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, MetadataCenter, provider_request_payload, provider_response_payload, client_response_payload, generic_sse_transport, protocol_adapter]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -779,40 +767,14 @@ resources:
     semantic_contract:
       openai_chat_stream_tool_call_identity: wire index locates the active call stream; a non-empty provider tool_call id identifies a materialized call within that wire-index stream
       reused_wire_index_rule: a previously unseen non-empty id on an occupied wire index starts a new materialized call and must not concatenate arguments with the prior call
-      continuation_rule: same-id and id-less deltas append to the active call for that wire index; a previously seen id on the same reused index reattaches to its original call
+      active_call_delta_rule: same-id and id-less deltas append to the active call for that wire index; a previously seen id on the same reused index reattaches to its original call
       cross_index_duplicate_rule: duplicate ids on different wire indices remain distinct inbound calls for Resp03 identity validation
       tool_thinking_native_item_rule: protocol adapters preserve each complete native tool-call item, original native item, and exact parameter JSON bytes through RespInbound02 without inspecting auxiliary names
       tool_thinking_duplicate_key_rule: Resp03 alone performs duplicate-aware strict parsing over retained parameter bytes; generic Value decoding may not erase duplicate-key evidence before the owner
       tool_thinking_adapter_boundary: adapters may assemble protocol fragments and retain raw parameter bytes but may not classify, redact, restore custom shape, format reasoning, observe status, or project Tool-Thinking
     allowed_writers: [V3HubRespInbound02Normalized, V3HubRespChatProcess03Governed]
-    allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespContinuation04Committed, V3HubRespOutbound05ClientSemantic]
+    allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, V3ServerRespOutbound06ClientFrame]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-  - resource_id: v3.continuation.remote_binding
-    resource_kind: side_channel
-    lifecycle: v3.responses_continuation.remote
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3HubRespContinuation04Committed
-    identity: [remoteResponseId, continuationOwner, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, providerId, modelId, authHandleId, capabilityRevision, expiresAtEpochMs]
-    allowed_writers: [execute_v3_responses_direct_runtime_kernel_core, V3HubRespContinuation04Committed, V3RemoteContinuationStore::commit, V3RemoteContinuationStore::release_bound, decode_v3_remote_continuation_locator]
-    allowed_readers: [V3RemoteContinuationStore::load, V3RemoteContinuationStore::load_for_req03, V3ResponsesDirectContinuationState::contains_for_req03, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3RemoteContinuationLocator::validate_capability_revision, encode_v3_remote_continuation_locator, V3HubReqContinuation03Classified, V3HubReqTarget06Resolved]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, V3HubReqChatProcess04Governed, continuation_store_transport_local_context]
-    may_enter_provider_body: false
-    may_enter_client_body: false
-    binding_status: anchored
-  - resource_id: v3.continuation.local_context_truth
-    resource_kind: side_channel
-    lifecycle: v3.responses_continuation.local_immutable_interval
-    owner_crate: routecodex-v3-runtime
-    owner_node: V3HubRespContinuation04Committed
-    identity: [contextId, entryProtocol, entryEndpoint, port, routingGroup, sessionId, conversationId, ownerKind]
-    payload_contract: chat_canonical_messages_only
-    control_identity_transport: explicit_commit_parameters_only
-    allowed_writers: [V3HubRespContinuation04Committed, commit_or_release_local_continuation, V3LocalContinuationStore::commit_at_resp04, V3LocalContinuationStore::release]
-    allowed_readers: [V3HubReqContinuation03Classified, resolve_v3_responses_previous_response_owner_execution_mode_at_req03, V3ResponsesRelayLocalContinuationState::contains_for_req03, V3HubReqChatProcess04Governed, execute_v3_anthropic_relay_runtime_with_local_continuation, V3HubContinuationLookup::with_local_context_from_req04_store, V3LocalContinuationStore::restore_at_req04]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, continuation_store_transport, response_projector, sse_framer, req04_responses_to_chat_rebuilder, metadata_center]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -822,9 +784,9 @@ resources:
     owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
     owner_crate: routecodex-v3-runtime
     owner_node: V3HubReqChatProcess04Governed
-    identity: [entryProtocol, requestId, continuationOwner, callId, toolKind]
+    identity: [entryProtocol, requestId, callId, toolKind]
     allowed_writers: [govern_tool_outputs_at_req04, govern_v3_hub_relay_response, V3HubReqChatProcess04Governed, V3HubRespChatProcess03Governed]
-    allowed_readers: [V3HubReqChatProcess04Governed, V3HubRespContinuation04Committed, V3HubReqOutbound07ProviderSemantic]
+    allowed_readers: [V3HubReqChatProcess04Governed, V3HubReqOutbound07ProviderSemantic]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-debug, response_projector, sse_framer]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -861,7 +823,7 @@ resources:
     identity: [requestId, fixedNodeId, borrowLifetime]
     allowed_writers: [borrow_v3_hub_current_node]
     allowed_readers: [V3HubHookDeclaration::invoke]
-    forbidden_writers: [V3HubStaticHookRegistry, routecodex-v3-debug, snapshot_recorder, continuation_store]
+    forbidden_writers: [V3HubStaticHookRegistry, routecodex-v3-debug, snapshot_recorder]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
@@ -1436,7 +1398,7 @@ resources:
     owner_node: V3HubRespInbound02Normalized
     identity: [requestId, providerProtocol, entryProtocol, frameSequence]
     payload_contract: standard_protocol_codec_owned
-    allowed_writers: [build_v3_hub_resp_inbound_02_from_provider_resp_compat_02, build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload]
+    allowed_writers: [build_v3_hub_resp_inbound_02_from_provider_resp_compat_02, build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload]
     canonical_codecs: [parse_v3_provider_sse_json_data, classify_v3_provider_sse_json_data, classify_v3_provider_responses_json_event, record_v3_provider_sse_json_frame]
     allowed_readers: [V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic]
     forbidden_writers: [routecodex-v3-sse, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter]
@@ -1511,12 +1473,10 @@ resources:
       - v3.hub.provider_wire_payload
       - v3.response.client_payload
       - v3.debug.payload_budget
-      - v3.continuation.local_context_truth
     isolation_contract: { tool_name: hard_isolation_boundary, session_id: hard_session_boundary, cross_tool_access: fail_fast, cross_session_access: fail_fast, per_tool_typed_state: required, generic_untyped_state: forbidden }
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: true
-    may_enter_continuation_state: false
     binding_status: design
     required_gates:
       - npm run verify:v3-resource-map
@@ -1544,11 +1504,9 @@ resources:
       - v3.hub.provider_wire_payload
       - v3.response.client_payload
       - v3.debug.payload_budget
-      - v3.continuation.local_context_truth
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    may_enter_continuation_state: false
     binding_status: design
     required_gates:
       - npm run verify:v3-resource-map
@@ -1579,12 +1537,10 @@ resources:
       - v3.hub.provider_wire_payload
       - v3.response.client_payload
       - v3.debug.payload_budget
-      - v3.continuation.local_context_truth
     binding_rules: { exactly_one_backend: required_before_dispatch, fallback_engine_iteration: forbidden, ambiguous_binding: fail_before_transport, unsupported_content_types: fail_explicitly }
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
-    may_enter_continuation_state: false
     binding_status: design
     required_gates:
       - npm run verify:v3-resource-map
@@ -2012,7 +1968,7 @@ resources:
       provider_failures_counted: false
     allowed_writers: [V3RouteHistoryWindow::record_turn, V3RoutePolicyRuntimeState::commit_request]
     allowed_readers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
-    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    forbidden_writers: [routecodex-v3-virtual-router, routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2031,7 +1987,7 @@ resources:
       vr_reentry: forbidden
     allowed_writers: [evaluate_v3_route_policies, V3RoutePolicyRuntimeState::evaluate_request]
     allowed_readers: [V3RoutePolicyRuntimeState::evaluate_request, V3VirtualRouter::resolve_route_pool_plan]
-    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, continuation, protocol.metadata]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2054,7 +2010,7 @@ resources:
       control_state_in_payload: forbidden
     allowed_writers: [record_v3_observability_event, record_v3_webui_error_projection]
     allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows, records]
-    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2081,7 +2037,7 @@ resources:
       control_state_in_payload: forbidden
     allowed_writers: [v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention]
     allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
-    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, continuation, protocol.metadata]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2172,7 +2128,7 @@ resources:
     identity: [requestId, protocol, keyKind, ordinal]
     allowed_writers: [parse_v3_direct_request_key_view]
     allowed_readers: [V3DirectRequestKeyHookCatalog, V3DirectRequestKeyHook::notify, V3DirectRequestKeyHook::rewrite]
-    forbidden_writers: [MetadataCenter, routing, retry, health, continuation, response.client_payload]
+    forbidden_writers: [MetadataCenter, routing, retry, health, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2187,7 +2143,7 @@ resources:
     identity: [requestId, protocol, keyKind]
     allowed_writers: [V3DirectRequestKeyHookCatalog, V3DirectRequestKeyHook::rewrite, apply_v3_direct_request_key_edits]
     allowed_readers: [responses_direct_request_projection_hook, chat_direct_request_projection_hook]
-    forbidden_writers: [MetadataCenter, routing, retry, health, continuation, response.client_payload]
+    forbidden_writers: [MetadataCenter, routing, retry, health, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2264,7 +2220,7 @@ resources:
     identity: [requestId, serverId, entryProtocol, clientStreamIntent]
     allowed_writers: [pending_endpoint_after_responses_admission, V3DirectSseAccept01ClientChannel]
     allowed_readers: [v3_request_wants_sse, pending_endpoint_after_responses_admission, execute_responses_direct_server_outcome, v3_io_sse_body, V3DirectSseAccept02RuntimeWorker]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, provider.wire_payload, response.raw_provider_sse, response.http_json_reparse]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-sse, MetadataCenter, routing, retry, health, provider.wire_payload, response.raw_provider_sse, response.http_json_reparse]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2343,7 +2299,7 @@ resources:
       preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3RelaySseHookCatalog::new, V3RelaySseHookCatalog::with_responses, V3RelaySseHookCatalog::with_chat]
     allowed_readers: [responses_provider_event_codec, provider_stream_materialization, openai_chat_relay_runtime]
-    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload, provider.wire_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2362,7 +2318,7 @@ resources:
       preservation_rule: Ordinary response.instructions and the legal response.model field are preserved.
     allowed_writers: [V3DirectSseTypedHookCatalog::new, V3DirectSseTypedHookCatalog::with_responses, V3DirectSseTypedHookCatalog::with_chat]
     allowed_readers: [V3DirectSseContentConsumer::consume, project_direct_typed_protocol_data]
-    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, continuation, request.normal_payload, provider.wire_payload]
+    forbidden_writers: [routecodex-v3-sse, MetadataCenter, routing, retry, health, request.normal_payload, provider.wire_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2501,10 +2457,10 @@ resources:
     identity: [requestId, attemptId, providerRuntimeIdentity, protocolTerminalGeneration]
     semantic_contract:
       issuance_condition: Protocol-valid terminal observed and bounded attempt payload sealed successfully.
-      consumers: [provider_health_success, route_policy_success_commit, continuation_commit, client_semantic_commit]
+      consumers: [provider_health_success, route_policy_success_commit, client_semantic_commit]
       non_receipts: [HTTP_2xx_headers, stream_object_constructed, first_business_frame, clean_transport_accept]
     allowed_writers: [runtime_response_semantic_owner]
-    allowed_readers: [provider_health_success, route_policy_success_commit, continuation_commit, client_semantic_commit]
+    allowed_readers: [provider_health_success, route_policy_success_commit, client_semantic_commit]
     forbidden_writers: [ProviderTransport, SSE_stream_wrapper, routecodex-v3-server, observability, payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2543,7 +2499,7 @@ resources:
       failure_lane: ObservationFailure in the internal Error chain; never provider failure or provider health mutation.
     allowed_writers: [runtime_observability_projector]
     allowed_readers: [developer_diagnostics, webui_projection]
-    forbidden_writers: [resident_request_controller, route_policy, provider_health, continuation, payload]
+    forbidden_writers: [resident_request_controller, route_policy, provider_health, payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2596,7 +2552,7 @@ resources:
     identity: [enabled, projectRoot, outputContract]
     allowed_writers: [compile_memory_raw_capture, V3Config05ManifestPublished]
     allowed_readers: [memory_raw_capture_for_responses]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routing, retry, health, continuation, debug]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routing, retry, health, debug]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2611,7 +2567,7 @@ resources:
     identity: [schemaVersion, outputContract]
     allowed_writers: [inject_memory_raw_capture_guidance]
     allowed_readers: [ResponsesDirectRequestProjectionHook, V3HubReqChatProcess04Governed]
-    forbidden_writers: [Provider, routing, retry, health, continuation, SSE_transport, debug]
+    forbidden_writers: [Provider, routing, retry, health, SSE_transport, debug]
     may_enter_provider_body: true
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2626,7 +2582,7 @@ resources:
     identity: [requestId, terminalKind, entryDigest]
     allowed_writers: [capture_responses_json, capture_responses_sse_event]
     allowed_readers: [publish_memory_l3_entries, memory_capture_diagnostics]
-    forbidden_writers: [Provider, routing, retry, health, continuation, SSE_transport, debug, request.normal_payload]
+    forbidden_writers: [Provider, routing, retry, health, SSE_transport, debug, request.normal_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -2641,7 +2597,7 @@ resources:
     identity: [projectRoot, hostId]
     allowed_writers: [V3MemoryL3Publisher::publish]
     allowed_readers: [project-memory automatic L3 scanner]
-    forbidden_writers: [routecodex-v3-config, routecodex-v3-server, Provider, routing, retry, health, continuation, SSE_transport, debug]
+    forbidden_writers: [routecodex-v3-config, routecodex-v3-server, Provider, routing, retry, health, SSE_transport, debug]
     semantic_contract:
       path: memory/L3/<host-id>.md
       publication: atomic_create_without_overwrite

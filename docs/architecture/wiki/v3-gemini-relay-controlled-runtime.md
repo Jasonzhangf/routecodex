@@ -21,8 +21,7 @@
 flowchart LR
   S[V3GeminiRelayRuntimeInput] --> R1[V3HubReqInbound01ClientRaw]
   R1 --> R2[V3HubReqInbound02Normalized]
-  R2 --> R3[V3HubReqContinuation03Classified]
-  R3 --> R4[V3HubReqChatProcess04Governed]
+  R2 --> R4[V3HubReqChatProcess04Governed]
   R4 --> R5[V3HubReqExecution05Planned]
   R5 --> R6[V3HubReqTarget06Resolved]
   R6 --> R7[V3HubReqOutbound07ProviderSemantic]
@@ -32,12 +31,11 @@ flowchart LR
   P --> P1[V3ProviderRespInbound01Raw]
   P1 --> P2[V3HubRespInbound02Normalized]
   P2 --> P3[V3HubRespChatProcess03Governed]
-  P3 --> P4[V3HubRespContinuation04Committed]
-  P4 --> P5[V3HubRespOutbound05ClientSemantic]
+  P3 --> P5[V3HubRespOutbound05ClientSemantic]
   P5 --> P6[V3ServerRespOutbound06ClientFrame]
 ```
 
-Machine edge IDs are `v3-gemini-relay-01..15`. Server reads the Config entry binding, supplies
+Machine edges omit the retired continuation step slots. Server reads the Config entry binding, supplies
 request scope, calls the Gemini Runtime owner, and transports the typed result. Gemini URL/model,
 candidate, function-call, finishReason, JSON, and SSE semantics stay in the Gemini codec/Runtime.
 

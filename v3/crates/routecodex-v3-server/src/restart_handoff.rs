@@ -25,13 +25,6 @@ pub enum V3FrontExecutionMode {
     Relay,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum V3FrontContinuationOwner {
-    Direct,
-    Relay,
-    None,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct V3FrontRequestLeaseKey {
     pub request_id: String,
@@ -149,7 +142,6 @@ pub struct V3RuntimeHandoffCheckpoint {
     pub key: V3FrontRequestLeaseKey,
     pub runtime_generation: u64,
     pub execution_mode: V3FrontExecutionMode,
-    pub continuation_owner: V3FrontContinuationOwner,
     pub next_client_sequence: u64,
     pub next_provider_sequence: u64,
     pub semantic_commit: bool,
@@ -163,7 +155,6 @@ pub struct V3RuntimeHandoffCheckpoint {
 pub struct V3FrontRequestLease {
     pub key: V3FrontRequestLeaseKey,
     pub execution_mode: V3FrontExecutionMode,
-    pub continuation_owner: V3FrontContinuationOwner,
     pub runtime_generation: u64,
     pub state: V3FrontLeaseState,
     pub semantic_commit: bool,
@@ -185,10 +176,6 @@ impl V3FrontRequestLease {
         idle: Duration,
         now: Instant,
     ) -> Self {
-        let continuation_owner = match execution_mode {
-            V3FrontExecutionMode::Direct => V3FrontContinuationOwner::Direct,
-            V3FrontExecutionMode::Relay => V3FrontContinuationOwner::Relay,
-        };
         Self {
             key: V3FrontRequestLeaseKey {
                 request_id: request_id.into(),
@@ -199,7 +186,6 @@ impl V3FrontRequestLease {
                 generation,
             },
             execution_mode,
-            continuation_owner,
             runtime_generation: generation,
             state: V3FrontLeaseState::Running,
             semantic_commit: false,
@@ -260,7 +246,6 @@ impl V3FrontRequestLease {
             key: self.key.clone(),
             runtime_generation: self.runtime_generation,
             execution_mode: self.execution_mode,
-            continuation_owner: self.continuation_owner,
             next_client_sequence: self.frame_sequence.client_next(),
             next_provider_sequence: self.frame_sequence.provider_next(),
             semantic_commit: self.semantic_commit,
@@ -284,7 +269,6 @@ impl V3FrontRequestLease {
         Self {
             key,
             execution_mode: checkpoint.execution_mode,
-            continuation_owner: checkpoint.continuation_owner,
             runtime_generation: new_generation,
             state: V3FrontLeaseState::Attached,
             semantic_commit: checkpoint.semantic_commit,

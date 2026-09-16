@@ -24,7 +24,6 @@ node_ids:
   - ProviderRespCompat02ProviderCompat
   - V3HubRespInbound02Normalized
   - V3HubRespChatProcess03Governed
-  - V3HubRespContinuation04Committed
   - V3HubRespOutbound05ClientSemantic
   - V3ServerRespOutbound06ClientFrame
 edges:
@@ -87,35 +86,13 @@ edges:
       side_channel_writes: []
   - step_id: v3-hub-resp-04
     from_node: V3HubRespChatProcess03Governed
-    to_node: V3HubRespContinuation04Committed
-    status: anchored
-    binding_kind: h1_typed_test
-    owner_feature_id: v3.hub_pipeline_static_skeleton
-    caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_resp_continuation_04_from_v3_hub_resp_chat_process_03
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_continuation_04_committed.rs
-    resource_flow:
-      consumes:
-        - v3.hub.response_semantic
-        - v3.hub.continuation_ownership
-      produces:
-        - v3.continuation.remote_binding
-        - v3.continuation.local_context_truth
-      side_channel_reads:
-        - v3.hub.continuation_ownership
-      side_channel_writes:
-        - v3.continuation.remote_binding
-        - v3.continuation.local_context_truth
-  - step_id: v3-hub-resp-05
-    from_node: V3HubRespContinuation04Committed
     to_node: V3HubRespOutbound05ClientSemantic
     status: anchored
     binding_kind: h1_typed_test
     owner_feature_id: v3.hub_pipeline_static_skeleton
     caller_symbol: all_adjacent_builders_form_the_fixed_typed_topology
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs
-    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
     resource_flow:
       consumes:
@@ -126,7 +103,7 @@ edges:
       side_channel_reads:
         - v3.hub.entry_protocol
       side_channel_writes: []
-  - step_id: v3-hub-resp-06
+  - step_id: v3-hub-resp-05
     from_node: V3HubRespOutbound05ClientSemantic
     to_node: V3ServerRespOutbound06ClientFrame
     status: anchored
@@ -158,4 +135,4 @@ completion_boundary:
   global_install_restart: false
   forbidden_claim: This manifest locks the Hub v1 core topology only; it does not
     claim provider live behavior, Direct cutover, Relay source slice completion,
-    continuation correctness, or P6 deletion.
+    or P6 deletion.

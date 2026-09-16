@@ -198,15 +198,6 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    let continuation_lookup = V3HubContinuationLookup::new(
-        None,
-        V3HubContinuationScope::new(
-            V3HubEntryProtocol::Gemini,
-            &input.server_id,
-            routing_group,
-            &input.request_id,
-        ),
-    );
     execute_v3_relay_runtime_core::<V3GeminiRelayCodec, T>(
         manifest,
         &input.server_id,
@@ -218,7 +209,6 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         transport,
         provider_health,
         retry_policy,
-        continuation_lookup,
         Vec::new(),
         true,
         None,
@@ -536,7 +526,6 @@ fn project_json_response(
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Gemini,
             V3HubProviderWireProtocol::Gemini,
-            V3HubContinuationOwnership::New,
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             transport_intent,
@@ -555,9 +544,8 @@ fn project_json_response(
             .with_tool_thinking_enabled(tool_thinking_enabled),
     )?;
     trace.push("V3HubRespChatProcess03Governed");
-    let resp04 = hooks.commit(resp03)?;
-    trace.push("V3HubRespContinuation04Committed");
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04(resp04.into_data());
+    let (resp03, _) = resp03.into_parts();
+    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);

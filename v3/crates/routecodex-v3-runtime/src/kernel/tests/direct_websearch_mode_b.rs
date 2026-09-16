@@ -8,9 +8,8 @@ use super::*;
 #[tokio::test]
 async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
     let manifest = direct_web_search_mode_b_manifest();
-    let continuation_state = V3ResponsesDirectContinuationState::default();
     let server_tool_state = V3ResponsesDirectServerToolState::default();
-    let continuation_scope = V3ResponsesDirectContinuationScope::responses(
+    let scope = V3ResponsesDirectServerToolScope::new(
         "/v1/responses",
         "session-ws-direct-2",
         "conversation-ws-direct-2",
@@ -18,7 +17,6 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         "default",
     );
     // 前置：上一轮搜索结果已捕获（SearchResultCaptured，original_call_id=call_ws_1）。
-    let scope = V3ResponsesDirectServerToolScope::from(&continuation_scope);
     let captured = crate::hub_v1::V3WebSearchCenterState::new()
         .transition_to(
             crate::hub_v1::V3WebSearchCenterPhase::LocalToolSurfaceActive,
@@ -81,15 +79,14 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
             }]
         }),
     );
-    let output = execute_v3_responses_direct_runtime_kernel_with_continuation_and_server_tool_state(
-        &continuation_state,
-        &server_tool_state,
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_server_tool_state(&server_tool_state, scope.clone())
+            .with_now_epoch_ms(2_000),
         &manifest,
         raw,
-        continuation_scope.clone(),
         crate::register_responses_direct_hooks(),
         &WebSearchHopTransport,
-        2_000,
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");

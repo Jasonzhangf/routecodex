@@ -35,7 +35,6 @@ routing_group = "default"
 allowed_modes = ["relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.anthropic_first]
 type = "anthropic"
@@ -85,7 +84,6 @@ routing_group = "default"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.relay_first]
 type = "anthropic"
@@ -179,7 +177,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
             payload: json!({"model": "client-model", "input": "hello"}),
         },
         &transport,
-        None,
         None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
@@ -278,7 +275,6 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         },
         &transport,
         None,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -350,7 +346,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
             }),
         },
         &transport,
-        None,
         None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
@@ -450,9 +445,8 @@ targets = [{ kind = "provider_model", provider = "relay", model = "test", key = 
 }
 
 #[test]
-fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
+fn relay_local_tool_output_consumes_call_id_aliases() {
     let payload = json!({
-        "previous_response_id": "resp_relay_owned",
         "input": [{
             "type": "function_call_output",
             "call_id": "call_relay_owned",
@@ -461,11 +455,7 @@ fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
     });
     let ids = find_responses_tool_output_ids(&payload).expect("tool output ids");
 
-    assert_eq!(ids.restore_ids, vec!["call_relay_owned"]);
-    assert_eq!(
-        ids.consumed_ids,
-        vec!["resp_relay_owned", "call_relay_owned"]
-    );
+    assert_eq!(ids.consumed_ids, vec!["call_relay_owned"]);
 }
 
 #[test]
@@ -653,7 +643,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.glm]
 type = "openai_chat"
@@ -727,7 +716,6 @@ endpoints = ["responses"]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [providers.minimax]
 type = "openai_chat"

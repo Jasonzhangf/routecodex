@@ -33,7 +33,7 @@ fn ensure_gemini_relay_test_state_dir() {
     });
 }
 
-#[path = "../../../tests/support/hub_v1_fixture.rs"]
+#[path = "support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
@@ -139,7 +139,7 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     assert_eq!(captured, expected_provider_payload);
     assert!(captured.get("metadata_center").is_none());
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 17);
+    assert_eq!(output.node_trace.len(), 15);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
     assert!(output
         .node_trace
@@ -147,7 +147,7 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     assert!(output
         .node_trace
         .contains(&"ProviderRespCompat02ProviderCompat"));
-    assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
+    assert_eq!(output.node_trace[14], "V3ServerRespOutbound06ClientFrame");
     let client_response = match output.client_body {
         V3GeminiRelayClientBody::Json(value) => value,
         V3GeminiRelayClientBody::Sse(_) => panic!("expected JSON client body"),
@@ -617,13 +617,12 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
     .unwrap();
     assert_eq!(output.status, 200);
     assert_eq!(
-        &output.node_trace[10..],
+        &output.node_trace[9..],
         &[
             "V3ProviderRespInbound01Raw",
             "ProviderRespCompat02ProviderCompat",
             "V3HubRespInbound02Normalized",
             "V3HubRespChatProcess03Governed",
-            "V3HubRespContinuation04Committed",
             "V3HubRespOutbound05ClientSemantic",
             "V3ServerRespOutbound06ClientFrame"
         ],

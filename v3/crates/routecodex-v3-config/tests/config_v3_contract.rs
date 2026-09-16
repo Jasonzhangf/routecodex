@@ -661,7 +661,9 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
     assert_eq!(responses.execution_mode.as_str(), "direct");
     assert_eq!(
         responses.runtime_owner_symbol.as_deref(),
-        Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")
+        Some(
+            "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug"
+        )
     );
 
     let execution = manifest.servers["primary"]
@@ -669,10 +671,6 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
         .as_ref()
         .expect("compact native V3 authoring must derive closed server execution policy");
     assert_eq!(execution.allowed_modes, vec!["direct", "relay"]);
-    assert_eq!(
-        execution.continuation.scope_keys,
-        vec!["entry_protocol", "server", "routing_group", "session"]
-    );
     assert_eq!(execution.attempt_store.request_max_attempts, 8);
     assert_eq!(execution.attempt_store.attempt_max_bytes, 64 * 1024 * 1024);
     assert_eq!(execution.attempt_store.attempt_max_frames, 262_144);
@@ -684,8 +682,8 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
 #[test]
 fn server_execution_attempt_store_compiles_explicit_policy() {
     let explicit_execution = HUB_V1_SERVER_EXECUTION.replacen(
-        "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }",
-        "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }\nattempt_store = { request_max_attempts = 7, attempt_max_bytes = 1024, attempt_max_frames = 16, request_max_bytes = 2048, process_max_bytes = 4096, residence_timeout_ms = 5000 }",
+        "allowed_transports = [\"json\", \"sse\"]",
+        "allowed_transports = [\"json\", \"sse\"]\nattempt_store = { request_max_attempts = 7, attempt_max_bytes = 1024, attempt_max_frames = 16, request_max_bytes = 2048, process_max_bytes = 4096, residence_timeout_ms = 5000 }",
         1,
     );
     let raw = format!(
@@ -710,7 +708,6 @@ fn server_execution_attempt_store_compiles_explicit_policy() {
 
 #[test]
 fn server_execution_attempt_store_rejects_zero_and_inverted_limits() {
-    let continuation = "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }";
     let invalid_policies = [
         "attempt_store = { request_max_attempts = 0 }",
         "attempt_store = { attempt_max_bytes = 0 }",
@@ -724,8 +721,8 @@ fn server_execution_attempt_store_rejects_zero_and_inverted_limits() {
 
     for invalid_policy in invalid_policies {
         let execution = HUB_V1_SERVER_EXECUTION.replacen(
-            continuation,
-            &format!("{continuation}\n{invalid_policy}"),
+            "allowed_transports = [\"json\", \"sse\"]",
+            &format!("allowed_transports = [\"json\", \"sse\"]\n{invalid_policy}"),
             1,
         );
         let raw = format!("{}\n{}\n{}", FULL_CONFIG, HUB_V1_DECLARATION, execution);
@@ -745,8 +742,8 @@ fn server_execution_attempt_store_rejects_unknown_fields() {
         FULL_CONFIG,
         HUB_V1_DECLARATION,
         HUB_V1_SERVER_EXECUTION.replacen(
-            "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }",
-            "continuation = { allowed_owners = [\"none\", \"remote_provider\", \"routecodex_local\"], scope_keys = [\"entry_protocol\", \"server\", \"routing_group\", \"session\"] }\nattempt_store = { unknown_limit = 1 }",
+            "allowed_transports = [\"json\", \"sse\"]",
+            "allowed_transports = [\"json\", \"sse\"]\nattempt_store = { unknown_limit = 1 }",
             1,
         )
     );
@@ -1160,59 +1157,17 @@ fn responses_websocket_v2_transport_options_are_validated() {
 }
 
 #[test]
-fn continuation_labels_do_not_block_http_responses_config() {
-    let explicit_http = FULL_CONFIG.replace(
-        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
-        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
-    );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
-
-    let websocket = explicit_http.replace(
-        "responses = { process = \"chat\", streaming = \"always\" }",
-        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
-    );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
-}
-
-#[test]
-fn gpt_responses_models_do_not_publish_continuation_as_implicit_capability() {
-    let websocket = FULL_CONFIG.replace(
-        "responses = { process = \"chat\", streaming = \"always\" }",
-        "responses = { process = \"chat\", streaming = \"always\", transport = \"websocket_v2\", websocket_v2_url = \"wss://provider.invalid/v1/responses\" }",
-    );
-    let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&websocket).unwrap()).unwrap();
-    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
-    assert!(
-        !capabilities
-            .iter()
-            .any(|capability| capability == "remote_continuation"),
-        "continuation owner is resolved from previous_response_id records, not implicit model capability: {capabilities:?}"
-    );
-    assert!(
-        !capabilities
-            .iter()
-            .any(|capability| capability == "tool_outputs"),
-        "tool_outputs is request protocol data, not implicit model capability: {capabilities:?}"
-    );
-
-    let explicit_http = FULL_CONFIG.replace(
-        "capabilities = [\"text\", \"reasoning\", \"tools\"]",
-        "capabilities = [\"text\", \"reasoning\", \"tools\", \"remote_continuation\", \"tool_outputs\"]",
-    );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&explicit_http).unwrap()).unwrap();
-
-    let non_responses = FULL_CONFIG.replacen("type = \"responses\"", "type = \"openai_chat\"", 1);
-    let manifest =
-        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&non_responses).unwrap())
-            .unwrap();
-    let capabilities = &manifest.providers["cc"].models["gpt-5.5"].capabilities;
-    assert!(
-        !capabilities
-            .iter()
-            .any(|capability| capability == "remote_continuation"),
-        "GPT model must not derive remote_continuation outside Responses protocol: {capabilities:?}"
-    );
+fn continuation_capability_labels_are_rejected() {
+    for capability in ["remote_continuation", "local_materialization"] {
+        let configured = FULL_CONFIG.replace(
+            "capabilities = [\"text\", \"reasoning\", \"tools\"]",
+            &format!("capabilities = [\"text\", \"reasoning\", \"tools\", \"{capability}\"]"),
+        );
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&configured).unwrap())
+                .unwrap_err();
+        assert!(error.to_string().contains("unknown capability"));
+    }
 }
 
 #[test]
@@ -1304,7 +1259,9 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
     assert!(responses.implemented);
     assert_eq!(
         responses.runtime_owner_symbol.as_deref(),
-        Some("execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation")
+        Some(
+            "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug"
+        )
     );
     let gemini = bindings
         .iter()
@@ -1327,8 +1284,8 @@ fn compiles_hub_v1_declarations_without_request_branch_decisions() {
     assert!(hub
         .entry_protocol_binding_for_endpoint("/v1/unknown")
         .is_none());
-    assert_eq!(hub.hooks.len(), 34);
-    assert_eq!(hub.resources.len(), 6);
+    assert_eq!(hub.hooks.len(), 30);
+    assert_eq!(hub.resources.len(), 5);
     assert!(hub
         .resources
         .values()
@@ -1415,7 +1372,7 @@ fn rejects_invalid_hub_v1_declarations_fail_fast() {
             "unknown hook",
         ),
         (
-            HUB_V1_DECLARATION.replace("  { hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\", requirement = \"required\", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },\n", ""),
+            HUB_V1_DECLARATION.replace("  { hook_id = \"hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented\", node = \"V3ServerRespOutbound06ClientFrame\", phase = \"exit\", requirement = \"required\", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },\n", ""),
             "missing required exit hook",
         ),
         (
@@ -1474,8 +1431,8 @@ fn enforces_hook_resource_profile_and_optional_contracts() {
         ),
         (
             HUB_V1_DECLARATION.replace(
-                "forbidden_resources = [\"continuation_store\"]",
-                "forbidden_resources = [\"continuation_store\"], profile = \"servertool\"",
+                "node = \"V3HubReqInbound02Normalized\", phase = \"exit\"",
+                "node = \"V3HubReqInbound02Normalized\", phase = \"exit\", profile = \"servertool\"",
             ),
             "servertool profile is forbidden",
         ),
@@ -1615,10 +1572,11 @@ fn rejects_invalid_pool_match_and_capability_combinations() {
         "capabilities = [\"text\", \"reasoning\", \"tools\"]",
         "capabilities = [\"text\", \"remote_continuation\"]",
     );
-    compile_v3_config_05_manifest(
+    let error = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(&legacy_continuation_label).unwrap(),
     )
-    .expect("legacy continuation labels are parsed for compatibility but no longer gate model capability");
+    .unwrap_err();
+    assert!(error.to_string().contains("unknown capability"));
 }
 
 #[test]
@@ -1750,47 +1708,43 @@ skeleton = "hub_v1"
 entry_protocols = ["responses", "anthropic", "gemini", "openai_chat"]
 hook_set_id = "hub_v1.default"
 entry_protocol_bindings = [
-  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_default_transport_debug_and_continuation", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
+  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
   { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
   { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
 ]
-resources = { metadata_center = { kind = "control", scope = "request" }, continuation_store = { kind = "continuation", scope = "server" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
+resources = { metadata_center = { kind = "control", scope = "request" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
 hooks = [
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.entry.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "entry", requirement = "required", priority = 0, order = 0, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = ["continuation_store"] },
-  { hook_id = "hub_v1.V3HubReqContinuation03Classified.entry.not_implemented", node = "V3HubReqContinuation03Classified", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqContinuation03Classified.exit.not_implemented", node = "V3HubReqContinuation03Classified", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = ["continuation_store"], forbidden_resources = [], profile = "servertool" },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.entry.not_implemented", node = "V3HubRespContinuation04Committed", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespContinuation04Committed.exit.not_implemented", node = "V3HubRespContinuation04Committed", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 30, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 31, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 32, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 33, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.entry.not_implemented", node = "V3HubReqTarget06Resolved", phase = "entry", requirement = "required", priority = 0, order = 8, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqTarget06Resolved.exit.not_implemented", node = "V3HubReqTarget06Resolved", phase = "exit", requirement = "required", priority = 0, order = 9, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.entry.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "entry", requirement = "required", priority = 0, order = 10, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubReqOutbound07ProviderSemantic.exit.not_implemented", node = "V3HubReqOutbound07ProviderSemantic", phase = "exit", requirement = "required", priority = 0, order = 11, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.entry.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 12, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderReqCompat06ProviderCompat.exit.not_implemented", node = "ProviderReqCompat06ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 13, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.entry.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "entry", requirement = "required", priority = 0, order = 14, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound08WirePayload.exit.not_implemented", node = "V3ProviderReqOutbound08WirePayload", phase = "exit", requirement = "required", priority = 0, order = 15, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.entry.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "entry", requirement = "required", priority = 0, order = 16, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderReqOutbound09TransportRequest.exit.not_implemented", node = "V3ProviderReqOutbound09TransportRequest", phase = "exit", requirement = "required", priority = 0, order = 17, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.entry.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "entry", requirement = "required", priority = 0, order = 18, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ProviderRespInbound01Raw.exit.not_implemented", node = "V3ProviderRespInbound01Raw", phase = "exit", requirement = "required", priority = 0, order = 19, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.entry.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "entry", requirement = "required", priority = 0, order = 20, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.entry.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "entry", requirement = "required", priority = 0, order = 28, allowed_resources = [], forbidden_resources = [] },
+  { hook_id = "hub_v1.V3ServerRespOutbound06ClientFrame.exit.not_implemented", node = "V3ServerRespOutbound06ClientFrame", phase = "exit", requirement = "required", priority = 0, order = 29, allowed_resources = [], forbidden_resources = [] },
 ]
 "#;
 
@@ -1799,13 +1753,11 @@ const HUB_V1_SERVER_EXECUTION: &str = r#"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 
 [servers.secondary.execution]
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
 allowed_transports = ["json", "sse"]
-continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"], scope_keys = ["entry_protocol", "server", "routing_group", "session"] }
 "#;
 
 #[test]

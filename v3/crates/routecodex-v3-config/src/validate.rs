@@ -572,28 +572,6 @@ fn compile_server_execution(
             authoring.allowed_transports,
             &["json", "sse"],
         )?,
-        continuation: V3ContinuationPolicyManifest {
-            allowed_owners: closed_list(
-                server_id,
-                "continuation.allowed_owners",
-                authoring.continuation.allowed_owners,
-                &["none", "remote_provider", "routecodex_local"],
-            )?,
-            scope_keys: {
-                let scope_keys = closed_list(
-                    server_id,
-                    "continuation.scope_keys",
-                    authoring.continuation.scope_keys,
-                    &["entry_protocol", "server", "routing_group", "session"],
-                )?;
-                if scope_keys.len() != 4 {
-                    return Err(validation(format!(
-                        "hub_v1 server {server_id} continuation.scope_keys must declare the complete isolation scope"
-                    )));
-                }
-                scope_keys
-            },
-        },
         attempt_store: crate::attempt_store::compile_attempt_store_policy(
             server_id,
             authoring.attempt_store,
@@ -1024,8 +1002,6 @@ fn compile_models(
                     | "vision"
                     | "longcontext"
                     | "no_reasoning_summary"
-                    | "remote_continuation"
-                    | "local_materialization"
                     | "tool_outputs"
             ) {
                 return Err(validation(format!(
@@ -1503,8 +1479,6 @@ fn compile_pool_match(
             "web_search",
             "multimodal",
             "vision",
-            "remote_continuation",
-            "local_materialization",
             "tool_outputs",
         ]),
     )?;

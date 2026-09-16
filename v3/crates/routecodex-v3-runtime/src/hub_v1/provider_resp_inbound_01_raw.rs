@@ -1,7 +1,6 @@
 use super::{
-    V3HubContinuationOwnership, V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource,
-    V3HubProviderWireProtocol, V3HubResponsePayload, V3HubTransportIntent,
-    V3ProviderCompatProfileId,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubInvocationSource, V3HubProviderWireProtocol,
+    V3HubResponsePayload, V3HubTransportIntent, V3ProviderCompatProfileId,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -12,7 +11,6 @@ pub struct V3ProviderRespInbound01Raw {
     pub(crate) raw_sse_chunks: Option<Arc<Vec<Vec<u8>>>>,
     pub(crate) entry_protocol: V3HubEntryProtocol,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
-    pub(crate) continuation: V3HubContinuationOwnership,
     pub(crate) execution: V3HubExecutionMode,
     pub(crate) invocation_source: V3HubInvocationSource,
     pub(crate) transport_intent: V3HubTransportIntent,
@@ -23,7 +21,6 @@ pub struct V3ProviderRespInbound01Raw {
 pub struct V3ProviderRespInbound01RawContext {
     pub(crate) entry_protocol: V3HubEntryProtocol,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
-    pub(crate) continuation: V3HubContinuationOwnership,
     pub(crate) execution: V3HubExecutionMode,
     pub(crate) invocation_source: V3HubInvocationSource,
     pub(crate) transport_intent: V3HubTransportIntent,
@@ -34,7 +31,6 @@ impl V3ProviderRespInbound01RawContext {
     pub fn new(
         entry_protocol: V3HubEntryProtocol,
         provider_protocol: V3HubProviderWireProtocol,
-        continuation: V3HubContinuationOwnership,
         execution: V3HubExecutionMode,
         invocation_source: V3HubInvocationSource,
         transport_intent: V3HubTransportIntent,
@@ -42,7 +38,6 @@ impl V3ProviderRespInbound01RawContext {
         Self {
             entry_protocol,
             provider_protocol,
-            continuation,
             execution,
             invocation_source,
             transport_intent,
@@ -60,7 +55,6 @@ pub fn build_v3_provider_resp_inbound_01_raw(
     payload: Value,
     entry_protocol: V3HubEntryProtocol,
     provider_protocol: V3HubProviderWireProtocol,
-    continuation: V3HubContinuationOwnership,
     execution: V3HubExecutionMode,
     invocation_source: V3HubInvocationSource,
     transport_intent: V3HubTransportIntent,
@@ -70,7 +64,6 @@ pub fn build_v3_provider_resp_inbound_01_raw(
         V3ProviderRespInbound01RawContext::new(
             entry_protocol,
             provider_protocol,
-            continuation,
             execution,
             invocation_source,
             transport_intent,
@@ -87,7 +80,6 @@ pub fn build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         raw_sse_chunks: None,
         entry_protocol: context.entry_protocol,
         provider_protocol: context.provider_protocol,
-        continuation: context.continuation,
         execution: context.execution,
         invocation_source: context.invocation_source,
         transport_intent: context.transport_intent,
@@ -104,7 +96,6 @@ pub fn build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
         raw_sse_chunks: Some(Arc::new(chunks)),
         entry_protocol: context.entry_protocol,
         provider_protocol: context.provider_protocol,
-        continuation: context.continuation,
         execution: context.execution,
         invocation_source: context.invocation_source,
         transport_intent: context.transport_intent,
