@@ -20,7 +20,7 @@ test('CI build consumes version truth without running the release version operat
   assert.equal(packageJson.scripts['bump-version'], 'node scripts/bump-version.mjs');
 });
 
-test('V3 owns one local runtime binary, Admin host, and command alias contract', () => {
+test('V3 owns local runtime binaries, Admin host, and command alias contract', () => {
   assert.deepEqual(packageJson.bin, {
     routecodex: 'dist/bin/rccv3',
     rcc: 'dist/bin/rccv3',
@@ -30,17 +30,22 @@ test('V3 owns one local runtime binary, Admin host, and command alias contract',
   assert.match(copyScript, /'--locked',[\s\S]*'--release'/);
   assert.ok(copyScript.includes("path.join(v3Root, 'target', 'release'"));
   assert.ok(copyScript.includes("path.join(v3Root, 'dist', 'bin'"));
+  assert.ok(copyScript.includes("'routecodex-v3-hooks'"));
+  assert.ok(copyScript.includes("'rccv3-hooksd'"));
 });
 
-test('install builds release inside V3 and atomically publishes direct runtime and Admin binaries', () => {
+test('install builds release inside V3 and atomically publishes runtime, Admin, and hooks sidecar binaries', () => {
   assert.ok(installScript.includes("path.join(v3Root, 'build-control', 'install-target'"));
   assert.match(installScript, /runInterruptibleCommand\('cargo', \[[\s\S]*'--locked',[\s\S]*'--release'/);
   assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', binaryName)"));
   assert.ok(installScript.includes("'-p',\n    'routecodex-v3-admin'"));
   assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', adminBinaryName)"));
+  assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', hooksBinaryName)"));
   assert.ok(installScript.includes('copyExecutableAtomic(sourceBin, repoBin)'));
   assert.ok(installScript.includes('copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin)'));
+  assert.ok(installScript.includes('copyExecutableAtomic(path.join(path.dirname(sourceBin), hooksBinaryName), repoHooksBin)'));
   assert.ok(installScript.includes('copyExecutableAtomic(repoBin, installBin, { sign: false })'));
+  assert.ok(installScript.includes('copyExecutableAtomic(repoHooksBin, installHooksBin, { sign: false })'));
   assert.ok(installScript.includes("for (const alias of ['routecodex', 'rcc'])"));
   assert.ok(installScript.includes('fs.symlinkSync(path.basename(binaryPath), temporaryPath)'));
   assert.ok(installScript.includes("codesign', ['-s', '-', '-f'"));
@@ -67,6 +72,8 @@ test('pack owns V3-local release target, staging, dist, and final artifacts', ()
   assert.ok(packScript.includes("path.join(v3Root, 'artifacts', 'pack')"));
   assert.ok(packScript.includes("path.join(v3Root, 'dist', 'bin'"));
   assert.ok(packScript.includes("'--locked',\n    '--release'"));
+  assert.ok(packScript.includes("'routecodex-v3-hooks'"));
+  assert.ok(packScript.includes("'rccv3-hooksd'"));
   assert.ok(packScript.includes("CARGO_TARGET_DIR: cargoTarget"));
   assert.ok(packScript.includes('run(process.execPath, [isolationGate], { env })'));
   assert.match(packScript, /TMPDIR: v3TempDir,[\s\S]*run\(process\.execPath, \[isolationGate\], \{ env \}\)/);
@@ -75,6 +82,7 @@ test('pack owns V3-local release target, staging, dist, and final artifacts', ()
   assert.ok(packScript.includes("routecodex: 'dist/bin/rccv3'"));
   assert.ok(packScript.includes("rcc: 'dist/bin/rccv3'"));
   assert.ok(packScript.includes("rccv3: 'dist/bin/rccv3'"));
+  assert.ok(packScript.includes("'rccv3-hooksd': 'dist/bin/rccv3-hooksd'"));
   assert.equal(packScript.includes('os.tmpdir()'), false);
   assert.equal(packScript.includes("path.join(repoRoot, 'dist'"), false);
   assert.equal(packScript.includes("path.join(repoRoot, 'artifacts'"), false);
