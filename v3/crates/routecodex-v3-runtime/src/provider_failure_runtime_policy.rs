@@ -511,7 +511,7 @@ impl V3ProviderFailureRuntimeHealth {
                         probe_errors.push(completion_error.to_string());
                     }
                     eprintln!(
-                        "provider health probe degraded: provider={provider_id} auth_alias={auth_alias:?} model={model_id:?} error={error}"
+                        "provider health probe failed: provider={provider_id} auth_alias={auth_alias:?} model={model_id:?} error={error}"
                     );
                 }
                 Err(V3ProviderHealthProbeFailure::Internal(error)) => {
