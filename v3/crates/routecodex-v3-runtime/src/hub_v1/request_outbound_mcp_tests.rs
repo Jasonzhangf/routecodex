@@ -135,6 +135,52 @@ fn openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin(
 }
 
 #[test]
+fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__mcpx",
+                    "tools": [{
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }]
+                }],
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "id": "ctc_custom_session",
+                        "call_id": "call_custom_session",
+                        "name": "session",
+                        "input": "custom payload"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_custom_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses custom tool history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical custom tool history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
+    );
+}
+
+#[test]
 fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(

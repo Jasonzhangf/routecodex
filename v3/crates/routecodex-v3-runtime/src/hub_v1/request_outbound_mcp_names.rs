@@ -106,6 +106,9 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
             let Some(tool_call_row) = tool_call.as_object_mut() else {
                 continue;
             };
+            if is_custom_tool_call(tool_call_row) {
+                continue;
+            }
             if !has_responses_item_id(tool_call_row) {
                 continue;
             }
@@ -132,6 +135,15 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
             }
         }
     }
+}
+
+fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {
+    tool_call
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_tool_call_type"))
+        .and_then(Value::as_str)
+        == Some("custom_tool_call")
 }
 
 fn has_responses_item_id(tool_call: &Map<String, Value>) -> bool {
