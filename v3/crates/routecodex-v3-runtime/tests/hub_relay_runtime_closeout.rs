@@ -2623,7 +2623,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "web_search"]
 [route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
@@ -2664,7 +2664,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "chat-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "local_materialization", "tool_outputs", "reasoning", "web_search"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "web_search"]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chat", model = "chat-wire-model", key = "controlled", priority = 1 }]

@@ -447,7 +447,7 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
     .unwrap();
 
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 17, "trace={:?}", output.node_trace);
+    assert_eq!(output.node_trace.len(), 15, "trace={:?}", output.node_trace);
     let events = output.client_response["events"]
         .as_array()
         .expect("Anthropic provider SSE must project to Anthropic client SSE events");

@@ -248,7 +248,7 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     assert_eq!(captured["user"], payload["user"]);
     assert_eq!(captured["metadata"], payload["metadata"]);
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 17);
+    assert_eq!(output.node_trace.len(), 15);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
     assert!(output
         .node_trace
@@ -256,7 +256,7 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     assert!(output
         .node_trace
         .contains(&"ProviderRespCompat02ProviderCompat"));
-    assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
+    assert_eq!(output.node_trace[14], "V3ServerRespOutbound06ClientFrame");
     let observability = output
         .observability
         .as_ref()

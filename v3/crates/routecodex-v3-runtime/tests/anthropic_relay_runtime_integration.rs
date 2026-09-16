@@ -216,7 +216,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
         })
     );
     assert_eq!(output.status, 200);
-    assert_eq!(output.node_trace.len(), 17, "trace={:?}", output.node_trace);
+    assert_eq!(output.node_trace.len(), 15, "trace={:?}", output.node_trace);
     assert_eq!(output.node_trace[0], "V3HubReqInbound01ClientRaw");
     assert!(output
         .node_trace
@@ -224,7 +224,7 @@ async fn json_runtime_uses_one_fixed_hub_lifecycle_and_exact_provider_wire() {
     assert!(output
         .node_trace
         .contains(&"ProviderRespCompat02ProviderCompat"));
-    assert_eq!(output.node_trace[16], "V3ServerRespOutbound06ClientFrame");
+    assert_eq!(output.node_trace[14], "V3ServerRespOutbound06ClientFrame");
     assert_eq!(output.client_response["stop_reason"], "tool_use");
     let toolreason = output
         .stream_observation
@@ -980,7 +980,7 @@ auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_
 wire_name = "responses-wire-model"
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision", "web_search"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "vision", "web_search"]
 [route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
@@ -1018,7 +1018,7 @@ wire_name = "responses-wire-model"
 aliases = ["claude-client-alias"]
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "vision"]
 [providers.secondary]
 type = "responses"
 base_url = "http://secondary.invalid/v1"
@@ -1029,7 +1029,7 @@ wire_name = "responses-wire-model"
 aliases = ["claude-client-alias"]
 supports_streaming = true
 supports_thinking = true
-capabilities = ["text", "tools", "tool_outputs", "local_materialization", "reasoning", "vision"]
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "vision"]
 [route_groups.__SCOPE__.pools.claude_client]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
