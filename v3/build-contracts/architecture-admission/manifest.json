@@ -468,8 +468,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.live_provider_compat.parity.yml",
       "source_path": "docs/architecture/manifests/v3.live_provider_compat.parity.yml",
-      "source_commit": "190c5e23fb19c30f44d0f4990fffb69df88e0e09",
-      "sha256": "3e5f52a4538d3c37f38c252b3b2da0d019d5bc2454615d0835fc13921592b149"
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
+      "sha256": "1779e5e064da81a77282f5012e7bd24565b7fb7c3222093f98802ed512dbac98"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml",
@@ -570,8 +570,8 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml",
-      "source_commit": "c665d90c3a105057d7e2a988b997b5e29027f917",
-      "sha256": "8f64ad5f5e56041321ada3bb1f56e1d1f6c00cdad9156cb190e403972454f137"
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
+      "sha256": "27815155e13732bea420c53fd7589812659f459708ccbe6bb7c0d33bb31e8578"
     },
     {
       "output_path": "repo/docs/architecture/manifests/v3.sse.transport_boundary.mainline.yml",
@@ -732,8 +732,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "4511c0e0da55ad91d98f585549c82d44c728c6769a3bdbebb2d064cc94f4e303"
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
+      "sha256": "48bc95f52d575201fbe807d626f16a2aee23f66889e074ac31e5a9413589ccb5"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -1158,8 +1158,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-live-provider-compat-parity.md",
       "source_path": "docs/architecture/wiki/v3-live-provider-compat-parity.md",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
-      "sha256": "8d3e132d4563e360bd97c93554de94c440615fa5a209ccb4639e0b1c6f04a081"
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
+      "sha256": "99911d31a86055798a844d455135e8106cb1c57ad7de1cea4145bf313cfebd63"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
@@ -1236,8 +1236,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md",
       "source_path": "docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md",
-      "source_commit": "1519efee567e924d25ac536924724503f7c4e613",
-      "sha256": "2e8447ec42e0741946d0a6fba9faf57be2bb435150461e0fead68777a52db909"
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
+      "sha256": "035d891e78c43fc9982e8405e0f5ac23dbd97750509dddbb24fb16c55f171a68"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-responses-session-admission.md",
@@ -2173,7 +2173,7 @@
       "output_path": "repo/docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
       "source_path": "docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
       "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
-      "sha256": "7615f720b2c6070a583f8e4a1a78eb8e52f1b88f53ab013f99197a8157265459"
+      "sha256": "eb2d83d9afb57abe2f2179432dbcc9281ef7ad451d0ab102225e31e75929443d"
     },
     {
       "output_path": "repo/docs/goals/v3-local-continuation-contract-store-test-design.md",
@@ -2413,7 +2413,7 @@
       "output_path": "repo/docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
       "source_path": "docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
       "source_commit": "abd04edd3149498da8025ee37e56c0b4f0e1442f",
-      "sha256": "e0368d2d90ab9d4d5bc29cb05f0a4cd80b7eb3f05c7d264019e31390b9a62a90"
+      "sha256": "cd48931de45a5cb4329b6995f04da3b11ccf22915ff4e1bc2da946c411717a93"
     },
     {
       "output_path": "repo/docs/goals/v3-responses-direct-remote-continuation-integration-test-design.md",
@@ -2812,5 +2812,5 @@
       "sha256": "fb611b669304c1ff1ae0285b6d2cb934fb6b6fbc5958191148a4e4a12bacc335"
     }
   ],
-  "manifest_digest": "36eceb78b944d5dcc2c6d177d37c9aa236d5a200365b2870fc3c9943eb278367"
+  "manifest_digest": "60b8e2360289ec38e07f964bf656421b2caeb87847895a8ae0f5e2038cfae4ac"
 }

@@ -25,7 +25,7 @@ In scope：
 Out of scope：
 
 - client-facing inbound WebSocket proxy implementation；它归 v3.responses_inbound_websocket_proxy。
-- Direct remote continuation state machine implementation；它归 v3.responses_direct_remote_continuation_integration。
+- Direct remote continuation state machine implementation：该 feature 已退役，不再作为本计划或当前 runtime 的验收项；历史计划与证据仅保留为非当前材料。
 - V2 config compatibility/importer、P6 deletion、production cutover。
 - 未授权的 ~/.rcc mutation、credential mutation、global install/restart。
 
@@ -47,7 +47,7 @@ Out of scope：
 - docs/architecture/v3-mainline-call-map.yml
 - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
 - docs/goals/v3-responses-websocket-v2-transport-hardening-plan.md
-- docs/goals/v3-responses-direct-remote-continuation-integration-plan.md
+- docs/goals/v3-responses-direct-remote-continuation-integration-plan.md（retired historical plan）
 - docs/goals/v3-relay-tool-servertool-multiturn-parity-closeout-plan.md
 
 候选实现面：
@@ -169,16 +169,15 @@ Verified live cases:
 - Restored /v1/models on the original config: HTTP 200 with required Codex request-builder fields for gpt-5.6-sol.
 - Restored Responses Relay JSON/SSE on POST /v1/responses: HTTP 200, fixed Req01-Req09/Resp01-Resp06 trace, no Direct/P6 markers.
 
-Boundary: no provider credential mutation, no persistent original 5555 config mutation, no P6 deletion, no
-two-turn remote continuation/tool_outputs exact-pin live replay, and no full production cutover is claimed.
+Boundary: no provider credential mutation, no persistent original 5555 config mutation, no P6 deletion, and no full production cutover is claimed.
 The direct temporary config existed only to produce fresh Direct JSON/SSE/WS evidence on the non-production
 V3 5555 listener, and the listener was restored to the original Relay profile before closeout.
 
-Follow-up blocker evidence: `.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json`
+Historical follow-up evidence: `.agent-collab/runs/20260716T125019Z-Macstudio-75061-1d19c963/provider-ws-upgrade-summary.json`
 probed 13 configured Responses providers x 4 provider-side WebSocket candidates with configured auth and
-`OpenAI-Beta: responses_websockets=2026-02-06`; 0/52 returned HTTP 101. This keeps
-`remote_continuation_two_turn_live=false` until a provider-verified Responses WebSocket v2 endpoint is available
-and a real two-turn exact-pin replay succeeds.
+`OpenAI-Beta: responses_websockets=2026-02-06`; 0/52 returned HTTP 101. Responses continuation is retired:
+a non-empty `previous_response_id` is rejected before provider send and this historical probe is not a current
+acceptance boundary.
 
 ## 13. 2026-07-23 current multi-provider 5555 audit
 
@@ -208,7 +207,7 @@ Evidence:
 - `.agent-collab/runs/20260722T171600Z-Macstudio.local-88821-c652a9-v3-live-compat-matrix/live-current-5555-status.log`
 
 The previous Anthropic endpoint exclusion is historical and must not be projected as a current
-production blocker. Gemini, Responses Relay WebSocket v2, remote continuation, and natural/authorized
+production blocker. Gemini, Responses Relay WebSocket v2, and natural/authorized
 live 401/403/5xx/timeout samples remain pending. This audit changed no provider config, credential, or
 live config. It performed no lifecycle mutation. If a lifecycle action becomes necessary, the only
 allowed aggregate command is `routecodex restart --port 5555`; start/server-start/run-managed-child

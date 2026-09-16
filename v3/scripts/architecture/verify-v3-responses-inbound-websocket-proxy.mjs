@@ -82,7 +82,7 @@ for (const phrase of [
   'async fn execute_responses_relay_websocket_output(',
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state(',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
   'send_responses_websocket_committed_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -100,7 +100,7 @@ for (const phrase of [
   'responses_inbound_websocket_accepts_binary_response_create_payload',
   'responses_inbound_websocket_projects_sse_runtime_events_as_websocket_frames',
   'responses_inbound_websocket_rejects_malformed_client_event_without_provider_send',
-  'responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_socket',
+  'responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send',
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
   'responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback',
   'responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream',
@@ -207,9 +207,9 @@ const directRuntimeCalls = text.directOutcome.match(/execute_v3_responses_direct
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
-const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_local_continuation_and_server_tool_state\(/g) ?? [];
-if (relayRuntimeCalls.length !== 1) {
-  failures.push(files.server + ': expected one WebSocket Relay Runtime entry call, got ' + relayRuntimeCalls.length);
+const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state\(/g) ?? [];
+if (relayRuntimeCalls.length !== 2) {
+  failures.push(files.server + ': expected planned and unplanned WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }
 
 forbid(files.server, text.server + text.websocket, [
