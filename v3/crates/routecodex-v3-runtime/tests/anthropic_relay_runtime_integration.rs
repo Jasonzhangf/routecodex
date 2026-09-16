@@ -5,15 +5,34 @@ use routecodex_v3_provider_responses::{
     V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_anthropic_relay_runtime, materialize_v3_provider_sse_as_canonical_response,
+    execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
+    materialize_v3_provider_sse_as_canonical_response,
     materialize_v3_responses_provider_sse_as_canonical_response,
     project_v3_anthropic_client_events, project_v3_anthropic_message_as_responses_response,
     project_v3_responses_json_as_anthropic_events, project_v3_responses_json_as_anthropic_message,
-    V3AnthropicRelayRuntimeInput, V3HubProviderWireProtocol,
+    V3AnthropicRelayRuntimeInput, V3HubProviderWireProtocol, V3ProviderFailureRuntimeHealth,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::Duration;
+
+async fn execute_v3_anthropic_relay_runtime<T: ResponsesTransport>(
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+    input: V3AnthropicRelayRuntimeInput,
+    transport: &T,
+) -> Result<
+    routecodex_v3_runtime::V3AnthropicRelayRuntimeOutput,
+    routecodex_v3_runtime::V3AnthropicRelayRuntimeError,
+> {
+    execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        manifest,
+        input,
+        transport,
+        Vec::new(),
+        V3ProviderFailureRuntimeHealth::from_manifest_for_tests(manifest),
+    )
+    .await
+}
 
 struct JsonTransport {
     captured: Mutex<Option<serde_json::Value>>,
