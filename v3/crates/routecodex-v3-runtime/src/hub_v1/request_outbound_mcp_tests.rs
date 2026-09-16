@@ -181,6 +181,59 @@ fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
 }
 
 #[test]
+fn responses_native_function_does_not_borrow_colliding_mcp_leaf_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "mcp__mcpx",
+                        "tools": [{
+                            "type": "function",
+                            "name": "session",
+                            "parameters": {"type": "object"}
+                        }]
+                    },
+                    {
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_native_session",
+                        "call_id": "call_native_session",
+                        "name": "session",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_native_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses native function history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical native function history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
+    );
+}
+
+#[test]
 fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(

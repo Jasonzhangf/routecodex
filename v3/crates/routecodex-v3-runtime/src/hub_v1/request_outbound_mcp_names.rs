@@ -1,6 +1,6 @@
 use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn provider_function_name(name: &str) -> String {
     if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
@@ -76,6 +76,7 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
         return;
     };
     let mut qualified_by_leaf = HashMap::<String, Option<String>>::new();
+    let mut ordinary_callable_names = HashSet::new();
     for tool in &tools {
         if let Ok(Some(children)) = flatten_namespace_tool_for_provider("openai-chat", tool) {
             for child in children {
@@ -86,7 +87,16 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
             continue;
         }
         if let Some(name) = provider_function_tool_name(tool) {
-            insert_provider_mcp_name(&mut qualified_by_leaf, name);
+            if mcp_tool_leaf_name(name).is_some() {
+                insert_provider_mcp_name(&mut qualified_by_leaf, name);
+            } else {
+                ordinary_callable_names.insert(name.to_owned());
+            }
+        }
+    }
+    for name in ordinary_callable_names {
+        if qualified_by_leaf.contains_key(&name) {
+            qualified_by_leaf.insert(name, None);
         }
     }
     if qualified_by_leaf.is_empty() {
