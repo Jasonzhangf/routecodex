@@ -96,22 +96,18 @@ impl HookHandler for CommandHookHandler {
                     self.command
                 ))
             })?;
-        child
-            .stdin
-            .as_mut()
-            .ok_or_else(|| {
-                HookRegistryError::HandlerError(format!(
-                    "hook command {} stdin unavailable",
-                    self.command
-                ))
-            })?
-            .write_all(input.to_string().as_bytes())
-            .map_err(|error| {
-                HookRegistryError::HandlerError(format!(
-                    "hook command {} stdin write failed: {error}",
-                    self.command
-                ))
-            })?;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            HookRegistryError::HandlerError(format!(
+                "hook command {} stdin unavailable",
+                self.command
+            ))
+        })?;
+        let stdin_write_error = match stdin.write_all(input.to_string().as_bytes()) {
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => None,
+            Err(error) => Some(error),
+            Ok(()) => None,
+        };
+        drop(stdin);
         let output = child.wait_with_output().map_err(|error| {
             HookRegistryError::HandlerError(format!(
                 "hook command {} wait failed: {error}",
@@ -124,6 +120,12 @@ impl HookHandler for CommandHookHandler {
                 self.command,
                 output.status,
                 String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+        if let Some(error) = stdin_write_error {
+            return Err(HookRegistryError::HandlerError(format!(
+                "hook command {} stdin write failed: {error}",
+                self.command
             )));
         }
         serde_json::from_slice(&output.stdout).map_err(|error| {

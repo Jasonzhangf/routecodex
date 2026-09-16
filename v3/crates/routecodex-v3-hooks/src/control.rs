@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn control_server_binds_socket_owner_only() {
-        let socket_path = std::env::temp_dir().join(format!(
+        let socket_path = std::path::Path::new("/tmp").join(format!(
             "rccv3-hooksd-mode-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn control_server_serves_health_and_shutdown_over_unix_socket() {
-        let socket_path = std::env::temp_dir().join(format!(
+        let socket_path = std::path::Path::new("/tmp").join(format!(
             "rccv3-hooksd-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn control_server_shutdown_never_unlinks_a_replacement_socket() {
-        let socket_path = std::env::temp_dir().join(format!(
+        let socket_path = std::path::Path::new("/tmp").join(format!(
             "rccv3-hooksd-replaced-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
@@ -819,7 +819,7 @@ mod tests {
 
     #[test]
     fn control_server_refuses_to_hijack_live_socket() {
-        let socket_path = std::env::temp_dir().join(format!(
+        let socket_path = std::path::Path::new("/tmp").join(format!(
             "rccv3-hooksd-live-{}-{}.sock",
             std::process::id(),
             std::time::SystemTime::now()
@@ -894,7 +894,7 @@ mod tests {
 
     #[test]
     fn control_mounted_handler_survives_state_restart() {
-        let state_path = std::env::temp_dir().join(format!(
+        let state_path = std::path::Path::new("/tmp").join(format!(
             "rccv3-hooksd-state-{}-{}.json",
             std::process::id(),
             std::time::SystemTime::now()
