@@ -630,6 +630,31 @@ exit 0  git diff --check
 The lifecycle source diff object for this candidate is
 `b9be7fc050425b9b35459d30eb8576daf101225a`.
 
+## Round 25: rebuilt candidate `d38ff088c`, task `rcc-internal-hooks-rebuild-0916-review`
+
+Verdict: `fail / code_failure`, one P1.
+
+- P1 `docs/architecture/v3-function-map.yml:65`: the feature declares
+  `live_required` same-entry replay, but the rebuilt candidate had no
+  commit-bound live replay receipt or explicit highest-layer capability gap.
+
+Fix: `docs/design/rcc-internal-hooks-sidecar-contract.md` now binds the
+rebuilt candidate, tree, base, binary hash, App Server socket, and live
+observations. The receipt records:
+
+- Desktop `idle_only` deferred and `working_allowed` accepted with the exact
+  `thread already has an active or pending turn` start error; no delivery,
+  reply, or read is claimed for that active target.
+- TUI A -> TUI B `accepted -> delivered -> replied` with native message ids,
+  plus the target pane marker and reply as corroboration.
+- The exact history-read capability errors and the remaining `read` gap; no
+  cursor, pane text, or reply id is promoted to a native read receipt.
+
+The receipt is bound to source candidate `d38ff088c`. Any follow-up commit is
+documentation-only and must leave the hooks, lifecycle, and release source
+paths unchanged; the contract includes the exact `git diff --exit-code`
+verification command.
+
 ## Unchanged boundary
 
 Install, production restart, merge, and push are not authorized and have not

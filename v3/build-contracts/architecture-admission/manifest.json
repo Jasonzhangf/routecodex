@@ -732,7 +732,7 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "eb0d222c2aefa1c310aec24336d3d5beffdc95d2",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "37900a948b0ec9fd1479205551974383e81ac614a05fc3748053aa8e56eab201"
     },
     {
@@ -744,25 +744,25 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "05ff471571a411c5d27c8ea67579dc654d530d02beaf9429b097e55850fcb93e"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "c5ddf6feb66d5ef68534ff472cb434962e8d07b496f4db0c0aebbdc75ae390b2"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
-      "source_commit": "3073a4bd53d904b149c51b7acda2019b10d39b87",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "bd621e2e4c1eb342e7d3f60cbaff96814a065b89717a6b88a15154b654c5eca1"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "15b360188991e59a19dfc10888da21cb00b6e594e67db188f86c0e6075f0b49f"
     },
     {
@@ -936,7 +936,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "c7ad97b280f47b4df59ef77eecb859cc9f6ebd759df51ff2f9356d0ef940d00b"
     },
     {
@@ -1164,7 +1164,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "c1bdb77de63048c9d1124795cbae9166de1c723678b07edfe38ae97e35c665e9"
     },
     {
@@ -1338,14 +1338,14 @@
     {
       "output_path": "repo/docs/design/rcc-internal-hooks-sidecar-contract.md",
       "source_path": "docs/design/rcc-internal-hooks-sidecar-contract.md",
-      "source_commit": "094f1fe1af42ac9deb39ef8c0fed88034d4d6662",
-      "sha256": "9186d92232f800310d155975179010702978ec6a5c098bc660dbc9d81eef6569"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "42713e79de14743a3e2cf81cb6362c027698e49558f0e27f3b64095eec3ada5a"
     },
     {
       "output_path": "repo/docs/design/rcc-internal-hooks-sidecar-review-0914.md",
       "source_path": "docs/design/rcc-internal-hooks-sidecar-review-0914.md",
-      "source_commit": "094f1fe1af42ac9deb39ef8c0fed88034d4d6662",
-      "sha256": "a3d0eb9c859ed1bee295b17b0519b30ecae3890d8ed804715170e3516b76f3c1"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "95e5bdb66ab1ea86765168614cac58f612e60d4d84ac6375a7b8c48821cdcc1f"
     },
     {
       "output_path": "repo/docs/design/rcc-unified-fence-marker-spec.md",
@@ -1716,7 +1716,7 @@
     {
       "output_path": "repo/docs/goals/rcc-internal-hooks-sidecar-plan.md",
       "source_path": "docs/goals/rcc-internal-hooks-sidecar-plan.md",
-      "source_commit": "094f1fe1af42ac9deb39ef8c0fed88034d4d6662",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "011021742c794377d4b3e0723f95d519cc18bf4e75f38f644fe0dc7f5110b214"
     },
     {
@@ -2796,7 +2796,7 @@
     {
       "output_path": "repo/scripts/architecture/mainline-call-map-lib.mjs",
       "source_path": "scripts/architecture/mainline-call-map-lib.mjs",
-      "source_commit": "6e282014395718880ba67943aba70f36798e3617",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
       "sha256": "6122991e8e52a97d1b52f0486296746cbfe02f450517c1c0d532bb2dd2f611e8"
     },
     {
@@ -2830,5 +2830,5 @@
       "sha256": "fb611b669304c1ff1ae0285b6d2cb934fb6b6fbc5958191148a4e4a12bacc335"
     }
   ],
-  "manifest_digest": "c15b21ea643b50f9d1f769eb5d6b8ad2b9a0f92040239978214db2889648201b"
+  "manifest_digest": "88fbc88eb626b0e1884d3156bd17757a8cb4048c3b6f1565d89de4c49ded1d28"
 }

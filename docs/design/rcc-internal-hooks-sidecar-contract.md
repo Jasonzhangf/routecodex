@@ -778,3 +778,97 @@ Remaining declared `live_required` items:
 
 Install, restart, merge, and push remain explicitly unauthorized and are owned
 by the supervisor.
+
+### Current candidate live replay receipt (2026-09-16)
+
+Source candidate:
+
+```text
+commit      d38ff088c6656bd706b6f27c2403092cc050fe60
+tree        8280aa3ff88ab1e40064dfbdd3ece87e21e57a4b
+base        origin/main 094f1fe1af42ac9deb39ef8c0fed88034d4d6662
+artifact    v3/target/debug/rccv3-hooksd
+sha256      e9fb4c27ed1098fdea7526102b4e48ded4d76eff42107b4a13536930cf7578cb
+size        4324752 bytes
+built       2026-09-16T08:04:00-0700
+control     /tmp/rcc-hooks-rebuild-0916.sock
+appserver   /Users/fanzhang/.codex/app-server-control/app-server-control.sock
+```
+
+The App Server probe returned `ok:true` and loaded threads:
+
+```text
+01a09634-4031-73f0-90df-11a03e0325eb
+01a0aad7-20c8-7052-90a2-92445e8fb8b2
+01a0aad7-220d-7f01-bb1a-6933273917b9
+01a0aad8-fe11-7482-992a-bfa5a460ec90
+```
+
+Desktop same-entry attempts against
+`01a09634-4031-73f0-90df-11a03e0325eb` observed the target as `working`:
+
+```text
+idle_only
+  outcome -> deferred
+  reason  -> target working or input-active with idle_only mode
+
+working_allowed
+  queue/add accepted -> 01a0aad1-02bf-7410-bd0e-6d8880961a5d
+  queue/start error  -> -32600 thread already has an active or pending turn
+  delivery evidence  -> accepted, exact start_error retained
+```
+
+This is an explicit target-state gap, not delivery evidence. The Desktop thread
+was the active owner of the current task, so the daemon correctly preserved the
+accepted queue receipt and did not claim `delivered`, `replied`, or `read`.
+
+TUI A -> TUI B replay used the current source candidate and the same live App
+Server:
+
+```text
+source thread 01a0aad7-20c8-7052-90a2-92445e8fb8b2  state idle
+target thread 01a0aad7-220d-7f01-bb1a-6933273917b9  state idle
+intent        rcc-rebuild-0916-live-final
+body          RCC_REBUILD_0916_LIVE_FINAL: reply exactly
+              RCC_REBUILD_0916_LIVE_FINAL_OK and no more.
+send_mode     working_allowed
+
+queue/add accepted -> 01a0aae2-3e0c-7e50-94b4-a719e582401c
+delivery evidence  -> delivered, native message id
+                      01a0aae2-4bc4-7e62-915f-22a414922cc5
+delivery evidence  -> replied, native message id
+                      01a0aae2-4bc4-7e62-915f-22a414922cc5
+target TUI pane    -> RCC_REBUILD_0916_LIVE_FINAL
+                      RCC_REBUILD_0916_LIVE_FINAL_OK
+```
+
+The sidecar's persisted intent evidence records the same `accepted`,
+`delivered`, and `replied` observations. The target pane observation is
+corroborating UI evidence; the native delivery-evidence response is the
+correlation source. This receipt does not promote `read` or `executed`.
+
+The earlier fresh-thread attempt on the same daemon recorded the exact history
+read capability failure and remains unresolved rather than promoted:
+
+```text
+thread/read        -> -32601 list_turns is not supported yet
+thread/timeline/list -> -32601 thread/timeline/list is not supported yet
+thread/items/list  -> -32601 thread/items/list is not supported yet
+thread/turns/list  -> -32601 list_turns is not supported yet
+```
+
+The current daemon exposes no explicit native read or acknowledgement receipt.
+`read` therefore remains the highest-layer capability gap and is not
+synthesized from a reply, pagination cursor, pane text, or message id. The
+Desktop attempt remains an explicit active-turn target-state gap. This receipt
+is bound to the source candidate above; subsequent documentation-only commits
+must leave the candidate source subtree unchanged:
+
+```text
+git diff --exit-code d38ff088c6656bd706b6f27c2403092cc050fe60 -- \
+  v3/crates/routecodex-v3-hooks \
+  v3/crates/routecodex-v3-lifecycle \
+  v3/scripts/install-cli.mjs \
+  v3/scripts/copy-cli-bin.mjs \
+  v3/scripts/pack-release.mjs
+```
