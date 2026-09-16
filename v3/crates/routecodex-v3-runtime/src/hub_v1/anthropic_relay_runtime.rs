@@ -855,7 +855,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         .collect::<String>(),
                 });
                 let resp01 = build_v3_provider_resp_inbound_01_raw_from_sse_chunks(
-                    chunks,
+                    chunks.clone(),
                     V3ProviderRespInbound01RawContext::new(
                         V3HubEntryProtocol::Anthropic,
                         provider_wire_protocol,
@@ -891,14 +891,29 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             {
                                 return Err(error);
                             }
-                            let failure = provider_runtime_failure(
-                                V3ProviderError::ResponseBody {
-                                    request_id: input.request_id.clone(),
-                                    provider_id: selected_target_provider_id.clone(),
-                                    reason: format!("provider response governance failed: {error}"),
-                                },
-                                &selected_target_provider_id,
-                            );
+                            let failure = if let Some(failure) =
+                                anthropic_provider_stream_failure_from_closeout_error(
+                                    &error,
+                                    chunks.clone(),
+                                    &input.request_id,
+                                    &selected_target_provider_id,
+                                    provider_wire_protocol,
+                                )
+                                .await
+                            {
+                                failure
+                            } else {
+                                provider_runtime_failure(
+                                    V3ProviderError::ResponseBody {
+                                        request_id: input.request_id.clone(),
+                                        provider_id: selected_target_provider_id.clone(),
+                                        reason: format!(
+                                            "provider response governance failed: {error}"
+                                        ),
+                                    },
+                                    &selected_target_provider_id,
+                                )
+                            };
                             drop(_provider_action_permit.take());
                             if let Some(failure) = handle_provider_failure(
                                 &failure_context,
@@ -1207,6 +1222,47 @@ fn record_provider_success_after_response_governance(
                 .map_err(V3AnthropicRelayRuntimeError::Target)?,
         )
         .map_err(|error| V3AnthropicRelayRuntimeError::Target(error.to_string()))
+}
+
+async fn anthropic_provider_stream_failure_from_closeout_error(
+    error: &V3AnthropicRelayRuntimeError,
+    chunks: Vec<Vec<u8>>,
+    request_id: &str,
+    provider_id: &str,
+    provider_wire_protocol: V3HubProviderWireProtocol,
+) -> Option<V3RelayProviderFailure> {
+    if !matches!(error, V3AnthropicRelayRuntimeError::ProviderCompat(_)) {
+        return None;
+    }
+    let provider = Box::pin(futures_util::stream::iter(chunks.into_iter().map(Ok)));
+    let materialization_result =
+        crate::hub_v1::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
+            provider_wire_protocol,
+            provider,
+        )
+        .await;
+    let materialization_error = materialization_result.err()?;
+    let failure = crate::hub_v1::responses_relay_runtime::provider_response_stream_relay_failure(
+        materialization_error,
+        request_id,
+        provider_id,
+        None,
+    )
+    .ok()?;
+    Some(V3RelayProviderFailure {
+        status: failure.status,
+        client_response: json!({
+            "type": "error",
+            "error": {
+                "type": failure.policy_error_type,
+                "message": failure.policy_error_message,
+            }
+        }),
+        source_stage: failure.source_stage,
+        terminal_projection: failure.terminal_projection,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
+    })
 }
 
 include!("anthropic_relay_runtime_helpers.rs");

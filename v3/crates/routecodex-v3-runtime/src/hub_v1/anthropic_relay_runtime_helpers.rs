@@ -321,6 +321,56 @@ fn extract_v3_anthropic_relay_usage_summary(
 mod anthropic_client_sse_projection_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn closeout_replay_uses_selected_provider_wire_protocol() {
+        let chunks = vec![
+            br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","response_id":"resp_partial","delta":"partial"}
+
+"#
+            .to_vec(),
+        ];
+        let error = V3AnthropicRelayRuntimeError::ProviderCompat(V3ProviderCompatError::other(
+            "response",
+            "compat:passthrough".to_string(),
+            "provider response event stream ended before response.completed".to_string(),
+        ));
+
+        let responses_failure = anthropic_provider_stream_failure_from_closeout_error(
+            &error,
+            chunks.clone(),
+            "req-provider-wire",
+            "flaky",
+            V3HubProviderWireProtocol::Responses,
+        )
+        .await
+        .expect("Responses wire closeout must be replayed as a provider failure");
+        let anthropic_failure = anthropic_provider_stream_failure_from_closeout_error(
+            &error,
+            chunks,
+            "req-provider-wire",
+            "flaky",
+            V3HubProviderWireProtocol::Anthropic,
+        )
+        .await
+        .expect("Anthropic wire closeout must also be replayed as a provider failure");
+
+        let responses_message = responses_failure.client_response["error"]["message"]
+            .as_str()
+            .unwrap();
+        let anthropic_message = anthropic_failure.client_response["error"]["message"]
+            .as_str()
+            .unwrap();
+        assert!(
+            responses_message.contains("response.completed"),
+            "Responses closeout must retain Responses failure semantics: {responses_message}"
+        );
+        assert_ne!(
+            responses_message, anthropic_message,
+            "provider wire protocol must remain bound through closeout failure replay"
+        );
+    }
+
     #[test]
     fn provider_pool_exhaustion_projects_compact_network_error() {
         let output = project_v3_anthropic_relay_runtime_failure(
