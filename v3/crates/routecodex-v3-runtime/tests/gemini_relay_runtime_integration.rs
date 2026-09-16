@@ -617,7 +617,7 @@ async fn sse_runtime_enters_response_chat_process_and_preserves_thought_signatur
     .unwrap();
     assert_eq!(output.status, 200);
     assert_eq!(
-        &output.node_trace[10..],
+        &output.node_trace[9..],
         &[
             "V3ProviderRespInbound01Raw",
             "ProviderRespCompat02ProviderCompat",
