@@ -3265,7 +3265,7 @@ async fn responses_inbound_websocket_rejects_malformed_client_event_without_prov
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_socket() {
+async fn responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
         start_controlled_continuation_websocket().await;
@@ -3338,8 +3338,8 @@ async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_
             break second_event;
         }
     };
-    assert_eq!(second_event["type"], "response.completed");
-    assert_eq!(second_event["response"]["id"], "resp_server_remote_2");
+    assert_eq!(second_event["type"], "error");
+    assert_eq!(second_event["error"]["code"], "invalid_request");
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3347,27 +3347,13 @@ async fn responses_inbound_websocket_replays_two_turn_tool_continuation_on_same_
         Some("Bearer secret-p6-inbound-ws-two-turn")
     );
     let first_capture = captures.recv().await.unwrap();
-    let second_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture.body["type"], "response.create");
-    assert_eq!(second_capture.body["type"], "response.create");
-    assert_eq!(
-        second_capture.body["previous_response_id"],
-        "resp_server_remote_1"
-    );
     assert_control_fields_absent(&first_capture.body);
-    assert_control_fields_absent(&second_capture.body);
-
-    assert_eq!(
-        second_capture.body["input"],
-        json!([
-            {"type":"function_call_output","call_id":"call_server_1","output":"ok"}
-        ])
-    );
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "remote continuation must reuse the provider socket without another handshake or send"
+        "second previous_response_id request must fail before provider send"
     );
 
     std::env::remove_var("V3_P6_TEST_KEY");

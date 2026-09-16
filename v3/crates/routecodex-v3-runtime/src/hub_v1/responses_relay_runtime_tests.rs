@@ -445,9 +445,8 @@ targets = [{ kind = "provider_model", provider = "relay", model = "test", key = 
 }
 
 #[test]
-fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
+fn relay_local_tool_output_consumes_call_id_aliases() {
     let payload = json!({
-        "previous_response_id": "resp_relay_owned",
         "input": [{
             "type": "function_call_output",
             "call_id": "call_relay_owned",
@@ -456,11 +455,7 @@ fn relay_local_tool_output_consumes_previous_response_and_call_id_aliases() {
     });
     let ids = find_responses_tool_output_ids(&payload).expect("tool output ids");
 
-    assert_eq!(ids.restore_ids, vec!["call_relay_owned"]);
-    assert_eq!(
-        ids.consumed_ids,
-        vec!["resp_relay_owned", "call_relay_owned"]
-    );
+    assert_eq!(ids.consumed_ids, vec!["call_relay_owned"]);
 }
 
 #[test]

@@ -416,29 +416,6 @@ fn attach_v3_provider_failure_events_to_failure(
     failure
 }
 
-fn payload_input_paired_call_ids(payload: &Value) -> Vec<String> {
-    payload
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| {
-            let item_type = item.get("type").and_then(Value::as_str)?;
-            if !matches!(
-                item_type,
-                "function_call" | "custom_tool_call" | "tool_call"
-            ) {
-                return None;
-            }
-            item.get("call_id")
-                .or_else(|| item.get("id"))
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        })
-        .collect()
-}
-
 fn build_v3_relay_observability_from_selected(
     selected: &routecodex_v3_target::V3Target10ConcreteProviderSelected,
     transport_intent: V3HubTransportIntent,

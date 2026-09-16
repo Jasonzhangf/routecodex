@@ -149,6 +149,18 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
+    if payload
+        .get("previous_response_id")
+        .is_some_and(|value| !value.is_null())
+    {
+        let _ = send_responses_websocket_error(
+            socket,
+            "invalid_request",
+            "Responses continuation is retired: previous_response_id is unsupported",
+        )
+        .await;
+        return Err(());
+    }
     let request_identity =
         match next_v3_console_request_identity(state, "/v1/responses", Some(&payload)) {
             Ok(identity) => identity,

@@ -1183,14 +1183,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
 
 #[derive(Debug, Default)]
 pub(crate) struct V3ResponsesRelayToolOutputIds {
-    pub(crate) restore_ids: Vec<String>,
     pub(crate) consumed_ids: Vec<String>,
 }
 
 pub(crate) fn find_responses_tool_output_ids(
     payload: &Value,
 ) -> Result<V3ResponsesRelayToolOutputIds, V3ResponsesRelayRuntimeError> {
-    let paired_call_ids = payload_input_paired_call_ids(payload);
     let mut ids = V3ResponsesRelayToolOutputIds::default();
     for item in payload
         .get("input")
@@ -1216,12 +1214,6 @@ pub(crate) fn find_responses_tool_output_ids(
             })?;
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
-        }
-        if paired_call_ids.iter().any(|paired| paired == id) {
-            continue;
-        }
-        if !ids.restore_ids.iter().any(|existing| existing == id) {
-            ids.restore_ids.push(id.to_owned());
         }
     }
     Ok(ids)
