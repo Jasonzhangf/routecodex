@@ -969,8 +969,8 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         .contains("prior provider returned 429"));
 }
 
-#[test]
-fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
+#[tokio::test]
+async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
     let mut manifest = global_pool_alive_manifest("relay_protocol_filter");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(
@@ -1007,7 +1007,8 @@ fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
         &selected,
         &BTreeSet::from([selected_key.clone()]),
         1,
-    );
+    )
+    .await;
     let V3RelayProviderTargetResolution::Selected(reselected) = resolution else {
         panic!("provider failure must reselect from the full captured route pool");
     };

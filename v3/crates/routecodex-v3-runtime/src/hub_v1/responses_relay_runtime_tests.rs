@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution_control::V3AttemptStoreError;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
@@ -356,23 +357,31 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         None,
         BTreeSet::new(),
         None,
-        Some(request_execution_control),
+        Some(request_execution_control.clone()),
     )
     .await
-    .expect_err("Relay must reject the next transport attempt from the shared budget");
+    .expect_err("the configured attempt ceiling must reject the exhausted handoff");
 
     assert!(matches!(
         error,
-        V3ResponsesRelayRuntimeError::ExecutionControl(_)
+        V3ResponsesRelayRuntimeError::ExecutionControl(message)
+            if message.contains("transport attempt limit 1 exhausted")
     ));
-    assert!(
-        transport
-            .provider_ids
-            .lock()
-            .expect("provider ids")
-            .is_empty(),
-        "budget exhaustion must happen before transport.send"
+    assert_eq!(
+        transport.provider_ids.lock().expect("provider ids").len(),
+        0,
+        "the configured ceiling must prevent an additional transport attempt"
     );
+    assert_eq!(
+        request_execution_control.transport_attempts(),
+        1,
+        "the handoff must retain the first attempt and reject the second"
+    );
+    assert!(matches!(
+        request_execution_control.attempt_budget().admit_transport_attempt(),
+        Err(V3AttemptStoreError::LocalResourceExhausted(message))
+            if message.contains("limit 1")
+    ));
 }
 
 #[test]

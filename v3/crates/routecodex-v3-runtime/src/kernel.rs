@@ -376,6 +376,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 },
             },
         };
+        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if standardized

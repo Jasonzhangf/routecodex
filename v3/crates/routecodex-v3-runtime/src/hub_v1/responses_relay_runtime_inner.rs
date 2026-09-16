@@ -176,6 +176,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
+        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let protocol_decision =
             handle_error_before_resp03!(
                 crate::nodes::build_v3_execution_11_protocol_decision_from_v3_target_10(

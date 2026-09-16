@@ -87,6 +87,7 @@ fn direct_policy_with_models(
                 default_pool_member: true,
                 path: vec!["selected-provider".to_string()],
             },
+            candidate_count: 1,
             unavailable_candidates: Vec::new(),
             attempts: 1,
             default_floor_protected: false,
