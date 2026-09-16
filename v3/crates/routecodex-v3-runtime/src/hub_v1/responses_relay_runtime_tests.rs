@@ -824,6 +824,46 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
 }
 
 #[test]
+fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_mcpx_workspace",
+            "choices":[{
+                "message":{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_mcpx_workspace",
+                        "type":"function",
+                        "function":{
+                            "name":"mcp__mcpx__workspace",
+                            "arguments":"{}"
+                        }
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }]
+        }),
+        &json!({
+            "tools":[{
+                "type":"function",
+                "function":{
+                    "name":"mcp__mcpx__workspace",
+                    "parameters":{"type":"object"}
+                }
+            }]
+        }),
+    )
+    .expect("flattened MCP function call must restore namespace for Responses client");
+
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
+    assert_eq!(response["output"][0]["name"], "workspace");
+    assert_eq!(response["output"][0]["call_id"], "call_mcpx_workspace");
+}
+
+#[test]
 fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
@@ -1031,6 +1071,46 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
             .finish_reason
             .as_deref(),
         Some("stop")
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
+    let observation = V3RuntimeStreamObservation::default();
+    let raw_sse = concat!(
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{\"reasoning_content\":\"internal reasoning only\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}],\"usage\":null}\n\n",
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":30,\"total_tokens\":42,\"input_tokens\":12,\"output_tokens\":30}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+    let provider_payload = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        provider,
+        &observation,
+    )
+    .await
+    .expect("reasoning-only terminal stream must materialize before semantic validation");
+
+    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+        None,
+        None,
+        &provider_payload,
+    )
+    .expect("reasoning-only stop must be a provider semantic failure");
+    assert_eq!(projection.status, 502);
+    assert_eq!(projection.code, "provider_empty_visible_output");
+
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        &provider_payload,
+        &json!({
+            "tools": [{"type":"function","function":{"name":"exec_command"}}]
+        }),
+    )
+    .expect_err("reasoning-only stop must not become a successful client response");
+
+    assert!(
+        error.to_string().contains("no visible model output"),
+        "wrong error: {error}"
     );
 }
 

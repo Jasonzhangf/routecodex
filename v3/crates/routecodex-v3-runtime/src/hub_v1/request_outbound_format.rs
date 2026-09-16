@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
+use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy, project_openai_chat_reasoning_summary_policy,
     project_openai_client_metadata_to_metadata, validate_openai_metadata,
@@ -177,8 +178,12 @@ fn normalize_responses_input_content_parts(payload: &mut Value) {
     }
 }
 
-pub(crate) fn normalize_v3_openai_responses_provider_request_payload(payload: &mut Value) {
+pub(crate) fn normalize_v3_openai_responses_provider_request_payload(
+    payload: &mut Value,
+) -> Result<(), String> {
+    promote_tool_search_output_tools_to_provider_tools(payload)?;
     normalize_responses_input_content_parts(payload);
+    Ok(())
 }
 
 fn responses_input_accepts_system_instruction_prefix(payload: &Value) -> bool {
@@ -344,6 +349,9 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
+    let mut source = source.clone();
+    promote_tool_search_output_tools_to_provider_tools(&mut source)?;
+    let source = &source;
     let control_paths = collect_outbound_control_field_paths(source);
     if !control_paths.is_empty() {
         return Err(format!(

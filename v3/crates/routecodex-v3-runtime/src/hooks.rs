@@ -427,7 +427,16 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
         _ => request_body,
     };
     if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses {
-        crate::hub_v1::normalize_v3_openai_responses_provider_request_payload(&mut request_body);
+        crate::hub_v1::normalize_v3_openai_responses_provider_request_payload(&mut request_body)
+            .map_err(|error| {
+                build_v3_error_01_source_raised_internal(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ResponsesDirect11Policy",
+                    "responses_provider_request_projection_failed",
+                    error,
+                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                )
+            })?;
     }
     let direct_request_protocol = match provider_protocol {
         crate::hub_v1::V3HubProviderWireProtocol::Responses => V3DirectRequestProtocol::Responses,
