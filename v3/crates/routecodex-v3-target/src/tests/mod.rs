@@ -1021,6 +1021,17 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
 
 #[test]
 fn health_cooldown_removes_default_floor_candidate_from_selection() {
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded(),
+            &Availability {
+                blocked: BTreeSet::from(["b:kb:m".into()]),
+            },
+            0,
+        )
+        .expect("the non-cooled candidate remains selectable");
+    assert_eq!(selected.candidate_count, 1);
+
     let exhausted = V3TargetInterpreter::default()
         .select_available(
             expanded(),

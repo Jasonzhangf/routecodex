@@ -61,6 +61,7 @@ pub struct V3Target09CandidateSetExpanded {
 pub struct V3Target10ConcreteProviderSelected {
     pub route: V3Router07OpaqueTargetHitOnce,
     pub candidate: V3TargetCandidate,
+    pub candidate_count: usize,
     pub unavailable_candidates: Vec<String>,
     pub attempts: usize,
     pub default_floor_protected: bool,
@@ -309,7 +310,7 @@ impl V3TargetInterpreter {
             // Earlier route tiers have precedence over later/default tiers.
             // Keep that precedence while candidate priority itself is ordered
             // descending (larger configured values win).
-            let route_tier_index = Self::route_tier_index(&expanded.route, candidate);
+            let route_tier_index = Self::route_tier_index_for_candidate(&expanded.route, candidate);
             let route_tier_rank = expanded
                 .route
                 .target_plan
@@ -357,6 +358,11 @@ impl V3TargetInterpreter {
                 attempted_candidates: unavailable,
             });
         };
+        // Cooldown, request-local exclusion, capability mismatch, and context
+        // rejection are not transport candidates.  The request-local attempt
+        // ceiling must therefore follow the eligible set, not the expanded
+        // declaration set.
+        let candidate_count = eligible.len().max(1);
         let mut tier = eligible
             .into_iter()
             .filter(|(_, _, projection)| projection.effective_priority == max_priority)
@@ -378,13 +384,18 @@ impl V3TargetInterpreter {
         Ok(V3Target10ConcreteProviderSelected {
             route: expanded.route,
             candidate: candidate.clone(),
+            candidate_count,
             unavailable_candidates: unavailable,
             attempts: index + 1,
             default_floor_protected: false,
         })
     }
 
-    fn route_tier_index(
+    /// Returns the captured route-plan tier containing a concrete candidate.
+    ///
+    /// Target owns this provenance lookup so runtime rescue logic can inspect
+    /// tier precedence without copying route-plan semantics.
+    pub fn route_tier_index_for_candidate(
         route: &V3Router07OpaqueTargetHitOnce,
         candidate: &V3TargetCandidate,
     ) -> usize {

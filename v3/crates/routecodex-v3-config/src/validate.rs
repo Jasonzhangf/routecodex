@@ -31,7 +31,10 @@ pub(crate) fn build_resource_registry(
 ) -> Result<V3Config04ResourceRegistryBuilt, V3ConfigError> {
     let authoring = validated.authoring;
     let hub_v1 = compile_hub_v1(authoring.pipelines.hub_v1)?;
-    let compiled_providers = compile_providers(authoring.providers)?;
+    let providers_using_default_model =
+        collect_providers_using_default_model(&authoring.forwarders, &authoring.route_groups);
+    let compiled_providers =
+        compile_providers(authoring.providers, &providers_using_default_model)?;
     let providers = compiled_providers.providers;
     validate_cross_provider_model_web_search_mode_uniqueness(&providers)?;
     let provider_error_action_policies = compiled_providers.provider_error_action_policies;
@@ -586,6 +589,7 @@ struct V3CompiledProviders {
 
 fn compile_providers(
     authoring: BTreeMap<String, V3ProviderAuthoringConfig>,
+    providers_using_default_model: &BTreeSet<String>,
 ) -> Result<V3CompiledProviders, V3ConfigError> {
     let mut providers = BTreeMap::new();
     let mut provider_error_action_policies = Vec::new();
@@ -609,7 +613,9 @@ fn compile_providers(
         if provider.models.is_empty() {
             return Err(validation(format!("provider {id} has no models")));
         }
-        if !provider.models.contains_key(&provider.default_model) {
+        if providers_using_default_model.contains(&id)
+            && !provider.models.contains_key(&provider.default_model)
+        {
             return Err(validation(format!(
                 "provider {id} default_model {} is not a canonical models key",
                 provider.default_model
@@ -681,6 +687,34 @@ fn compile_providers(
         providers,
         provider_error_action_policies,
     })
+}
+
+fn collect_providers_using_default_model(
+    forwarders: &BTreeMap<String, V3ForwarderAuthoringConfig>,
+    route_groups: &BTreeMap<String, V3RouteGroupAuthoringConfig>,
+) -> BTreeSet<String> {
+    let mut providers = BTreeSet::new();
+    for forwarder in forwarders.values() {
+        for target in &forwarder.targets {
+            if target.kind == V3RouteTargetKind::ProviderModel && target.model.is_none() {
+                if let Some(provider) = target.provider.as_deref() {
+                    providers.insert(provider.to_string());
+                }
+            }
+        }
+    }
+    for group in route_groups.values() {
+        for pool in group.pools.values() {
+            for target in &pool.targets {
+                if target.kind == V3RouteTargetKind::ProviderModel && target.model.is_none() {
+                    if let Some(provider) = target.provider.as_deref() {
+                        providers.insert(provider.to_string());
+                    }
+                }
+            }
+        }
+    }
+    providers
 }
 
 fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Option<String> {

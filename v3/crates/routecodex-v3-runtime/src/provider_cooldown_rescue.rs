@@ -5,14 +5,14 @@ pub(crate) enum V3TargetSelectionAfterRescue {
 }
 
 impl V3ProviderFailureRuntimeHealth {
-    pub(crate) async fn run_exhaustion_rescue_probes(
+    async fn run_cooldown_rescue_probes_for_candidates(
         &self,
         manifest: &V3Config05ManifestPublished,
-        expanded: &V3Target09CandidateSetExpanded,
+        candidates: &[V3TargetCandidate],
     ) -> Result<(), String> {
         let mut identities = BTreeSet::new();
         let mut probes = Vec::new();
-        for candidate in &expanded.candidates {
+        for candidate in candidates {
             let identity = (
                 &candidate.provider_id,
                 &candidate.auth_alias,
@@ -91,7 +91,7 @@ impl V3ProviderFailureRuntimeHealth {
                                 v3_relay_provider_policy_now_epoch_ms()?,
                                 Some(permit.expected_generation()),
                             )
-                        .map_err(|store_error| store_error.to_string())?;
+                            .map_err(|store_error| store_error.to_string())?;
                         Ok(())
                     }
                 };
@@ -103,6 +103,15 @@ impl V3ProviderFailureRuntimeHealth {
             result?;
         }
         Ok(())
+    }
+
+    pub(crate) async fn run_exhaustion_rescue_probes(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+    ) -> Result<(), String> {
+        self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates)
+            .await
     }
 }
 
@@ -163,10 +172,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     );
     let initial_exhaustion = match initial_selection {
         Ok(selected) => {
-            // Probe the already-cooled members before the final currently
-            // available member is allowed to fail and empty the pool.  This
-            // is deliberately owned by target selection: provider failure
-            // callers do not each grow a second cooldown/probe path.
             let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
             let available_count = expanded
                 .candidates
@@ -199,10 +204,59 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                         .iter()
                         .any(|scope| scope.contains("cooldown"))
             });
-            if allow_exhaustion_rescue_probe && available_count == 1 && cooled_peer_exists {
+            let selected_tier = V3TargetInterpreter::route_tier_index_for_candidate(
+                &selected.route,
+                &selected.candidate,
+            );
+            let preceding_tier_candidates = if selected_tier == usize::MAX {
+                Vec::new()
+            } else {
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| {
+                        let key = v3_relay_provider_candidate_key(candidate);
+                        V3TargetInterpreter::route_tier_index_for_candidate(
+                            &selected.route,
+                            candidate,
+                        ) < selected_tier
+                            && !request_local_excluded_candidates.contains(&key)
+                            && provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    now_ms,
+                                )
+                                .blocked_scopes
+                                .iter()
+                                .any(|scope| scope.contains("cooldown"))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            // A later tier is selected only after its preceding tiers are
+            // unavailable. Probe those cooled members before committing to the
+            // later tier. Request-local failures stay excluded permanently.
+            let rescue_candidates = if !preceding_tier_candidates.is_empty() {
+                preceding_tier_candidates
+            } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| {
+                        !request_local_excluded_candidates
+                            .contains(&v3_relay_provider_candidate_key(candidate))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
                 rescue_attempted = true;
                 if let Err(error) = provider_health
-                    .run_exhaustion_rescue_probes(manifest, &expanded)
+                    .run_cooldown_rescue_probes_for_candidates(manifest, &rescue_candidates)
                     .await
                 {
                     return V3TargetSelectionAfterRescue::Failed(target_resolution_source(

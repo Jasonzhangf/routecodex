@@ -226,7 +226,7 @@ mod tests {
         let body = json!({
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": [
-                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+                {"type": "tool_use", "name": "invalid.tool!", "input": {}}
             ]}]
         });
         let error =
@@ -238,12 +238,34 @@ mod tests {
     }
 
     #[test]
+    fn wire_maps_historical_namespace_tool_use_name_in_anthropic_messages() {
+        let mut anthropic_target = target();
+        anthropic_target.provider_type = "anthropic".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": [
+                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+            ]}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-tool-use-name",
+            anthropic_target,
+            body,
+        )
+        .expect("Anthropic tool-use history names must be normalized before provider transport");
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
     fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
         let body = json!({
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": "", "tool_calls": [
                 {"id": "call-review", "type": "function", "function": {
-                    "name": "mcp__codex_review.review_start",
+                    "name": "invalid.tool!",
                     "arguments": "{}"
                 }}
             ]}]

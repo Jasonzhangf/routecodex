@@ -131,6 +131,57 @@ fn native_v3_root_loads_referenced_provider_files() {
 }
 
 #[test]
+fn off_route_directory_default_model_does_not_block_referenced_route() {
+    let root = temp_root("off-route-default");
+    let token = write_token(&root, "external");
+    let provider_path = write_provider(&root, "external", "responses", "gpt-test", &token, "");
+    let provider_text = fs::read_to_string(&provider_path).unwrap().replace(
+        "defaultModel = \"gpt-test\"",
+        "defaultModel = \"unrouted-model\"",
+    );
+    fs::write(&provider_path, provider_text).unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "gpt-test")).unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .expect("the routed model is the canonical runtime model");
+    assert!(snapshot.manifest.providers["external"]
+        .models
+        .contains_key("gpt-test"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn implicit_directory_provider_target_requires_a_canonical_default_model() {
+    let root = temp_root("implicit-default-model");
+    let token = write_token(&root, "external");
+    let provider_path = write_provider(&root, "external", "responses", "gpt-test", &token, "");
+    let provider_text = fs::read_to_string(&provider_path).unwrap().replace(
+        "defaultModel = \"gpt-test\"",
+        "defaultModel = \"unrouted-model\"",
+    );
+    fs::write(&provider_path, provider_text).unwrap();
+    let config_path = root.join("config.v3.toml");
+    let config =
+        directory_root_config("external", "gpt-test").replace(", model = \"gpt-test\"", "");
+    fs::write(&config_path, config).unwrap();
+
+    let error = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect_err("implicit provider target must validate its default model");
+    assert!(
+        error
+            .to_string()
+            .contains("default_model unrouted-model is not a canonical models key"),
+        "unexpected error: {error}"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn provider_only_source_change_changes_snapshot_identity_and_manifest() {
     let root = temp_root("identity");
     let token = write_token(&root, "external");

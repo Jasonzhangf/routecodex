@@ -87,7 +87,13 @@ pub(crate) fn compile_provider_directory(
             None
         };
         let v3 = provider.v3.unwrap_or_default();
-        let models = compile_v2_provider_models(provider.models, Some(selected_models));
+        // An empty selection means the route uses the provider default model.
+        // Keep the directory model table intact so validation can verify that
+        // default_model is a canonical key before runtime target expansion.
+        let models = compile_v2_provider_models(
+            provider.models,
+            (!selected_models.is_empty()).then_some(selected_models),
+        );
         providers.insert(
             provider_id.clone(),
             V3ProviderAuthoringConfig {

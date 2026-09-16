@@ -1162,17 +1162,14 @@ impl V3ProviderHealthStore {
             }
         }
         let next_probe_failure_count = existing_probe.probe_failure_count.saturating_add(1);
-        let (observed_attempts, observed_failures) = {
-            let history = state.adaptive_history.entry(key.clone()).or_default();
-            history.attempts = history.attempts.saturating_add(1);
-            history.failures = history.failures.saturating_add(1);
-            history.probe_failure_count = next_probe_failure_count;
-            record_health_delta(history, -5);
-            history.failure_streak = history.failure_streak.saturating_add(1);
-            history.success_streak = 0;
-            history.score_generation = history.score_generation.saturating_add(1);
-            (history.attempts, history.failures)
-        };
+        // A cooldown probe is control-plane recovery traffic, not a provider
+        // transport attempt. Keep its failure counter on the probe state and
+        // preserve the transport history used by candidate scheduling.
+        let (observed_attempts, observed_failures) = state
+            .adaptive_history
+            .get(&key)
+            .map(|history| (history.attempts, history.failures))
+            .unwrap_or_default();
         // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
         // looping after the 3h step. Health history still records adaptive
         // diagnostics, but must not reschedule the ladder.
