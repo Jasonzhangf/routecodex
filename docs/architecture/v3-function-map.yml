@@ -2323,6 +2323,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2370,6 +2372,7 @@ features:
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
   - project_v3_responses_arguments_to_openai_chat_wire
   - build_v3_openai_chat_standard_request_from_chat_canonical
+  - qualify_openai_chat_missing_mcp_tool_call_names
   - project_openai_client_metadata_to_metadata
   - unsupported_client_metadata_paths
   - validate_openai_metadata
@@ -2422,6 +2425,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
