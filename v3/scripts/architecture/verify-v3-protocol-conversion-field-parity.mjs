@@ -1220,6 +1220,7 @@ if (!expectedParityCommand || pkg.scripts?.['test:v3-protocol-conversion-field-p
 for (const scriptName of [
   'render:v3-protocol-semantic-field-matrix',
   'test:v3-protocol-conversion-field-parity',
+  'test:v3-responses-continuation-namespace-contract',
   'verify:v3-protocol-conversion-field-parity',
   'test:v3-protocol-conversion-field-parity-red-fixtures',
 ]) {
@@ -1230,6 +1231,7 @@ for (const command of [
   'npm run verify:v3-protocol-conversion-field-parity',
   'npm run test:v3-protocol-conversion-field-parity-red-fixtures',
   'npm run test:v3-protocol-conversion-field-parity',
+  'npm run test:v3-responses-continuation-namespace-contract',
 ]) {
   if (!parityCiScript.includes(command)) {
     failures.push(`${paths.v3PackageJson}: verify:v3-protocol-conversion-field-parity-ci must include ${command}`);
