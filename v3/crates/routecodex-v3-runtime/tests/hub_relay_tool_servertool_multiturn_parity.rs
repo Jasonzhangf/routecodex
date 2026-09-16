@@ -32,6 +32,22 @@ fn raw_request_for(
 }
 
 fn chat_tool_output_content<'a>(payload: &'a Value, call_id: &str) -> Option<&'a str> {
+    if let Some(input) = payload.get("input").and_then(Value::as_array) {
+        if let Some(item) = input.iter().find(|item| {
+            item.get("call_id").and_then(Value::as_str) == Some(call_id)
+                && matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output")
+                        | Some("tool_call_output")
+                        | Some("custom_tool_call_output")
+                )
+        }) {
+            return item
+                .get("output")
+                .or_else(|| item.get("content"))
+                .and_then(Value::as_str);
+        }
+    }
     payload
         .get("messages")
         .and_then(Value::as_array)?

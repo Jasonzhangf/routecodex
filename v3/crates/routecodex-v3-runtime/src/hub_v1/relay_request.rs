@@ -415,10 +415,23 @@ fn govern_tool_outputs_at_req04(
     {
         return govern_chat_tool_outputs_at_req04(payload, current_payload_start);
     }
+    let mut expected_outputs = BTreeMap::new();
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        for message in messages.iter().skip(current_payload_start) {
+            if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+                for call in calls {
+                    if let Some((call_id, expected_kind)) =
+                        expected_tool_call_output_from_chat_call(call)
+                    {
+                        expected_outputs.insert(call_id, expected_kind);
+                    }
+                }
+            }
+        }
+    }
     let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(0);
     };
-    let mut expected_outputs = BTreeMap::new();
     let mut output_count = 0;
     for (index, item) in input.iter_mut().enumerate().skip(current_payload_start) {
         if let Some((call_id, expected_kind)) = expected_tool_call_output_from_item(item) {
