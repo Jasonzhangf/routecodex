@@ -824,6 +824,46 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
 }
 
 #[test]
+fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_mcpx_workspace",
+            "choices":[{
+                "message":{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_mcpx_workspace",
+                        "type":"function",
+                        "function":{
+                            "name":"mcp__mcpx__workspace",
+                            "arguments":"{}"
+                        }
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }]
+        }),
+        &json!({
+            "tools":[{
+                "type":"function",
+                "function":{
+                    "name":"mcp__mcpx__workspace",
+                    "parameters":{"type":"object"}
+                }
+            }]
+        }),
+    )
+    .expect("flattened MCP function call must restore namespace for Responses client");
+
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
+    assert_eq!(response["output"][0]["name"], "workspace");
+    assert_eq!(response["output"][0]["call_id"], "call_mcpx_workspace");
+}
+
+#[test]
 fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({

@@ -425,12 +425,20 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "input":input
         }));
     }
-    Ok(json!({
-        "type":"function_call",
-        "call_id":call_id,
-        "name":name,
-        "arguments":arguments
-    }))
+    let mut item = Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        ),
+        ("call_id".to_string(), Value::String(call_id.to_string())),
+        ("name".to_string(), Value::String(name.to_string())),
+        (
+            "arguments".to_string(),
+            Value::String(arguments.to_string()),
+        ),
+    ]);
+    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut item);
+    Ok(Value::Object(item))
 }
 
 fn parse_v3_openai_chat_custom_tool_input(

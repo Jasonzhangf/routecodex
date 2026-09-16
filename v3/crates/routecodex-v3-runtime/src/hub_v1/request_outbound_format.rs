@@ -130,7 +130,6 @@ fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<
     // Re-running it here would reapply public metadata limits to the provider
     // compatible slot. Client metadata is already consumed as local context.
     let mut normalized = payload.clone();
-    promote_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     let instructions = normalized
         .as_object_mut()
         .and_then(|row| row.remove("instructions"))
@@ -350,6 +349,9 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
+    let mut source = source.clone();
+    promote_tool_search_output_tools_to_provider_tools(&mut source)?;
+    let source = &source;
     let control_paths = collect_outbound_control_field_paths(source);
     if !control_paths.is_empty() {
         return Err(format!(
@@ -1302,7 +1304,6 @@ fn normalize_openai_chat_messages_payload(
         payload,
         V3OutboundTargetProtocol::OpenAiChat,
     )?;
-    promote_tool_search_output_tools_to_provider_tools(&mut normalized)?;
     if let Some(row) = normalized.as_object_mut() {
         if let Some(max_output_tokens) = row.remove("max_output_tokens") {
             row.entry("max_completion_tokens".to_string())

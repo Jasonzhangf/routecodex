@@ -72,6 +72,58 @@ fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools
 }
 
 #[test]
+fn responses_tool_search_output_promotes_namespace_before_chat_projection_strips_extension() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "type": "tool_search_call",
+                        "call_id": "call_search",
+                        "execution": "client",
+                        "status": "completed",
+                        "arguments": {"query": "MCPX workspace"}
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_search",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "mcp__mcpx",
+                            "tools": [{
+                                "type": "function",
+                                "name": "workspace",
+                                "description": "List workspaces",
+                                "parameters": {"type": "object"}
+                            }]
+                        }]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses tool search history must canonicalize");
+    assert_eq!(
+        canonical["messages"][1]["routecodex_chat_extension"]["responses_tool_output_type"],
+        "tool_search_output",
+        "canonical history must carry the tool_search_output marker"
+    );
+
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("discovered namespace tools must survive Chat provider projection");
+
+    assert!(
+        request["tools"].as_array().is_some_and(|tools| tools.iter().any(
+            |tool| tool["type"] == "function"
+                && tool["function"]["name"] == "mcp__mcpx__workspace"
+        )),
+        "provider tools must expose the discovered namespace child after projection: {request}"
+    );
+}
+
+#[test]
 fn responses_provider_wire_preserves_promoted_namespace_for_wire_expansion() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
