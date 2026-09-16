@@ -794,7 +794,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let response_status = read_v3_runtime_response_status(&finalized_provider_value);
                 observability.finish_reason =
                     read_v3_runtime_finish_reason(&finalized_provider_value)
-                        .or_else(|| read_v3_runtime_finish_reason(&provider_value));
+                        .or_else(|| read_v3_runtime_finish_reason(&provider_value))
+                        .or_else(|| {
+                            infer_v3_runtime_finish_reason_from_provider_event_json(
+                                Some("response.completed"),
+                                response_status.as_deref(),
+                            )
+                        });
                 observability.response_status = response_status;
                 observability.usage = extract_v3_runtime_usage_summary(&finalized_provider_value);
                 // Resp03 response-side tool projection.
