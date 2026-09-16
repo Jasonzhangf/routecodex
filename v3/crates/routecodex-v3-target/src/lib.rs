@@ -583,7 +583,12 @@ impl V3TargetInterpreter {
             .get(provider_id)
             .filter(|provider| provider.enabled)
             .ok_or_else(|| V3TargetError::ProviderMissing(provider_id.to_string()))?;
-        let model_id = model_id.unwrap_or(&provider.default_model);
+        let model_id = model_id
+            .or_else(|| provider.models.keys().next().map(String::as_str))
+            .ok_or_else(|| V3TargetError::ModelMissing {
+                provider_id: provider_id.to_string(),
+                model_id: "<route-model>".to_string(),
+            })?;
         let model = provider
             .models
             .get(model_id)

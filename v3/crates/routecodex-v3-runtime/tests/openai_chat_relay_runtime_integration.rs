@@ -7,6 +7,7 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
+    build_v3_provider_global_probe_target,
     execute_v3_openai_chat_relay_runtime as execute_v3_openai_chat_relay_runtime_impl,
     execute_v3_openai_chat_relay_runtime_with_provider_health,
     project_v3_openai_chat_relay_runtime_failure, V3OpenAiChatRelayClientBody,
@@ -2086,6 +2087,23 @@ targets = [{{ kind = "provider_model", provider = "{identity}", model = "chat-wi
         .unwrap(),
     )
     .unwrap()
+}
+
+#[test]
+fn global_probe_rejects_explicit_unrouted_model() {
+    let identity = "probe_invalid_model";
+    let manifest = manifest_with_identity(identity);
+    let error = build_v3_provider_global_probe_target(
+        &manifest,
+        identity,
+        Some(identity),
+        Some("model-that-is-not-routed"),
+    )
+    .expect_err("a probe must never substitute a different model");
+    assert!(
+        error.contains("model-that-is-not-routed is not routed"),
+        "{error}"
+    );
 }
 
 fn manifest_with_two_providers_for_scope(

@@ -105,8 +105,8 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点：401/403 → 连续 2 次×1h；
-/// 429/5xx → 连续 3 次×15m；其余 provider 失败沿用 typed 分类结果并按默认
+/// internal.toml 全局错误策略表的落地点：401/403/503 → 连续 2 次×1h；402 → 连续 3 次×1h；
+/// 429/其余 5xx → 连续 3 次×15m；其余 provider 失败沿用 typed 分类结果并按默认
 /// recoverable 阈值（3）计数。任何失败连续达到阈值即进入全局冷却，
 /// 由后台探活（先密后稀阶梯）或真实成功恢复。
 pub(crate) fn apply_v3_internal_provider_failure_policy(
@@ -119,6 +119,7 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
     if let Some(policy) = build_v3_provider_global_failure_policy(status) {
         action.failure_threshold = policy.failure_threshold;
         action.cooldown_ms = policy.cooldown_ms;
+        action.long_probe_backoff = matches!(status, 401 | 402 | 403 | 503);
         action.scope = V3ProviderHealthScope::GlobalProviderKey;
         return action;
     }
@@ -628,6 +629,7 @@ impl V3ProviderFailureRuntimeHealth {
                     failure_threshold: u32::MAX,
                     cooldown_ms: 1,
                     probe_interval_ms: 1,
+                    long_probe_backoff: false,
                     until_restart: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::Session,
                 }),
@@ -668,7 +670,7 @@ impl V3ProviderFailureRuntimeHealth {
         );
         let classified = build_v3_error_02_classified_from_v3_error_01(source.clone());
         if let Some(policy) = matched_policy_directive
-            .map(provider_failure_policy_from_error_policy_directive)
+            .map(|policy| provider_failure_policy_from_error_policy_directive(policy, status))
             .transpose()?
             .flatten()
         {
@@ -1405,6 +1407,7 @@ fn find_matching_provider_error_policy<'manifest>(
 
 fn provider_failure_policy_from_error_policy_directive(
     policy: &V3ProviderErrorActionPolicyManifest,
+    status: u16,
 ) -> Result<Option<V3ProviderFailurePolicy>, String> {
     let failure_threshold = policy
         .path
@@ -1439,6 +1442,7 @@ fn provider_failure_policy_from_error_policy_directive(
         cooldown_ms: duration_ms.unwrap_or(1),
         probe_interval_ms: duration_ms
             .unwrap_or(v3_internal_error_handling().unrecoverable_probe_interval_ms),
+        long_probe_backoff: matches!(status, 401 | 402 | 403 | 503),
         until_restart: until_restart.unwrap_or(false),
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     }))

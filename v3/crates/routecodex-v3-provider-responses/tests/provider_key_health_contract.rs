@@ -128,6 +128,7 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
         failure_threshold: 3,
         cooldown_ms: 60_000,
         probe_interval_ms: 60_000,
+        long_probe_backoff: false,
         until_restart: false,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     };
@@ -530,6 +531,7 @@ fn recoverable_key_probe_is_single_flight_and_global_probe_is_not_duplicated() {
         score_delta_milli: -20,
         failure_threshold: 0,
         cooldown_ms: 60_000,
+        long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
     };
     store
@@ -656,6 +658,7 @@ fn account_error_reaches_cooldown_at_zero() {
         score_delta_milli: -20,
         failure_threshold: 0,
         cooldown_ms: 60_000,
+        long_probe_backoff: false,
         class_code: "invalid_api_key".to_string(),
     };
     for now_ms in 100..105 {

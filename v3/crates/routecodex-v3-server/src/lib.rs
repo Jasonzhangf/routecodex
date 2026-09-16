@@ -556,9 +556,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 },
             )
             .await;
-        // Probe health records each target result; aggregate probe errors are
-        // not human console events.
-        let _ = startup_result;
+        if let Err(error) = startup_result {
+            eprintln!("provider startup probe batch failed: {error}");
+        }
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -584,7 +584,9 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                             probe_v3_provider_global_target(target).await
                         }
                     }).await;
-                    let _ = result;
+                    if let Err(error) = result {
+                        eprintln!("provider periodic probe batch failed: {error}");
+                    }
                 }
             }
         }

@@ -688,6 +688,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         score_delta_milli: -400,
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
+        long_probe_backoff: false,
     };
     let scope = test_provider_failure_scope(
         "incomplete_key_identity",
