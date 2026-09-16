@@ -911,56 +911,61 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .await
             .expect("provider attempt failure must reach terminal Error06");
         }
-        let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-fresh-after-uncommitted-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"blocked"}]}],
-                    "stream":false
-                }),
-            },
-            &succeeding,
-            provider_health.runtime_health(),
-        )
-        .await;
+        // The exhausted request owns the wait and must recover when the
+        // single-flight rescue probe succeeds. Hold the probe permit here so
+        // the test never reaches the invalid provider URL.
+        let rescue_permit = provider_health
+            .store()
+            .acquire_provider_cooldown_rescue_probe(server_id, Some(server_id), Some("gemini-wire"))
+            .expect("rescue probe acquisition")
+            .expect("cooldown-only exhaustion must schedule one rescue probe");
+        let blocked_manifest = manifest.clone();
+        let blocked_health = provider_health.runtime_health();
+        let blocked_server_id = server_id.to_string();
+        let blocked_request_id = format!("req-gemini-fresh-after-uncommitted-{case}");
+        let blocked = tokio::spawn(async move {
+            execute_v3_gemini_relay_runtime_with_provider_health(
+                &blocked_manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: blocked_server_id,
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: blocked_request_id,
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"blocked"}]}],
+                        "stream":false
+                    }),
+                },
+                &succeeding,
+                blocked_health,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(
-            blocked.is_err(),
-            "{case} fresh request must be blocked while provider cooldown is active"
+            !blocked.is_finished(),
+            "{case} exhausted request must wait for rescue probe recovery"
         );
-
-        // provider cooldown 与 model-key health 都需要各自成功 probe，随后 fresh 成功。
-        revive_cooled_provider(&provider_health, server_id).await;
-        let second = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-after-provider-revival-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"next"}]}],
-                    "stream":false
-                }),
-            },
-            &succeeding,
-            provider_health.runtime_health(),
-        )
-        .await
-        .expect("probe-revived provider must accept a fresh request");
+        provider_health
+            .store()
+            .complete_provider_cooldown_probe_success_at_generation(
+                server_id,
+                Some(server_id),
+                Some("gemini-wire"),
+                u64::MAX,
+                Some(rescue_permit.expected_generation()),
+            )
+            .expect("rescue probe success must revive the cooled provider");
+        let second = tokio::time::timeout(Duration::from_secs(5), blocked)
+            .await
+            .expect("rescue probe success must release the exhausted request")
+            .expect("exhausted request task panicked")
+            .expect("probe-revived provider must accept the held request");
         assert_eq!(second.status, 200);
     }
 }
