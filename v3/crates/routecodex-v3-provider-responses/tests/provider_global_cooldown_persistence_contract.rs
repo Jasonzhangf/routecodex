@@ -252,3 +252,65 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         vec![("p".into(), Some("k".into()), Some("m".into()))]
     );
 }
+
+#[test]
+fn restart_restores_long_probe_cadence_for_persisted_long_class() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-restart-ordinary-long-probes-{}.json",
+        std::process::id()
+    ));
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+    coordinator
+        .record_failure(
+            "p",
+            Some("k"),
+            Some("m"),
+            V3ProviderCooldownFailureClass::ProbeLong,
+            1_000,
+            V3ProviderCooldownObservation::default(),
+        )
+        .unwrap();
+
+    let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    assert_eq!(
+        restored
+            .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+            .unwrap()
+            .map(|permit| permit.provider_id().to_string())
+            .as_deref(),
+        Some("p"),
+        "persisted long-policy cooldown must expose a startup probe"
+    );
+    restored
+        .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_001)
+        .unwrap();
+    assert!(restored
+        .provider_cooldown_probe_keys_due(32_000)
+        .unwrap()
+        .is_empty());
+    assert!(restored
+        .provider_cooldown_probe_keys_due(32_001)
+        .unwrap()
+        .contains(&("p".into(), Some("k".into()), Some("m".into()))));
+}

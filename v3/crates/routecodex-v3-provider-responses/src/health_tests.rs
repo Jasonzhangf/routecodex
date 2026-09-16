@@ -169,6 +169,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         failure_threshold: 2,
         cooldown_ms: 3_600_000,
         probe_interval_ms: 3_600_000,
+        long_probe_backoff: false,
         until_restart: false,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     };

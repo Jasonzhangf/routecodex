@@ -5,14 +5,15 @@ use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
 };
-use crate::probe_backoff::{adaptive_probe_interval_ms, probe_backoff_ms};
+use crate::probe_backoff::{adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms};
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
-    persist_cooldown_state, provider_cooldown_state_path_for_manifest,
-    start_provider_health_persistence, V3ProviderHealthPersistenceWriter,
+    legacy_provider_cooldown_state_path_for_manifest, persist_cooldown_state,
+    provider_cooldown_state_path_for_manifest, start_provider_health_persistence,
+    V3ProviderHealthPersistenceWriter,
 };
 use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionStepManifest};
 use routecodex_v3_error::{
@@ -58,6 +59,7 @@ pub struct V3ProviderFailurePolicy {
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
     pub probe_interval_ms: u64,
+    pub long_probe_backoff: bool,
     pub until_restart: bool,
     pub cooldown_scope: V3ProviderFailureCooldownScope,
 }
@@ -68,6 +70,7 @@ impl Default for V3ProviderFailurePolicy {
             failure_threshold: 3,
             cooldown_ms: 900_000,
             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+            long_probe_backoff: false,
             until_restart: false,
             cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
         }
@@ -343,23 +346,28 @@ impl V3ProviderHealthStore {
 
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         let persistence_path = provider_cooldown_state_path_for_manifest(manifest);
-        Self::from_manifest_with_persistence_path(manifest, persistence_path)
+        Self::from_manifest_internal(
+            manifest,
+            Some(persistence_path),
+            Some(legacy_provider_cooldown_state_path_for_manifest(manifest)),
+        )
     }
 
     pub fn from_manifest_without_persistence(manifest: &V3Config05ManifestPublished) -> Self {
-        Self::from_manifest_internal(manifest, None)
+        Self::from_manifest_internal(manifest, None, None)
     }
 
     pub fn from_manifest_with_persistence_path(
         manifest: &V3Config05ManifestPublished,
         persistence_path: PathBuf,
     ) -> Self {
-        Self::from_manifest_internal(manifest, Some(persistence_path))
+        Self::from_manifest_internal(manifest, Some(persistence_path), None)
     }
 
     fn from_manifest_internal(
         manifest: &V3Config05ManifestPublished,
         persistence_path: Option<PathBuf>,
+        legacy_persistence_path: Option<PathBuf>,
     ) -> Self {
         let configured_disabled = manifest
             .providers
@@ -381,6 +389,7 @@ impl V3ProviderHealthStore {
                             failure_threshold: health.failure_threshold.max(1),
                             cooldown_ms: health.cooldown_ms.max(1),
                             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                            long_probe_backoff: false,
                             until_restart: false,
                             cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
                         },
@@ -417,10 +426,14 @@ impl V3ProviderHealthStore {
             state.adaptive_history.entry(key).or_insert(history);
         }
         if let Some((writer, persisted_entries)) =
-            start_provider_health_persistence(persistence_path)
+            start_provider_health_persistence(manifest, persistence_path, legacy_persistence_path)
         {
             for (key, blocked_until_ms, next_probe_at_ms) in persisted_entries {
-                if key.failure_class != V3ProviderCooldownFailureClass::Semantic {
+                if !matches!(
+                    key.failure_class,
+                    V3ProviderCooldownFailureClass::Semantic
+                        | V3ProviderCooldownFailureClass::ProbeLong
+                ) {
                     continue;
                 }
                 if state.health_disabled.contains(&key.provider_id)
@@ -440,6 +453,8 @@ impl V3ProviderHealthStore {
                         next_probe_at_ms: Some(next_probe_at_ms),
                         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
                         probe_failure_count: 0,
+                        long_probe_backoff: key.failure_class
+                            == V3ProviderCooldownFailureClass::ProbeLong,
                         observed_attempts: 0,
                         observed_failures: 0,
                         recovery_ewma_ms: None,
@@ -585,6 +600,7 @@ impl V3ProviderHealthStore {
                         now_ms,
                         until_ms,
                         policy.probe_interval_ms,
+                        policy.long_probe_backoff,
                     );
                 }
                 state.auth_key_cooldowns.insert(
@@ -1144,6 +1160,7 @@ impl V3ProviderHealthStore {
         let Some(existing_probe) = state.provider_cooldown_probes.get(&key) else {
             return Ok(());
         };
+        let long_probe_backoff = existing_probe.long_probe_backoff;
         let current_generation = state
             .adaptive_history
             .get(&key)
@@ -1173,10 +1190,13 @@ impl V3ProviderHealthStore {
             history.score_generation = history.score_generation.saturating_add(1);
             (history.attempts, history.failures)
         };
-        // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
-        // looping after the 3h step. Health history still records adaptive
-        // diagnostics, but must not reschedule the ladder.
-        let next_interval = probe_backoff_ms(next_probe_failure_count);
+        // Probe retry cadence is fixed and capped at 15m for ordinary errors;
+        // typed long-policy failures retain the extended 1h/3h steps.
+        let next_interval = if long_probe_backoff {
+            long_probe_backoff_ms(next_probe_failure_count)
+        } else {
+            probe_backoff_ms(next_probe_failure_count)
+        };
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(());
         };
@@ -1274,6 +1294,7 @@ impl V3ProviderHealthStore {
                     now_ms,
                     now_ms.saturating_add(action.cooldown_ms.max(1)),
                     interval,
+                    action.long_probe_backoff,
                 );
             }
         }
@@ -1807,6 +1828,7 @@ fn default_failure_policy_from_manifest(
         failure_threshold: threshold,
         cooldown_ms,
         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+        long_probe_backoff: false,
         until_restart,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     }
@@ -2135,6 +2157,7 @@ fn upsert_provider_cooldown_probe(
         now_ms,
         blocked_until_ms,
         V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+        false,
     );
 }
 
@@ -2226,6 +2249,7 @@ fn upsert_provider_cooldown_probe_with_interval(
     now_ms: u64,
     blocked_until_ms: u64,
     probe_interval_ms: u64,
+    long_probe_backoff: bool,
 ) {
     // 已有 probe 在途时保留 in-flight 标记：并发失败 re-upsert 不得清掉
     // 单飞锁，否则会并发启动第二个 probe。
@@ -2249,6 +2273,7 @@ fn upsert_provider_cooldown_probe_with_interval(
             next_probe_at_ms: Some(now_ms.saturating_add(probe_interval_ms.max(1))),
             probe_interval_ms: probe_interval_ms.max(1),
             probe_failure_count: 0,
+            long_probe_backoff,
             observed_attempts: 3,
             observed_failures: 3,
             recovery_ewma_ms: existing.and_then(|probe_state| probe_state.recovery_ewma_ms),
