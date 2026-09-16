@@ -5,6 +5,69 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 #[tokio::test]
+async fn provider_probe_failure_is_local_and_does_not_fail_the_probe_batch() {
+    let manifest = global_pool_alive_manifest("probe_failure_is_local");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            "provider startup probe failed",
+            0,
+            1,
+        )
+        .expect("provider cooldown setup");
+
+    health
+        .run_due_provider_health_probes(u64::MAX, true, |_, _, _| async {
+            Err(V3ProviderHealthProbeFailure::Provider(
+                "HTTP 503".to_string(),
+            ))
+        })
+        .await
+        .expect("provider-local probe failure must not fail the probe batch");
+
+    assert!(health
+        .store
+        .has_provider_cooldown_probe_pending("first", Some("key1"), Some("gpt-test"))
+        .expect("provider cooldown state"));
+}
+
+#[tokio::test]
+async fn internal_probe_failure_remains_observable() {
+    let manifest = global_pool_alive_manifest("probe_internal_failure");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            "provider startup probe target failed",
+            0,
+            1,
+        )
+        .expect("provider cooldown setup");
+
+    let error = health
+        .run_due_provider_health_probes(u64::MAX, true, |_, _, _| async {
+            Err(V3ProviderHealthProbeFailure::Internal(
+                "invalid probe target".to_string(),
+            ))
+        })
+        .await
+        .expect_err("internal probe failure must fail the probe batch");
+
+    assert!(error.contains("invalid probe target"));
+    assert!(health
+        .store
+        .has_provider_cooldown_probe_pending("first", Some("key1"), Some("gpt-test"))
+        .expect("provider cooldown state"));
+}
+
+#[tokio::test]
 async fn completed_probe_updates_health_before_slower_probe_finishes() {
     let manifest = global_pool_alive_manifest("probe_completion_order");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -106,11 +169,13 @@ async fn failed_probe_backoff_starts_at_probe_completion_time() {
                     .expect("test clock must follow Unix epoch")
                     .as_millis() as u64;
                 completion_marker.store(finished_ms, Ordering::Relaxed);
-                Err("controlled probe failure".to_string())
+                Err(V3ProviderHealthProbeFailure::Provider(
+                    "controlled probe failure".to_string(),
+                ))
             }
         })
         .await
-        .expect_err("controlled probe failure must remain observable");
+        .expect("provider-local probe failure must not fail the probe batch");
     let finished_ms = completion_ms.load(Ordering::Relaxed);
     assert!(
         finished_ms > started_ms + 1_000,

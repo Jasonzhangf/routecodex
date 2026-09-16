@@ -50,6 +50,12 @@ struct V3ProviderProbeCancellationGuard {
 
 const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
 
+#[derive(Debug)]
+pub enum V3ProviderHealthProbeFailure {
+    Provider(String),
+    Internal(String),
+}
+
 async fn execute_provider_health_probe<F, Fut>(
     store: V3ProviderHealthStore,
     permit: routecodex_v3_provider_responses::V3ProviderHealthProbePermit,
@@ -60,11 +66,11 @@ async fn execute_provider_health_probe<F, Fut>(
     Option<String>,
     Option<String>,
     u64,
-    Result<(), String>,
+    Result<(), V3ProviderHealthProbeFailure>,
 )
 where
     F: Fn(String, Option<String>, Option<String>) -> Fut,
-    Fut: Future<Output = Result<(), String>>,
+    Fut: Future<Output = Result<(), V3ProviderHealthProbeFailure>>,
 {
     let provider_id = permit.provider_id().to_string();
     let auth_alias = permit.auth_alias().map(str::to_string);
@@ -101,7 +107,7 @@ impl Drop for V3ProviderProbeCancellationGuard {
 
 pub async fn probe_v3_provider_global_target(
     target: V3ResponsesProviderTarget,
-) -> Result<(), String> {
+) -> Result<(), V3ProviderHealthProbeFailure> {
     probe_v3_provider_global_target_impl(target).await
 }
 
@@ -429,7 +435,7 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<(), String>
     where
         F: Fn(String, Option<String>, Option<String>) -> Fut + Clone,
-        Fut: Future<Output = Result<(), String>>,
+        Fut: Future<Output = Result<(), V3ProviderHealthProbeFailure>>,
     {
         let mut probe_errors = Vec::new();
         let mut pending_keys = self
@@ -491,7 +497,7 @@ impl V3ProviderFailureRuntimeHealth {
                         probe_errors.push(error.to_string());
                     }
                 }
-                Err(error) => {
+                Err(V3ProviderHealthProbeFailure::Provider(error)) => {
                     if let Err(completion_error) = self
                         .store
                         .complete_provider_cooldown_probe_failure_at_generation(
@@ -504,9 +510,24 @@ impl V3ProviderFailureRuntimeHealth {
                     {
                         probe_errors.push(completion_error.to_string());
                     }
-                    probe_errors.push(format!(
-                        "adaptive provider cooldown probe failed for {provider_id}: {error}"
-                    ));
+                    eprintln!(
+                        "provider health probe degraded: provider={provider_id} auth_alias={auth_alias:?} model={model_id:?} error={error}"
+                    );
+                }
+                Err(V3ProviderHealthProbeFailure::Internal(error)) => {
+                    if let Err(completion_error) = self
+                        .store
+                        .complete_provider_cooldown_probe_failure_at_generation(
+                            &provider_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                            completion_now_ms,
+                            Some(expected_generation),
+                        )
+                    {
+                        probe_errors.push(completion_error.to_string());
+                    }
+                    probe_errors.push(error);
                 }
             }
             drop(cancellation);
