@@ -1079,7 +1079,7 @@ fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup(
     let record_path = hooks_root.join("install.json");
     let hooksd_started = hooks_root.join("hooksd-started");
     let managed_tmp = tempfile::Builder::new()
-        .tempdir_in(std::env::temp_dir())
+        .tempdir_in(std::path::Path::new("/tmp"))
         .unwrap();
     fs::create_dir_all(&bin_directory).unwrap();
     let hooksd = bin_directory.join("rccv3-hooksd");
