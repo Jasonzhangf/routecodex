@@ -107,18 +107,52 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         output.insert("input".to_string(), Value::String(raw));
         return Ok(Value::Object(output));
     }
-    Ok(json!({
-        "type":"function_call",
-        "call_id":call_id,
-        "name":name,
-        "arguments":serde_json::to_string(input)
-            .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use.input" })?
-    }))
+    let mut output = Map::from_iter([
+        (
+            "type".to_string(),
+            Value::String("function_call".to_string()),
+        ),
+        ("call_id".to_string(), Value::String(call_id.to_owned())),
+        ("name".to_string(), Value::String(name.to_owned())),
+        (
+            "arguments".to_string(),
+            Value::String(serde_json::to_string(input).map_err(|_| {
+                V3AnthropicCodecError::MalformedField {
+                    field: "tool_use.input",
+                }
+            })?),
+        ),
+    ]);
+    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut output);
+    Ok(Value::Object(output))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flattened_mcp_tool_use_restores_namespace_for_responses_client() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "mcp__mcpx__workspace"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_mcpx_workspace",
+                "name": "mcp__mcpx__workspace",
+                "input": {}
+            }),
+            &context,
+        )
+        .expect("flattened MCP tool_use must restore namespace");
+
+        assert_eq!(call["type"], "function_call");
+        assert_eq!(call["namespace"], "mcp__mcpx");
+        assert_eq!(call["name"], "workspace");
+        assert_eq!(call["call_id"], "call_mcpx_workspace");
+    }
 
     #[test]
     fn governed_custom_tool_accepts_unwrapped_native_input_after_guidance_removal() {

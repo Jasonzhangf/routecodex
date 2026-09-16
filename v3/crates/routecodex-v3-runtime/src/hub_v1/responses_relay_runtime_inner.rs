@@ -518,7 +518,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         )
                     {
                         let failure = provider_semantic_failure(
-                            429,
                             semantic_error,
                             &selected_target_provider_id,
                             Some(selected_observability.clone()),
@@ -625,7 +624,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .map_err(V3ResponsesRelayRuntimeError::Target)?;
                     }
                     let failure = provider_semantic_failure(
-                        provider_status,
                         semantic_error,
                         &selected_target_provider_id,
                         Some(selected_observability.clone()),
@@ -942,7 +940,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .map_err(V3ResponsesRelayRuntimeError::Target)?;
                     }
                     let failure = provider_semantic_failure(
-                        provider_status,
                         semantic_error,
                         &selected_target_provider_id,
                         Some(selected_observability.clone()),

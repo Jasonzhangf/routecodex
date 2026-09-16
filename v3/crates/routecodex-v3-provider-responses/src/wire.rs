@@ -671,7 +671,7 @@ fn expand_namespace_tools_in_responses_wire_body(
             namespace_name_map.extend(mapping);
         }
         match flatten_namespace_tool_for_provider(protocol, &tool) {
-            Ok(Some(mut children)) => expanded.extend(children),
+            Ok(Some(children)) => expanded.extend(children),
             Ok(None) => expanded.push(tool),
             Err(detail) => {
                 return Err(V3ProviderError::NamespaceToolFlattenFailed {
@@ -684,6 +684,9 @@ fn expand_namespace_tools_in_responses_wire_body(
     if provider_type == "openai_chat" {
         expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
     }
+    if has_namespace {
+        reject_conflicting_expanded_tool_names(request_id, &expanded)?;
+    }
     body["tools"] = Value::Array(expanded);
     rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
     // Historical inputs may carry an MCP-qualified call even when the current
@@ -695,6 +698,37 @@ fn expand_namespace_tools_in_responses_wire_body(
         provider_type == "openai_chat",
     );
     Ok(body)
+}
+
+fn reject_conflicting_expanded_tool_names(
+    request_id: &str,
+    tools: &[Value],
+) -> Result<(), V3ProviderError> {
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for (index, tool) in tools.iter().enumerate() {
+        let name = tool.get("name").and_then(Value::as_str).or_else(|| {
+            tool.get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        });
+        let Some(name) = name else {
+            continue;
+        };
+        if let Some((_, previous_index)) = seen.iter().find(|(existing, _)| existing == name) {
+            if tools[*previous_index] != *tool {
+                return Err(V3ProviderError::NamespaceToolFlattenFailed {
+                    request_id: request_id.to_string(),
+                    detail: format!(
+                        "ConflictingOutboundFields duplicate provider tool name `{name}` must have identical provider declaration"
+                    ),
+                });
+            }
+            continue;
+        }
+        seen.push((name.to_string(), index));
+    }
+    Ok(())
 }
 
 fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {

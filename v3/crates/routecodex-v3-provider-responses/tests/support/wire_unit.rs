@@ -1693,6 +1693,64 @@ mod tests {
             "retain=true must keep cipher verbatim"
         );
     }
+
+    #[test]
+    fn wire_expands_custom_namespace_and_rewrites_call_names() {
+        let body = json!({
+            "model": "upstream-model",
+            "stream": false,
+            "tools": [
+                {"type": "namespace", "name": "custom_ns", "tools": [
+                    {"type": "function", "name": "run", "description": "run", "parameters": {"type": "object"}}
+                ]},
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "function", "name": "workspace", "description": "workspace", "parameters": {"type": "object"}}
+                ]}
+            ],
+            "input": [
+                {"type": "function_call", "call_id": "call-custom", "name": "custom_ns.run", "arguments": "{}"},
+                {"type": "function_call", "call_id": "call-mcpx", "name": "mcp__mcpx.workspace", "arguments": "{}"}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-custom-namespace", target(), body)
+                .expect("custom namespace declarations must survive to the provider wire layer");
+        assert_eq!(wire.body()["tools"][0]["name"], "custom_ns__run");
+        assert_eq!(wire.body()["tools"][1]["name"], "mcp__mcpx__workspace");
+        assert_eq!(wire.body()["input"][0]["name"], "custom_ns__run");
+        assert_eq!(wire.body()["input"][1]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
+    fn wire_rejects_conflicting_namespace_tool_schemas() {
+        let body = json!({
+            "model": "upstream-model",
+            "stream": false,
+            "tools": [
+                {"type": "namespace", "name": "custom_ns", "tools": [
+                    {"type": "function", "name": "run", "description": "first", "parameters": {"type": "object"}}
+                ]},
+                {"type": "namespace", "name": "custom_ns", "tools": [
+                    {"type": "function", "name": "run", "description": "conflicting", "parameters": {"type": "object"}}
+                ]}
+            ],
+            "input": "hello"
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-conflicting-namespace",
+            target(),
+            body,
+        )
+        .expect_err("conflicting expanded provider tool names must fail closed");
+        assert!(
+            error.to_string().contains("ConflictingOutboundFields"),
+            "conflict must name the duplicate provider tool contract: {error}"
+        );
+        assert!(
+            error.to_string().contains("custom_ns__run"),
+            "conflict must identify the provider name: {error}"
+        );
+    }
 }
 
 /// thinking 模式判定：`reasoning.effort` 或顶层 `reasoning_effort` 非空且

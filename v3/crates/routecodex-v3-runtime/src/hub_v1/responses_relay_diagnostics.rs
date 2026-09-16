@@ -43,6 +43,7 @@ pub(super) fn openai_chat_provider_diagnostic_message(payload: &Value) -> Option
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct V3ProviderSemanticErrorProjection {
+    pub(super) status: u16,
     pub(super) code: String,
     pub(super) message: String,
     pub(super) provider_global_failure: bool,
@@ -68,6 +69,7 @@ pub(super) fn anthropic_cyber_refusal_error_from_payload(
         .filter(|value| !value.is_empty())
         .unwrap_or("Anthropic returned a cyber-category refusal.");
     Some(V3ProviderSemanticErrorProjection {
+        status: 429,
         code: V3_ANTHROPIC_CYBER_REFUSAL_CODE.to_string(),
         message: format!(
             "Anthropic cyber refusal is treated as retryable provider saturation: {explanation}"
@@ -112,71 +114,109 @@ pub(super) fn provider_response_semantic_error_from_manifest(
     provider_id: Option<&str>,
     payload: &Value,
 ) -> Option<V3ProviderSemanticErrorProjection> {
-    let manifest = manifest?;
-    let provider_id = provider_id?;
-    let provider = manifest.providers.get(provider_id);
-    let provider_type = provider.map(|provider| provider.provider_type.as_str());
-    let model = payload.get("model").and_then(Value::as_str);
-    manifest
-        .error
-        .provider_error_action_policy
-        .iter()
-        .find(|policy| {
-            provider_error_action_policy_matches(policy, provider_id, provider_type, model, payload)
-        })
-        .map(|policy| {
-            let public_message = manifest
+    let configured = match (manifest, provider_id) {
+        (Some(manifest), Some(provider_id)) => {
+            let provider = manifest.providers.get(provider_id);
+            let provider_type = provider.map(|provider| provider.provider_type.as_str());
+            let model = payload.get("model").and_then(Value::as_str);
+            manifest
                 .error
-                .client_error_projection_policy
+                .provider_error_action_policy
                 .iter()
-                .find(|projection| {
-                    projection
-                        .matcher
-                        .reason_code
-                        .as_deref()
-                        .is_none_or(|reason| reason == policy.action.reason_code)
-                        && projection
-                            .matcher
-                            .action_class
-                            .is_none_or(|action| action == policy.action.kind)
+                .find(|policy| {
+                    provider_error_action_policy_matches(
+                        policy,
+                        provider_id,
+                        provider_type,
+                        model,
+                        payload,
+                    )
                 })
-                .map(|projection| projection.projection.public_code.clone())
-                .unwrap_or_else(|| policy.action.reason_code.clone());
-            V3ProviderSemanticErrorProjection {
-                code: policy.action.reason_code.clone(),
-                message: format!(
-                    "Provider response semantic error matched policy {} reason {} action {} display {}",
-                    policy.policy_id,
-                    policy.action.reason_code,
-                    policy.action.kind.as_str(),
-                    public_message
-                ),
-                provider_global_failure: policy.action.provider_global_failure
-                    || policy.path.iter().any(|step| {
-                        matches!(
-                            step,
-                            routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
-                                provider_global_failure: true,
-                                ..
-                            }
-                        )
-                    }),
-                cooldown_ms: policy
-                    .path
-                    .iter()
-                    .find_map(|step| match step {
-                        routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
-                            duration_ms,
-                            ..
-                        } => *duration_ms,
-                        _ => None,
-                    })
-                    .or(policy.action.cooldown_ms),
-                matched_policy: Some(V3ProviderFailureDirective::from_matched_policy(
-                    policy.clone(),
-                )),
-            }
-        })
+                .map(|policy| {
+                    let public_message = manifest
+                        .error
+                        .client_error_projection_policy
+                        .iter()
+                        .find(|projection| {
+                            projection
+                                .matcher
+                                .reason_code
+                                .as_deref()
+                                .is_none_or(|reason| reason == policy.action.reason_code)
+                                && projection
+                                    .matcher
+                                    .action_class
+                                    .is_none_or(|action| action == policy.action.kind)
+                        })
+                        .map(|projection| projection.projection.public_code.clone())
+                        .unwrap_or_else(|| policy.action.reason_code.clone());
+                    V3ProviderSemanticErrorProjection {
+                        status: 200,
+                        code: policy.action.reason_code.clone(),
+                        message: format!(
+                            "Provider response semantic error matched policy {} reason {} action {} display {}",
+                            policy.policy_id,
+                            policy.action.reason_code,
+                            policy.action.kind.as_str(),
+                            public_message
+                        ),
+                        provider_global_failure: policy.action.provider_global_failure
+                            || policy.path.iter().any(|step| {
+                                matches!(
+                                    step,
+                                    routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                                        provider_global_failure: true,
+                                        ..
+                                    }
+                                )
+                            }),
+                        cooldown_ms: policy
+                            .path
+                            .iter()
+                            .find_map(|step| match step {
+                                routecodex_v3_config::V3ProviderDispositionStepManifest::Cooldown {
+                                    duration_ms,
+                                    ..
+                                } => *duration_ms,
+                                _ => None,
+                            })
+                            .or(policy.action.cooldown_ms),
+                        matched_policy: Some(V3ProviderFailureDirective::from_matched_policy(
+                            policy.clone(),
+                        )),
+                    }
+                })
+        }
+        _ => None,
+    };
+    configured.or_else(|| provider_terminal_without_visible_output_error(payload))
+}
+
+fn provider_terminal_without_visible_output_error(
+    payload: &Value,
+) -> Option<V3ProviderSemanticErrorProjection> {
+    let terminal_choice = payload
+        .get("choices")
+        .and_then(Value::as_array)?
+        .iter()
+        .any(|choice| {
+            choice
+                .get("finish_reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| !reason.trim().is_empty())
+        });
+    if !terminal_choice || provider_payload_has_valid_model_output(payload) {
+        return None;
+    }
+    Some(V3ProviderSemanticErrorProjection {
+        status: 502,
+        code: "provider_empty_visible_output".to_string(),
+        message: "provider terminal response contained no visible model output or tool calls"
+            .to_string(),
+        provider_global_failure: false,
+        cooldown_ms: None,
+        matched_policy: None,
+    })
 }
 
 fn provider_error_action_policy_matches(
@@ -329,8 +369,7 @@ fn provider_payload_has_valid_model_output(payload: &Value) -> bool {
                 .is_some_and(|calls| !calls.is_empty())
                 || message
                     .get("content")
-                    .and_then(Value::as_str)
-                    .is_some_and(|content| !content.trim().is_empty())
+                    .is_some_and(provider_output_value_has_content)
         })
     {
         return true;

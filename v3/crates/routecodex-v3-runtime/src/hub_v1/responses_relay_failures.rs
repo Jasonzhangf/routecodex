@@ -113,11 +113,11 @@ pub(crate) fn provider_runtime_failure(
 }
 
 pub(crate) fn provider_semantic_failure(
-    status: u16,
     error: responses_relay_diagnostics::V3ProviderSemanticErrorProjection,
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
+    let status = error.status;
     let policy_error_type = error.code.clone();
     let policy_error_message = error.message.clone();
     let matched_policy = error.matched_policy.clone();
