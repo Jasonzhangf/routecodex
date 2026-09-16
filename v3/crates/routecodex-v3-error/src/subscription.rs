@@ -31,6 +31,9 @@ pub struct V3ProviderFailureAction {
     pub score_delta_milli: i32,
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
+    /// Whether the typed HTTP policy permits the extended 1h/3h probe ladder.
+    /// Only HTTP 401, 402, 403, and 503 set this flag.
+    pub long_probe_backoff: bool,
 }
 
 impl V3ProviderFailureAction {
@@ -42,6 +45,7 @@ impl V3ProviderFailureAction {
             score_delta_milli: -5,
             failure_threshold: 0,
             cooldown_ms: 15 * 60_000,
+            long_probe_backoff: false,
         }
     }
 
@@ -63,6 +67,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             score_delta_milli: 0,
             failure_threshold: 0,
             cooldown_ms: 0,
+            long_probe_backoff: false,
         };
     }
     let status = classified
@@ -75,15 +80,23 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
     if matches!(status, Some(401 | 402 | 403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
+        let cooldown_ms = if matches!(status, Some(401 | 402 | 403)) {
+            classified
+                .provider_global_cooldown_ms
+                .unwrap_or(60 * 60_000)
+        } else {
+            // Long probe cadence is reserved for the explicit HTTP policy
+            // statuses. Code-only failures still use the ordinary 15m cap.
+            15 * 60_000
+        };
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -20,
             failure_threshold: 0,
-            cooldown_ms: classified
-                .provider_global_cooldown_ms
-                .unwrap_or(60 * 60_000),
+            cooldown_ms,
+            long_probe_backoff: matches!(status, Some(401 | 402 | 403)),
         };
     }
     let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);
@@ -91,6 +104,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         if let Some(policy) = build_v3_provider_global_failure_policy(status) {
             action.failure_threshold = policy.failure_threshold;
             action.cooldown_ms = policy.cooldown_ms;
+            action.long_probe_backoff = matches!(status, 503);
         }
     }
     action
@@ -154,6 +168,7 @@ pub fn build_v3_provider_global_error_fingerprint(
 ) -> Result<Option<V3ProviderErrorFingerprint>, String> {
     let (class, normalized_status) = match status {
         401 | 403 => ("account_auth", 401),
+        402 => ("account_billing", 402),
         429 => ("recoverable_upstream", 429),
         500..=599 => ("recoverable_upstream", 500),
         _ => return Ok(None),
@@ -165,12 +180,17 @@ pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
-        401 | 403 => Some(V3ProviderGlobalFailurePolicy {
+        401 | 403 | 503 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 2,
             cooldown_ms: 60 * 60_000,
             probe_interval_ms: 60 * 60_000,
         }),
-        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
+        402 => Some(V3ProviderGlobalFailurePolicy {
+            failure_threshold: 3,
+            cooldown_ms: 60 * 60_000,
+            probe_interval_ms: 60 * 60_000,
+        }),
+        429 | 500..=502 | 504..=599 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 3,
             cooldown_ms: 15 * 60_000,
             probe_interval_ms: 15 * 60_000,
@@ -238,7 +258,35 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 2);
+        assert_eq!(action.cooldown_ms, 60 * 60_000);
+        assert!(action.long_probe_backoff);
+
+        let ordinary = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_connect_failed",
+            500,
+        ));
+        assert_eq!(ordinary.failure_threshold, 3);
+        assert_eq!(ordinary.cooldown_ms, 15 * 60_000);
+        assert!(!ordinary.long_probe_backoff);
+
+        let payment_required = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "payment_required",
+            402,
+        ));
+        assert_eq!(
+            payment_required.recovery,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+        );
+        assert_eq!(payment_required.failure_threshold, 0);
+        assert_eq!(payment_required.cooldown_ms, 60 * 60_000);
+        assert!(payment_required.long_probe_backoff);
+        let fingerprint = build_v3_provider_global_error_fingerprint(402)
+            .expect("402 fingerprint classification must not fail")
+            .expect("402 must reach global health");
+        assert_eq!(fingerprint.http_status, 402);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",

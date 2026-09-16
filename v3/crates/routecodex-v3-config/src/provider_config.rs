@@ -87,6 +87,9 @@ pub(crate) fn compile_provider_directory(
             None
         };
         let v3 = provider.v3.unwrap_or_default();
+        // Directory routes own model selection. Keep only models referenced by
+        // those routes; the legacy defaultModel field must not expand the
+        // runtime model set or block startup when it is off-route.
         let models = compile_v2_provider_models(provider.models, Some(selected_models));
         providers.insert(
             provider_id.clone(),

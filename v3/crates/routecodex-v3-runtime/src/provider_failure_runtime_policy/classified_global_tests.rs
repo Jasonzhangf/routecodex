@@ -122,6 +122,29 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
         !second_401.available,
         "401 must block after configured unrecoverable threshold: {second_401:?}"
     );
+
+    let payment_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let classified_402 =
+        classified_provider_error("V3ProviderRespInbound01Raw", "payment_required", 402);
+    for now_ms in [20_000, 20_001, 20_002] {
+        payment_health
+            .record_provider_global_health_for_classified_error(
+                &scope,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                &classified_402,
+                now_ms,
+            )
+            .expect("classified 402 failure should record");
+    }
+    assert!(
+        !payment_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_002)
+            .available,
+        "402 must reach global health and cool after its typed threshold"
+    );
 }
 
 fn classified_provider_error(

@@ -1,6 +1,54 @@
 use super::*;
 
 #[test]
+fn directory_compilation_uses_referenced_models_only() {
+    let models = BTreeMap::from([
+        (
+            "deepseek-v4.1-flash".to_string(),
+            V2ProviderModelConfig {
+                wire_name: Some("deepseek-v4.1-flash".to_string()),
+                aliases: Vec::new(),
+                capabilities: vec!["text".to_string()],
+                supports_streaming: Some(true),
+                supports_thinking: Some(true),
+                thinking: None,
+                max_tokens: None,
+                max_context: None,
+                max_context_tokens: None,
+                context_window: None,
+                context_token_estimate_scale_bps: 10_000,
+                web_search_execution_mode: None,
+                web_search_backend: None,
+                features: BTreeMap::new(),
+            },
+        ),
+        (
+            "glm-5.3-flash".to_string(),
+            V2ProviderModelConfig {
+                wire_name: Some("glm-5.3-flash".to_string()),
+                aliases: Vec::new(),
+                capabilities: vec!["text".to_string()],
+                supports_streaming: Some(true),
+                supports_thinking: Some(true),
+                thinking: None,
+                max_tokens: None,
+                max_context: None,
+                max_context_tokens: None,
+                context_window: None,
+                context_token_estimate_scale_bps: 10_000,
+                web_search_execution_mode: None,
+                web_search_backend: None,
+                features: BTreeMap::new(),
+            },
+        ),
+    ]);
+    let referenced = BTreeSet::from(["glm-5.3-flash".to_string()]);
+    let compiled = compile_v2_provider_models(models, Some(&referenced));
+    assert!(compiled.contains_key("glm-5.3-flash"));
+    assert!(!compiled.contains_key("deepseek-v4.1-flash"));
+}
+
+#[test]
 fn snake_case_web_search_mode_parses_via_alias() {
     let parsed: V2ProviderModelConfig = toml::from_str(
         r#"
