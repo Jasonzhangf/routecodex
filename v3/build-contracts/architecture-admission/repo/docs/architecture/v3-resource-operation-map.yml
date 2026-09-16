@@ -12,6 +12,97 @@ canonical_docs:
   - docs/goals/v3-hub-pipeline-static-skeleton-implementation-plan.md
   - docs/design/v3-existing-hub-provider-path-audit.md
 resources:
+  - resource_id: v3.hooks.sidecar_install_record
+    resource_kind: external_process_declaration
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3HooksInstallRecord
+    identity: [installRecordPath, hooksRuntime, binDirectory, appserverSocket]
+    allowed_writers: [routecodex_hooks_init]
+    allowed_readers: [start_configured_hooks_sidecar, hooks_runtime_mode]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.control_socket
+    resource_kind: sidecar_control_transport
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: ControlServer
+    identity: [socketPath, protocol]
+    allowed_writers: [ControlServer::serve_forever]
+    allowed_readers: [serve_connection, HooksSidecarCore]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-provider-responses]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.native_appserver_transport
+    resource_kind: native_codex_transport
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: NativeAppServerTransport
+    identity: [namespace, appserverSocket, threadId, intentId]
+    allowed_writers: [NativeAppServerTransport::send_message]
+    allowed_readers: [NativeAppServerTransport::session_status, NativeAppServerTransport::delivery_evidence]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-lifecycle]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.delivery_ledger
+    resource_kind: typed_delivery_evidence
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: HooksSidecarCore
+    identity: [intentId, messageId, state, cursor, readItemId]
+    allowed_writers: [HooksSidecarCore::forward, HooksSidecarCore::delivery_evidence]
+    allowed_readers: [ControlRequest::IntentEvidence]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-lifecycle]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.schedule_registry
+    resource_kind: timer_registration
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: HooksSidecarCore
+    identity: [scheduleId, registrant, atIso8601, sendMode]
+    allowed_writers: [HooksSidecarCore::upsert_schedule, HooksSidecarCore::pause_schedule, HooksSidecarCore::resume_schedule, HooksSidecarCore::remove_schedule]
+    allowed_readers: [HooksSidecarCore::run_due_schedules]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-lifecycle]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.mounted_handler_registry
+    resource_kind: hook_registry
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: HookRegistry
+    identity: [hookKind, handlerId, strategy]
+    allowed_writers: [HookRegistry::register_handler, HookRegistry::mount_handler, HookRegistry::unregister]
+    allowed_readers: [HookRegistry::dispatch]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-lifecycle]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+  - resource_id: v3.hooks.session_status
+    resource_kind: native_session_observation
+    lifecycle: v3.rcc_internal_hooks_sidecar
+    owner_feature_id: v3.rcc_internal_hooks_sidecar
+    owner_crate: routecodex-v3-hooks
+    owner_node: NativeAppServerTransport
+    identity: [namespace, appserverSocket, threadId, state, inputActive]
+    allowed_writers: [NativeAppServerTransport::session_status]
+    allowed_readers: [HooksSidecarCore::session_status, ControlRequest::SessionStatus]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-lifecycle]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.user_config.file_source
     resource_kind: config_authoring
     lifecycle: v3.user_config.compile

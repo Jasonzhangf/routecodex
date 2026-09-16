@@ -10,6 +10,7 @@ routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-server = { path = "../routecodex-v3-server" }
 routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
 routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
+routecodex-v3-hooks = { path = "../routecodex-v3-hooks" }
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true

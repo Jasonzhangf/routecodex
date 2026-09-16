@@ -383,20 +383,14 @@ export function renderMainlineChainMarkdown(root, chainId, options = {}) {
     ...renderMainlineChainSection(chain, owners),
   ];
 
-  const CHAIN_PAGE_MAP = new Map([
-    ['config.user_config_materialization.mainline', 'mainline-call-graph'],
-    ['request.mainline', 'request-mainline-call-graph'],
-    ['response.mainline', 'response-mainline-call-graph'],
-    ['error.mainline', 'error-mainline-call-graph'],
-    ['runtime.lifecycle.mainline', 'runtime-lifecycle-call-graph'],
-    ['metadata.center.mainline', 'metadata-center-mainline-source'],
-  ]);
+  const chainPages = new Map(
+    GENERATED_WIKI_CHAIN_PAGES.map(({ chainId, path: relPath }) => [chainId, relPath]),
+  );
   const chainLinks = (parsed.chains ?? [])
     .filter((c) => c?.chain_id !== chainId)
     .map((c) => {
-      const base = CHAIN_PAGE_MAP.get(c.chain_id) ?? String(c.chain_id).replace(/\./g, '-');
-      const relPath = `${WIKI_ROOT}/${base}.md`;
-      return fileExists(root, relPath) ? `[${c.chain_id}](${relPath})` : c.chain_id;
+      const relPath = chainPages.get(c.chain_id);
+      return relPath && fileExists(root, relPath) ? `[${c.chain_id}](${relPath})` : c.chain_id;
     });
   if (chainLinks.length > 0) {
     lines.push('', '## Other Chains', '');
