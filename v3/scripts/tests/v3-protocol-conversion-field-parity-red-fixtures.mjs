@@ -960,6 +960,13 @@ const cases = [
     diagnostic: /test:v3-responses-continuation-namespace-contract/u,
   },
   {
+    name: 'Focused Responses continuation namespace gate is unwired from root parity CI',
+    file: 'package.json',
+    from: ' && npm run test:v3-responses-continuation-namespace-contract',
+    to: '',
+    diagnostic: /test:v3-responses-continuation-namespace-contract/u,
+  },
+  {
     name: 'Protocol matrix drops a registered Chat message field',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
     from: 'request.messages[].role',
