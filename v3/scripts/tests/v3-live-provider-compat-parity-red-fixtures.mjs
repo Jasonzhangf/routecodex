@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import YAML from 'yaml';
 
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-live-provider-compat-parity.mjs');
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-live-provider-compat-parity.mjs');
 const cases = [
   {
     name: 'matrix endpoint transport case removed',
@@ -115,13 +115,12 @@ const cases = [
     diagnostic: /Responses Relay WebSocket v2 must cite current managed 5555 live_verified evidence and be ready/,
   },
   {
-    name: 'remote continuation exact-pin blocker removed',
+    name: 'retired remote continuation feature reintroduced',
     file: 'docs/architecture/manifests/v3.live_provider_compat.parity.yml',
     mutateYaml: (doc) => {
-      doc.production_blockers = doc.production_blockers
-        .filter((entry) => entry.blocker_id !== 'remote_continuation_exact_pin_provider_profile_unavailable');
+      doc.completion_boundary.remote_continuation_two_turn_live = false;
     },
-    diagnostic: /missing explicit remote continuation exact-pin provider\/profile blocker/,
+    diagnostic: /retired Responses continuation feature must not remain an active case, blocker, or completion boundary/,
   },
   {
     name: 'live evidence confused with controlled evidence',
@@ -190,7 +189,6 @@ const copyPaths = [
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-live-provider-compat-parity.md',
   'docs/goals/v3-live-provider-compat-parity-closeout-plan.md',
-  'package.json',
 ];
 
 const failures = [];
@@ -200,6 +198,7 @@ for (const testCase of cases) {
     for (const relative of copyPaths) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
     }
+    cpSync(resolve(repo, 'v3/package.json'), resolve(root, 'package.json'));
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (testCase.mutateYaml) {

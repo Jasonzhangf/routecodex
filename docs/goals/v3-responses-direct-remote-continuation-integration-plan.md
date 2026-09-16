@@ -1,5 +1,9 @@
 # V3 Responses Direct Remote Continuation Integration Plan
 
+> Retired: this feature is no longer an active implementation or acceptance path. A non-empty
+> `previous_response_id` is rejected before provider send. The plan and evidence below are retained
+> as historical record only.
+
 ## 1. 目标与验收标准
 
 把现有 Rust remote continuation locator/store/codec 接入 V3 Responses Direct 固定流水线，使 provider-owned `response_id/previous_response_id` 在下一轮 tool output 请求中按原 provider/model/auth pin 续接，并通过受控 upstream 与真实 5555 同入口验证。

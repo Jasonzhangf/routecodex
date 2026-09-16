@@ -2641,7 +2641,7 @@ features:
   - v3/crates/routecodex-v3-config/src/validate.rs
   - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - v3/crates/routecodex-v3-virtual-router/src/lib.rs
-  - v3/tests/support/hub_v1_fixture.rs
+  - v3/crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs
   - docs/goals/v3-gemini-relay-runtime-integration-plan.md
   - docs/goals/v3-gemini-relay-runtime-integration-test-design.md
   - docs/architecture/manifests/v3.gemini_relay.controlled_runtime.mainline.yml

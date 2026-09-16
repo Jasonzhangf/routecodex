@@ -36,7 +36,7 @@ edges:
     to_node: V3HubRespOutbound05ClientSemantic
     owner_feature_id: v3.sse_protocol_codec_projection_boundary
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
-    owner_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_continuation_04_with_client_payload
+    owner_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload
     status: binding_pending
 forbidden_semantics_in_transport:
   - response.completed

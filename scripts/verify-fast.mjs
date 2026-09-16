@@ -335,7 +335,7 @@ function parseJsonFile(relativePath, content) {
   return result.config;
 }
 
-function affectedCargoPackages(rustFiles) {
+function affectedCargoPackages(rustFiles, { allowUnowned = new Set() } = {}) {
   let metadata;
   try {
     metadata = JSON.parse(
@@ -368,7 +368,7 @@ function affectedCargoPackages(rustFiles) {
       }
     }
     if (best) affected.add(best.name);
-    else unmatched.push(file);
+    else if (!allowUnowned.has(file)) unmatched.push(file);
   }
   if (unmatched.length > 0) {
     fail(`required V3 Rust owner evidence unavailable; file(s) are not owned by a V3 Cargo package: ${unmatched.join(', ')}`);
@@ -413,18 +413,14 @@ if (deleted.length > 0) {
   process.stderr.write(`[verify:fast] INFO deleted file(s): ${deleted.join(', ')}\n`);
 }
 
-const changedRustFiles = [
-  ...new Set([
-    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
-    ...deleted.filter((path) => path.endsWith('.rs')),
-  ]),
-];
+const changedRustFiles = [...new Set(entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')))];
 const changedV3RustFiles = changedRustFiles.filter((path) => path.startsWith('v3/'));
 const changedV4RustFiles = changedRustFiles.filter((path) => path.startsWith('v4/'));
 const unsupportedRustFiles = changedRustFiles.filter((path) => !path.startsWith('v3/') && !path.startsWith('v4/'));
 if (unsupportedRustFiles.length > 0) {
   fail(`affected Rust compile evidence unavailable; no declared fast-gate owner for: ${unsupportedRustFiles.join(', ')}`);
 }
+const deletedV3RustFiles = deleted.filter((path) => path.startsWith('v3/') && path.endsWith('.rs'));
 
 const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relative) => /\.(?:rs|toml|yaml|yml)$/u.test(relative)))];
 if (semanticFiles.length > 0) {
@@ -466,8 +462,8 @@ for (const { commit, path: relative } of entries) {
 if (changedV4RustFiles.length > 0) {
   process.stderr.write(`[verify:fast] WARN V4 Rust compile deferred to its scoped workspace gate: ${changedV4RustFiles.join(', ')}\n`);
 }
-if (!scopeOnly && changedV3RustFiles.length > 0) {
-  const affectedPackages = affectedCargoPackages(changedV3RustFiles);
+if (!scopeOnly && (changedV3RustFiles.length > 0 || deletedV3RustFiles.length > 0)) {
+  const affectedPackages = affectedCargoPackages([...changedV3RustFiles, ...deletedV3RustFiles], { allowUnowned: new Set(deletedV3RustFiles) });
   if (affectedPackages.length > 0) {
     const cargoArgs = [
       'check',
@@ -489,7 +485,7 @@ if (!scopeOnly && changedV3RustFiles.length > 0) {
 }
 
 const deferredCompileTargets = [
-  ...(changedV3RustFiles.length > 0 ? ['scoped V3 test job'] : []),
+  ...(changedV3RustFiles.length > 0 || deletedV3RustFiles.length > 0 ? ['scoped V3 test job'] : []),
   ...(changedV4RustFiles.length > 0 ? ['scoped V4 workspace job'] : []),
 ];
 const compileEvidence = scopeOnly
@@ -497,7 +493,7 @@ const compileEvidence = scopeOnly
     ? `affected Rust compile deferred to ${deferredCompileTargets.join(' and ')}`
     : 'no Rust compile applicable'
   : [
-      ...(changedV3RustFiles.length > 0 ? ['affected V3 Rust compile checked'] : []),
+      ...(changedV3RustFiles.length > 0 || deletedV3RustFiles.length > 0 ? ['affected V3 Rust compile checked'] : []),
       ...(changedV4RustFiles.length > 0 ? ['V4 workspace compile deferred'] : []),
     ].join('; ') || 'no Rust compile applicable';
 process.stdout.write(`[verify:fast] PASS checked ${entries.length} file version(s); ${skippedFullCi}; ${compileEvidence}\n`);
