@@ -1,8 +1,9 @@
-/// Fixed probe retry cadence, in milliseconds:
-/// 5s / 30s / 1m / 3m / 15m / 1h / 3h. The ladder loops: after the 3h step
-/// the next probe failure returns to 5s. Index 0 is the first probe scheduled
-/// when a key enters cooldown; index N is scheduled after probe failure N.
-const PROBE_BACKOFF_MS: [u64; 7] = [
+/// Normal provider probe retry cadence, in milliseconds. 15 minutes is the
+/// maximum wait for ordinary failures.
+const PROBE_BACKOFF_MS: [u64; 5] = [5_000, 30_000, 60_000, 3 * 60_000, 15 * 60_000];
+
+/// Authentication and persistent service failures retain the long cadence.
+const LONG_PROBE_BACKOFF_MS: [u64; 7] = [
     5_000,
     30_000,
     60_000,
@@ -13,7 +14,11 @@ const PROBE_BACKOFF_MS: [u64; 7] = [
 ];
 
 pub(crate) fn probe_backoff_ms(failure_count: u8) -> u64 {
-    PROBE_BACKOFF_MS[usize::from(failure_count) % PROBE_BACKOFF_MS.len()]
+    PROBE_BACKOFF_MS[usize::from(failure_count).min(PROBE_BACKOFF_MS.len() - 1)]
+}
+
+pub(crate) fn long_probe_backoff_ms(failure_count: u8) -> u64 {
+    LONG_PROBE_BACKOFF_MS[usize::from(failure_count) % LONG_PROBE_BACKOFF_MS.len()]
 }
 
 pub(crate) fn adaptive_probe_interval_ms(
@@ -59,27 +64,30 @@ pub(crate) fn adaptive_probe_interval_ms(
 
 #[cfg(test)]
 mod tests {
-    use super::{adaptive_probe_interval_ms, probe_backoff_ms};
+    use super::{adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms};
 
     #[test]
     fn adaptive_probe_starts_fast_and_stretches_for_non_recovery() {
         assert_eq!(adaptive_probe_interval_ms(3, 3, None, 0), 5_000);
-        assert!(adaptive_probe_interval_ms(10, 10, None, 1) >= 3 * 60_000);
+        assert!(adaptive_probe_interval_ms(10, 10, None, 1) <= 15 * 60_000);
     }
 
     #[test]
-    fn probe_backoff_ladder_is_5s_30s_1m_3m_15m_1h_3h_and_loops() {
+    fn normal_probe_backoff_is_capped_at_fifteen_minutes() {
         assert_eq!(probe_backoff_ms(0), 5_000);
         assert_eq!(probe_backoff_ms(1), 30_000);
         assert_eq!(probe_backoff_ms(2), 60_000);
         assert_eq!(probe_backoff_ms(3), 3 * 60_000);
         assert_eq!(probe_backoff_ms(4), 15 * 60_000);
-        assert_eq!(probe_backoff_ms(5), 60 * 60_000);
-        assert_eq!(probe_backoff_ms(6), 3 * 60 * 60_000);
-        // The ladder loops back to 5s after the 3h step.
-        assert_eq!(probe_backoff_ms(7), 5_000);
-        assert_eq!(probe_backoff_ms(8), 30_000);
-        assert_eq!(probe_backoff_ms(14), 5_000);
+        assert_eq!(probe_backoff_ms(5), 15 * 60_000);
+        assert_eq!(probe_backoff_ms(255), 15 * 60_000);
+    }
+
+    #[test]
+    fn long_probe_backoff_retains_the_existing_ladder() {
+        assert_eq!(long_probe_backoff_ms(5), 60 * 60_000);
+        assert_eq!(long_probe_backoff_ms(6), 3 * 60 * 60_000);
+        assert_eq!(long_probe_backoff_ms(7), 5_000);
     }
 
     #[test]

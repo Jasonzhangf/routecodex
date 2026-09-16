@@ -1,19 +1,23 @@
-//! Spec contract: the provider cooldown probe cadence is the fixed,
-//! observable ladder 5s / 30s / 1m / 3m / 15m / 1h / 3h, looping after the
-//! 3h step. The first probe after a key enters cooldown is due 5s later.
+//! Spec contract: ordinary provider cooldown probes use a fixed,
+//! observable ladder capped at 15m. Long cadence is reserved for typed
+//! 401/402/403/503 policy actions. The first probe after a key enters cooldown is
+//! due 5s later.
 //! Restart semantics (probe history reset) are owned by the persistence
 //! module and start the same ladder from 5s.
-use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_error::{
+    V3ProviderFailureAction, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    V3ProviderRecoveryKind,
+};
 use routecodex_v3_provider_responses::V3ProviderHealthStore;
 
 const LADDER_MS: [u64; 7] = [
-    5_000,      // first probe after block (probe failure count 0)
-    30_000,     // after probe failure 1
-    60_000,     // after probe failure 2
-    180_000,    // after probe failure 3
-    900_000,    // after probe failure 4
-    3_600_000,  // after probe failure 5
-    10_800_000, // after probe failure 6
+    5_000,   // first probe after block (probe failure count 0)
+    30_000,  // after probe failure 1
+    60_000,  // after probe failure 2
+    180_000, // after probe failure 3
+    900_000, // after probe failure 4
+    900_000, // after probe failure 5 (capped)
+    900_000, // after probe failure 6 (capped)
 ];
 
 fn scope() -> V3ProviderFailureSessionScope {
@@ -166,7 +170,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
 }
 
 #[test]
-fn probe_failures_follow_5s_30s_1m_3m_15m_1h_3h_ladder() {
+fn probe_failures_cap_ordinary_errors_at_fifteen_minutes() {
     let store = V3ProviderHealthStore::default();
     for now_ms in 1..=3 {
         fail(&store, now_ms);
@@ -212,5 +216,47 @@ fn probe_failures_follow_5s_30s_1m_3m_15m_1h_3h_ladder() {
                 .available,
             "failed probe must keep the key blocked at step {index}"
         );
+    }
+}
+
+#[test]
+fn long_policy_probe_keeps_the_extended_cadence() {
+    let store = V3ProviderHealthStore::default();
+    let action = V3ProviderFailureAction {
+        class_code: "provider_http_503".to_string(),
+        recovery: V3ProviderRecoveryKind::RecoverableCounted,
+        scope: V3ProviderHealthScope::GlobalProviderKey,
+        score_delta_milli: -5,
+        failure_threshold: 1,
+        cooldown_ms: 60 * 60_000,
+        long_probe_backoff: true,
+    };
+    store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)
+        .unwrap();
+    let mut now_ms = 1;
+    for delta in [5_000, 30_000, 60_000, 180_000, 900_000, 3_600_000] {
+        let due_at = now_ms + delta;
+        assert_eq!(
+            store
+                .provider_cooldown_probe_keys_due(due_at)
+                .unwrap()
+                .len(),
+            1
+        );
+        let permit = store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+            .unwrap()
+            .expect("long cadence probe permit");
+        store
+            .complete_provider_cooldown_probe_failure_at_generation(
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                due_at,
+                Some(permit.expected_generation()),
+            )
+            .unwrap();
+        now_ms = due_at;
     }
 }
