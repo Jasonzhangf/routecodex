@@ -1295,7 +1295,7 @@ fn resolve_v3_dry_run_target_label(state: &V3ListenerState) -> String {
         .values()
         .find_map(|provider| {
             let auth_alias = provider.auth.entries.first()?.alias.as_str();
-            let model = provider.models.get(&provider.default_model)?;
+            let model = provider.models.values().next()?;
             Some(format!(
                 "{}[{}].{}",
                 provider.id, auth_alias, model.wire_name

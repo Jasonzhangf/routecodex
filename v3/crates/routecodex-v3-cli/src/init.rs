@@ -93,18 +93,16 @@ fn provider_catalogue(config_dir: &std::path::Path) -> Result<Vec<ProviderChoice
             .keys()
             .cloned()
             .collect::<Vec<_>>();
-        if models.contains(&entry.config.provider.default_model) {
+        if !models.is_empty() {
             catalogue.push(ProviderChoice {
                 provider: provider_id,
-                model: entry.config.provider.default_model,
+                model: String::new(),
                 models,
             });
         }
     }
     if catalogue.is_empty() {
-        return Err(
-            "no enabled provider with a declared default model exists under provider/".into(),
-        );
+        return Err("no enabled provider with a routed model exists under provider/".into());
     }
     Ok(catalogue)
 }
@@ -122,7 +120,12 @@ fn select_provider_model(
     } else {
         println!("[init] available providers:");
         for (index, entry) in catalogue.iter().enumerate() {
-            println!("  {}. {}/{}", index + 1, entry.provider, entry.model);
+            println!(
+                "  {}. {} ({} models)",
+                index + 1,
+                entry.provider,
+                entry.models.len()
+            );
         }
         let raw = prompt("select provider number (default 1)")?;
         let index = if raw.is_empty() {
@@ -137,7 +140,16 @@ fn select_provider_model(
             .get(index)
             .ok_or_else(|| format!("provider selection {} is out of range", index + 1))?
     };
-    let selected_model = model.unwrap_or(&selected.model);
+    let selected_model = match model {
+        Some(model) => model,
+        None if selected.models.len() == 1 => selected.models.first().unwrap(),
+        None => {
+            return Err(format!(
+                "provider {:?} declares multiple models; pass --model explicitly",
+                selected.provider
+            ));
+        }
+    };
     if !selected
         .models
         .iter()

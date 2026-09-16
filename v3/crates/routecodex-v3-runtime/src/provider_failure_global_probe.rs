@@ -48,10 +48,17 @@ pub fn build_v3_provider_global_probe_target(
             ))
         }
     };
-    let model = provider
-        .models
-        .get(model_id.unwrap_or(&provider.default_model))
-        .ok_or_else(|| format!("probe provider {provider_id} default model missing"))?;
+    let model = match model_id {
+        Some(id) => provider
+            .models
+            .get(id)
+            .ok_or_else(|| format!("probe provider {provider_id} model {id} is not routed"))?,
+        None => provider
+            .models
+            .values()
+            .next()
+            .ok_or_else(|| format!("probe provider {provider_id} has no routed model"))?,
+    };
     let responses = provider.responses.as_ref();
     Ok(V3ResponsesProviderTarget {
         provider_id: provider.id.clone(),

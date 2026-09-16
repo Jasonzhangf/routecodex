@@ -4,7 +4,6 @@ use crate::global_cooldown::{
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
@@ -14,10 +13,7 @@ type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64
 
 #[derive(Debug)]
 enum V3ProviderHealthPersistenceCommand {
-    Replace {
-        failure_class: V3ProviderCooldownFailureClass,
-        entries: V3ProviderCooldownPersistenceEntries,
-    },
+    Replace(V3ProviderCooldownPersistenceEntries),
     Flush(mpsc::Sender<Result<(), String>>),
 }
 
@@ -57,15 +53,15 @@ impl V3ProviderHealthPersistenceWriter {
                 let mut persisted_entries = coordinator.persisted_entries();
                 while let Ok(command) = receiver.recv() {
                     match command {
-                        V3ProviderHealthPersistenceCommand::Replace {
-                            failure_class,
-                            entries,
-                        } => {
-                            let replaced_classes = BTreeSet::from([failure_class]);
+                        V3ProviderHealthPersistenceCommand::Replace(entries) => {
                             let mut merged_entries = persisted_entries
                                 .iter()
                                 .filter(|(key, _, _)| {
-                                    !replaced_classes.contains(&key.failure_class)
+                                    !matches!(
+                                        key.failure_class,
+                                        V3ProviderCooldownFailureClass::Semantic
+                                            | V3ProviderCooldownFailureClass::ProbeLong
+                                    )
                                 })
                                 .cloned()
                                 .collect::<Vec<_>>();
@@ -112,10 +108,7 @@ impl V3ProviderHealthPersistenceWriter {
     fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
         if let Err(error) = self
             .sender
-            .try_send(V3ProviderHealthPersistenceCommand::Replace {
-                failure_class: V3ProviderCooldownFailureClass::Semantic,
-                entries,
-            })
+            .try_send(V3ProviderHealthPersistenceCommand::Replace(entries))
         {
             set_persistence_alarm(
                 &self.alarm,
@@ -126,10 +119,7 @@ impl V3ProviderHealthPersistenceWriter {
 
     fn flush_snapshot(&self, entries: V3ProviderCooldownPersistenceEntries) -> Result<(), String> {
         self.sender
-            .send(V3ProviderHealthPersistenceCommand::Replace {
-                failure_class: V3ProviderCooldownFailureClass::Semantic,
-                entries,
-            })
+            .send(V3ProviderHealthPersistenceCommand::Replace(entries))
             .map_err(|error| format!("provider health persistence writer unavailable: {error}"))?;
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         self.sender
@@ -153,13 +143,15 @@ impl V3ProviderHealthPersistenceWriter {
 }
 
 pub(super) fn start_provider_health_persistence(
+    manifest: &V3Config05ManifestPublished,
     persistence_path: Option<PathBuf>,
+    legacy_persistence_path: Option<PathBuf>,
 ) -> Option<(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
     let mut coordinator = persistence_path.map(|path| {
-        V3ProviderCooldownCoordinator::load(path, 5 * 60 * 60_000)
+        load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path)
             .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
     });
     coordinator.as_mut().map(|coordinator| {
@@ -176,6 +168,53 @@ pub(super) fn start_provider_health_persistence(
     })
 }
 
+fn load_provider_cooldown_coordinator(
+    manifest: &V3Config05ManifestPublished,
+    path: PathBuf,
+    legacy_path: Option<PathBuf>,
+) -> Result<V3ProviderCooldownCoordinator, String> {
+    const MAX_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
+    if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_none() && !path.exists() {
+        if let Some(legacy_path) = legacy_path.filter(|legacy| legacy != &path && legacy.exists()) {
+            let legacy = V3ProviderCooldownCoordinator::load(legacy_path, MAX_COOLDOWN_MS)?;
+            let entries = legacy
+                .persisted_entries()
+                .into_iter()
+                .filter(|(key, _, _)| manifest_contains_cooldown_key(manifest, key))
+                .collect();
+            let mut migrated = V3ProviderCooldownCoordinator::new(path, MAX_COOLDOWN_MS);
+            migrated.replace_entries(entries)?;
+            return Ok(migrated);
+        }
+    }
+    V3ProviderCooldownCoordinator::load(path, MAX_COOLDOWN_MS)
+}
+
+fn manifest_contains_cooldown_key(
+    manifest: &V3Config05ManifestPublished,
+    key: &V3ProviderCooldownKey,
+) -> bool {
+    let Some(provider) = manifest.providers.get(&key.provider_id) else {
+        return false;
+    };
+    if !provider.enabled {
+        return false;
+    }
+    if let Some(auth_alias) = key.auth_alias.as_deref() {
+        if !provider
+            .auth
+            .entries
+            .iter()
+            .any(|entry| entry.alias == auth_alias)
+        {
+            return false;
+        }
+    }
+    key.model_id
+        .as_deref()
+        .is_none_or(|model_id| provider.models.contains_key(model_id))
+}
+
 pub(super) fn provider_cooldown_state_path_for_manifest(
     manifest: &V3Config05ManifestPublished,
 ) -> PathBuf {
@@ -187,7 +226,56 @@ pub(super) fn provider_cooldown_state_path_for_manifest(
         .with_file_name(format!("provider-cooldowns-{scope}.json"))
 }
 
+pub(super) fn legacy_provider_cooldown_state_path_for_manifest(
+    manifest: &V3Config05ManifestPublished,
+) -> PathBuf {
+    let scope = legacy_listener_scope_digest(manifest);
+    default_provider_cooldown_state_path()
+        .with_file_name(format!("provider-cooldowns-{scope}.json"))
+}
+
 fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
+    let mut hasher = Sha256::new();
+    for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
+        hasher.update((server_id.len() as u64).to_le_bytes());
+        hasher.update(server_id.as_bytes());
+        hasher.update((server.bind.len() as u64).to_le_bytes());
+        hasher.update(server.bind.as_bytes());
+        hasher.update(server.port.to_le_bytes());
+    }
+    // Provider/model/auth identity is part of the persistence scope. A config
+    // revision must not inherit cooldown entries for removed or renamed
+    // targets and then probe them on startup.
+    hasher.update(b"providers");
+    hasher.update((manifest.providers.len() as u64).to_le_bytes());
+    for (provider_id, provider) in &manifest.providers {
+        hasher.update(b"provider_id");
+        hasher.update((provider_id.len() as u64).to_le_bytes());
+        hasher.update(provider_id.as_bytes());
+        hasher.update(b"provider_enabled");
+        hasher.update([u8::from(provider.enabled)]);
+        hasher.update(b"auth_aliases");
+        hasher.update((provider.auth.entries.len() as u64).to_le_bytes());
+        for entry in &provider.auth.entries {
+            hasher.update((entry.alias.len() as u64).to_le_bytes());
+            hasher.update(entry.alias.as_bytes());
+        }
+        hasher.update(b"model_ids");
+        hasher.update((provider.models.len() as u64).to_le_bytes());
+        for model_id in provider.models.keys() {
+            hasher.update((model_id.len() as u64).to_le_bytes());
+            hasher.update(model_id.as_bytes());
+        }
+    }
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn legacy_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
     let mut hasher = Sha256::new();
     for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
         hasher.update((server_id.len() as u64).to_le_bytes());
@@ -225,7 +313,11 @@ fn provider_cooldown_persistence_entries(
                     provider_id: key.provider_id.clone(),
                     auth_alias: key.auth_alias.clone(),
                     model_id: probe.probe_model_id.clone(),
-                    failure_class: V3ProviderCooldownFailureClass::Semantic,
+                    failure_class: if probe.long_probe_backoff {
+                        V3ProviderCooldownFailureClass::ProbeLong
+                    } else {
+                        V3ProviderCooldownFailureClass::Semantic
+                    },
                 },
                 probe.blocked_until_ms?,
                 probe.next_probe_at_ms?,
@@ -324,6 +416,50 @@ mod tests {
                     && name.ends_with(".json")
                     && name.len() > "provider-cooldowns-.json".len()
             }));
+    }
+
+    #[test]
+    fn provider_cooldown_state_path_changes_when_provider_identity_changes() {
+        let primary = manifest("primary", "127.0.0.1", 1);
+        let mut changed = primary.clone();
+        changed
+            .providers
+            .values_mut()
+            .next()
+            .expect("fixture provider")
+            .enabled = false;
+        assert_ne!(
+            provider_cooldown_state_path_for_manifest(&primary),
+            provider_cooldown_state_path_for_manifest(&changed),
+            "provider config revisions must not reuse stale cooldown persistence"
+        );
+    }
+
+    #[test]
+    fn legacy_migration_accepts_only_current_provider_keys() {
+        let manifest = manifest("primary", "127.0.0.1", 1);
+        let valid = V3ProviderCooldownKey {
+            provider_id: "p".into(),
+            auth_alias: Some("k".into()),
+            model_id: Some("m".into()),
+            failure_class: V3ProviderCooldownFailureClass::Semantic,
+        };
+        let stale_provider = V3ProviderCooldownKey {
+            provider_id: "removed".into(),
+            ..valid.clone()
+        };
+        let stale_auth = V3ProviderCooldownKey {
+            auth_alias: Some("removed-key".into()),
+            ..valid.clone()
+        };
+        let stale_model = V3ProviderCooldownKey {
+            model_id: Some("removed-model".into()),
+            ..valid.clone()
+        };
+        assert!(manifest_contains_cooldown_key(&manifest, &valid));
+        assert!(!manifest_contains_cooldown_key(&manifest, &stale_provider));
+        assert!(!manifest_contains_cooldown_key(&manifest, &stale_auth));
+        assert!(!manifest_contains_cooldown_key(&manifest, &stale_model));
     }
 
     fn manifest(server_id: &str, bind: &str, port: u16) -> V3Config05ManifestPublished {

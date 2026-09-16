@@ -20,6 +20,8 @@ pub struct V3ProviderCooldownProbeState {
     pub next_probe_at_ms: Option<u64>,
     pub probe_interval_ms: u64,
     pub probe_failure_count: u8,
+    /// Long cadence is reserved for repeated 401/402/403/503 style failures.
+    pub long_probe_backoff: bool,
     pub observed_attempts: u32,
     pub observed_failures: u32,
     pub recovery_ewma_ms: Option<u64>,

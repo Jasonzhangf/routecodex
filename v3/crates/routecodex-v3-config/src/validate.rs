@@ -609,12 +609,6 @@ fn compile_providers(
         if provider.models.is_empty() {
             return Err(validation(format!("provider {id} has no models")));
         }
-        if !provider.models.contains_key(&provider.default_model) {
-            return Err(validation(format!(
-                "provider {id} default_model {} is not a canonical models key",
-                provider.default_model
-            )));
-        }
         if provider.sse_first_frame_timeout_ms == Some(0) {
             return Err(validation(format!(
                 "provider {id} sse_first_frame_timeout_ms must be non-zero"

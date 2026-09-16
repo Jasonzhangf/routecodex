@@ -737,6 +737,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
                     failure_threshold: 3,
                     cooldown_ms: 900_000,
                     probe_interval_ms: 900_000,
+                    long_probe_backoff: false,
                     until_restart: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::Session,
                 }),
