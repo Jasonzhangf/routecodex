@@ -1,6 +1,78 @@
 version: 1
 status: h1_typed_skeleton_and_static_registry_bound
 features:
+- feature_id: v3.rcc_internal_hooks_sidecar
+  status: source_active_live_verification_required
+  change_risk: high
+  owner_kind: rust_v3_internal_hooks_sidecar
+  owner_scope: Optional RouteCodex-owned hooks sidecar process, native Codex App Server transport, mounted hook dispatch, timers, forwarding, and typed delivery evidence.
+  owner_crates:
+  - routecodex-v3-hooks
+  - routecodex-v3-lifecycle
+  owner_files:
+  - v3/crates/routecodex-v3-hooks/src/lib.rs
+  - v3/crates/routecodex-v3-hooks/src/appserver.rs
+  - v3/crates/routecodex-v3-hooks/src/control.rs
+  - v3/crates/routecodex-v3-hooks/src/bin/rccv3-hooksd.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/hooks_install.rs
+  resource_bindings:
+  - v3.hooks.sidecar_install_record
+  - v3.hooks.control_socket
+  - v3.hooks.native_appserver_transport
+  - v3.hooks.delivery_ledger
+  - v3.hooks.schedule_registry
+  - v3.hooks.mounted_handler_registry
+  - v3.hooks.session_status
+  entry_symbols:
+  - HooksSidecarCore::forward
+  - HooksSidecarCore::dispatch_hook_event
+  - HooksSidecarCore::run_due_schedules
+  - HooksSidecarCore::session_status
+  - NativeAppServerTransport::send_message
+  - NativeAppServerTransport::delivery_evidence
+  - ControlServer::with_native_sockets_handlers_and_state
+  - start_configured_hooks_sidecar
+  allowed_paths:
+  - v3/crates/routecodex-v3-hooks
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar
+  - v3/crates/routecodex-v3-lifecycle/src/internal_hooksd_tests.rs
+  - v3/scripts/copy-cli-bin.mjs
+  - v3/scripts/install-cli.mjs
+  - v3/scripts/pack-release.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - docs/architecture
+  - docs/design/rcc-internal-hooks-sidecar-contract.md
+  - docs/goals/rcc-internal-hooks-sidecar-plan.md
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - routing
+  - retry
+  - continuation
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-runtime
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+  - node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+  live_required:
+  - real TUI/TUI and TUI/Desktop App Server same-entry replay with native accepted/delivered/replied/read evidence or an explicit highest-layer capability gap
+  - sidecar missing/crash/timeout leaves RouteCodex Running with hooks_unavailable:<reason>
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    live_replay: required
+    production_restart: supervisor_owned
 - feature_id: v3.provider_key_health_model_granularity
   status: source_controlled_runtime_pending_live_replay
   change_risk: high
@@ -525,11 +597,9 @@ features:
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
-  - configured_retry_budget_for_failure
   - provider_error_policy_matches_failure
   - is_v3_retryable_transient_stage_code
   - V3_TRANSIENT_TRANSPORT_HANG_CODE
-  - V3_TRANSIENT_RETRY_BUDGET
   - build_v3_provider_global_probe_target
   - probe_v3_provider_global_target
   - build_v3_provider_failure_session_scope_for_request
@@ -4199,7 +4269,6 @@ features:
   - docs/architecture/v3-verification-map.yml
   - docs/architecture/manifests/v3.runtime_timing_observability.mainline.yml
   - scripts/architecture/verify-v3-runtime-timing-observability.mjs
-  - scripts/tests/v3-runtime-timing-observability-red-fixtures.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -4215,7 +4284,6 @@ features:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_
     --lib -- --nocapture
   - npm run verify:v3-runtime-timing-observability
-  - npm run test:v3-runtime-timing-observability-red-fixtures
   - npm run verify:v3-architecture-docs
   runtime_status: source_active_live_verification_required
 - feature_id: v3.provider_action_gate
@@ -4648,9 +4716,7 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-stage-protocol-shapes
   entry_symbols:
-  - run_v3_direct_transient_failure_policy
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
-  - V3_TRANSIENT_RETRY_BUDGET
   mainline_bindings:
   - v3-provider-action-gate-19
   - v3-provider-action-gate-20
@@ -5399,6 +5465,15 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/observability.rs
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/admin-webui/requests.html
+  - v3/admin-webui/vendor/ambient.css
+  - v3/admin-webui/app/core.js
+  - v3/admin-webui/app/shell.js
+  - v3/admin-webui/app/charts.js
+  - v3/admin-webui/app/drawer.js
+  - v3/admin-webui/app/views/dashboard.js
+  - v3/admin-webui/app/views/usage.js
+  - v3/admin-webui/app/views/providers.js
+  - v3/admin-webui/app/views/routes.js
   resource_bindings:
   - v3.observability.webui_store
   entry_symbols:
@@ -5410,6 +5485,15 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
   - v3/admin-webui/requests.html
   - v3/admin-webui/styles.css
+  - v3/admin-webui/vendor/ambient.css
+  - v3/admin-webui/app/core.js
+  - v3/admin-webui/app/shell.js
+  - v3/admin-webui/app/charts.js
+  - v3/admin-webui/app/drawer.js
+  - v3/admin-webui/app/views/dashboard.js
+  - v3/admin-webui/app/views/usage.js
+  - v3/admin-webui/app/views/providers.js
+  - v3/admin-webui/app/views/routes.js
   forbidden_paths:
   - request.normal_payload
   - response.client_payload

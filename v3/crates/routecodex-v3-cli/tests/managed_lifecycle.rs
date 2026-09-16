@@ -1,19 +1,51 @@
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const SECRET: &str = "managed-lifecycle-controlled-secret";
 const PORT_STATE_TIMEOUT: Duration = Duration::from_secs(15);
+static MANAGED_LIFECYCLE_TEST_LOCK: Mutex<()> = Mutex::new(());
+// The stub sidecar is launched by the managed child and must reach its marker
+// before the test exercises stop/restart/control. Under a parallel workspace
+// test run that launch can take well over a second of scheduler time, so this
+// waits for the observed state with a generous bound instead of racing a thin
+// setup deadline.
+const HOOKS_MARKER_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn lifecycle_test_guard() -> MutexGuard<'static, ()> {
+    MANAGED_LIFECYCLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn wait_for_hooksd_marker(instance_dir: &Path, marker: &Path, label: &str) {
+    let deadline = Instant::now() + HOOKS_MARKER_TIMEOUT;
+    while !marker.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "{label}; status={}; pid_record={}; stderr={}",
+            fs::read_to_string(instance_dir.join("status.json")).unwrap_or_default(),
+            instance_dir.join("hooks-sidecar.pid").exists(),
+            fs::read_to_string(instance_dir.join("hooks-sidecar.stderr.log")).unwrap_or_default()
+        );
+        sleep(Duration::from_millis(10));
+    }
+}
 
 fn managed_test_command(binary: &str) -> Command {
     let mut command = Command::new(binary);
+    let temp_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build-control/temp");
+    fs::create_dir_all(&temp_dir).unwrap();
     command
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("TMPDIR", "build-control/temp")
@@ -87,11 +119,52 @@ continuation = { allowed_owners = ["none", "remote_provider", "routecodex_local"
 "#;
 
 fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+    static ALLOCATED_PORTS: OnceLock<Mutex<HashSet<u16>>> = OnceLock::new();
+    let mut allocated = ALLOCATED_PORTS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        if allocated.insert(port) {
+            return port;
+        }
+    }
+}
+
+fn state_root_diagnostics(state_root: &Path) -> String {
+    let instances_root = state_root.join("instances");
+    let Ok(entries) = fs::read_dir(&instances_root) else {
+        return format!("instances_root={}", instances_root.display());
+    };
+    let mut diagnostics = String::new();
+    for entry in entries.flatten() {
+        let instance_dir = entry.path();
+        if !instance_dir.is_dir() {
+            continue;
+        }
+        for file_name in [
+            "status.json",
+            "server.log",
+            "hooks-sidecar.stderr.log",
+            "hooks-sidecar.pid",
+        ] {
+            let path = instance_dir.join(file_name);
+            let Ok(bytes) = fs::read(&path) else {
+                continue;
+            };
+            diagnostics.push_str(&format!(
+                "\n--- {} ---\n{}",
+                path.display(),
+                String::from_utf8_lossy(&bytes)
+            ));
+        }
+    }
+    diagnostics
 }
 
 fn write_config(root: &TempDir, ports: [u16; 2]) -> PathBuf {
@@ -252,6 +325,31 @@ fn run_with_hooks_record(
         )
         .env("V3_MANAGED_TEST_KEY", SECRET)
         .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .output()
+        .unwrap()
+}
+
+fn run_with_hooks_record_tmpdir(
+    binary: &str,
+    state_root: &Path,
+    config: &Path,
+    command: &str,
+    hooks_record: &Path,
+    tmp_dir: &Path,
+) -> Output {
+    managed_test_command(binary)
+        .args(["server", command, "--config"])
+        .arg(config)
+        .env("ROUTECODEX_V3_STATE_DIR", state_root)
+        .env(
+            "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+            request_counter_file(state_root),
+        )
+        .env("V3_MANAGED_TEST_KEY", SECRET)
+        .env("ROUTECODEX_HOOKS_INSTALL_RECORD", hooks_record)
+        .env("TMPDIR", tmp_dir)
+        .env("TMP", tmp_dir)
+        .env("TEMP", tmp_dir)
         .output()
         .unwrap()
 }
@@ -638,6 +736,7 @@ fn copy_release_binary(source: &str, release_root: &Path) -> PathBuf {
 
 #[test]
 fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -741,6 +840,7 @@ fn managed_cli_start_status_restart_stop_is_one_aggregate_identity() {
 
 #[test]
 fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -760,6 +860,7 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
         &record_path,
         serde_json::json!({
             "supervisor_enabled": true,
+            "hooks_runtime": "legacy_supervisor",
             "supervisor_wrapper": supervisor_wrapper,
             "daemon_config": daemon_config,
             "bin_directory": bin_directory,
@@ -779,10 +880,25 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
     assert!(status.status.success());
     let status_json = last_json(&status);
     assert_eq!(status_json["state"], "running");
-    let detail = status_json["detail"].as_str().unwrap();
-    assert!(detail.contains("hooks sidecar unavailable:"));
-    assert!(detail.contains("hooks sidecar exited before readiness"));
     let instance_dir = single_instance_dir(&state_root);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = wait_status_file_state(&instance_dir, "running")
+            .get("detail")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if detail.contains("hooks sidecar unavailable:")
+            && detail.contains("hooks_unavailable:crashed")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "hooks failure detail was not published: {detail}"
+        );
+        sleep(Duration::from_millis(50));
+    }
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("control.json").exists());
     for port in ports {
@@ -801,7 +917,275 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
 }
 
 #[test]
+fn slow_hooks_sidecar_does_not_block_managed_stop() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "slow hooksd did not start before stop",
+    );
+
+    let stop_started = Instant::now();
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        stop_started.elapsed() < Duration::from_secs(5),
+        "stop waited for hooks readiness timeout: {:?}",
+        stop_started.elapsed()
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+}
+
+#[test]
+fn slow_hooks_sidecar_does_not_block_managed_restart() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "slow hooksd did not start before restart",
+    );
+
+    let restart_started = Instant::now();
+    let restart = run_with_hooks_record(binary, &state_root, &config, "restart", &record_path);
+    assert!(
+        restart.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restart.stderr)
+    );
+    assert!(
+        restart_started.elapsed() < Duration::from_secs(5),
+        "restart waited for hooks readiness timeout: {:?}",
+        restart_started.elapsed()
+    );
+    assert_eq!(last_json(&restart)["state"], "running");
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+}
+
+#[test]
+fn malformed_control_json_does_not_stop_managed_runtime_or_escape_hooks_cleanup() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    let managed_tmp = tempfile::Builder::new()
+        .tempdir_in(std::path::Path::new("/tmp"))
+        .unwrap();
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "install_root": hooks_root,
+            "bin_directory": bin_directory,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "start",
+        &record_path,
+        managed_tmp.path(),
+    );
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stderr),
+        state_root_diagnostics(&state_root)
+    );
+    for port in ports {
+        wait_port(port, true);
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "malformed-json test hooksd did not start",
+    );
+
+    let control: Value =
+        serde_json::from_slice(&fs::read(instance_dir.join("control.json")).unwrap()).unwrap();
+    let socket_path = PathBuf::from(control["socket_path"].as_str().unwrap());
+    let mut stream = UnixStream::connect(socket_path).unwrap();
+    stream.write_all(b"{not-json}\n").unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    BufReader::new(&mut stream)
+        .read_line(&mut response)
+        .unwrap();
+    let rejection: Value = serde_json::from_str(response.trim()).unwrap();
+    assert_eq!(rejection["accepted"], false);
+    assert_eq!(rejection["state"], "running");
+    assert!(rejection["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid control request JSON"));
+
+    let status = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "status",
+        &record_path,
+        managed_tmp.path(),
+    );
+    assert!(status.status.success());
+    assert_eq!(last_json(&status)["state"], "running");
+    assert!(hooksd_started.exists());
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let stop = run_with_hooks_record_tmpdir(
+        binary,
+        &state_root,
+        &config,
+        "stop",
+        &record_path,
+        managed_tmp.path(),
+    );
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+}
+
+#[test]
 fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1049,6 +1433,7 @@ fn top_level_start_status_restart_stop_match_legacy_cli_shape() {
 
 #[test]
 fn top_level_lifecycle_without_config_uses_home_config_toml() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1112,6 +1497,7 @@ tiers = [[{ use = "test/test" }]]
 
 #[test]
 fn top_level_start_snap_forces_debug_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1172,6 +1558,7 @@ fn top_level_start_snap_forces_debug_snapshots() {
 
 #[test]
 fn top_level_start_without_snap_disables_codex_samples_but_preserves_debug_runtime() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1211,6 +1598,7 @@ fn top_level_start_without_snap_disables_codex_samples_but_preserves_debug_runti
 
 #[test]
 fn top_level_start_snapall_enables_direct_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1253,6 +1641,7 @@ fn top_level_start_snapall_enables_direct_snapshots() {
 
 #[test]
 fn top_level_restart_snap_forces_debug_snapshots() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1309,6 +1698,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
 
 #[test]
 fn top_level_start_snap_stages_enable_local_stage_selector() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let home = root.path().join("home");
@@ -1354,6 +1744,7 @@ fn top_level_start_snap_stages_enable_local_stage_selector() {
 
 #[test]
 fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1442,6 +1833,7 @@ fn managed_child_survives_start_cli_exit_and_is_controlled_by_new_cli_processes(
 
 #[test]
 fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1499,6 +1891,7 @@ fn managed_restart_recovers_owned_stale_running_child_after_unexpected_exit() {
 
 #[test]
 fn stopped_instance_restarts_from_next_release_snapshot_executable() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1587,6 +1980,7 @@ fn stopped_instance_restarts_from_next_release_snapshot_executable() {
 
 #[test]
 fn running_instance_restart_execs_next_release_snapshot_in_place() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1684,6 +2078,7 @@ fn running_instance_restart_execs_next_release_snapshot_in_place() {
 
 #[test]
 fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1747,6 +2142,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
 
 #[test]
 fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1833,6 +2229,7 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
 
 #[test]
 fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let ports = [free_port(), free_port()];
@@ -1872,6 +2269,7 @@ fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
 
 #[test]
 fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let shared_port = free_port();
@@ -1936,6 +2334,7 @@ fn start_releases_only_overlapping_port_from_foreign_managed_instance() {
 
 #[test]
 fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let shared_port = free_port();
@@ -2009,6 +2408,7 @@ fn foreign_background_start_releasing_all_ports_disconnects_foreground_owner() {
 
 #[test]
 fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
+    let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
     let state_root = root.path().join("state");
     let target_port = free_port();

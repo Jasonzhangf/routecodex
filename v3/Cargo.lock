@@ -1213,11 +1213,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "routecodex-v3-hooks"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "routecodex-v3-lifecycle"
 version = "0.1.0"
 dependencies = [
  "libc",
  "routecodex-v3-config",
+ "routecodex-v3-hooks",
  "routecodex-v3-provider-responses",
  "routecodex-v3-runtime",
  "routecodex-v3-server",

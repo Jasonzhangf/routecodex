@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "handlers": [
+    {
+      "handler_id": "stopless-example",
+      "hook_kind": "stop",
+      "strategy": {
+        "type": "command",
+        "command": "/bin/sh",
+        "args": [
+          "-c",
+          "printf '%s\\n' '{\"send_message\":{\"intent_id\":\"stopless-example-wake\",\"source\":{\"namespace\":\"codex_tui\",\"appserver_id\":\"tui-appserver\",\"scope_id\":\"local:source\",\"session_id\":\"source\",\"thread_id\":\"source\"},\"target\":{\"namespace\":\"codex_tui\",\"appserver_id\":\"tui-appserver\",\"scope_id\":\"local:target\",\"session_id\":\"target\",\"thread_id\":\"target\"},\"body\":\"continue\",\"send_mode\":\"working_allowed\"}}'"
+        ]
+      }
+    }
+  ]
+}

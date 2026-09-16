@@ -1,4 +1,9 @@
 use super::*;
+use std::os::unix::io::AsRawFd;
+use std::time::{Duration, Instant};
+
+const STATUS_LOCK_TIMEOUT: Duration = Duration::from_millis(250);
+const STATUS_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(5);
 
 pub(crate) fn validate_auth_handles(
     manifest: &V3Config05ManifestPublished,
@@ -146,6 +151,16 @@ pub(crate) fn write_status(
     state: V3ManagedRunState,
     detail: Option<String>,
 ) -> Result<(), V3LifecycleError> {
+    let _lock = acquire_status_file_lock(instance_dir)?;
+    write_status_unlocked(instance_dir, instance_id, state, detail)
+}
+
+fn write_status_unlocked(
+    instance_dir: &Path,
+    instance_id: &str,
+    state: V3ManagedRunState,
+    detail: Option<String>,
+) -> Result<(), V3LifecycleError> {
     write_json_atomic(
         &instance_dir.join("status.json"),
         &V3ManagedStatusRecord {
@@ -156,6 +171,69 @@ pub(crate) fn write_status(
             detail,
         },
     )
+}
+
+pub(crate) fn write_running_status_if_current(
+    instance_dir: &Path,
+    instance_id: &str,
+    detail: Option<String>,
+) -> Result<(), V3LifecycleError> {
+    let _lock = acquire_status_file_lock(instance_dir)?;
+    let status_path = instance_dir.join("status.json");
+    if status_path.exists() {
+        let status: V3ManagedStatusRecord = read_json(&status_path)?;
+        if status.instance_id != instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "status instance id differs from hooks sidecar instance identity".to_string(),
+            ));
+        }
+        if status.state != V3ManagedRunState::Running {
+            return Ok(());
+        }
+    }
+    write_status_unlocked(
+        instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        detail,
+    )
+}
+
+struct StatusFileLock {
+    file: File,
+}
+
+impl Drop for StatusFileLock {
+    fn drop(&mut self) {
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+fn acquire_status_file_lock(instance_dir: &Path) -> Result<StatusFileLock, V3LifecycleError> {
+    ensure_private_dir(instance_dir)?;
+    let path = instance_dir.join("status.lock");
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .open(path)?;
+    let deadline = Instant::now() + STATUS_LOCK_TIMEOUT;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(StatusFileLock { file });
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::WouldBlock {
+            return Err(error.into());
+        }
+        if Instant::now() >= deadline {
+            return Err(V3LifecycleError::Timeout("status file lock".to_string()));
+        }
+        std::thread::sleep(STATUS_LOCK_RETRY_INTERVAL);
+    }
 }
 
 pub(crate) fn write_json_atomic<T: Serialize>(
