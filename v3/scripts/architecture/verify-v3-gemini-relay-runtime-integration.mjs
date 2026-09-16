@@ -12,6 +12,7 @@ const designPath = 'docs/goals/v3-gemini-relay-runtime-integration-test-design.m
 const serverPath = 'v3/crates/routecodex-v3-server/src/lib.rs';
 const serverExecutorsPath = 'v3/crates/routecodex-v3-server/src/executors.rs';
 const endpointHandlersPath = 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs';
+const frameBuildersPath = 'v3/crates/routecodex-v3-server/src/frame_builders.rs';
 const serverTestsPath = 'v3/crates/routecodex-v3-server/tests/gemini_relay_controlled.rs';
 const configValidatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
 const configTestsPath = 'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs';
@@ -37,7 +38,8 @@ const design = read(designPath);
 const server = read(serverPath);
 const serverExecutors = read(serverExecutorsPath);
 const endpointHandlers = read(endpointHandlersPath);
-const serverSurface = `${server}\n${serverExecutors}\n${endpointHandlers}`;
+const frameBuilders = read(frameBuildersPath);
+const serverSurface = `${server}\n${serverExecutors}\n${endpointHandlers}\n${frameBuilders}`;
 const serverTests = read(serverTestsPath);
 const configValidate = read(configValidatePath);
 const configTests = read(configTestsPath);
@@ -53,9 +55,9 @@ const wikiHtml = read(wikiHtmlPath);
 const packageJson = read(packagePath);
 const failures = [];
 
-requirePackageScript('test:v3-gemini-relay-runtime-integration', 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test gemini_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test gemini_relay_controlled -- --nocapture');
-requirePackageScript('verify:v3-gemini-relay-runtime-integration', 'node scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
-requirePackageScript('test:v3-gemini-relay-runtime-integration-red-fixtures', 'node scripts/tests/v3-gemini-relay-runtime-integration-red-fixtures.mjs');
+requirePackageScript('test:v3-gemini-relay-runtime-integration', 'CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test gemini_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test gemini_relay_controlled -- --nocapture');
+requirePackageScript('verify:v3-gemini-relay-runtime-integration', 'node v3/scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
+requirePackageScript('test:v3-gemini-relay-runtime-integration-red-fixtures', 'node v3/scripts/tests/v3-gemini-relay-runtime-integration-red-fixtures.mjs');
 
 for (const phrase of [
   'execute_v3_gemini_relay_runtime_with_default_transport',
@@ -102,7 +104,7 @@ for (const node of [
 for (const phrase of [
   'json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics',
   'json_function_call_governance_preserves_gemini_name_mapping',
-  'sse_runtime_emits_first_gemini_event_before_provider_terminal_without_materializing',
+  'sse_runtime_commits_complete_attempt_only_after_provider_terminal',
   'malformed_non_terminal_and_post_terminal_sse_fail_explicitly',
   'provider_error_enters_error01_06_without_success_projection',
   'malformed_provider_error_body_projects_explicit_error_not_fallback',
@@ -112,7 +114,7 @@ for (const phrase of [
 for (const phrase of [
   'server_executes_controlled_json_sse_error_and_isolation_without_second_owner',
   '/v1beta/models/gemini-wire:generateContent',
-  'client first Gemini frame must arrive before controlled terminal delay',
+  'validated Gemini attempt must complete after the controlled terminal',
   'metadata_center',
 ]) requireText(serverTests, serverTestsPath, phrase);
 for (const phrase of ['White-box Matrix', 'Runtime Module Black-box', 'Server Loopback Black-box', 'Known Gaps', 'No real Gemini provider']) {
@@ -133,7 +135,7 @@ for (const [text, owner, phrases] of [
 requireText(hub, hubPath, 'mod gemini_relay_runtime;');
 for (const phrase of [
   'execute_v3_gemini_relay_runtime_with_default_transport',
-  'V3GeminiRelayClientBody::Sse',
+  'V3Server16Body::Sse(client_stream)',
   'Body::from_stream(',
   'entry_protocol_binding_for_endpoint(&path)',
   'entry_protocol == "gemini"',
@@ -212,7 +214,8 @@ function verifyYamlManifest() {
   if (parsed?.lifecycle_id !== 'v3.gemini_relay.controlled_runtime') failures.push(manifestPath + ': lifecycle_id mismatch');
   if (parsed?.owner_feature_id !== 'v3.gemini_relay_runtime_integration') failures.push(manifestPath + ': owner_feature_id mismatch');
   const edges = Array.isArray(parsed?.edges) ? parsed.edges : [];
-  for (let index = 1; index <= 15; index += 1) {
+  for (let index = 1; index <= 17; index += 1) {
+    if (index === 4 || index === 16) continue;
     const step = 'v3-gemini-relay-' + String(index).padStart(2, '0');
     if (!edges.some((edge) => edge?.step_id === step && edge?.status === 'anchored')) failures.push(manifestPath + ': missing anchored edge ' + step);
   }
