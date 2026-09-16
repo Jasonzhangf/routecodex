@@ -22,6 +22,9 @@ mod cooldown_exhaustion;
 #[path = "auth_key_policy_tests.rs"]
 mod auth_key_policy;
 
+#[path = "tests/probe_recovery.rs"]
+mod probe_recovery;
+
 // 归一化优先级基线：隔离自适应分数阻断，让用例专测阈值语义。
 fn normalize_global_pool_priorities(manifest: &mut V3Config05ManifestPublished) {
     for target in manifest

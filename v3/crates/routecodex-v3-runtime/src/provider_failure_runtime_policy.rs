@@ -1,4 +1,4 @@
-use futures_util::future::join_all;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use routecodex_v3_config::internal::{
     classify_v3_internal_provider_error, v3_internal_error_handling,
 };
@@ -30,6 +30,7 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::provider_action_gate::{
     V3ProviderActionAdmission, V3ProviderActionFailureRecorded, V3ProviderActionGate,
@@ -45,6 +46,46 @@ struct V3ProviderProbeCancellationGuard {
     auth_alias: Option<String>,
     model_id: Option<String>,
     expected_generation: u64,
+}
+
+const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
+
+async fn execute_provider_health_probe<F, Fut>(
+    store: V3ProviderHealthStore,
+    permit: routecodex_v3_provider_responses::V3ProviderHealthProbePermit,
+    probe: F,
+) -> (
+    V3ProviderProbeCancellationGuard,
+    String,
+    Option<String>,
+    Option<String>,
+    u64,
+    Result<(), String>,
+)
+where
+    F: Fn(String, Option<String>, Option<String>) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    let provider_id = permit.provider_id().to_string();
+    let auth_alias = permit.auth_alias().map(str::to_string);
+    let model_id = permit.model_id().map(str::to_string);
+    let expected_generation = permit.expected_generation();
+    let cancellation = V3ProviderProbeCancellationGuard {
+        store,
+        provider_id: provider_id.clone(),
+        auth_alias: auth_alias.clone(),
+        model_id: model_id.clone(),
+        expected_generation,
+    };
+    let result = probe(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
+    (
+        cancellation,
+        provider_id,
+        auth_alias,
+        model_id,
+        expected_generation,
+        result,
+    )
 }
 
 impl Drop for V3ProviderProbeCancellationGuard {
@@ -390,81 +431,106 @@ impl V3ProviderFailureRuntimeHealth {
         Fut: Future<Output = Result<(), String>>,
     {
         let mut probe_errors = Vec::new();
-        let mut permits = Vec::new();
-        for (provider_id, auth_alias, model_id) in self
+        let mut pending_keys = self
             .store
             .provider_cooldown_probe_keys(now_ms, startup)
             .map_err(|error| error.to_string())?
-        {
-            if let Some(permit) = self
-                .store
-                .acquire_provider_cooldown_probe(
-                    &provider_id,
-                    auth_alias.as_deref(),
-                    model_id.as_deref(),
-                )
-                .map_err(|error| error.to_string())?
-            {
-                permits.push(permit);
-            }
-        }
-        let probe_results = join_all(permits.into_iter().map(|permit| {
-            let probe = probe.clone();
-            let provider_id = permit.provider_id().to_string();
-            let auth_alias = permit.auth_alias().map(str::to_string);
-            let model_id = permit.model_id().map(str::to_string);
-            let expected_generation = permit.expected_generation();
-            let cancellation = V3ProviderProbeCancellationGuard {
-                store: self.store.clone(),
-                provider_id: provider_id.clone(),
-                auth_alias: auth_alias.clone(),
-                model_id: model_id.clone(),
-                expected_generation,
+            .into_iter();
+        let mut in_flight = FuturesUnordered::new();
+        while in_flight.len() < V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {
+            let Some((provider_id, auth_alias, model_id)) = pending_keys.next() else {
+                break;
             };
-            async move {
-                let result =
-                    (&probe)(provider_id.clone(), auth_alias.clone(), model_id.clone()).await;
-                (
-                    cancellation,
-                    provider_id,
-                    auth_alias,
-                    model_id,
-                    expected_generation,
-                    result,
-                )
-            }
-        }))
-        .await;
-        for (cancellation, provider_id, auth_alias, model_id, expected_generation, result) in
-            probe_results
-        {
-            match result {
-                Ok(()) => self
-                    .store
-                    .complete_provider_cooldown_probe_success_at_generation(
-                        &provider_id,
-                        auth_alias.as_deref(),
-                        model_id.as_deref(),
-                        now_ms,
-                        Some(expected_generation),
-                    )
-                    .map_err(|error| error.to_string())?,
+            let permit = match self.store.acquire_provider_cooldown_probe(
+                &provider_id,
+                auth_alias.as_deref(),
+                model_id.as_deref(),
+            ) {
+                Ok(Some(permit)) => permit,
+                Ok(None) => continue,
                 Err(error) => {
-                    self.store
+                    probe_errors.push(error.to_string());
+                    break;
+                }
+            };
+            in_flight.push(execute_provider_health_probe(
+                self.store.clone(),
+                permit,
+                probe.clone(),
+            ));
+        }
+        while let Some((
+            cancellation,
+            provider_id,
+            auth_alias,
+            model_id,
+            expected_generation,
+            result,
+        )) = in_flight.next().await
+        {
+            let completion_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(duration) => duration.as_millis() as u64,
+                Err(error) => {
+                    probe_errors.push(format!("provider probe completion clock failure: {error}"));
+                    now_ms
+                }
+            };
+            match result {
+                Ok(()) => {
+                    if let Err(error) = self
+                        .store
+                        .complete_provider_cooldown_probe_success_at_generation(
+                            &provider_id,
+                            auth_alias.as_deref(),
+                            model_id.as_deref(),
+                            completion_now_ms,
+                            Some(expected_generation),
+                        )
+                    {
+                        probe_errors.push(error.to_string());
+                    }
+                }
+                Err(error) => {
+                    if let Err(completion_error) = self
+                        .store
                         .complete_provider_cooldown_probe_failure_at_generation(
                             &provider_id,
                             auth_alias.as_deref(),
                             model_id.as_deref(),
-                            now_ms,
+                            completion_now_ms,
                             Some(expected_generation),
                         )
-                        .map_err(|error| error.to_string())?;
+                    {
+                        probe_errors.push(completion_error.to_string());
+                    }
                     probe_errors.push(format!(
                         "adaptive provider cooldown probe failed for {provider_id}: {error}"
                     ));
                 }
             }
             drop(cancellation);
+            while in_flight.len() < V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {
+                let Some((provider_id, auth_alias, model_id)) = pending_keys.next() else {
+                    break;
+                };
+                let permit = match self.store.acquire_provider_cooldown_probe(
+                    &provider_id,
+                    auth_alias.as_deref(),
+                    model_id.as_deref(),
+                ) {
+                    Ok(Some(permit)) => permit,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        probe_errors.push(error.to_string());
+                        break;
+                    }
+                };
+                in_flight.push(execute_provider_health_probe(
+                    self.store.clone(),
+                    permit,
+                    probe.clone(),
+                ));
+            }
         }
         if probe_errors.is_empty() {
             Ok(())
