@@ -105,12 +105,13 @@ pub use responses_relay_dry_run::{
     execute_v3_responses_relay_dry_run_runtime_with_server_tool_state,
     project_v3_responses_relay_runtime_failure,
 };
+pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
 use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
     is_v3_responses_provider_response_failure, provider_failure_output, provider_http_failure,
     provider_request_relay_failure, provider_response_hook_failure,
-    provider_response_stream_failure, provider_response_stream_relay_failure,
-    provider_runtime_failure, provider_semantic_failure, server_routing_group,
+    provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
+    server_routing_group,
 };
 use responses_relay_json_hooks::*;
 
