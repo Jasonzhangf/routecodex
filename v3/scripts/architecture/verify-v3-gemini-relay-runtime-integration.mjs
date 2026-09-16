@@ -125,9 +125,15 @@ for (const [text, owner, phrases] of [
   [functionMap, functionMapPath, ['feature_id: v3.gemini_relay_runtime_integration', 'v3.gemini.client_sse_stream']],
   [mainlineMap, mainlineMapPath, ['chain_id: v3.gemini_relay.controlled_runtime', 'v3-gemini-relay-15', 'execute_v3_gemini_generate_content_request']],
   [resourceMap, resourceMapPath, ['resource_id: v3.gemini.client_sse_stream', 'allowed_readers: [gemini_relay_output_response]']],
-  [verificationMap, verificationMapPath, ['feature_id: v3.gemini_relay_runtime_integration', 'malformed SSE JSON non-terminal stream end and frames after terminal finishReason', 'fail explicitly']],
+  [verificationMap, verificationMapPath, [
+    'feature_id: v3.gemini_relay_runtime_integration',
+    'SSE buffers the complete provider attempt until a valid terminal',
+    'Server SSE uses Body::from_stream after the controlled provider terminal is validated',
+    'malformed SSE JSON non-terminal stream end and frames after terminal finishReason',
+    'fail explicitly',
+  ]],
   [manifest, manifestPath, ['lifecycle_id: v3.gemini_relay.controlled_runtime', 'V3ServerRespOutbound06ClientFrame', 'v3-gemini-relay-15']],
-  [wiki, wikiPath, ['Single lifecycle', 'Body::from_stream', 'Live Gemini provider compatibility', 'No fallback']],
+  [wiki, wikiPath, ['Single lifecycle', 'validates the complete provider attempt before client commit', 'Body::from_stream', 'Live Gemini provider compatibility', 'No fallback']],
   [wikiHtml, wikiHtmlPath, ['Canonical Markdown source:', 'V3 Gemini Relay Controlled Runtime', 'Body::from_stream', 'No fallback']],
   [entryBindingManifest, entryBindingManifestPath, ['entry_protocol: gemini', 'execution_mode: relay', 'implementation_status: implemented', 'execute_v3_gemini_relay_runtime_with_default_transport']],
 ]) for (const phrase of phrases) requireText(text, owner, phrase);

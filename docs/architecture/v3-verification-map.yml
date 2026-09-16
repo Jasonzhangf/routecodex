@@ -1782,7 +1782,7 @@ features:
   required_unit:
   - JSON preserves Gemini contents tools generationConfig usage and selected URL path wire model without writing model into provider body
   - functionCall governance preserves Gemini functionCall.name mapping
-  - SSE emits first candidate frame before provider terminal and never appends synthetic DONE
+  - SSE buffers the complete provider attempt until a valid terminal, then transports incremental client frames without synthetic DONE
   - malformed SSE JSON non-terminal stream end and frames after terminal finishReason fail explicitly
   - provider HTTP failure enters Error01-06 without Resp01 success projection
   - malformed provider error body projects an explicit provider_error_body_malformed error without fallback
@@ -1790,7 +1790,7 @@ features:
   required_blackbox:
   - loopback upstream receives exactly one POST /v1beta/models/gemini-wire:generateContent per valid request
   - Server JSON response preserves controlled Gemini candidates and usage metadata
-  - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
+  - Server SSE uses Body::from_stream after the controlled provider terminal is validated
   - Server 429 response exposes Error01-06 and does not wrap success
   - rejected metadata_center request produces zero upstream captures
   - Config binding marks gemini relay implemented with Gemini runtime owner

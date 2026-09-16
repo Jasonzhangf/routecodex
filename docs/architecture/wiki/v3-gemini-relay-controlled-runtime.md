@@ -45,7 +45,7 @@ candidate, function-call, finishReason, JSON, and SSE semantics stay in the Gemi
 |---|---|---|
 | JSON | Loopback captures one `/v1beta/models/gemini-wire/generateContent` request and returns exact candidates/usage | client URL alias selects the wire URL without inserting a synthetic `model` body field |
 | Function call | Runtime governs a Gemini `functionCall` and preserves its `name` | protocol identity is not lost or remapped by generic Hub stages |
-| SSE | Shared incremental decoder feeds `Body::from_stream`; first candidate frame arrives before delayed terminal; no synthetic `[DONE]` | no full stream materialization or OpenAI framing |
+| SSE | Shared incremental decoder validates the complete provider attempt before client commit; `Body::from_stream` then transports client frames; no synthetic `[DONE]` | no provider terminal failure after client commit, full client-stream materialization, or OpenAI framing |
 | SSE negatives | malformed JSON, stream end without terminal, and post-terminal frame fail explicitly | still-running or malformed provider streams never become success |
 | Error | Controlled 429 enters `V3Error01SourceRaised` through `V3Error06ClientProjected` | provider failure never becomes Resp01/success |
 | Malformed error body | Controlled non-JSON provider error projects `provider_error_body_malformed` | provider error parsing cannot fall back to a generic hidden shape |
