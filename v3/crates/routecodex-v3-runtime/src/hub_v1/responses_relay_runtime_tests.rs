@@ -1074,6 +1074,46 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
     );
 }
 
+#[tokio::test]
+async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
+    let observation = V3RuntimeStreamObservation::default();
+    let raw_sse = concat!(
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{\"reasoning_content\":\"internal reasoning only\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}],\"usage\":null}\n\n",
+        "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":30,\"total_tokens\":42,\"input_tokens\":12,\"output_tokens\":30}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let provider = Box::pin(stream::iter(vec![Ok(raw_sse.as_bytes().to_vec())]));
+    let provider_payload = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        provider,
+        &observation,
+    )
+    .await
+    .expect("reasoning-only terminal stream must materialize before semantic validation");
+
+    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
+        None,
+        None,
+        &provider_payload,
+    )
+    .expect("reasoning-only stop must be a provider semantic failure");
+    assert_eq!(projection.status, 502);
+    assert_eq!(projection.code, "provider_empty_visible_output");
+
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        &provider_payload,
+        &json!({
+            "tools": [{"type":"function","function":{"name":"exec_command"}}]
+        }),
+    )
+    .expect_err("reasoning-only stop must not become a successful client response");
+
+    assert!(
+        error.to_string().contains("no visible model output"),
+        "wrong error: {error}"
+    );
+}
+
 #[test]
 fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(

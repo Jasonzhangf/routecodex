@@ -374,7 +374,7 @@ fn responses_temperature_unsupported_profile_normalizes_tools_and_removes_temper
 }
 
 #[test]
-fn glm_no_prompt_cache_key_profile_removes_unsupported_provider_fields() {
+fn glm_unsupported_fields_profile_removes_unsupported_provider_fields() {
     for provider_protocol in ["openai-responses", "openai-chat"] {
         let input = ReqOutboundCompatInput {
             payload: json!({
@@ -384,7 +384,9 @@ fn glm_no_prompt_cache_key_profile_removes_unsupported_provider_fields() {
                 "messages": [{"role": "user", "content": "hello"}]
             }),
             adapter_context: AdapterContext {
-                compatibility_profile: Some("chat:glm-no-prompt-cache-key".to_string()),
+                compatibility_profile: Some(
+                    "chat:glm-unsupported-prompt-cache-key-verbosity".to_string(),
+                ),
                 provider_protocol: Some(provider_protocol.to_string()),
                 ..Default::default()
             },
@@ -394,7 +396,7 @@ fn glm_no_prompt_cache_key_profile_removes_unsupported_provider_fields() {
         let result = run_req_outbound_stage3_compat(input).unwrap();
         assert_eq!(
             result.applied_profile.as_deref(),
-            Some("chat:glm-no-prompt-cache-key")
+            Some("chat:glm-unsupported-prompt-cache-key-verbosity")
         );
         assert!(
             result.payload.get("prompt_cache_key").is_none(),
