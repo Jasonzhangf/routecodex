@@ -59,6 +59,82 @@ fn responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_w
 }
 
 #[test]
+fn responses_function_call_history_without_namespace_is_qualified_from_provider_tools() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__mcpx",
+                    "tools": [{
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }]
+                }],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_mcpx_session",
+                        "call_id": "call_mcpx_session",
+                        "name": "session",
+                        "arguments": r#"{"action":"list","workspace":"routecodex"}"#
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_mcpx_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses MCP namespace-less history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical MCP namespace-less history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("mcp__mcpx__session")
+    );
+}
+
+#[test]
+fn openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__mcpx",
+            "tools": [{
+                "type": "function",
+                "name": "session",
+                "parameters": {"type": "object"}
+            }]
+        }],
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_native_session",
+                "type": "function",
+                "function": {"name": "session", "arguments": "{}"}
+            }]
+        }]
+    }))
+    .expect("OpenAI Chat history must remain projectable");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
+    );
+}
+
+#[test]
 fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(

@@ -1,4 +1,6 @@
+use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 
 fn provider_function_name(name: &str) -> String {
     if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
@@ -61,6 +63,113 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             }
         }
     }
+}
+
+pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    let Some(tools) = root.get("tools").and_then(Value::as_array).cloned() else {
+        return;
+    };
+    let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut qualified_by_leaf = HashMap::<String, Option<String>>::new();
+    for tool in &tools {
+        if let Ok(Some(children)) = flatten_namespace_tool_for_provider("openai-chat", tool) {
+            for child in children {
+                if let Some(name) = provider_function_tool_name(&child) {
+                    insert_provider_mcp_name(&mut qualified_by_leaf, name);
+                }
+            }
+            continue;
+        }
+        if let Some(name) = provider_function_tool_name(tool) {
+            insert_provider_mcp_name(&mut qualified_by_leaf, name);
+        }
+    }
+    if qualified_by_leaf.is_empty() {
+        return;
+    }
+    for message in messages {
+        let Some(message_row) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(tool_calls) = message_row
+            .get_mut("tool_calls")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(tool_call_row) = tool_call.as_object_mut() else {
+                continue;
+            };
+            if !has_responses_item_id(tool_call_row) {
+                continue;
+            }
+            let Some(name) = tool_call_row
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            if name.starts_with("mcp__") {
+                continue;
+            }
+            let Some(qualified) = qualified_by_leaf.get(&name).and_then(Option::as_ref) else {
+                continue;
+            };
+            if let Some(function) = tool_call_row
+                .get_mut("function")
+                .and_then(Value::as_object_mut)
+            {
+                function.insert("name".to_string(), Value::String(qualified.clone()));
+            }
+        }
+    }
+}
+
+fn has_responses_item_id(tool_call: &Map<String, Value>) -> bool {
+    tool_call
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_item_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn provider_function_tool_name(tool: &Value) -> Option<&str> {
+    tool.get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| tool.get("name").and_then(Value::as_str))
+}
+
+fn insert_provider_mcp_name(map: &mut HashMap<String, Option<String>>, name: &str) {
+    let Some(leaf) = mcp_tool_leaf_name(name) else {
+        return;
+    };
+    match map.get(leaf) {
+        Some(Some(existing)) if existing != name => {
+            map.insert(leaf.to_string(), None);
+        }
+        None => {
+            map.insert(leaf.to_string(), Some(name.to_string()));
+        }
+        _ => {}
+    }
+}
+
+fn mcp_tool_leaf_name(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix("mcp__")?;
+    let (_, tool) = rest.rsplit_once("__")?;
+    (!tool.is_empty()).then_some(tool)
 }
 
 pub(super) fn restore_responses_mcp_namespace(object: &mut Map<String, Value>) -> bool {
