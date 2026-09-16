@@ -149,8 +149,6 @@ for (const evidenceKey of [
   'messages_sse_dryrun_no_send',
   'messages_sse_live_200',
   'responses_relay_ws_text_live_200',
-  'responses_relay_ws_tool_loop_live_200',
-  'remote_continuation_current_inventory',
 ]) {
   if (!String(currentProfile?.evidence?.[evidenceKey] ?? '').startsWith('.agent-collab/runs/')) {
     failures.push(manifestPath + ': current 5555 profile missing run evidence ' + evidenceKey);
@@ -159,10 +157,9 @@ for (const evidenceKey of [
 const currentFinding = String(currentProfile?.finding ?? '');
 if (!currentFinding.includes('Anthropic Messages JSON and SSE are live_verified')
     || !currentFinding.includes('Responses Relay client-facing WebSocket v2')
-    || !currentFinding.includes('Remote continuation exact-pin remains blocked')
     || !currentFinding.includes('multi-provider')
     || !currentFinding.includes('no start/server-start/run-managed-child')) {
-  failures.push(manifestPath + ': current 5555 finding must name multi-provider Anthropic JSON/SSE and Responses Relay WebSocket live evidence, remote continuation blocker, and no start lifecycle use');
+  failures.push(manifestPath + ': current 5555 finding must name multi-provider Anthropic JSON/SSE and Responses Relay WebSocket live evidence and no start lifecycle use');
 }
 
 for (const endpoint of expectedEndpoints) requireArrayText(manifest.axes?.endpoints, endpoint, 'axes.endpoints');
@@ -236,18 +233,11 @@ for (const entry of cases) {
   }
 }
 
-const productionBlockers = Array.isArray(manifest.production_blockers)
-  ? manifest.production_blockers
-  : [];
-if (!productionBlockers.some((entry) =>
-  entry.blocker_id === 'remote_continuation_exact_pin_provider_profile_unavailable')) {
-  failures.push(manifestPath + ': missing explicit remote continuation exact-pin provider/profile blocker');
-}
-if (manifest.completion_boundary?.remote_continuation_two_turn_live !== false
-    || manifest.completion_boundary?.remote_continuation_provider_ws_opened_count !== 0
-    || !String(manifest.completion_boundary?.remote_continuation_current_5555_inventory ?? '')
-      .includes('20260723T020344Z-Macstudio.local-23790-wscont')) {
-  failures.push(manifestPath + ': remote continuation live boundary must remain false with current provider inventory evidence');
+if (manifest.cases?.some((entry) => entry.owner_feature_id === 'v3.responses_direct_remote_continuation_integration')
+    || manifest.production_blockers?.some((entry) =>
+      entry.owner_feature_id === 'v3.responses_direct_remote_continuation_integration')
+    || manifest.completion_boundary?.remote_continuation_two_turn_live !== undefined) {
+  failures.push(manifestPath + ': retired Responses continuation feature must not remain an active case, blocker, or completion boundary');
 }
 
 for (const required of requiredErrorCases) {

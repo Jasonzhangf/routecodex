@@ -413,12 +413,7 @@ if (deleted.length > 0) {
   process.stderr.write(`[verify:fast] INFO deleted file(s): ${deleted.join(', ')}\n`);
 }
 
-const changedRustFiles = [
-  ...new Set([
-    ...entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')),
-    ...deleted.filter((path) => path.endsWith('.rs')),
-  ]),
-];
+const changedRustFiles = [...new Set(entries.map(({ path }) => path).filter((path) => path.endsWith('.rs')))];
 const changedV3RustFiles = changedRustFiles.filter((path) => path.startsWith('v3/'));
 const changedV4RustFiles = changedRustFiles.filter((path) => path.startsWith('v4/'));
 const unsupportedRustFiles = changedRustFiles.filter((path) => !path.startsWith('v3/') && !path.startsWith('v4/'));

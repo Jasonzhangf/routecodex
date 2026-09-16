@@ -83,6 +83,13 @@ const cases = [
     diagnostic: /execute_responses_relay_websocket_output|Relay Runtime/,
   },
   {
+    name: 'Relay WebSocket unplanned branch dispatch removed',
+    file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+    from: '        None => {\n            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+    to: '        None => {\n            execute_v3_responses_relay_runtime_without_health(',
+    diagnostic: /planned and unplanned WebSocket Relay Runtime entry calls/,
+  },
+  {
     name: 'Relay WebSocket direct handoff consumption removed',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
     from: 'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',

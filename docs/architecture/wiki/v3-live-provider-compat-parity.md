@@ -68,8 +68,7 @@ Current blockers are explicit and must not be silently converted into readiness:
 
 - responses_relay_live_verified: /v1/responses Relay source binding, controlled Server entry, and live JSON/SSE provider replay are verified.
 - anthropic_messages_live_verified_current_5555: Anthropic Messages JSON and SSE are enabled and live verified on the current multi-provider 5555 profile.
-- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for Gemini, remote continuation, and live 401/403/5xx/timeout cases.
-- remote_continuation_exact_pin_provider_profile_unavailable: the current 5555 profile has no Responses `websocket_v2` provider transport, no `websocket_v2_url`, and no model with both `remote_continuation` and `tool_outputs`, so provider-owned exact-pin two-turn replay remains blocked.
+- live_provider_replay_matrix_pending: the broader matrix still needs real provider evidence for Gemini and live 401/403/5xx/timeout cases.
 - gemini_generate_content_live_replay_pending: Gemini Generate Content JSON/SSE remains outside the final 5555 profile.
 - final_5555_profile_gemini_endpoint_not_enabled: Gemini remains outside the current 5555 endpoint profile and retains the typed endpoint_not_enabled blocker.
 
@@ -88,8 +87,7 @@ Anthropic Messages JSON provider-request dry-run stopped before provider send wi
 Responses Relay client-facing WebSocket v2 is also live verified on the same current 5555 profile:
 
 - `.agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_probe_after_restart_20260723T030907Z.json` opened `ws://127.0.0.1:5555/v1/responses` and returned `response.completed` with marker `WS_RELAY_LIVE_OK`.
-- `.agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/live-probes-initial/ws_tool_loop_after_restart_20260723T031352Z.json` opened the same client WebSocket, received a first `response.completed` with `function_call`, sent a second `response.create` with `previous_response_id` + `function_call_output`, and received the second `response.completed`.
-- `.agent-collab/runs/20260723T020344Z-Macstudio.local-23790-wscont/current-5555-remote-continuation-inventory.json` records that exact-pin provider-owned remote continuation remains unavailable in this profile because active providers are `openai_chat` / `anthropic` and none declares Responses `websocket_v2` transport, `websocket_v2_url`, `remote_continuation`, or `tool_outputs`.
+- Responses continuation is retired. A client WebSocket `response.create` carrying a non-empty `previous_response_id` is rejected before provider send; the retired two-turn continuation replay is historical evidence only and is not a current acceptance path.
 
 This audit did not mutate provider config, credentials, or live config. It used only the allowed aggregate lifecycle command `routecodex restart --port 5555` and did not use any start/server-start/run-managed-child lifecycle command.
 
@@ -120,4 +118,4 @@ Responses Direct fresh live recheck on 2026-07-16T12:20:33Z used a temporary nat
 
 ## Completion Boundary
 
-This closeout proves a partial live 5555 provider replay after authorized global install and managed V3 restart evidence, plus the current multi-provider audit. It includes Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE/client WebSocket, Anthropic Messages JSON/SSE, `/v1/models`, and OpenAI Chat Relay JSON/SSE. It also records controlled provider-failure evidence for 401/403/5xx/timeout reroute/default-pool behavior. It does not prove two-turn provider-owned remote continuation/tool_outputs exact-pin live replay, credential mutation, P6 deletion, Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover. A follow-up provider-side WebSocket v2 probe found 0 HTTP 101 upgrades across 13 configured Responses providers and 52 candidate endpoints, and the current 5555 profile inventory has no Responses WebSocket v2 provider candidate, so remote continuation remains blocked by provider/profile endpoint availability rather than by the client-facing Relay WebSocket path.
+This closeout proves a partial live 5555 provider replay after authorized global install and managed V3 restart evidence, plus the current multi-provider audit. It includes Responses Direct JSON/SSE/client WebSocket, Responses Relay JSON/SSE/client WebSocket, Anthropic Messages JSON/SSE, `/v1/models`, and OpenAI Chat Relay JSON/SSE. It also records controlled provider-failure evidence for 401/403/5xx/timeout reroute/default-pool behavior. It does not prove credential mutation, P6 deletion, Gemini live replay, live 401/403/5xx/timeout provider failures, or full production cutover. Responses continuation, including provider-owned exact-pin continuation, is retired and is not a completion boundary.
