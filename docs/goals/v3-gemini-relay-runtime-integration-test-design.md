@@ -132,7 +132,7 @@ The focused integration must stay compatible with:
 
 ## 9. Execution Evidence
 
-Review receipt is bound to candidate `3bce94f29` in the clean worktree:
+Execution receipt is bound to the current branch candidate in the clean worktree:
 
 ```text
 /Users/fanzhang/Documents/github/routecodex/playground/8e89837-pool-hold-0916
@@ -154,3 +154,8 @@ Key receipts:
 - `test:v3-gemini-relay-runtime-integration-red-fixtures`: `ok (10 forbidden mutations rejected)`
 - `verify:v3-architecture-ci`: `ok (39/39 sub-gates green)`
 - `cooldown_exhaustion`: `4 passed; 0 failed`
+
+The read-only Codex review task could not execute the red-fixture gate itself because
+its sandbox could not create the temporary fixture directory (`EPERM: mkdtemp ...`).
+This section is the independently captured writable-runner execution receipt for that
+gate, not a replacement review decision.
