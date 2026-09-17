@@ -1017,6 +1017,11 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
     let Some(name) = name else {
         return Ok(None);
     };
+    let name = if responses_tool_call_type == "custom_tool_call" {
+        name.to_string()
+    } else {
+        super::request_outbound_mcp_names::provider_function_name(name)
+    };
     let arguments = function
         .and_then(|entry| entry.get("arguments"))
         .or_else(|| row.get("arguments"))
@@ -1039,7 +1044,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
             ),
             ("id".to_string(), Value::String(item_id)),
             ("call_id".to_string(), Value::String(call_id.to_string())),
-            ("name".to_string(), Value::String(name.to_string())),
+            ("name".to_string(), Value::String(name.clone())),
             ("input".to_string(), input),
         ]))));
     }
@@ -1070,7 +1075,7 @@ fn chat_tool_call_to_responses_input_item(call: &Value) -> Result<Option<Value>,
         ),
         ("id".to_string(), Value::String(item_id)),
         ("call_id".to_string(), Value::String(call_id.to_string())),
-        ("name".to_string(), Value::String(name.to_string())),
+        ("name".to_string(), Value::String(name)),
         ("arguments".to_string(), Value::String(arguments_text)),
     ]))))
 }
