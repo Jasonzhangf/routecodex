@@ -5,7 +5,8 @@
 //! projection live here behind the typed runtime owner.
 
 use crate::{
-    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime, SseTransportDriver,
+    NativeProviderSseSource, ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
+    SseTransportDriver,
 };
 use routecodex_v4_config::RuntimeConfigManifest;
 use routecodex_v4_provider::{
@@ -17,14 +18,15 @@ use routecodex_v4_server::{HttpRequest, HttpResponse};
 use routecodex_v4_standard_plugins::diagnostic;
 use serde_json::Value;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 // HTTP/error projection is owned by `response_error_port`; these re-exports
 // preserve the public adapter surface for the listener without retaining a
 // second implementation in the production pipeline.
 pub use crate::response_error_port::{
-    project_http_fault as project_fault,
-    project_provider_http_fault as project_upstream_fault,
+    project_http_fault as project_fault, project_provider_http_fault as project_upstream_fault,
 };
 
 /// Project a fault that happened before request admission. The runtime owns a
@@ -54,6 +56,50 @@ pub fn dispatch(
     entry_protocol: &str,
     continuation_owner: &str,
 ) -> Result<HttpResponse, HttpResponse> {
+    dispatch_with_cancellation(
+        manifest,
+        runtime,
+        availability,
+        request,
+        entry_protocol,
+        continuation_owner,
+        None,
+    )
+}
+
+pub fn dispatch_with_cancellation(
+    manifest: &RuntimeConfigManifest,
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    availability: &Arc<Mutex<routecodex_v4_provider::V4Availability01SessionScoped>>,
+    request: &HttpRequest,
+    entry_protocol: &str,
+    continuation_owner: &str,
+    cancellation: Option<&AtomicBool>,
+) -> Result<HttpResponse, HttpResponse> {
+    dispatch_with_request_cancellation(
+        manifest,
+        runtime,
+        availability,
+        request,
+        entry_protocol,
+        continuation_owner,
+        cancellation,
+        None,
+        None,
+    )
+}
+
+pub fn dispatch_with_request_cancellation(
+    manifest: &RuntimeConfigManifest,
+    runtime: &Arc<Mutex<SkeletonRuntime>>,
+    availability: &Arc<Mutex<routecodex_v4_provider::V4Availability01SessionScoped>>,
+    request: &HttpRequest,
+    entry_protocol: &str,
+    continuation_owner: &str,
+    cancellation: Option<&AtomicBool>,
+    request_cancellation: Option<CancellationToken>,
+    provider_runtime: Option<tokio::runtime::Handle>,
+) -> Result<HttpResponse, HttpResponse> {
     dispatch_request(
         manifest,
         runtime,
@@ -61,6 +107,9 @@ pub fn dispatch(
         request,
         entry_protocol,
         continuation_owner,
+        cancellation,
+        request_cancellation,
+        provider_runtime,
     )
 }
 
@@ -122,6 +171,9 @@ fn dispatch_request(
     request: &HttpRequest,
     entry_protocol: &str,
     continuation_owner: &str,
+    cancellation: Option<&AtomicBool>,
+    request_cancellation: Option<CancellationToken>,
+    provider_runtime: Option<tokio::runtime::Handle>,
 ) -> Result<HttpResponse, HttpResponse> {
     let started_at = std::time::Instant::now();
     let session_scope = request
@@ -130,14 +182,7 @@ fn dispatch_request(
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    let continuation_owner = if entry_protocol == "responses" {
-        // V4 retains only provider-owned Direct Responses continuation.
-        // Local/relay continuation is retired and must never be inferred from
-        // provider profile configuration.
-        "direct".to_string()
-    } else {
-        continuation_owner.to_string()
-    };
+    let continuation_owner = continuation_owner.to_string();
     let request_id = request.request_id.clone();
     let request_lease = runtime
         .lock()
@@ -162,14 +207,13 @@ fn dispatch_request(
             Err(_) => HttpResponse::error(500, "request runtime lock poisoned"),
         }
     };
-    let project_upstream_fault = |
-        request: &HttpRequest,
-        fault: RuntimeFault,
-        status: u16,
-        product: Option<&routecodex_v4_config::RuntimeProductConfig>,
-        provider_id: &str,
-        response_body: &str,
-    | -> HttpResponse {
+    let project_upstream_fault = |request: &HttpRequest,
+                                  fault: RuntimeFault,
+                                  status: u16,
+                                  product: Option<&routecodex_v4_config::RuntimeProductConfig>,
+                                  provider_id: &str,
+                                  response_body: &str|
+     -> HttpResponse {
         match runtime.lock() {
             Ok(runtime) => crate::response_error_port::project_provider_http_fault_with_runtime(
                 &runtime,
@@ -203,9 +247,7 @@ fn dispatch_request(
     let model = admission.model.as_str();
     let stream_mode = admission.stream;
     let mut selection_request = TargetSelectionRequest::new(
-        request
-            .header("x-rccv4-route-group-id")
-            .map(str::to_string),
+        request.header("x-rccv4-route-group-id").map(str::to_string),
         model,
         entry_protocol,
         if entry_protocol == "responses" {
@@ -273,25 +315,25 @@ fn dispatch_request(
             &selection_request,
         )
         .map_err(|error| {
-        let status = if !unavailable_provider_ids.is_empty()
-            && error.code == "target_selection" {
-            503
-        } else {
-            404
-        };
-        project_fault(
-            request,
-            RuntimeFault::new(
-                if status == 503 {
-                    "provider_pool_exhausted"
-                } else {
-                    "model_unavailable"
-                },
-                format!("{} (requested_model={})", error, model),
-            ),
-            status,
-        )
-    })?;
+            let status = if !unavailable_provider_ids.is_empty() && error.code == "target_selection"
+            {
+                503
+            } else {
+                404
+            };
+            project_fault(
+                request,
+                RuntimeFault::new(
+                    if status == 503 {
+                        "provider_pool_exhausted"
+                    } else {
+                        "model_unavailable"
+                    },
+                    format!("{} (requested_model={})", error, model),
+                ),
+                status,
+            )
+        })?;
     let route_facts = selection_request.to_route_facts_value();
     let target_selection = target.to_control_value(&selection_request.execution_lane);
     let request_report = runtime
@@ -349,7 +391,9 @@ fn dispatch_request(
         let target_selection = target.to_control_value(execution_lane);
         let report = runtime
             .lock()
-            .map_err(|_| RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"))?
+            .map_err(|_| {
+                RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned")
+            })?
             .execute_request_json_scoped_for_target_with_route_facts_and_lease(
                 &String::from_utf8_lossy(&request.body),
                 entry_protocol,
@@ -376,6 +420,29 @@ fn dispatch_request(
                              wire_body: &Value,
                              stream: bool|
      -> Result<ProviderTransportResult, ProviderTransportError> {
+        if stream {
+            let cancellation = request_cancellation
+                .clone()
+                .unwrap_or_else(CancellationToken::new);
+            let runtime = provider_runtime
+                .clone()
+                .ok_or_else(|| ProviderTransportError {
+                    code: "provider_async_runtime".to_string(),
+                    message:
+                        "streaming provider transport requires an explicit async runtime handle"
+                            .to_string(),
+                    status: None,
+                })?;
+            let request = ProviderTransportRequest::new(
+                &target.protocol,
+                &target.config_path,
+                target.auth_alias.as_deref(),
+                &target.wire_model,
+                wire_body.clone(),
+                true,
+            )?;
+            return ProviderTransportPort::execute_streaming(request, cancellation, &runtime);
+        }
         let request = ProviderTransportRequest::new(
             &target.protocol,
             &target.config_path,
@@ -414,6 +481,18 @@ fn dispatch_request(
                 )
             })
     };
+    let ensure_client_connected = || -> Result<(), HttpResponse> {
+        if cancellation.is_some_and(|token| token.load(Ordering::SeqCst)) {
+            Err(project_fault(
+                request,
+                RuntimeFault::new("client_disconnected", "client disconnected"),
+                499,
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    ensure_client_connected()?;
     if stream_mode {
         let mut stream = match execute_transport(&target, &wire_body, true).map_err(|error| {
             project_fault(
@@ -423,7 +502,38 @@ fn dispatch_request(
                 error.status.unwrap_or(502),
             )
         })? {
-            ProviderTransportResult::Stream(stream) => stream,
+            ProviderTransportResult::Stream(_) => {
+                return Err(project_upstream_fault(
+                    request,
+                    RuntimeFault::new(
+                        "provider_transport_shape",
+                        "streaming transport returned blocking response",
+                    ),
+                    502,
+                    manifest.product.as_ref(),
+                    &target.provider_id,
+                    "",
+                ));
+            }
+            ProviderTransportResult::NativeStream(stream) => NativeProviderSseSource::new(
+                stream,
+                request_cancellation
+                    .clone()
+                    .unwrap_or_else(CancellationToken::new),
+                provider_runtime.clone().ok_or_else(|| {
+                    project_upstream_fault(
+                        request,
+                        RuntimeFault::new(
+                            "provider_async_runtime",
+                            "streaming provider transport requires an explicit async runtime handle",
+                        ),
+                        502,
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
+                    )
+                })?,
+            ),
             ProviderTransportResult::Response(_) => {
                 return Err(project_fault(
                     request,
@@ -435,11 +545,30 @@ fn dispatch_request(
                 ));
             }
         };
+        let mut response_body = String::new();
         if stream.status() >= 400 {
+            let bytes = stream.read_error_body().map_err(|error| {
+                project_upstream_fault(
+                    request,
+                    RuntimeFault::new(
+                        "provider_response_read",
+                        format!("provider error body read failed: {error}"),
+                    )
+                    .with_status(stream.status()),
+                    stream.status(),
+                    manifest.product.as_ref(),
+                    &target.provider_id,
+                    "",
+                )
+            })?;
+            response_body = String::from_utf8_lossy(&bytes).into_owned();
             if let Some(product) = manifest.product.as_ref() {
-                if let Some(policy) =
-                    ProductErrorPolicyPort::evaluate(product, &target.provider_id, stream.status(), "")
-                {
+                if let Some(policy) = ProductErrorPolicyPort::evaluate(
+                    product,
+                    &target.provider_id,
+                    stream.status(),
+                    &response_body,
+                ) {
                     record_provider_failure(
                         &target.provider_id,
                         policy.cooldown,
@@ -476,7 +605,7 @@ fn dispatch_request(
                                 retry_route_facts,
                                 &selection_request.execution_lane,
                             )
-                                .map_err(|fault| project_fault(request, fault, 598))?;
+                            .map_err(|fault| project_fault(request, fault, 598))?;
                             target = candidate;
                             stream = match execute_transport(&target, &retry_body, true).map_err(|error| {
                                     project_upstream_fault(
@@ -488,7 +617,40 @@ fn dispatch_request(
                                         "",
                                     )
                                 })? {
-                                    ProviderTransportResult::Stream(stream) => stream,
+                                    ProviderTransportResult::Stream(_) => {
+                                        return Err(project_upstream_fault(
+                                            request,
+                                            RuntimeFault::new(
+                                                "provider_transport_shape",
+                                                "streaming transport returned blocking response",
+                                            ),
+                                            502,
+                                            manifest.product.as_ref(),
+                                            &target.provider_id,
+                                            "",
+                                        ));
+                                    }
+                                    ProviderTransportResult::NativeStream(stream) => {
+                                        NativeProviderSseSource::new(
+                                            stream,
+                                            request_cancellation
+                                                .clone()
+                                                .unwrap_or_else(CancellationToken::new),
+                                            provider_runtime.clone().ok_or_else(|| {
+                                                project_upstream_fault(
+                                                    request,
+                                                    RuntimeFault::new(
+                                                        "provider_async_runtime",
+                                                        "streaming provider transport requires an explicit async runtime handle",
+                                                    ),
+                                                    502,
+                                                    manifest.product.as_ref(),
+                                                    &target.provider_id,
+                                                    "",
+                                                )
+                                            })?,
+                                        )
+                                    }
                                     ProviderTransportResult::Response(_) => {
                                         return Err(project_upstream_fault(
                                             request,
@@ -503,6 +665,26 @@ fn dispatch_request(
                                         ));
                                     }
                                 };
+                            if stream.status() >= 400 {
+                                let retry_response_body =
+                                    stream.read_error_body().map_err(|error| {
+                                        project_upstream_fault(
+                                            request,
+                                            RuntimeFault::new(
+                                                "provider_response_read",
+                                                format!("provider error body read failed: {error}"),
+                                            )
+                                            .with_status(stream.status()),
+                                            stream.status(),
+                                            manifest.product.as_ref(),
+                                            &target.provider_id,
+                                            "",
+                                        )
+                                    })?;
+                                let retry_response_body =
+                                    String::from_utf8_lossy(&retry_response_body);
+                                response_body = retry_response_body.into_owned();
+                            }
                         }
                     }
                 }
@@ -520,7 +702,7 @@ fn dispatch_request(
                 status,
                 manifest.product.as_ref(),
                 &target.provider_id,
-                "",
+                &response_body,
             ));
         }
         if !stream
@@ -582,7 +764,7 @@ fn dispatch_request(
         )
     })? {
         ProviderTransportResult::Response(response) => response,
-        ProviderTransportResult::Stream(_) => {
+        ProviderTransportResult::Stream(_) | ProviderTransportResult::NativeStream(_) => {
             return Err(project_upstream_fault(
                 request,
                 RuntimeFault::new(
@@ -643,7 +825,7 @@ fn dispatch_request(
                         retry_route_facts,
                         &selection_request.execution_lane,
                     )
-                        .map_err(|fault| project_fault(request, fault, 598))?;
+                    .map_err(|fault| project_fault(request, fault, 598))?;
                     target = candidate;
                     reselected = true;
                     raw = match execute_transport(&target, &retry_body, false).map_err(|error| {
@@ -657,7 +839,8 @@ fn dispatch_request(
                         )
                     })? {
                         ProviderTransportResult::Response(response) => response,
-                        ProviderTransportResult::Stream(_) => {
+                        ProviderTransportResult::Stream(_)
+                        | ProviderTransportResult::NativeStream(_) => {
                             return Err(project_upstream_fault(
                                 request,
                                 RuntimeFault::new(
@@ -711,7 +894,11 @@ fn dispatch_request(
             &target.provider_id,
         );
     }
-    if raw.content_type.to_ascii_lowercase().contains("text/event-stream") {
+    if raw
+        .content_type
+        .to_ascii_lowercase()
+        .contains("text/event-stream")
+    {
         return Err(project_fault(
             request,
             RuntimeFault::new(
@@ -732,64 +919,61 @@ fn dispatch_request(
             599,
         )
     })?;
-            let report = runtime
-                .lock()
-                .map_err(|_| {
-                    project_fault(
-                        request,
-                        RuntimeFault::new(
-                            "response_runtime_lock",
-                            "response runtime lock poisoned",
-                        ),
-                        500,
-                    )
-                })?
-                .execute_provider_response_scoped_for_target_with_lease(
-                    &provider_raw,
-                    &request_id,
-                    request.port,
-                    session_scope,
-                    conversation_scope,
-                    entry_protocol,
-                    &target.protocol,
-                    &continuation_owner,
-                    Some(&request_lease),
-                )
-                .map_err(|fault| project_fault(request, fault, 502))?;
-            let frame = report.client_frame.ok_or_else(|| {
-                project_fault(
-                    request,
-                    RuntimeFault::new(
-                        "response_frame_missing",
-                        "response chain produced no client frame",
-                    ),
-                    502,
-                )
-            })?;
-            let projected = serde_json::from_str(&frame).map_err(|error| {
-                project_fault(
-                    request,
-                    RuntimeFault::new("response_frame_invalid", error.to_string()),
-                    502,
-                )
-            })?;
-            let client_status = if (200..300).contains(&raw.status) {
-                200
-            } else {
-                raw.status
-            };
-            emit_payload_console_events(
-                &report.trace,
+    let report = runtime
+        .lock()
+        .map_err(|_| {
+            project_fault(
                 request,
-                &request.path,
-                &target.provider_id,
-                &target.wire_model,
-                stream_mode,
-                Some(client_status),
-                started_at.elapsed(),
-            );
-            let _ = std::io::stdout().flush();
-            Ok(json_response(client_status, projected))
+                RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned"),
+                500,
+            )
+        })?
+        .execute_provider_response_scoped_for_target_with_lease(
+            &provider_raw,
+            &request_id,
+            request.port,
+            session_scope,
+            conversation_scope,
+            entry_protocol,
+            &target.protocol,
+            &continuation_owner,
+            Some(&request_lease),
+        )
+        .map_err(|fault| project_fault(request, fault, 502))?;
+    let frame = report.client_frame.ok_or_else(|| {
+        project_fault(
+            request,
+            RuntimeFault::new(
+                "response_frame_missing",
+                "response chain produced no client frame",
+            ),
+            502,
+        )
+    })?;
+    let projected = serde_json::from_str(&frame).map_err(|error| {
+        project_fault(
+            request,
+            RuntimeFault::new("response_frame_invalid", error.to_string()),
+            502,
+        )
+    })?;
+    let client_status = if (200..300).contains(&raw.status) {
+        200
+    } else {
+        raw.status
+    };
+    emit_payload_console_events(
+        &report.trace,
+        request,
+        &request.path,
+        &target.provider_id,
+        &target.wire_model,
+        stream_mode,
+        Some(client_status),
+        started_at.elapsed(),
+    );
+    let _ = std::io::stdout().flush();
+    Ok(json_response(client_status, projected))
 }
 
 pub(crate) fn emit_payload_console_events(
@@ -849,15 +1033,21 @@ pub fn render_payload_console_event(
 ) -> Option<String> {
     let (plugin_id, rest) = trace_entry.split_once(':')?;
     let (kind, message) = rest.split_once(':')?;
-    let direct_hook = matches!(plugin_id, "v4.hook.direct.request" | "v4.hook.direct.response");
+    let direct_hook = matches!(
+        plugin_id,
+        "v4.hook.direct.request" | "v4.hook.direct.response"
+    );
     if !(plugin_id.ends_with("payload_console_render") || direct_hook)
-        || kind != "console.payload_ready" {
+        || kind != "console.payload_ready"
+    {
         return None;
     }
     // TTY diagnostics may prefix the payload summary with ANSI color codes.
     // Normalize only the diagnostic presentation carrier; never touch the
     // business payload or control side-channel.
-    let message = message.trim_start_matches(|ch: char| ch == '\u{1b}' || ch == '[' || ch.is_ascii_digit() || ch == ';' || ch == 'm');
+    let message = message.trim_start_matches(|ch: char| {
+        ch == '\u{1b}' || ch == '[' || ch.is_ascii_digit() || ch == ';' || ch == 'm'
+    });
     if message.starts_with("▶ [req]") {
         let headline = diagnostic::format_request(
             endpoint,
@@ -970,25 +1160,12 @@ mod tests {
         let mut availability = V4Availability01SessionScoped::new();
         for route_group_id in ["first", "selected"] {
             availability
-                .record_failure_for(
-                    "5520",
-                    Some(route_group_id),
-                    "session",
-                    "provider",
-                    true,
-                    1,
-                )
+                .record_failure_for("5520", Some(route_group_id), "session", "provider", true, 1)
                 .expect("route-scoped failure records");
         }
 
-        mark_provider_success_for_route(
-            &mut availability,
-            5520,
-            "selected",
-            "session",
-            "provider",
-        )
-        .expect("selected route success clears its cooldown");
+        mark_provider_success_for_route(&mut availability, 5520, "selected", "session", "provider")
+            .expect("selected route success clears its cooldown");
 
         assert!(!availability.is_eligible("5520", "first", "session", "provider"));
         assert!(availability.is_eligible("5520", "selected", "session", "provider"));

@@ -36,11 +36,25 @@ fn profile_for(address: &str) -> String {
     static NEXT_PROFILE: AtomicU64 = AtomicU64::new(0);
     let serial = NEXT_PROFILE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "routecodex-v4-async-transport-{}-{serial}.toml",
+        "routecodex-v4-async-transport-alias-{}-{serial}.toml",
         std::process::id()
     ));
     let profile = format!(
         "providerId = \"test-provider\"\n\n[provider]\nbaseURL = \"{address}\"\ndefaultModel = \"model\"\ntype = \"responses\"\n\n[provider.models.model]\nwireName = \"wire-model\"\n\n[provider.auth]\napiKey = \"test-key\"\n"
+    );
+    std::fs::write(&path, profile).expect("write provider test profile");
+    path.display().to_string()
+}
+
+fn profile_for_protocol(address: &str, protocol: &str) -> String {
+    static NEXT_PROFILE: AtomicU64 = AtomicU64::new(0);
+    let serial = NEXT_PROFILE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-v4-async-transport-{}-{serial}.toml",
+        std::process::id()
+    ));
+    let profile = format!(
+        "providerId = \"test-provider\"\n\n[provider]\nbaseURL = \"{address}\"\ndefaultModel = \"model\"\ntype = \"{protocol}\"\n\n[provider.models.model]\nwireName = \"wire-model\"\n\n[provider.auth]\napiKey = \"test-key\"\n"
     );
     std::fs::write(&path, profile).expect("write provider test profile");
     path.display().to_string()
@@ -110,6 +124,7 @@ async fn native_transport_stream_splits_chunks_and_preserves_http_error() {
         .send_streaming(
             &profile,
             "responses",
+            "responses",
             &json!({"stream": true}),
             CancellationToken::new(),
         )
@@ -125,6 +140,72 @@ async fn native_transport_stream_splits_chunks_and_preserves_http_error() {
     }
     assert_eq!(received, body);
     task.await.expect("mock task");
+}
+
+#[tokio::test]
+async fn native_transport_rejects_profile_protocol_mismatch_before_io() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind mismatch fixture");
+    let address = format!("http://{}", listener.local_addr().expect("mock address"));
+    let profile = profile_for(&address);
+    let transport =
+        NativeProviderTransport::new(Duration::from_secs(2), 128 * 1024).expect("transport");
+    let error = transport
+        .send_streaming(
+            &profile,
+            "anthropic",
+            "v1/messages",
+            &json!({"stream": true}),
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("protocol mismatch must fail");
+    assert_eq!(error.code, "provider_protocol_mismatch");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err(),
+        "mismatched profile must fail before provider network I/O"
+    );
+}
+
+#[tokio::test]
+async fn native_transport_uses_canonical_anthropic_auth_for_protocol_alias() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind alias fixture");
+    let address = format!("http://{}", listener.local_addr().expect("mock address"));
+    let profile = profile_for_protocol(&address, "anthropic-messages");
+    let transport =
+        NativeProviderTransport::new(Duration::from_secs(2), 128 * 1024).expect("transport");
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("accept provider request");
+        let mut request = vec![0u8; 8192];
+        let count = socket.read(&mut request).await.expect("read provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("write provider response");
+        String::from_utf8_lossy(&request[..count]).to_ascii_lowercase()
+    });
+    let mut stream = transport
+        .send_streaming(
+            &profile,
+            "anthropic",
+            "v1/messages",
+            &json!({"stream": true}),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("aliased anthropic stream");
+    assert_eq!(stream.next_chunk().await.expect("stream eof"), None);
+    let request = server.await.expect("provider fixture");
+    assert!(request.contains("x-api-key: test-key"), "{request}");
+    assert!(request.contains("anthropic-version: 2023-06-01"), "{request}");
+    assert!(!request.contains("authorization: bearer"), "{request}");
 }
 
 #[tokio::test]

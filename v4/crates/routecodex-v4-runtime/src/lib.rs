@@ -30,9 +30,7 @@ use routecodex_v4_error::{
 use routecodex_v4_node_container::{ActiveEpochStore, ExecutionEpochBundle};
 use routecodex_v4_router::{SelectedTarget, TargetSelectionRequest};
 use routecodex_v4_skeleton::SkeletonPlan;
-use routecodex_v4_standard_plugins::{
-    sse_transport::SseTransportFrame, StandardHandleRegistry,
-};
+use routecodex_v4_standard_plugins::{sse_transport::SseTransportFrame, StandardHandleRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -53,11 +51,11 @@ pub mod response_error_port;
 
 pub use control_resources::*;
 pub use execution_engine::{ExecutionEngine, ExecutionError, NodeExecutionFrame, NodeOutcome};
-pub use production_sse::{ProviderSseSource, SseTransportDriver};
 pub use node_service::{
     ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
     NodeServiceRegistry, ServiceError, ServiceLifecycle,
 };
+pub use production_sse::{NativeProviderSseSource, ProviderSseSource, SseTransportDriver};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.
@@ -87,9 +85,12 @@ pub struct RequestAdmissionFacts {
 }
 
 fn decode_request_admission_facts(control: &Value) -> Result<RequestAdmissionFacts, RuntimeFault> {
-    let facts = control
-        .get("request_admission_facts")
-        .ok_or_else(|| RuntimeFault::new("request_admission_facts_missing", "request inbound plan produced no admission facts"))?;
+    let facts = control.get("request_admission_facts").ok_or_else(|| {
+        RuntimeFault::new(
+            "request_admission_facts_missing",
+            "request inbound plan produced no admission facts",
+        )
+    })?;
     let object = facts.as_object().ok_or_else(|| {
         RuntimeFault::new(
             "request_admission_facts_invalid",
@@ -105,7 +106,12 @@ fn decode_request_admission_facts(control: &Value) -> Result<RequestAdmissionFac
     let stream = object
         .get("stream")
         .and_then(Value::as_bool)
-        .ok_or_else(|| RuntimeFault::new("request_admission_facts_invalid", "stream is missing or not boolean"))?;
+        .ok_or_else(|| {
+            RuntimeFault::new(
+                "request_admission_facts_invalid",
+                "stream is missing or not boolean",
+            )
+        })?;
     let has_previous_response_id = object
         .get("has_previous_response_id")
         .and_then(Value::as_bool)
@@ -1105,9 +1111,7 @@ impl ExecutionContext {
 }
 
 fn control_resource_value(value: Option<String>) -> Option<Value> {
-    value.map(|value| {
-        serde_json::from_str(&value).unwrap_or(Value::String(value))
-    })
+    value.map(|value| serde_json::from_str(&value).unwrap_or(Value::String(value)))
 }
 
 /// Plane isolation is structural: data and control are disjoint typed views.
@@ -1755,8 +1759,7 @@ impl ResponseStreamProcessor {
             ));
         }
         let transport = SharedTransportCarrier::from_shared_bytes(frame.shared_bytes());
-        let report = runtime
-            .execute_provider_response_scoped_for_target_with_transport_and_lease(
+        let report = runtime.execute_provider_response_scoped_for_target_with_transport_and_lease(
             "{}",
             self.request_lease.request_id(),
             self.port,
@@ -1781,10 +1784,10 @@ impl ResponseStreamProcessor {
         })?;
         if let Some(message) = disposition.strip_prefix("failed:") {
             return Ok((
-                self.project_failure(runtime, RuntimeFault::new(
-                    "provider_response_failed",
-                    message.to_string(),
-                ))?,
+                self.project_failure(
+                    runtime,
+                    RuntimeFault::new("provider_response_failed", message.to_string()),
+                )?,
                 None,
             ));
         }
@@ -1858,8 +1861,7 @@ impl ResponseStreamProcessor {
                 format!("error chain projection failed: {error:?}"),
             )
         })?;
-        let encoded = runtime
-            .encode_client_error_sse(&self.entry_protocol, &projection.message)?;
+        let encoded = runtime.encode_client_error_sse(&self.entry_protocol, &projection.message)?;
         let frame = SseTransportFrame::from_complete_bytes(encoded)
             .map_err(|error| RuntimeFault::new("client_sse_transport", format!("{error:?}")))?;
         self.failure_projected = true;
@@ -1875,7 +1877,10 @@ impl SkeletonRuntime {
     }
 
     pub fn from_compiled_plan(plan: SkeletonPlan) -> Result<Self, RuntimeFault> {
-        Self::from_compiled_plan_with_registry(plan, std::sync::Arc::new(StandardHandleRegistry::new()))
+        Self::from_compiled_plan_with_registry(
+            plan,
+            std::sync::Arc::new(StandardHandleRegistry::new()),
+        )
     }
 
     pub fn from_compiled_plan_with_registry(
@@ -2039,8 +2044,9 @@ impl SkeletonRuntime {
                 ))
             }
         };
-        let data: Value = serde_json::from_slice(raw_body)
-            .map_err(|error| RuntimeFault::new("invalid_request", format!("invalid JSON: {error}")))?;
+        let data: Value = serde_json::from_slice(raw_body).map_err(|error| {
+            RuntimeFault::new("invalid_request", format!("invalid JSON: {error}"))
+        })?;
         if !data.is_object() {
             return Err(RuntimeFault::new(
                 "invalid_request",
@@ -2121,11 +2127,8 @@ impl SkeletonRuntime {
             "execution_lane": request.execution_lane,
             "model": request.requested_model,
         });
-        let frame = NodeExecutionFrame::with_information(
-            serde_json::json!({}),
-            control,
-            information,
-        );
+        let frame =
+            NodeExecutionFrame::with_information(serde_json::json!({}), control, information);
         let outcome = ExecutionEngine::execute_pinned_node_from(
             "relay_request",
             Some("V4HubReqExecution04Planned"),
@@ -2139,8 +2142,14 @@ impl SkeletonRuntime {
             NodeOutcome::Continue { control, .. } => control,
             NodeOutcome::Failure { error } => {
                 return Err(RuntimeFault::new(
-                    error.get("code").and_then(Value::as_str).unwrap_or("target_selection"),
-                    error.get("message").and_then(Value::as_str).unwrap_or("Cordis target selection failed"),
+                    error
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .unwrap_or("target_selection"),
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Cordis target selection failed"),
                 ));
             }
             NodeOutcome::Branch { .. } | NodeOutcome::Terminal { .. } => {
@@ -2154,18 +2163,30 @@ impl SkeletonRuntime {
             .as_object()
             .and_then(|object| object.get("target_selection"))
             .cloned()
-            .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target node produced no selection"))
-            ?;
-        let selection = selection
-            .as_object()
-            .ok_or_else(|| RuntimeFault::new("target_selection", "Cordis target selection is not an object"))?;
+            .ok_or_else(|| {
+                RuntimeFault::new(
+                    "target_selection",
+                    "Cordis target node produced no selection",
+                )
+            })?;
+        let selection = selection.as_object().ok_or_else(|| {
+            RuntimeFault::new(
+                "target_selection",
+                "Cordis target selection is not an object",
+            )
+        })?;
         let string_field = |name: &str| {
             selection
                 .get(name)
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
-                .ok_or_else(|| RuntimeFault::new("target_selection", format!("Cordis target selection missing {name}")))
+                .ok_or_else(|| {
+                    RuntimeFault::new(
+                        "target_selection",
+                        format!("Cordis target selection missing {name}"),
+                    )
+                })
         };
         let auth_alias = selection
             .get("auth_alias")
@@ -2900,10 +2921,9 @@ impl SkeletonRuntime {
             Err(error) => {
                 let message = error.to_string();
                 let payload_hash = format!("sha256:{:x}", Sha256::digest(message.as_bytes()));
-                let mut bus = self
-                    .diagnostic_bus
-                    .lock()
-                    .map_err(|_| RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned"))?;
+                let mut bus = self.diagnostic_bus.lock().map_err(|_| {
+                    RuntimeFault::new("diagnostic_bus", "diagnostic bus lock poisoned")
+                })?;
                 bus.publish(DiagnosticEventEnvelope::new(
                     SubscriptionTopic::NodeError,
                     request_id,
@@ -2916,7 +2936,9 @@ impl SkeletonRuntime {
                     .any(|subscription| subscription.scope_key == request_id)
                 {
                     bus.dispatch(&SubscriptionTopic::NodeError, request_id)
-                        .map_err(|bus_error| RuntimeFault::new("diagnostic_bus", bus_error.to_string()))?;
+                        .map_err(|bus_error| {
+                            RuntimeFault::new("diagnostic_bus", bus_error.to_string())
+                        })?;
                 }
                 return Err(RuntimeFault::new("execution_engine", message));
             }
@@ -2969,7 +2991,9 @@ impl SkeletonRuntime {
             if !executed_plugins.contains(&plugin_id) {
                 return Err(RuntimeFault::new(
                     "production_plugin_not_executed",
-                    format!("production chain {chain_id} did not execute compiled plugin {plugin_id}"),
+                    format!(
+                        "production chain {chain_id} did not execute compiled plugin {plugin_id}"
+                    ),
                 ));
             }
         }

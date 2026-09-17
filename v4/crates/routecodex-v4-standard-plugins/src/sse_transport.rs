@@ -85,10 +85,12 @@ pub struct SseIngressPlugin {
 pub fn production_transport_pair(
     started_at: Instant,
 ) -> Result<(SseIngressPlugin, SseEgressPlugin), SseTransportError> {
-    let policy = SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))?;
+    let ingress_policy =
+        SseTransportPolicy::new(16 * 1024 * 1024, 1024 * 1024, Duration::from_secs(30))?;
+    let egress_policy = SseTransportPolicy::new(1024 * 1024, 1024 * 1024, Duration::from_secs(30))?;
     Ok((
-        SseIngressPlugin::new(policy, started_at),
-        SseEgressPlugin::new(policy, started_at),
+        SseIngressPlugin::new(ingress_policy, started_at),
+        SseEgressPlugin::new(egress_policy, started_at),
     ))
 }
 

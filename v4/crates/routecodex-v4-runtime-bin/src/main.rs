@@ -1,4 +1,3 @@
-use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
 use routecodex_v4_cli::{
     Cli, ConfigIntent, ConfigPathIntent, InitIntent, ManagedChildIntent, RestartIntent,
     ServerIntent, ServerStartIntent, ServertoolIntent, SnapshotIntent, StartIntent, StopIntent,
@@ -9,6 +8,7 @@ use routecodex_v4_config::{
     write_runtime_authoring, write_runtime_manifest_atomic, RuntimeConfigManifest,
     RuntimeInitOptions, RuntimeProductConfig,
 };
+use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
 use routecodex_v4_lifecycle::{
     exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
     start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
@@ -16,16 +16,15 @@ use routecodex_v4_lifecycle::{
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
-    ProviderInitAuth, ProviderInitOptions, V4Availability01SessionScoped, write_provider_profile,
+    write_provider_profile, ProviderInitAuth, ProviderInitOptions, V4Availability01SessionScoped,
 };
 use routecodex_v4_router::{
-    TargetSelectionHandle,
-    DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
 };
-use routecodex_v4_runtime::{RuntimeFault, SkeletonRuntime};
 use routecodex_v4_runtime::production_pipeline;
+use routecodex_v4_runtime::{RuntimeFault, SkeletonRuntime};
 use routecodex_v4_server::{
-    AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse,
+    AsyncHttpHandler, AsyncHttpServer, HttpHandler, HttpRequest, HttpResponse, ResponseStream,
 };
 use routecodex_v4_servertool::{build_run_projection, ServertoolRunInput};
 use routecodex_v4_standard_plugins::diagnostic;
@@ -78,12 +77,13 @@ fn write_cordis_request(
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) => {
-                    return Err(format!(
-                        "{label} request write timed out after {}ms: {error}",
-                        timeout.as_millis()
-                    ));
-                }
+                ) =>
+            {
+                return Err(format!(
+                    "{label} request write timed out after {}ms: {error}",
+                    timeout.as_millis()
+                ));
+            }
             Err(error) => return Err(format!("{label} request failed: {error}")),
         }
     }
@@ -111,9 +111,7 @@ fn read_cordis_response_line(
             .map_err(|error| format!("{label} read timeout setup failed: {error}"))?;
         match stream.read(&mut buffer) {
             Ok(0) => {
-                return Err(format!(
-                    "{label} response ended before a JSON line"
-                ));
+                return Err(format!("{label} response ended before a JSON line"));
             }
             Ok(bytes) => {
                 if response.len() + bytes > MAX_CORDIS_RESPONSE_BYTES {
@@ -124,21 +122,21 @@ fn read_cordis_response_line(
                 }
                 response.extend_from_slice(&buffer[..bytes]);
                 if let Some(end) = response.iter().position(|byte| *byte == b'\n') {
-                    return String::from_utf8(response[..=end].to_vec()).map_err(|error| {
-                        format!("{label} response is not valid UTF-8: {error}")
-                    });
+                    return String::from_utf8(response[..=end].to_vec())
+                        .map_err(|error| format!("{label} response is not valid UTF-8: {error}"));
                 }
             }
             Err(error)
                 if matches!(
                     error.kind(),
                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                ) => {
-                    return Err(format!(
-                        "{label} response read timed out after {}ms: {error}",
-                        timeout.as_millis()
-                    ));
-                }
+                ) =>
+            {
+                return Err(format!(
+                    "{label} response read timed out after {}ms: {error}",
+                    timeout.as_millis()
+                ));
+            }
             Err(error) => return Err(format!("{label} response read failed: {error}")),
         }
     }
@@ -175,7 +173,8 @@ impl CordisAdmission {
             return Err("Cordis admission handshake rejected".to_string());
         }
         let generation = value["snapshot"]["generation"]
-            .as_u64().ok_or_else(|| "Cordis admission snapshot has no generation".to_string())?;
+            .as_u64()
+            .ok_or_else(|| "Cordis admission snapshot has no generation".to_string())?;
         let mut stream = UnixStream::connect(&socket_path)
             .map_err(|error| format!("Cordis admission socket connect failed: {error}"))?;
         let request = serde_json::json!({
@@ -190,23 +189,27 @@ impl CordisAdmission {
             request.as_bytes(),
             CORDIS_ADMISSION_TIMEOUT,
         )?;
-        let response = read_cordis_response_line(
-            &mut stream,
-            "Cordis admission",
-            CORDIS_ADMISSION_TIMEOUT,
-        )?;
+        let response =
+            read_cordis_response_line(&mut stream, "Cordis admission", CORDIS_ADMISSION_TIMEOUT)?;
         let response: Value = serde_json::from_str(response.trim())
             .map_err(|error| format!("Cordis admission response is invalid JSON: {error}"))?;
         if response.get("ok") != Some(&Value::Bool(true)) {
-            return Err(format!("Cordis admission rejected: {}", response["message"].as_str().unwrap_or("unknown error")));
+            return Err(format!(
+                "Cordis admission rejected: {}",
+                response["message"].as_str().unwrap_or("unknown error")
+            ));
         }
         let active = response["admission"]["active_epoch"].clone();
         if active["graph_hash"].as_str() != Some(expected_graph_hash)
             || active["manifest_hash"].as_str() != Some(expected_manifest_hash)
-            || active["epoch_id"].as_str() != Some(expected_epoch_id) {
+            || active["epoch_id"].as_str() != Some(expected_epoch_id)
+        {
             return Err("Cordis admission active epoch identity mismatch".to_string());
         }
-        Ok(Self { generation, graph_hash: expected_graph_hash.to_string() })
+        Ok(Self {
+            generation,
+            graph_hash: expected_graph_hash.to_string(),
+        })
     }
 }
 
@@ -226,8 +229,7 @@ impl ProductionHandleRegistry {
 
 impl HandleRegistry for ProductionHandleRegistry {
     fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
-        if plugin_id == TARGET_SELECTION_PLUGIN_ID
-            || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID
+        if plugin_id == TARGET_SELECTION_PLUGIN_ID || plugin_id == DIRECT_TARGET_SELECTION_PLUGIN_ID
         {
             if let Some(handle) = self.router_target.as_ref() {
                 return Some(handle as &dyn PluginHandle);
@@ -236,10 +238,14 @@ impl HandleRegistry for ProductionHandleRegistry {
         self.standard.get(plugin_id)
     }
 
-    fn encode_client_error_sse(&self, entry_protocol: &str, message: &str) -> Result<Vec<u8>, String> {
-        self.standard.encode_client_error_sse(entry_protocol, message)
+    fn encode_client_error_sse(
+        &self,
+        entry_protocol: &str,
+        message: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.standard
+            .encode_client_error_sse(entry_protocol, message)
     }
-
 }
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-v4");
@@ -587,7 +593,10 @@ fn ensure_cordis_host_socket(
     let socket = paths.state_root.join("cordis.sock");
     let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/lib/rccv4/cordis-daemon.mjs")))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join(".local/lib/rccv4/cordis-daemon.mjs"))
+        })
         .ok_or_else(|| "Cordis admission requires RCCV4_CORDIS_HOST_RUNNER or HOME".to_string())?;
     if !runner.is_file() {
         return Err(format!("Cordis host runner missing: {}", runner.display()));
@@ -836,7 +845,8 @@ impl PipelineHandler {
             Some(CordisAdmission::admit(
                 &manifest.execution_epoch.graph_hash,
                 &manifest.execution_epoch.manifest_hash,
-                manifest.execution_epoch.candidate["epoch_id"].as_str()
+                manifest.execution_epoch.candidate["epoch_id"]
+                    .as_str()
                     .ok_or_else(|| "runtime candidate has no epoch_id".to_string())?,
             )?)
         } else {
@@ -859,7 +869,8 @@ impl PipelineHandler {
             )
             .map_err(|error| error.to_string())?;
         if let Some(receipt) = cordis_admission_receipt {
-            if receipt.graph_hash != manifest.execution_epoch.graph_hash || receipt.generation == 0 {
+            if receipt.graph_hash != manifest.execution_epoch.graph_hash || receipt.generation == 0
+            {
                 return Err("Cordis admission receipt is invalid".to_string());
             }
         }
@@ -880,7 +891,13 @@ impl PipelineHandler {
 }
 
 impl PipelineHandler {
-    fn serve_http(&self, request: HttpRequest) -> HttpResponse {
+    fn serve_http_with_cancellation(
+        &self,
+        request: HttpRequest,
+        cancellation: Option<&AtomicBool>,
+        request_cancellation: Option<CancellationToken>,
+        provider_runtime: Option<tokio::runtime::Handle>,
+    ) -> HttpResponse {
         debug_assert_eq!(
             self.execution_epoch.state,
             routecodex_v4_node_container::ExecutionEpochState::Active
@@ -895,24 +912,32 @@ impl PipelineHandler {
                 }),
             ),
             ("GET", "/v1/models") => production_pipeline::models_response(&self.manifest),
-            ("POST", "/v1/responses") => production_pipeline::dispatch(
+            ("POST", "/v1/responses") => production_pipeline::dispatch_with_request_cancellation(
                 &self.manifest,
                 &self.runtime,
                 &self.availability,
                 &request,
                 "responses",
                 "direct",
+                cancellation,
+                request_cancellation,
+                provider_runtime.clone(),
             )
             .unwrap_or_else(|response| response),
-            ("POST", "/v1/chat/completions") => production_pipeline::dispatch(
-                &self.manifest,
-                &self.runtime,
-                &self.availability,
-                &request,
-                "chat",
-                "relay",
-            )
-            .unwrap_or_else(|response| response),
+            ("POST", "/v1/chat/completions") => {
+                production_pipeline::dispatch_with_request_cancellation(
+                    &self.manifest,
+                    &self.runtime,
+                    &self.availability,
+                    &request,
+                    "chat",
+                    "relay",
+                    cancellation,
+                    request_cancellation,
+                    provider_runtime,
+                )
+                .unwrap_or_else(|response| response)
+            }
             _ => production_pipeline::project_fault_unleased(
                 &self.runtime,
                 &request,
@@ -925,7 +950,44 @@ impl PipelineHandler {
 
 impl HttpHandler for PipelineHandler {
     fn handle(&mut self, request: HttpRequest) -> HttpResponse {
-        self.serve_http(request)
+        let runtime = Arc::new(
+            match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    return production_pipeline::project_fault_unleased(
+                        &self.runtime,
+                        &request,
+                        RuntimeFault::new("provider_async_runtime", error.to_string()),
+                        502,
+                    )
+                }
+            },
+        );
+        let provider_runtime = runtime.handle().clone();
+        let mut response =
+            self.serve_http_with_cancellation(request, None, None, Some(provider_runtime));
+        if let Some(stream) = response.stream.take() {
+            response.stream = Some(Box::new(RuntimePinnedStream {
+                inner: stream,
+                _runtime: runtime,
+            }));
+        }
+        response
+    }
+}
+
+struct RuntimePinnedStream {
+    inner: Box<dyn ResponseStream>,
+    _runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl ResponseStream for RuntimePinnedStream {
+    fn next_chunk(&mut self, chunk: &mut Vec<u8>) -> Result<bool, std::io::Error> {
+        self.inner.next_chunk(chunk)
     }
 }
 
@@ -933,22 +995,39 @@ impl AsyncHttpHandler for PipelineHandler {
     fn handle_async<'a>(
         &'a self,
         request: HttpRequest,
-        _cancellation: CancellationToken,
+        cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = HttpResponse> + Send + 'a>> {
         let handler = self.clone();
         let runtime_for_fault = Arc::clone(&handler.runtime);
         let request_for_fault = request.clone();
         Box::pin(async move {
-            tokio::task::spawn_blocking(move || handler.serve_http(request))
-                .await
-                .unwrap_or_else(|error| {
-                    production_pipeline::project_fault_unleased(
-                        &runtime_for_fault,
-                        &request_for_fault,
-                        RuntimeFault::new("request_worker_panicked", error.to_string()),
-                        500,
-                    )
-                })
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let watcher_cancelled = Arc::clone(&cancelled);
+            let provider_cancellation = cancellation.clone();
+            let provider_runtime = tokio::runtime::Handle::current();
+            let watcher = tokio::spawn(async move {
+                cancellation.cancelled().await;
+                watcher_cancelled.store(true, Ordering::SeqCst);
+            });
+            let result = tokio::task::spawn_blocking(move || {
+                handler.serve_http_with_cancellation(
+                    request,
+                    Some(&cancelled),
+                    Some(provider_cancellation),
+                    Some(provider_runtime),
+                )
+            })
+            .await
+            .unwrap_or_else(|error| {
+                production_pipeline::project_fault_unleased(
+                    &runtime_for_fault,
+                    &request_for_fault,
+                    RuntimeFault::new("request_worker_panicked", error.to_string()),
+                    500,
+                )
+            });
+            watcher.abort();
+            result
         })
     }
 }
@@ -956,15 +1035,14 @@ impl AsyncHttpHandler for PipelineHandler {
 mod tests {
     use super::*;
     use routecodex_v4_config::{compile_product_config, compile_runtime_config};
-    use routecodex_v4_skeleton::SkeletonPlan;
-    use routecodex_v4_runtime::production_pipeline::{
-        render_payload_console_event,
-    };
-    use routecodex_v4_runtime::{ProviderSseSource, ResponseStreamProcessor, SseTransportDriver};
     use routecodex_v4_router::TargetSelectionRequest;
+    use routecodex_v4_runtime::production_pipeline::render_payload_console_event;
+    use routecodex_v4_runtime::{ProviderSseSource, ResponseStreamProcessor, SseTransportDriver};
     use routecodex_v4_server::ResponseStream;
+    use routecodex_v4_skeleton::SkeletonPlan;
     use std::collections::VecDeque;
     use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct CordisReadinessReport {
@@ -1033,9 +1111,7 @@ mod tests {
         }
     }
 
-    impl<'a, R: HandleRegistry + ?Sized> HandleRegistry
-        for MissingStandardHandleRegistry<'a, R>
-    {
+    impl<'a, R: HandleRegistry + ?Sized> HandleRegistry for MissingStandardHandleRegistry<'a, R> {
         fn get(&self, plugin_id: &str) -> Option<&dyn routecodex_v4_cordis_bridge::PluginHandle> {
             if plugin_id == self.missing_plugin_id {
                 None
@@ -1088,25 +1164,20 @@ mod tests {
                 let mut reader = BufReader::new(&mut stream);
                 reader.read_line(&mut request).expect("read request");
             }
-            std::io::Write::write_all(&mut stream, b"{\"ok\":true}\n")
-                .expect("write response");
+            std::io::Write::write_all(&mut stream, b"{\"ok\":true}\n").expect("write response");
             reply_tx.send(()).expect("signal response");
             release_rx.recv().expect("release server");
         });
 
         let mut client = UnixStream::connect(&socket_path).expect("connect test client");
-        std::io::Write::write_all(&mut client, b"{\"op\":\"handshake\"}\n")
-            .expect("write request");
+        std::io::Write::write_all(&mut client, b"{\"op\":\"handshake\"}\n").expect("write request");
         reply_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("server wrote response");
         let started = std::time::Instant::now();
-        let response = read_cordis_response_line(
-            &mut client,
-            "test Cordis",
-            Duration::from_secs(1),
-        )
-        .expect("newline-delimited response");
+        let response =
+            read_cordis_response_line(&mut client, "test Cordis", Duration::from_secs(1))
+                .expect("newline-delimited response");
         assert!(started.elapsed() < Duration::from_millis(500));
         assert_eq!(response, "{\"ok\":true}\n");
 
@@ -1146,15 +1217,11 @@ mod tests {
         });
 
         let mut client = UnixStream::connect(&socket_path).expect("connect test client");
-        std::io::Write::write_all(&mut client, b"{\"op\":\"handshake\"}\n")
-            .expect("write request");
+        std::io::Write::write_all(&mut client, b"{\"op\":\"handshake\"}\n").expect("write request");
         let started = std::time::Instant::now();
-        let error = read_cordis_response_line(
-            &mut client,
-            "test Cordis",
-            Duration::from_millis(50),
-        )
-        .expect_err("fragmented response without newline must time out");
+        let error =
+            read_cordis_response_line(&mut client, "test Cordis", Duration::from_millis(50))
+                .expect_err("fragmented response without newline must time out");
         assert!(error.contains("timed out"), "unexpected error: {error}");
         assert!(started.elapsed() < Duration::from_millis(500));
 
@@ -1354,7 +1421,10 @@ priority = 1
             .lock()
             .expect("runtime lock")
             .epoch_plugin_ids();
-        assert!(plugin_ids.len() > 2, "production must not admit only inbound plugins");
+        assert!(
+            plugin_ids.len() > 2,
+            "production must not admit only inbound plugins"
+        );
         for required in [
             "v4.std.request.responses_normalize",
             "v4.std.request.responses_wire_build",
@@ -1479,7 +1549,9 @@ priority = 1
     fn production_request_report_witnesses_real_cordis_handles() {
         let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
         let runtime = handler.runtime.lock().expect("runtime lock");
-        let lease = runtime.admit_request("request-plugin-witness").expect("request lease");
+        let lease = runtime
+            .admit_request("request-plugin-witness")
+            .expect("request lease");
         let report = runtime
             .execute_request_json_scoped_for_target_with_lease(
                 r#"{"model":"mock-model","messages":[{"role":"user","content":"hello"}]}"#,
@@ -1516,14 +1588,19 @@ priority = 1
             .expect("diagnostic bus lock")
             .published_facts()
             .len();
-        assert!(published > 0, "production plugin execution must publish diagnostic facts");
+        assert!(
+            published > 0,
+            "production plugin execution must publish diagnostic facts"
+        );
     }
 
     #[test]
     fn production_response_report_witnesses_real_cordis_handles() {
         let handler = PipelineHandler::new(test_manifest()).expect("handler initializes");
         let runtime = handler.runtime.lock().expect("runtime lock");
-        let lease = runtime.admit_request("response-plugin-witness").expect("response lease");
+        let lease = runtime
+            .admit_request("response-plugin-witness")
+            .expect("response lease");
         let report = runtime
             .execute_provider_response_scoped_for_target_with_lease(
                 r#"{"id":"resp_1","model":"mock-model","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}"#,
@@ -1558,11 +1635,51 @@ priority = 1
 
     struct MockSseSource {
         chunks: VecDeque<Result<Vec<u8>, String>>,
+        pending: Vec<u8>,
         wait_result: Result<(), String>,
     }
 
     impl ProviderSseSource for MockSseSource {
         fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
+            if !self.pending.is_empty() {
+                let count = self.pending.len().min(chunk.len());
+                chunk[..count].copy_from_slice(&self.pending[..count]);
+                self.pending.drain(..count);
+                return Ok(count);
+            }
+            match self.chunks.pop_front() {
+                Some(Ok(bytes)) => {
+                    let count = bytes.len().min(chunk.len());
+                    chunk[..count].copy_from_slice(&bytes[..count]);
+                    self.pending.extend_from_slice(&bytes[count..]);
+                    Ok(count)
+                }
+                Some(Err(error)) => Err(error),
+                None => Ok(0),
+            }
+        }
+
+        fn wait(&mut self) -> Result<(), String> {
+            self.wait_result.clone()
+        }
+    }
+
+    struct GatedSseSource {
+        chunks: VecDeque<Result<Vec<u8>, String>>,
+        release_tail: mpsc::Receiver<()>,
+        tail_released: bool,
+        read_count: usize,
+    }
+
+    impl ProviderSseSource for GatedSseSource {
+        fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
+            self.read_count += 1;
+            if self.read_count > 1 && !self.tail_released {
+                self.release_tail
+                    .recv()
+                    .map_err(|error| error.to_string())?;
+                self.tail_released = true;
+            }
             match self.chunks.pop_front() {
                 Some(Ok(bytes)) => {
                     let count = bytes.len();
@@ -1575,7 +1692,7 @@ priority = 1
         }
 
         fn wait(&mut self) -> Result<(), String> {
-            self.wait_result.clone()
+            Ok(())
         }
     }
 
@@ -1645,7 +1762,70 @@ priority = 1
         SseTransportDriver::new(
             MockSseSource {
                 chunks: chunks.into(),
+                pending: Vec::new(),
                 wait_result: Ok(()),
+            },
+            runtime,
+            processor,
+            HttpRequest {
+                method: "POST".into(),
+                path: "/v1/responses".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                request_id: "request-1".into(),
+                server_id: "test".into(),
+                port,
+            },
+            "test-provider".into(),
+            "m".into(),
+        )
+    }
+
+    fn gated_stream(
+        runtime: Arc<Mutex<SkeletonRuntime>>,
+        chunks: Vec<Result<Vec<u8>, String>>,
+        release_tail: mpsc::Receiver<()>,
+    ) -> SseTransportDriver<GatedSseSource> {
+        let port = u16::from_ne_bytes([0, 1]);
+        let (request_lease, request_scope) = {
+            let runtime = runtime.lock().expect("test runtime lock");
+            let request_lease = runtime
+                .admit_request("request-1")
+                .expect("test stream admission");
+            let report = runtime
+                .execute_request_json_scoped_for_target_with_lease(
+                    r#"{"model":"m","input":[]}"#,
+                    "responses",
+                    "responses",
+                    "m",
+                    true,
+                    "request-1",
+                    port,
+                    "session-1",
+                    "conversation-1",
+                    Some("direct"),
+                    Some(&request_lease),
+                )
+                .expect("test request establishes stream scope");
+            (request_lease, report.scope)
+        };
+        let processor = ResponseStreamProcessor::new(
+            request_lease,
+            request_scope,
+            port,
+            "responses",
+            "responses",
+            "direct",
+            "session-1",
+            "conversation-1",
+        )
+        .expect("test stream processor");
+        SseTransportDriver::new(
+            GatedSseSource {
+                chunks: chunks.into(),
+                release_tail,
+                tail_released: false,
+                read_count: 0,
             },
             runtime,
             processor,
@@ -1690,6 +1870,112 @@ priority = 1
     }
 
     #[test]
+    fn first_client_frame_waits_for_provider_terminal_without_waiting_for_eof() {
+        let first =
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"buffered\"}\n\n";
+        let terminal =
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\n\n";
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut stream = gated_stream(
+            runtime(),
+            vec![Ok(first.to_vec()), Ok(terminal.to_vec())],
+            release_rx,
+        );
+        let (result_tx, result_rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut output = Vec::new();
+            let mut chunk = Vec::new();
+            loop {
+                match stream.next_chunk(&mut chunk) {
+                    Ok(true) => {
+                        output.extend_from_slice(&chunk);
+                        chunk.clear();
+                    }
+                    Ok(false) => {
+                        result_tx
+                            .send(Ok(output))
+                            .expect("send buffered read result");
+                        break;
+                    }
+                    Err(error) => {
+                        result_tx
+                            .send(Err(error.to_string()))
+                            .expect("send buffered read failure");
+                        break;
+                    }
+                }
+            }
+        });
+
+        assert!(
+            result_rx
+                .recv_timeout(std::time::Duration::from_millis(1))
+                .is_err(),
+            "client bytes must not be committed before the provider terminal"
+        );
+        release_tx.send(()).expect("release provider terminal");
+        let output = result_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("buffered read completion")
+            .expect("buffered stream must project");
+        let text = String::from_utf8(output).expect("client SSE is UTF-8");
+        assert!(text.contains("event: response.completed"), "{text}");
+        reader.join().expect("reader thread");
+    }
+
+    #[test]
+    fn terminal_commit_ignores_late_provider_transport_error() {
+        let terminal =
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\n\n";
+        let mut stream = stream(vec![
+            Ok(terminal.to_vec()),
+            Err("late provider close error".to_string()),
+        ]);
+        let mut chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("terminal must commit"));
+        let text = String::from_utf8(chunk).expect("client SSE is UTF-8");
+        assert!(text.contains("event: response.completed"), "{text}");
+        assert!(!text.contains("event: error"), "{text}");
+        let mut closed = Vec::new();
+        assert!(!stream.next_chunk(&mut closed).expect("stream must close"));
+    }
+
+    #[test]
+    fn provider_attempt_above_client_egress_limit_remains_valid() {
+        let payload = "x".repeat(256 * 1024);
+        let mut attempt = Vec::new();
+        for _ in 0..5 {
+            attempt.extend_from_slice(
+                format!(
+                    "event: response.output_text.delta\ndata: {{\"type\":\"response.output_text.delta\",\"delta\":\"{payload}\"}}\n\n"
+                )
+                .as_bytes(),
+            );
+        }
+        let terminal =
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\n\n";
+        attempt.extend_from_slice(terminal);
+        let mut stream = stream(vec![Ok(attempt)]);
+        let mut chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("provider attempt above client queue limit must project"));
+        let mut output = std::mem::take(&mut chunk);
+        while stream
+            .next_chunk(&mut chunk)
+            .expect("client frame delivery must continue")
+        {
+            output.extend_from_slice(&chunk);
+            chunk.clear();
+        }
+        let text = String::from_utf8(output).expect("client SSE is UTF-8");
+        assert!(text.contains("event: response.completed"), "{text}");
+        assert!(!text.contains("event: error"));
+    }
+
+    #[test]
     fn premature_eof_emits_explicit_error_event_before_close() {
         let mut stream = stream(Vec::new());
         let mut chunk = Vec::new();
@@ -1704,25 +1990,20 @@ priority = 1
     }
 
     #[test]
-    fn truncated_tail_after_terminal_emits_explicit_error_event() {
+    fn terminal_commit_ignores_tail_after_terminal() {
         let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"abc\"}}\n\n";
         let mut bytes = terminal.to_vec();
         bytes.extend_from_slice(b"event: response.output_text.delta\ndata: {\"type\":");
         let mut stream = stream(vec![Ok(bytes)]);
-        let mut terminal_chunk = Vec::new();
+        let mut chunk = Vec::new();
         assert!(stream
-            .next_chunk(&mut terminal_chunk)
-            .expect("terminal frame must project"));
-        assert!(String::from_utf8(terminal_chunk)
-            .expect("terminal frame must be UTF-8")
-            .contains("event: response.completed"));
-        let mut error_chunk = Vec::new();
-        assert!(stream
-            .next_chunk(&mut error_chunk)
-            .expect("truncated tail error must emit"));
-        let text = String::from_utf8(error_chunk).expect("error event must be UTF-8");
-        assert!(text.starts_with("event: error\ndata: "));
-        assert!(text.contains("incomplete provider SSE frame"));
+            .next_chunk(&mut chunk)
+            .expect("terminal must commit"));
+        let text = String::from_utf8(chunk).expect("client SSE is UTF-8");
+        assert!(text.contains("event: response.completed"), "{text}");
+        assert!(!text.contains("event: error"), "{text}");
+        let mut closed = Vec::new();
+        assert!(!stream.next_chunk(&mut closed).expect("stream must close"));
     }
 
     #[test]
@@ -1825,8 +2106,8 @@ priority = 1
         let manifest = test_manifest();
         let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
         let plan = {
-            let handler = PipelineHandler::new(test_manifest())
-                .expect("production handler must initialize");
+            let handler =
+                PipelineHandler::new(test_manifest()).expect("production handler must initialize");
             let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
             plan
         };
@@ -1864,8 +2145,8 @@ priority = 1
         let manifest = test_manifest();
         let registry = ProductionHandleRegistry::new(manifest.product.as_ref());
         let plan = {
-            let handler = PipelineHandler::new(test_manifest())
-                .expect("production handler must initialize");
+            let handler =
+                PipelineHandler::new(test_manifest()).expect("production handler must initialize");
             let plan = handler.runtime.lock().expect("runtime lock").plan().clone();
             plan
         };

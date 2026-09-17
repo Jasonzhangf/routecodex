@@ -18,6 +18,19 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 
+const ANTHROPIC_MESSAGES_PATH: &str = "v1/messages?beta=true";
+
+fn canonical_transport_protocol(protocol: &str) -> String {
+    match protocol {
+        "responses" | "openai_responses" | "openai-responses" => "responses".to_string(),
+        "anthropic" | "anthropic_messages" | "anthropic-messages" | "messages" => {
+            "anthropic".to_string()
+        }
+        "openai" | "chat" | "openai_chat" | "openai-chat" => "openai".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct ProviderFile {
     #[serde(rename = "providerId")]
@@ -209,6 +222,7 @@ impl NativeProviderTransport {
     pub async fn send_streaming(
         &self,
         profile_path: &str,
+        requested_protocol: &str,
         endpoint_suffix: &str,
         input: &Value,
         cancellation: CancellationToken,
@@ -221,6 +235,31 @@ impl NativeProviderTransport {
             });
         }
         let profile = load_profile(profile_path)?;
+        let profile_protocol = canonical_transport_protocol(&profile.protocol);
+        if !matches!(
+            profile_protocol.as_str(),
+            "responses" | "openai" | "anthropic"
+        ) {
+            return Err(ProviderTransportError {
+                code: "provider_protocol_unsupported".to_string(),
+                message: format!(
+                    "provider profile protocol {} has no native streaming transport",
+                    profile.protocol
+                ),
+                status: None,
+            });
+        }
+        let requested_protocol = canonical_transport_protocol(requested_protocol);
+        if profile_protocol != requested_protocol {
+            return Err(ProviderTransportError {
+                code: "provider_protocol_mismatch".to_string(),
+                message: format!(
+                    "profile protocol {} does not match {requested_protocol}",
+                    profile.protocol
+                ),
+                status: None,
+            });
+        }
         let key = materialize_auth(&profile.auth)?;
         let body = serde_json::to_vec(input).map_err(|error| ProviderTransportError {
             code: "provider_request_encode".into(),
@@ -266,7 +305,7 @@ impl NativeProviderTransport {
             .client
             .post(endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/json");
-        request = if profile.protocol == "anthropic" {
+        request = if canonical_transport_protocol(&profile.protocol) == "anthropic" {
             request
                 .header("x-api-key", key)
                 .header("anthropic-version", "2023-06-01")
@@ -332,6 +371,17 @@ pub struct NativeProviderResponseStream {
     content_type: String,
 }
 
+impl std::fmt::Debug for NativeProviderResponseStream {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativeProviderResponseStream")
+            .field("seen", &self.seen)
+            .field("status", &self.status)
+            .field("content_type", &self.content_type)
+            .finish_non_exhaustive()
+    }
+}
+
 impl NativeProviderResponseStream {
     pub fn status(&self) -> u16 {
         self.status
@@ -378,6 +428,14 @@ impl NativeProviderResponseStream {
         let remainder = bytes.split_off(split_at);
         self.pending = remainder;
         Ok(Some(bytes))
+    }
+
+    pub async fn read_error_body(&mut self) -> Result<Vec<u8>, ProviderTransportError> {
+        let mut body = Vec::new();
+        while let Some(chunk) = self.next_chunk().await? {
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 }
 
@@ -623,7 +681,7 @@ fn send_wire_request(
     endpoint_suffix: &str,
 ) -> Result<ProviderRawResponse, ProviderTransportError> {
     let profile = load_profile(profile_path)?;
-    if profile.protocol != protocol {
+    if canonical_transport_protocol(&profile.protocol) != canonical_transport_protocol(protocol) {
         return Err(ProviderTransportError {
             code: "provider_protocol_mismatch".to_string(),
             message: format!(
@@ -655,7 +713,7 @@ fn send_wire_request(
     let mut request = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
-    request = if protocol == "anthropic" {
+    request = if canonical_transport_protocol(protocol) == "anthropic" {
         request
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01")
@@ -698,24 +756,27 @@ pub fn send_protocol(
     input: &Value,
     stream: bool,
 ) -> Result<ProviderTransportResult, ProviderTransportError> {
-    match (protocol, stream) {
+    let protocol = canonical_transport_protocol(protocol);
+    match (protocol.as_str(), stream) {
         // Wire shaping belongs to the request NodePluginPlan. The transport
         // owner sends that already-built body byte-for-byte; it must not
         // inject model/stream fields or perform protocol projection here.
         ("responses", false) => send_wire_request(profile_path, input, "responses", "responses")
             .map(ProviderTransportResult::Response),
-        ("responses", true) => {
-            send_wire_streaming(profile_path, input, "responses", "responses")
+        ("responses", true) => send_wire_streaming(profile_path, input, "responses", "responses")
+            .map(ProviderTransportResult::Stream),
+        ("openai", false) => send_wire_request(profile_path, input, "openai", "chat/completions")
+            .map(ProviderTransportResult::Response),
+        ("anthropic", false) => {
+            send_wire_request(profile_path, input, "anthropic", ANTHROPIC_MESSAGES_PATH)
+                .map(ProviderTransportResult::Response)
+        }
+        ("openai", true) => send_wire_streaming(profile_path, input, "openai", "chat/completions")
+            .map(ProviderTransportResult::Stream),
+        ("anthropic", true) => {
+            send_wire_streaming(profile_path, input, "anthropic", ANTHROPIC_MESSAGES_PATH)
                 .map(ProviderTransportResult::Stream)
         }
-        ("openai" | "chat", false) => send_wire_request(profile_path, input, "openai", "chat/completions")
-            .map(ProviderTransportResult::Response),
-        ("anthropic", false) => send_wire_request(profile_path, input, "anthropic", "messages")
-            .map(ProviderTransportResult::Response),
-        ("openai" | "chat", true) => send_wire_streaming(profile_path, input, "openai", "chat/completions")
-            .map(ProviderTransportResult::Stream),
-        ("anthropic", true) => send_wire_streaming(profile_path, input, "anthropic", "messages")
-            .map(ProviderTransportResult::Stream),
         (other, _) => Err(ProviderTransportError {
             code: "provider_protocol_unsupported".to_string(),
             message: format!("provider protocol {other} has no transport owner"),
@@ -728,6 +789,7 @@ pub fn send_protocol(
 pub enum ProviderTransportResult {
     Response(ProviderRawResponse),
     Stream(ProviderResponseStream),
+    NativeStream(NativeProviderResponseStream),
 }
 
 /// Typed provider transport request.  Only provider wire data crosses this
@@ -808,8 +870,8 @@ impl ProviderTransportPort {
     pub fn execute(
         request: ProviderTransportRequest,
     ) -> Result<ProviderTransportResult, ProviderTransportError> {
-        if !matches!(request.protocol.as_str(), "responses" | "openai" | "chat" | "anthropic")
-        {
+        let protocol = canonical_transport_protocol(&request.protocol);
+        if !matches!(protocol.as_str(), "responses" | "openai" | "anthropic") {
             return Err(ProviderTransportError {
                 code: "provider_protocol_unsupported".to_string(),
                 message: format!(
@@ -821,11 +883,56 @@ impl ProviderTransportPort {
         }
         validate_auth_alias(&request.profile_path, request.auth_alias.as_deref())?;
         send_protocol(
-            &request.protocol,
+            &protocol,
             &request.profile_path,
             &request.wire_body,
             request.stream,
         )
+    }
+
+    pub fn execute_streaming(
+        request: ProviderTransportRequest,
+        cancellation: CancellationToken,
+        runtime: &tokio::runtime::Handle,
+    ) -> Result<ProviderTransportResult, ProviderTransportError> {
+        let protocol = canonical_transport_protocol(&request.protocol);
+        if !matches!(protocol.as_str(), "responses" | "openai" | "anthropic") {
+            return Err(ProviderTransportError {
+                code: "provider_protocol_unsupported".to_string(),
+                message: format!(
+                    "provider protocol {} has no native streaming transport",
+                    request.protocol
+                ),
+                status: None,
+            });
+        }
+        if !request.stream {
+            return Err(ProviderTransportError {
+                code: "provider_stream_request".to_string(),
+                message: "streaming transport entry requires stream=true".to_string(),
+                status: None,
+            });
+        }
+        validate_auth_alias(&request.profile_path, request.auth_alias.as_deref())?;
+        let transport =
+            NativeProviderTransport::new(Duration::from_secs(300), NATIVE_MAX_RESPONSE_BYTES)?;
+        let stream = runtime.block_on(transport.send_streaming(
+            &request.profile_path,
+            &protocol,
+            &native_streaming_endpoint_suffix(&protocol),
+            &request.wire_body,
+            cancellation,
+        ))?;
+        Ok(ProviderTransportResult::NativeStream(stream))
+    }
+}
+
+fn native_streaming_endpoint_suffix(protocol: &str) -> std::borrow::Cow<'static, str> {
+    match protocol {
+        "responses" => "responses".into(),
+        "openai" => "chat/completions".into(),
+        "anthropic" => ANTHROPIC_MESSAGES_PATH.into(),
+        other => other.to_string().into(),
     }
 }
 
@@ -836,7 +943,7 @@ fn send_wire_streaming(
     endpoint_suffix: &str,
 ) -> Result<ProviderResponseStream, ProviderTransportError> {
     let profile = load_profile(profile_path)?;
-    if profile.protocol != protocol {
+    if canonical_transport_protocol(&profile.protocol) != canonical_transport_protocol(protocol) {
         return Err(ProviderTransportError {
             code: "provider_protocol_mismatch".to_string(),
             message: format!(
@@ -868,7 +975,7 @@ fn send_wire_streaming(
     let mut request = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
-    request = if protocol == "anthropic" {
+    request = if canonical_transport_protocol(protocol) == "anthropic" {
         request
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01")
