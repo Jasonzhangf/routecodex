@@ -2,14 +2,18 @@ use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
-fn provider_function_name(name: &str) -> String {
+pub(super) fn provider_function_name(name: &str) -> String {
+    let name = name
+        .strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"))
+        .unwrap_or_else(|| name.to_owned());
     if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
         let dot = dot + "mcp__".len();
-        let mut normalized = name.to_owned();
+        let mut normalized = name;
         normalized.replace_range(dot..=dot, "__");
         normalized
     } else {
-        name.to_owned()
+        name
     }
 }
 
@@ -34,6 +38,9 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             let Some(call) = call.as_object_mut() else {
                 continue;
             };
+            if is_custom_tool_call(call) {
+                continue;
+            }
             if let Some(name) = call.get("name").and_then(Value::as_str) {
                 call.insert(
                     "name".to_string(),
@@ -50,16 +57,24 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             }
         }
     }
-    if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
-        for part in parts {
-            let Some(part_object) = part.as_object_mut() else {
-                continue;
-            };
-            if let Some(name) = part_object.get("name").and_then(Value::as_str) {
-                part_object.insert(
-                    "name".to_string(),
-                    Value::String(provider_function_name(name)),
-                );
+    let is_custom_tool_output = message
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_tool_output_type"))
+        .and_then(Value::as_str)
+        == Some("custom_tool_call_output");
+    if !is_custom_tool_output {
+        if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
+            for part in parts {
+                let Some(part_object) = part.as_object_mut() else {
+                    continue;
+                };
+                if let Some(name) = part_object.get("name").and_then(Value::as_str) {
+                    part_object.insert(
+                        "name".to_string(),
+                        Value::String(provider_function_name(name)),
+                    );
+                }
             }
         }
     }
@@ -81,16 +96,18 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
         if let Ok(Some(children)) = flatten_namespace_tool_for_provider("openai-chat", tool) {
             for child in children {
                 if let Some(name) = provider_function_tool_name(&child) {
-                    insert_provider_mcp_name(&mut qualified_by_leaf, name);
+                    let name = provider_function_name(name);
+                    insert_provider_mcp_name(&mut qualified_by_leaf, &name);
                 }
             }
             continue;
         }
         if let Some(name) = provider_function_tool_name(tool) {
-            if mcp_tool_leaf_name(name).is_some() {
-                insert_provider_mcp_name(&mut qualified_by_leaf, name);
+            let name = provider_function_name(name);
+            if mcp_tool_leaf_name(&name).is_some() {
+                insert_provider_mcp_name(&mut qualified_by_leaf, &name);
             } else {
-                ordinary_callable_names.insert(name.to_owned());
+                ordinary_callable_names.insert(name);
             }
         }
     }

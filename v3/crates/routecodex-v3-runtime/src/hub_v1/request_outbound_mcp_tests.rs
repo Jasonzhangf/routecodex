@@ -10,6 +10,57 @@ fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
 }
 
 #[test]
+fn openai_chat_provider_strips_legacy_functions_prefix_from_history_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"deepseek-v4.1-flash","tools":[
+            {"type":"function","name":"functions.mcp__codex_review__review_start","parameters":{"type":"object"}},
+            {"type":"function","function":{"name":"functions.mcp__codex_review__review_nested","parameters":{"type":"object"}}}
+        ],"messages":[
+            {"role":"assistant","tool_calls":[{"id":"call_review","type":"function","function":{"name":"functions.mcp__codex_review__review_start","arguments":"{}"}}]},
+            {"role":"assistant","content":[{"type":"tool_use","name":"functions.mcp__codex_review__review_start","input":{}}]}
+        ]
+    })).expect("legacy functions prefix must not reach OpenAI Chat provider wire");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        request["tools"][1]["function"]["name"],
+        "mcp__codex_review__review_nested"
+    );
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn openai_chat_provider_preserves_ordinary_functions_prefix() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-5.5","tools":[{"type":"function","name":"functions.custom.render","parameters":{"type":"object"}}],"messages":[
+            {"role":"assistant","tool_calls":[{"id":"call_custom","type":"function","function":{"name":"functions.custom.render","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"call_custom","content":[{"type":"tool_result","name":"functions.custom.render","content":"{}"}]}
+        ]
+    })).expect("ordinary function names must remain exact");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "functions.custom.render"
+    );
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("functions.custom.render")
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["name"],
+        json!("functions.custom.render")
+    );
+}
+
+#[test]
 fn openai_chat_provider_preserves_tool_search_control_history_names() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model":"glm-5.3","messages":[{"role":"assistant","tool_calls":[{"id":"search_1","type":"function","function":{"name":"mcp__mcpx.workspace","arguments":"{}"}}],"routecodex_chat_extension":{"responses_tool_call_type":"tool_search_call"}}]
@@ -105,6 +156,28 @@ fn responses_function_call_history_without_namespace_is_qualified_from_provider_
 }
 
 #[test]
+fn legacy_mcp_declaration_qualifies_namespace_less_continuation_history() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-5.5",
+        "tools":[{"type":"function","name":"functions.mcp__mcpx__session","parameters":{"type":"object"}}],
+        "messages":[{"role":"assistant","tool_calls":[{
+            "id":"call_session",
+            "type":"function",
+            "function":{"name":"session","arguments":"{}"},
+            "routecodex_chat_extension":{"responses_item_id":"fc_session"}
+        }]}]
+    })).expect("legacy MCP declarations must qualify continuation history");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "mcp__mcpx__session"
+    );
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx__session"
+    );
+}
+
+#[test]
 fn openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.3",
@@ -154,7 +227,7 @@ fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
                         "type": "custom_tool_call",
                         "id": "ctc_custom_session",
                         "call_id": "call_custom_session",
-                        "name": "session",
+                        "name": "functions.custom.render",
                         "input": "custom payload"
                     },
                     {
@@ -176,7 +249,23 @@ fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
 
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        json!("session")
+        json!("functions.custom.render")
+    );
+}
+
+#[test]
+fn openai_chat_provider_preserves_custom_tool_output_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-5.5","messages":[{
+            "role":"tool",
+            "tool_call_id":"call_custom",
+            "content":[{"type":"tool_result","name":"functions.custom.render","content":"{}"}],
+            "routecodex_chat_extension":{"responses_tool_output_type":"custom_tool_call_output"}
+        }]
+    })).expect("custom tool output names must remain exact");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        json!("functions.custom.render")
     );
 }
 
