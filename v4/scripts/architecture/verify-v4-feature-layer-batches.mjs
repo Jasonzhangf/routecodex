@@ -85,6 +85,7 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
   }
   failures.push(...validateFeatureLayerDefinition(input, context, {
     allowPendingGuard: options.allowPendingGuard === true,
+    executeReceipts: mode === 'admission',
   }));
   if (mode === 'admission') {
     validateFeatureLayerAdmission(input, context, failures);

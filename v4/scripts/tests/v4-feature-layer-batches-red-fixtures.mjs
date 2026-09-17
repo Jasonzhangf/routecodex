@@ -339,6 +339,26 @@ export function runFeatureLayerBatchSelfTest({
   } catch (error) {
     failures.push(failure('ALL_READY_ADMISSION_SELF_TEST', error.message));
   }
+  try {
+    let rejected = false;
+    try {
+      runAllReadyAdmissionFixture({
+        canonicalInput,
+        validate,
+        now: productionContext.now,
+        mutateEvidence(record, { task, role }) {
+          if (task.task_id === 'V4-PARITY-001' && role === 'positive') {
+            record.receipt_hash = `sha256:${'0'.repeat(64)}`;
+          }
+        },
+      });
+    } catch (error) {
+      rejected = /EVIDENCE_RECEIPT_MISMATCH/.test(error.message);
+    }
+    if (!rejected) throw new Error('mutated receipt_hash was accepted');
+  } catch (error) {
+    failures.push(failure('RECEIPT_HASH_MUTATION_SELF_TEST', error.message));
+  }
   return result(5 - failures.length, 5, failures);
 }
 

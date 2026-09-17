@@ -130,7 +130,7 @@ function commitPathMatchesCurrent(commit, relativePath, truth) {
     && canonicalJson(candidateBlob) === canonicalJson(currentBlob);
 }
 
-export function validateSourceGreenClaims(input, context, failures) {
+export function validateSourceGreenClaims(input, context, failures, options = {}) {
   const integrationCommit = context.truth.currentHead();
   for (const batch of input.manifest.batches ?? []) {
     const readyTasks = (batch.tasks ?? []).filter((task) => task.status === TASK_READY_STATUS);
@@ -258,11 +258,12 @@ export function validateSourceGreenClaims(input, context, failures) {
               ...(candidateTask.support_paths ?? []),
             ])),
             gateInputPaths: projection.gateInputPaths,
-            gateMap: candidateGateMap,
-            truth: context.truth,
-            integrationCommit,
-            failures,
-            now: context.now,
+          gateMap: candidateGateMap,
+          truth: context.truth,
+          integrationCommit,
+          executeReceipts: options.executeReceipts !== false,
+          failures,
+          now: context.now,
           });
         }
         for (const candidatePath of sortedUnique([

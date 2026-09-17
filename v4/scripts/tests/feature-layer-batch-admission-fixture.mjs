@@ -5,7 +5,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { EXPECTED_TASKS, RUNTIME_MODULE_ID } from '../architecture/lib/feature-layer-batch-contract.mjs';
 import { GATE_INPUT_SETS } from '../architecture/lib/feature-layer-batch-registry.mjs';
-import { canonicalJson, createGitTruth, sha256 } from '../architecture/lib/feature-layer-batch-git.mjs';
+import {
+  canonicalJson,
+  createGitTruth,
+  gateReceiptHash,
+  sha256,
+} from '../architecture/lib/feature-layer-batch-git.mjs';
 
 const v4Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BASELINE_ANCHOR = '7557b8825ac829a436193ddf865568c9091eda5b';
@@ -92,7 +97,12 @@ function evidenceRecord({ id, taskId, moduleId, sourceCommit, scopeHash, inputHa
  * temporary Git repository.  This is test-only: it never changes production
  * manifests, bypasses a gate, or substitutes a fake runGate implementation.
  */
-export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Date.now() }) {
+export function runAllReadyAdmissionFixture({
+  canonicalInput,
+  validate,
+  now = Date.now(),
+  mutateEvidence = null,
+}) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'v4-layer-admission-ready-'));
   try {
     run(repo, 'git', ['init', '--quiet']);
@@ -179,10 +189,15 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
     const base = commit(repo, 'fixture baseline');
     run(repo, 'git', ['tag', BASELINE_ANCHOR, base]);
     const rawTruth = createGitTruth({ repoRoot: repo, v4Root: path.join(repo, 'v4') });
+    const fixtureGate = path.join(repo, 'v4', 'fixture', 'gate.mjs');
     const truth = {
       ...rawTruth,
       resolveCommit(ref) {
         return ref === BASELINE_ANCHOR ? base : rawTruth.resolveCommit(ref);
+      },
+      runGate(argv) {
+        const receipt = rawTruth.runGate([process.execPath, fixtureGate]);
+        return { ...receipt, receipt_hash: gateReceiptHash(argv, receipt.status) };
       },
     };
     const candidates = new Map();
@@ -248,7 +263,8 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
         ])].sort();
         const scope = candidate.scope_hash;
         for (const [suffix, role, kind, phase] of ROLE_GATES) {
-          write(repo, `${evidenceDir}/${role}.json`, JSON.stringify(evidenceRecord({
+          const argv = ['node', 'fixture/gate.mjs'];
+          const record = evidenceRecord({
             id: role,
             taskId: task.task_id,
             moduleId: batch.module_ids[0],
@@ -256,12 +272,15 @@ export function runAllReadyAdmissionFixture({ canonicalInput, validate, now = Da
             scopeHash: scope,
             inputHashes,
             gateId: `fixture_${suffix}`,
-            argv: ['node', 'fixture/gate.mjs'],
+            argv,
             producer: { adapter: 'node', identity: `fixture_${suffix}` },
             phase,
             kind,
             now,
-          }), null, 2));
+          });
+          record.receipt_hash = gateReceiptHash(argv, 0);
+          if (mutateEvidence) mutateEvidence(record, { task, role });
+          write(repo, `${evidenceDir}/${role}.json`, JSON.stringify(record, null, 2));
         }
       }
     }

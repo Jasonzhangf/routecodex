@@ -20,6 +20,10 @@ export function sha256(value) {
   return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 }
 
+export function gateReceiptHash(argv, status) {
+  return sha256(canonicalJson({ argv, status }));
+}
+
 function run(command, args, cwd, { allowFailure = false, encoding = null } = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -110,6 +114,7 @@ export function createGitTruth({ repoRoot, v4Root, readStagedIndex = false }) {
   // within this truth view so the gate remains deterministic without spawning
   // the same Git subprocess for every mutation case.
   const factCache = new Map();
+  const gateReceiptCache = new Map();
   const cachedFact = (key, producer) => {
     if (factCache.has(key)) return factCache.get(key);
     const value = producer();
@@ -400,13 +405,17 @@ export function createGitTruth({ repoRoot, v4Root, readStagedIndex = false }) {
         || argv.some((part) => typeof part !== 'string' || part.length === 0 || /[\r\n\0]/.test(part))) {
       throw new Error('gate argv must be a non-empty string array');
     }
+    const cacheKey = canonicalJson(argv);
+    if (gateReceiptCache.has(cacheKey)) return { ...gateReceiptCache.get(cacheKey) };
     const result = run(argv[0], argv.slice(1), v4Root, { allowFailure: true, encoding: 'utf8' });
-    return {
+    const receipt = {
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
-      receipt_hash: sha256(canonicalJson({ argv, status: result.status, stdout: result.stdout, stderr: result.stderr })),
+      receipt_hash: gateReceiptHash(argv, result.status),
     };
+    gateReceiptCache.set(cacheKey, receipt);
+    return { ...receipt };
   }
 
   return {

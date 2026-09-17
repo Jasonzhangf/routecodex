@@ -81,6 +81,7 @@ export function validateEvidenceRecordShape(evidence, failures, context, now = D
   }
   if (!FULL_COMMIT_PATTERN.test(evidence.source_commit ?? '')
       || !SHA256_PATTERN.test(evidence.scope_hash ?? '')
+      || (evidence.receipt_hash !== undefined && !SHA256_PATTERN.test(evidence.receipt_hash))
       || !Array.isArray(evidence.input_hashes)
       || evidence.input_hashes.length === 0
       || evidence.input_hashes.some((hash) => !SHA256_PATTERN.test(hash))) {
@@ -134,6 +135,7 @@ export function validateEvidenceRef({
   gateMap,
   truth,
   integrationCommit,
+  executeReceipts = true,
   failures,
   now,
 }) {
@@ -200,6 +202,20 @@ export function validateEvidenceRef({
       || evidence.exit_status !== 0
       || /review/i.test(`${evidence.producer?.adapter ?? ''}:${evidence.producer?.identity ?? ''}`)) {
     addFailure(failures, 'EVIDENCE_PRODUCER_MISMATCH', `${context}: producer/command receipt is not the registered gate`);
+  }
+  if (!SHA256_PATTERN.test(evidence.receipt_hash ?? '')) {
+    addFailure(failures, 'EVIDENCE_RECEIPT_MISSING', `${context}: executable evidence requires a receipt hash`);
+  } else if (executeReceipts) {
+    let receipt;
+    try {
+      receipt = truth.runGate(gate.argv);
+    } catch (error) {
+      addFailure(failures, 'EVIDENCE_RECEIPT_EXECUTION_FAILED', `${context}: ${error.message}`);
+    }
+    if (receipt && (receipt.status !== 0 || receipt.receipt_hash !== evidence.receipt_hash)) {
+      addFailure(failures, 'EVIDENCE_RECEIPT_MISMATCH',
+        `${context}: materialized receipt does not match the registered gate execution`);
+    }
   }
   const expectedId = path.basename(ref.path, '.json');
   if (evidence.evidence_id !== expectedId) {
