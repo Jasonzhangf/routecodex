@@ -188,3 +188,5 @@ if (direct) {
     runProductionMode(mode);
   }
 }
+
+// V4 lane G candidate marker: no semantic change.
