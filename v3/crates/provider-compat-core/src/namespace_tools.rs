@@ -284,6 +284,7 @@ fn normalize_provider_wire_message(value: &mut Value) {
             let Some(tool_call) = tool_call.as_object_mut() else {
                 continue;
             };
+            normalize_provider_wire_name_field(tool_call, "name");
             if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut) {
                 normalize_provider_wire_name_field(function, "name");
             }
@@ -629,6 +630,7 @@ mod tests {
                 "role":"assistant",
                 "tool_calls": [{
                     "type":"function",
+                    "name":"mcp__mcpx.workspace.read",
                     "function":{"name":"functions.mcp__codex_review__review_start"}
                 }],
                 "content":[{"type":"tool_result","name":"mcp__mcpx.workspace.read"}]
@@ -638,6 +640,10 @@ mod tests {
         assert_eq!(body["input"][0]["name"], "mcp__codex_review__review_start");
         assert_eq!(body["input"][1]["name"], "mcp__mcpx__workspace__read");
         assert_eq!(body["input"][2]["name"], "servertool__search");
+        assert_eq!(
+            body["messages"][0]["tool_calls"][0]["name"],
+            "mcp__mcpx__workspace__read"
+        );
         assert_eq!(
             body["messages"][0]["tool_calls"][0]["function"]["name"],
             "mcp__codex_review__review_start"
