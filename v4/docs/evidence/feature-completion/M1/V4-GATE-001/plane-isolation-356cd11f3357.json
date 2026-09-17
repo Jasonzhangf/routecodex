@@ -1,0 +1,40 @@
+{
+  "evidence_id": "plane-isolation-356cd11f3357",
+  "issue_id": "V4-GATE-001",
+  "experiment_id": "v4-feature-layer-g-v4-gate-001",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "execution_surface": "development_whitebox",
+  "source_commit": "356cd11f3357406460dea751df624e67feaf96a2",
+  "scope": {
+    "feature_id": "V4-GATE-001",
+    "module_id": "routecodex-v4-governance"
+  },
+  "producer": {
+    "adapter": "node",
+    "identity": "v4_parity_gate_plane_isolation"
+  },
+  "command_argv": [
+    "node",
+    "scripts/architecture/verify-v4-plane-isolation.mjs"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-09-17T15:17:52.383Z",
+  "expires_at": "2026-09-24T15:17:52.383Z",
+  "input_hashes": [
+    "sha256:0f1d0896454aa067519d21e5832f9f9e2cbb3bde3aafc0e12a6b2ea521c8c359",
+    "sha256:10a16467ae93032f6a872e56c3573324cf4fa6662245d295fee5614d00d9cf64",
+    "sha256:13890c252511422bf1c8d2837c55f0d660aee0f043a23094dbd13374dcfb7250",
+    "sha256:5a329291b0ae44c5749b6caf9a26026f81c96f2df814d4dc4eaa81d7fb6d159a",
+    "sha256:60ab7b26b7f0feb7a3842c62aaa3c8002eb54788e4d848ee1b50ef5ced591e82",
+    "sha256:6a3333b06f36476c6663dad514d9f9ac934126287c25f324eb1238b5dcd670e1",
+    "sha256:74be147c3f360ebf0d3f1b03f3b8ee8d5d8d66f760f9c2dd48602bbfa2fb807b",
+    "sha256:a3b544f0b1be9e4582f3c0c9f8d78eea16bed5a0e25dcb712a42aa7c75a94cb6",
+    "sha256:d64848a39e0f1ead697d808b099d14bdfb31f912dd3a1667e7914c40b91be0ff",
+    "sha256:dfb9988ade49ba6f470987505ef68cf15dc1608697ce2dea08dd04ce619ef50f",
+    "sha256:ec15e3883910de16b98eced21e78fcb30d3cb258fa9ab5aa58c66b3de5b65aa3",
+    "sha256:f02d26cfca663602bd8cb3b1771ac2431abf48c9ddefd287af9c85f82ef35cfd"
+  ],
+  "scope_hash": "sha256:6a5e896239bee923f707195b55341d1b6189ef43d554609c0c8a4bc33db3dbf2"
+}
