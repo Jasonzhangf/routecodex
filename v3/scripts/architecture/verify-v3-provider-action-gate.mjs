@@ -417,7 +417,15 @@ if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
   failures.push(`${files.directHelpers}: removed SSE stopless stream wrapper must not reappear`);
 }
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
-if (text.policy.includes('if let Ok(alternative) = resolve_v3_relay_target')) {
+const relayFailurePolicy = findFunctionBody(
+  text.policy,
+  'run_v3_relay_provider_failure_policy',
+  files.policy,
+);
+const targetResolutionFailure = relayFailurePolicy.match(
+  /Some\(Err\(source\)\)\s*=>\s*V3RelayProviderTargetResolution::Failed\(source\)\s*,/u,
+);
+if (!targetResolutionFailure) {
   failures.push(
     `${files.policy}: target-resolution source errors must not be swallowed as provider-pool exhaustion`,
   );
