@@ -46,7 +46,7 @@ The request and response normal payloads must never carry RouteCodex internal si
 |---|---|---|---|
 | JSON success | Gemini contents/tools/generationConfig, client alias in URL | one Req01–Req09 and Resp01–Resp06 trace; provider URL uses wire model; provider body remains semantically equal and has no synthetic `model` | URL model routing and wire rewrite do not mutate Gemini body |
 | Function call | provider candidate contains `functionCall.name` | response governance succeeds and client projection preserves the same name | Gemini function-call identity is not dropped or remapped |
-| SSE incremental | first non-terminal candidate arrives before terminal candidate | first client frame is observable before terminal release; no synthetic `[DONE]` | no full-stream materialization |
+| SSE terminal commit | first non-terminal candidate arrives before terminal candidate | runtime remains uncommitted until the controlled terminal; client frames then stream without synthetic `[DONE]` | no provider terminal failure after client commit and no full client-stream materialization |
 | SSE malformed | framed `data` is not JSON | stream emits explicit error and no success payload | malformed provider stream is not silently accepted |
 | SSE non-terminal end | stream closes after `finishReason: null` | explicit `ended without terminal finishReason` error | still-running response is not misclassified as terminal success |
 | SSE post-terminal | provider emits another frame after terminal `finishReason` | explicit post-terminal error | late provider frames are not appended to a completed response |
@@ -72,8 +72,8 @@ Required assertions:
 - Gemini request body remains semantically equivalent; URL-path model truth is not injected as a
   provider body field.
 - JSON and SSE both traverse the same fixed Hub v1 lifecycle.
-- SSE uses `SseIncrementalDecoder`, emits before terminal, and rejects malformed/non-terminal/late
-  frames.
+- SSE uses `SseIncrementalDecoder`, withholds client commit until terminal, and rejects
+  malformed/non-terminal/late frames.
 - Provider HTTP failure uses Error01–06 and does not enter Resp01 success.
 - Request and response side-channel fields fail closed.
 
@@ -92,8 +92,8 @@ Required assertions:
   `execute_v3_gemini_relay_runtime_with_default_transport`.
 - Valid JSON and SSE requests each produce exactly one controlled upstream capture.
 - Upstream receives the expected authentication header, wire-model URL, and unchanged Gemini body.
-- SSE first frame reaches the client before the controlled terminal delay; Server uses
-  `Body::from_stream` and performs no candidate/functionCall/finishReason parsing.
+- SSE client frames are released only after the controlled provider terminal is validated; Server
+  uses `Body::from_stream` and performs no candidate/functionCall/finishReason parsing.
 - Controlled 429 exposes Error01–06.
 - Rejected `metadata_center` request produces zero upstream captures.
 
@@ -102,7 +102,7 @@ Required assertions:
 Positive gates lock:
 
 - JSON candidate, usage, function-call identity, URL model, and body semantics.
-- Incremental SSE first-frame timing and terminal finishReason.
+- SSE terminal-gated client commit and terminal finishReason.
 
 Negative gates lock:
 
@@ -129,3 +129,35 @@ The focused integration must stay compatible with:
   changed.
 - Controlled loopback proves source/runtime integration shape, not global or production Gemini
   compatibility.
+
+## 9. Execution Evidence
+
+Execution receipt is bound to the current branch candidate in the clean worktree:
+
+```text
+/Users/fanzhang/Documents/github/routecodex/playground/8e89837-pool-hold-0916
+```
+
+Commands run from that worktree all exited `0`:
+
+```text
+npm run render:architecture-wiki-html
+npm run verify:architecture-wiki-html-sync
+npm run test:v3-gemini-relay-runtime-integration
+npm run verify:v3-gemini-relay-runtime-integration
+npm run test:v3-gemini-relay-runtime-integration-red-fixtures
+npm run verify:v3-architecture-ci
+CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion -- --nocapture
+```
+
+Key receipts:
+
+- `test:v3-gemini-relay-runtime-integration`: runtime `20 passed; 0 failed`, server controlled `1 passed; 0 failed`
+- `test:v3-gemini-relay-runtime-integration-red-fixtures`: `ok (10 forbidden mutations rejected)`
+- `verify:v3-architecture-ci`: `ok (39/39 sub-gates green)`
+- `cooldown_exhaustion`: `4 passed; 0 failed`
+
+The read-only Codex review task could not execute the red-fixture gate itself because
+its sandbox could not create the temporary fixture directory (`EPERM: mkdtemp ...`).
+This section is the independently captured writable-runner execution receipt for that
+gate, not a replacement review decision.

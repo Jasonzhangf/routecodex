@@ -60,7 +60,7 @@ error_path:
 isolation:
   provider_body_forbidden: [metadata_center, debug_snapshot, resource_handle]
   client_body_forbidden: [metadata_center, debug_snapshot, resource_handle, selected_target]
-  sse_rule: "Runtime validates and emits Gemini frames incrementally without synthetic DONE; Server transports V3GeminiRelayClientStream with Body::from_stream and never materializes the full stream."
+  sse_rule: "Runtime buffers the complete provider attempt until a valid terminal, then emits Gemini client frames incrementally without synthetic DONE; Server transports V3GeminiRelayClientStream with Body::from_stream and never materializes the full client stream."
 verification:
   required_gates:
     - npm run test:v3-gemini-relay-runtime-integration

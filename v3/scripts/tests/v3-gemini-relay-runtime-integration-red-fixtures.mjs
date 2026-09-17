@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs';
 const relayCore = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs';
 const server = 'v3/crates/routecodex-v3-server/src/executors.rs';
@@ -34,6 +34,7 @@ const copied = [
   server,
   'v3/crates/routecodex-v3-server/src/lib.rs',
   'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   'v3/crates/routecodex-v3-server/tests/gemini_relay_controlled.rs',
   'v3/crates/routecodex-v3-config/src/validate.rs',
   'v3/crates/routecodex-v3-config/tests/config_v3_contract.rs',

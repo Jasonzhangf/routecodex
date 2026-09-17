@@ -90,6 +90,10 @@ flowchart TD
     <p>URL/model, candidates, functionCall, finishReason, and stream terminal rules stay in Gemini codec/runtime.</p>
   </article>
 <article class="logic-card">
+    <h3>Client commit is terminal-gated</h3>
+    <p>Controlled SSE evidence proves provider terminal validation precedes client SSE commit and no full client-stream materialization.</p>
+  </article>
+<article class="logic-card">
     <h3>Server consumes binding only</h3>
     <p>Server dispatches to the Gemini runtime owner and transports typed output; it does not parse Gemini response semantics.</p>
   </article>
