@@ -78,9 +78,10 @@ function validatePhysicalSources(sourceInputs, failures) {
   }
   if ((sourceInputs.responseInbound.match(/reject_control_fields\(/g) ?? []).length !== 2
       || !sourceInputs.responseInbound.includes('reject_control_fields(raw)?;')
-      || (sourceInputs.responseOutbound.match(/reject_control_fields\(/g) ?? []).length !== 2
+      || (sourceInputs.responseOutbound.match(/reject_control_fields\(/g) ?? []).length !== 3
       || !sourceInputs.responseOutbound.includes('reject_control_fields(object)?;')
-      || !sourceInputs.responseOutbound.includes('reject_control_fields(&semantic)?;')) {
+      || !sourceInputs.responseOutbound.includes('reject_control_fields(&semantic)?;')
+      || !sourceInputs.responseOutbound.includes('reject_control_fields(governed)?;')) {
     failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
       'provider/client response boundaries must reject control fields before projection'));
   }
@@ -316,7 +317,7 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
     {
       name: 'client SSE control rejection removed',
       mutate(_map, _contract, sources) {
-        sources.responseOutbound = sources.responseOutbound.replace('    reject_control_fields(object)?;\n', '');
+        sources.responseOutbound = sources.responseOutbound.replace('    reject_control_fields(governed)?;\n', '');
       },
       expected: ['WIRE_CONTROL_REJECTION_SOURCE'],
     },
