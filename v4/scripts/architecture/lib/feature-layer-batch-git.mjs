@@ -20,6 +20,10 @@ export function sha256(value) {
   return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 }
 
+export function gateReceiptHash(argv, status) {
+  return sha256(canonicalJson({ argv, status }));
+}
+
 function run(command, args, cwd, { allowFailure = false, encoding = null } = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -104,12 +108,13 @@ function filesystemBlobIdentity(v4Root, relativePath) {
   };
 }
 
-export function createGitTruth({ repoRoot, v4Root }) {
+export function createGitTruth({ repoRoot, v4Root, readStagedIndex = false }) {
   const git = (args, options = {}) => run('git', args, repoRoot, options);
   // Red fixtures replay immutable Git facts many times. Cache read-only facts
   // within this truth view so the gate remains deterministic without spawning
   // the same Git subprocess for every mutation case.
   const factCache = new Map();
+  const gateReceiptCache = new Map();
   const cachedFact = (key, producer) => {
     if (factCache.has(key)) return factCache.get(key);
     const value = producer();
@@ -190,6 +195,10 @@ export function createGitTruth({ repoRoot, v4Root }) {
   }
 
   function blob(commit, relativePath) {
+    if (readStagedIndex && commit === currentHead()) {
+      const staged = git(['show', `:${repoPath(relativePath)}`], { allowFailure: true });
+      if (staged.status === 0) return staged.stdout;
+    }
     if (!FULL_COMMIT_PATTERN.test(commit)) return null;
     return cachedFact(`blob:${commit}:${relativePath}`, () => {
       const result = git(['show', `${commit}:${repoPath(relativePath)}`], { allowFailure: true });
@@ -203,12 +212,38 @@ export function createGitTruth({ repoRoot, v4Root }) {
   }
 
   function trackedAt(commit, relativePath) {
+    if (readStagedIndex && commit === currentHead()) {
+      const staged = git(['cat-file', '-e', `:${repoPath(relativePath)}`], { allowFailure: true });
+      if (staged.status === 0) return true;
+    }
     if (!FULL_COMMIT_PATTERN.test(commit)) return false;
     return cachedFact(`trackedAt:${commit}:${relativePath}`, () =>
       git(['cat-file', '-e', `${commit}:${repoPath(relativePath)}`], { allowFailure: true }).status === 0);
   }
 
   function blobIdentity(commit, relativePath) {
+    if (readStagedIndex && commit === currentHead()) {
+      const expectedPath = repoPath(relativePath);
+      const result = git(['ls-files', '--stage', '-z', '--', expectedPath], { allowFailure: true });
+      if (result.status === 0) {
+        const entries = nulStrings(result.stdout);
+        if (entries.length === 1) {
+          const match = entries[0].match(/^([0-9]{6}) ([0-9a-f]{40}) ([0-3])\t(.+)$/);
+          if (match && match[3] === '0' && match[4] === expectedPath
+              && ['100644', '100755'].includes(match[1])) {
+            const bytes = blob(commit, relativePath);
+            if (bytes !== null) {
+              return {
+                path: normalizeRelative(relativePath),
+                mode: match[1],
+                git_oid: match[2],
+                sha256: sha256(bytes),
+              };
+            }
+          }
+        }
+      }
+    }
     if (!FULL_COMMIT_PATTERN.test(commit)) return null;
     return cachedFact(`blobIdentity:${commit}:${relativePath}`, () => {
       const expectedPath = repoPath(relativePath);
@@ -370,13 +405,17 @@ export function createGitTruth({ repoRoot, v4Root }) {
         || argv.some((part) => typeof part !== 'string' || part.length === 0 || /[\r\n\0]/.test(part))) {
       throw new Error('gate argv must be a non-empty string array');
     }
+    const cacheKey = canonicalJson(argv);
+    if (gateReceiptCache.has(cacheKey)) return { ...gateReceiptCache.get(cacheKey) };
     const result = run(argv[0], argv.slice(1), v4Root, { allowFailure: true, encoding: 'utf8' });
-    return {
+    const receipt = {
       status: result.status,
       stdout: result.stdout,
       stderr: result.stderr,
-      receipt_hash: sha256(canonicalJson({ argv, status: result.status, stdout: result.stdout, stderr: result.stderr })),
+      receipt_hash: gateReceiptHash(argv, result.status),
     };
+    gateReceiptCache.set(cacheKey, receipt);
+    return { ...receipt };
   }
 
   return {

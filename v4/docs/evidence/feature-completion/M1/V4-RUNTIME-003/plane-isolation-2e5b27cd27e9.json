@@ -1,0 +1,35 @@
+{
+  "evidence_id": "plane-isolation-2e5b27cd27e9",
+  "issue_id": "V4-RUNTIME-003",
+  "experiment_id": "v4-feature-layer-b-v4-runtime-003",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "execution_surface": "development_whitebox",
+  "source_commit": "2e5b27cd27e9cdb221b9b8f1170bd5db97caf66c",
+  "scope": {
+    "feature_id": "V4-RUNTIME-003",
+    "module_id": "routecodex-v4-plugin-plan"
+  },
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4_runtime_003_plan_bundle_plane"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "-p",
+    "routecodex-v4-plugin-plan",
+    "--manifest-path",
+    "Cargo.toml",
+    "--locked"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "receipt_hash": "sha256:b78229c7313f411969b5ab0af55e88d6e8d5bb94c40033f5129af502d57ef6e4",
+  "created_at": "2026-09-17T19:28:10.935Z",
+  "expires_at": "2026-09-24T19:28:10.935Z",
+  "input_hashes": [
+    "sha256:bbdbb4dedc2deddffa9fd1853da4bca20085eac4677f5c2d1870485fa611ebf0"
+  ],
+  "scope_hash": "sha256:e4db861c06ceb4af3b11e2ec838704d1b5fa648f272c59a135791a36666d62cc"
+}

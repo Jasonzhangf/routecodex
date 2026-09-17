@@ -110,6 +110,12 @@ function validateGuard(manifest, truth, failures, allowPendingGuard) {
       || !requireExactKeys(integration.resource_refs, ['merge_queue_state', 'integration_candidate'], failures, 'INTEGRATION_RESOURCE_REFS', 'integration.resource_refs')) {
     addFailure(failures, 'INTEGRATION_STATE_INVALID', 'integration owner/admission/typed state drifted');
   }
+  if (!integration.wiring_started
+      && (integration.resource_refs?.merge_queue_state !== null
+        || integration.resource_refs?.integration_candidate !== null)) {
+    addFailure(failures, 'INTEGRATION_RESOURCE_REFS',
+      'unwired integration must not reference merge/integration truth stores');
+  }
   const surfaces = integration.guarded_surfaces ?? [];
   if (!sameOrdered(surfaces.map((surface) => surface.path), GUARDED_WIRING_SURFACES)
       || surfaces.some((surface) => !requireExactKeys(surface, ['path', 'scope_hash'], failures, 'GUARD_SURFACE_INVALID', `guard ${surface.path}`))) {
@@ -363,7 +369,9 @@ export function validateFeatureLayerDefinition(input, context, options = {}) {
   if (((manifest.integration?.wiring_edges ?? []).length > 0) !== manifest.integration?.wiring_started) {
     addFailure(failures, 'WIRING_STATE_DRIFT', 'wiring_started and wiring_edges must change together');
   }
-  validateSourceGreenClaims(input, context, failures);
+  validateSourceGreenClaims(input, context, failures, {
+    executeReceipts: options.executeReceipts !== false,
+  });
   for (const edge of input.mainlineMap.edges ?? []) {
     const serialized = JSON.stringify(edge);
     if (!manifest.integration?.wiring_started

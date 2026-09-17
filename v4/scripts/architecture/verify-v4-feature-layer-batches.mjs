@@ -68,10 +68,10 @@ export function loadCanonicalInput() {
   };
 }
 
-export function createProductionContext() {
+export function createProductionContext({ readStagedIndex = false } = {}) {
   return {
     io: createIo(),
-    truth: createGitTruth({ repoRoot, v4Root }),
+    truth: createGitTruth({ repoRoot, v4Root, readStagedIndex }),
     now: Date.now(),
   };
 }
@@ -85,6 +85,7 @@ export function validateFeatureLayerBatchAdmission(input, context, options = {})
   }
   failures.push(...validateFeatureLayerDefinition(input, context, {
     allowPendingGuard: options.allowPendingGuard === true,
+    executeReceipts: mode === 'admission',
   }));
   if (mode === 'admission') {
     validateFeatureLayerAdmission(input, context, failures);
@@ -139,7 +140,7 @@ function modeFromArgs(args) {
 function runProductionMode(mode) {
   const failures = validateFeatureLayerBatchAdmission(
     loadCanonicalInput(),
-    createProductionContext(),
+    createProductionContext({ readStagedIndex: mode === 'build-guard' }),
     { mode, allowPendingGuard: allowPendingGuardForMode(mode) },
   );
   if (failures.length > 0) {
@@ -188,3 +189,5 @@ if (direct) {
     runProductionMode(mode);
   }
 }
+
+// V4 lane G candidate marker: no semantic change.
