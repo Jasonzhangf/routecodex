@@ -242,8 +242,10 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
     }
+    let mut did_rescue_probe = false;
     loop {
         if !rescue_attempted {
+            let pre_rescue_generation = provider_health.store.availability_generation();
             if let Err(error) = provider_health
                 .run_exhaustion_rescue_probes(manifest, &expanded)
                 .await
@@ -255,6 +257,8 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                 ));
             }
             rescue_attempted = true;
+            did_rescue_probe = provider_health.store.availability_generation()
+                != pre_rescue_generation;
         }
         let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
@@ -283,7 +287,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         if provider_health.store.availability_generation() != observed_generation {
             continue;
         }
-        if !v3_exhaustion_is_cooldown_only(
+        if did_rescue_probe || !v3_exhaustion_is_cooldown_only(
             &expanded,
             request_local_excluded_candidates,
             failure_session_scope,
