@@ -797,6 +797,7 @@ struct ControlFrame {
     route_exit: Option<String>,
     continuation_committed: bool,
     continuation_restored: bool,
+    provider_sse_reducer: Option<Value>,
 }
 
 /// Control plane view: typed side-channel only; never projected into payload.
@@ -815,6 +816,7 @@ pub struct ControlView {
     pub route_exit: Option<String>,
     pub continuation_committed: bool,
     pub continuation_restored: bool,
+    pub provider_sse_reducer: Option<Value>,
     pub metadata: MetadataCenter,
 }
 
@@ -910,6 +912,7 @@ impl ExecutionContext {
                 route_exit: None,
                 continuation_committed: false,
                 continuation_restored: false,
+                provider_sse_reducer: None,
                 metadata: MetadataCenter::new(scope),
             },
             information: InformationView::default(),
@@ -1024,6 +1027,7 @@ impl ExecutionContext {
                 .get("continuation_restored")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            provider_sse_reducer: control_object.get("provider_sse_reducer").cloned(),
         };
         context.control.continuation_scope = control.continuation_scope;
         context.control.continuation_owner = control.continuation_owner;
@@ -1036,6 +1040,7 @@ impl ExecutionContext {
         context.control.route_exit = control.route_exit;
         context.control.continuation_committed = control.continuation_committed;
         context.control.continuation_restored = control.continuation_restored;
+        context.control.provider_sse_reducer = control.provider_sse_reducer;
         context.information = serde_json::from_value(frame.information.clone())
             .map_err(|error| RuntimeFault::new("execution_frame_information", error.to_string()))?;
         for event in &frame.events {
@@ -1075,6 +1080,7 @@ impl ExecutionContext {
             route_exit: self.control.route_exit,
             continuation_committed: self.control.continuation_committed,
             continuation_restored: self.control.continuation_restored,
+            provider_sse_reducer: self.control.provider_sse_reducer,
         };
         let raw_payload = match chain_id {
             "request" | "direct_request" | "relay_request" => self.data.raw_entry.as_deref(),
@@ -1615,6 +1621,7 @@ pub struct ExecutionReport {
     /// reconstruct protocol payloads from the original client body.
     pub provider_wire_value: Option<Value>,
     pub client_frame: Option<String>,
+    pub provider_sse_reducer: Option<Value>,
     pub continuation_scope: Option<String>,
     pub continuation_owner: Option<String>,
     pub execution_mode: Option<String>,
@@ -1684,6 +1691,7 @@ pub struct ResponseStreamProcessor {
     conversation_scope: String,
     semantic_terminal: bool,
     failure_projected: bool,
+    provider_sse_reducer: routecodex_v4_standard_plugins::response_inbound::ProviderSseReducer,
 }
 
 impl ResponseStreamProcessor {
@@ -1740,6 +1748,8 @@ impl ResponseStreamProcessor {
             conversation_scope: conversation_scope.to_string(),
             semantic_terminal: false,
             failure_projected: false,
+            provider_sse_reducer:
+                routecodex_v4_standard_plugins::response_inbound::ProviderSseReducer::default(),
         })
     }
 
@@ -1758,6 +1768,8 @@ impl ResponseStreamProcessor {
                 "provider emitted a semantic frame after stream terminal",
             ));
         }
+        let provider_sse_reducer = serde_json::to_value(&self.provider_sse_reducer)
+            .map_err(|error| RuntimeFault::new("provider_sse_reducer_encode", error.to_string()))?;
         let transport = SharedTransportCarrier::from_shared_bytes(frame.shared_bytes());
         let report = runtime.execute_provider_response_scoped_for_target_with_transport_and_lease(
             "{}",
@@ -1770,7 +1782,13 @@ impl ResponseStreamProcessor {
             &self.continuation_owner,
             Some(transport),
             Some(&self.request_lease),
+            Some(provider_sse_reducer),
         )?;
+        if let Some(value) = report.provider_sse_reducer.as_ref() {
+            self.provider_sse_reducer = serde_json::from_value(value.clone()).map_err(|error| {
+                RuntimeFault::new("provider_sse_reducer_decode", error.to_string())
+            })?;
+        }
         let disposition = report.trace.iter().find_map(|entry| {
             entry
                 .split_once(":provider_sse_disposition:")
@@ -2599,6 +2617,7 @@ impl SkeletonRuntime {
             continuation_owner,
             None,
             request_lease,
+            None,
         )
     }
 
@@ -2614,6 +2633,7 @@ impl SkeletonRuntime {
         continuation_owner: &str,
         transport: Option<SharedTransportCarrier>,
         request_lease: Option<&RuntimeLease>,
+        provider_sse_reducer: Option<Value>,
     ) -> Result<ExecutionReport, RuntimeFault> {
         if let Some(lease) = request_lease {
             if lease.request_id() != request_id {
@@ -2670,6 +2690,7 @@ impl SkeletonRuntime {
                 } else {
                     "direct".to_string()
                 });
+                ctx.control.provider_sse_reducer = provider_sse_reducer;
             },
             request_lease.map(RuntimeLease::epoch_lease),
             transport,
@@ -3023,10 +3044,7 @@ impl SkeletonRuntime {
                 chain_id,
                 &NodeExecutionFrame::with_side_channels(data, control, information, events),
             )?,
-            NodeOutcome::Terminal { .. } => {
-                ctx.data = DataView::default();
-                ctx
-            }
+            NodeOutcome::Terminal { .. } => ctx,
             NodeOutcome::Failure { .. } => unreachable!("failure returned above"),
             NodeOutcome::Branch { .. } => {
                 return Err(RuntimeFault::new(
@@ -3049,6 +3067,7 @@ impl SkeletonRuntime {
                 .transpose()
                 .map_err(|error| RuntimeFault::new("provider_wire_decode", error.to_string()))?,
             client_frame: ctx.data.client_frame.clone(),
+            provider_sse_reducer: ctx.control.provider_sse_reducer.clone(),
             continuation_scope: ctx.control.continuation_scope.clone(),
             continuation_owner: ctx.control.continuation_owner.clone(),
             execution_mode: ctx.control.execution_mode.clone(),

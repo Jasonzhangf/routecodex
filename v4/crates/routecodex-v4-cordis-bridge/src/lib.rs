@@ -479,6 +479,7 @@ fn control_resource_key(resource_id: &str) -> Option<&'static str> {
         "v4.control.target_selection" => Some("target_selection"),
         "v4.control.request_admission_facts" => Some("request_admission_facts"),
         "v4.control.stream_terminal" => Some("stream_terminal"),
+        "v4.control.provider_sse_reducer" => Some("provider_sse_reducer"),
         "v4.control.scope_command" => Some("scope_command"),
         _ => None,
     }

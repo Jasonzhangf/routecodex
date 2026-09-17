@@ -87,7 +87,7 @@ fn project_usage(value: &Value) -> Value {
     Value::Object(projected)
 }
 
-pub(crate) fn project_responses_to_chat(value: &Value) -> Value {
+pub(crate) fn project_responses_to_chat(value: &Value) -> Result<Value, String> {
     if value.get("type").is_some() {
         return project_responses_event_to_chat(value);
     }
@@ -103,7 +103,15 @@ pub(crate) fn project_responses_to_chat(value: &Value) -> Value {
             .expect("chat message is an object")
             .insert("tool_calls".to_string(), Value::Array(tool_calls.clone()));
     }
-    json!({
+    let finish_reason = if value.get("status").and_then(Value::as_str) == Some("incomplete") {
+        project_incomplete_finish_reason(value, value)?
+    } else if tool_calls.is_empty() {
+        "stop"
+    } else {
+        "tool_calls"
+    };
+
+    Ok(json!({
         "id": value.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
         "object": "chat.completion",
         "created": value.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
@@ -111,10 +119,30 @@ pub(crate) fn project_responses_to_chat(value: &Value) -> Value {
         "choices": [{
             "index": 0,
             "message": message,
-            "finish_reason": if tool_calls.is_empty() { "stop" } else { "tool_calls" }
+            "finish_reason": finish_reason
         }],
         "usage": project_usage(value)
-    })
+    }))
+}
+
+fn project_incomplete_finish_reason(
+    response: &Value,
+    event: &Value,
+) -> Result<&'static str, String> {
+    let reason = response
+        .pointer("/incomplete_details/reason")
+        .or_else(|| event.pointer("/incomplete_details/reason"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty());
+    match reason {
+        Some("max_output_tokens") => Ok("length"),
+        Some("content_filter") => Ok("content_filter"),
+        Some(other) => Err(format!(
+            "Responses response.incomplete carries unsupported incomplete_details.reason {other}"
+        )),
+        None => Err("Responses response.incomplete requires incomplete_details.reason".to_string()),
+    }
 }
 
 /// Adjacent client protocol codec. It converts an already governed semantic
@@ -185,7 +213,7 @@ pub fn encode_client_error_sse_frame(
     Ok(frame)
 }
 
-fn project_responses_event_to_chat(value: &Value) -> Value {
+fn project_responses_event_to_chat(value: &Value) -> Result<Value, String> {
     let event_type = value
         .get("type")
         .and_then(Value::as_str)
@@ -219,25 +247,59 @@ fn project_responses_event_to_chat(value: &Value) -> Value {
                 }]),
             );
         }
-        "response.completed" => {
-            finish_reason = Value::String(
-                if responses_tool_calls(response).is_empty() {
-                    "stop"
-                } else {
-                    "tool_calls"
+        "response.output_item.added" => {
+            if let Some(item) = value.get("item") {
+                if item.get("type").and_then(Value::as_str) == Some("function_call") {
+                    delta.insert(
+                        "tool_calls".to_string(),
+                        json!([{
+                            "index": value.get("output_index").cloned().unwrap_or(Value::Null),
+                            "id": item.get("call_id").or_else(|| item.get("id")).cloned().unwrap_or(Value::Null),
+                            "type": "function",
+                            "function": {
+                                "name": item.get("name").cloned().unwrap_or(Value::Null),
+                                "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
+                            }
+                        }]),
+                    );
                 }
-                .to_string(),
-            );
+            }
+        }
+        "response.completed" | "response.incomplete" => {
+            let finish = if event_type == "response.incomplete" {
+                project_incomplete_finish_reason(response, value)?
+            } else if responses_tool_calls(response).is_empty() {
+                "stop"
+            } else {
+                "tool_calls"
+            };
+            finish_reason = Value::String(finish.to_string());
         }
         _ => {}
     }
-    json!({
+    let mut projected = json!({
         "id": response.get("id").cloned().unwrap_or_else(|| Value::String(String::new())),
         "object": "chat.completion.chunk",
         "created": response.get("created_at").cloned().unwrap_or_else(|| Value::Number(0.into())),
         "model": response.get("model").cloned().unwrap_or_else(|| Value::String(String::new())),
         "choices": [{"index": 0, "delta": Value::Object(delta), "finish_reason": finish_reason}]
-    })
+    });
+    if let Some(usage) = response.get("usage").and_then(Value::as_object) {
+        let mut projected_usage = Map::new();
+        for (source, target) in [
+            ("input_tokens", "prompt_tokens"),
+            ("output_tokens", "completion_tokens"),
+            ("total_tokens", "total_tokens"),
+            ("input_tokens_details", "prompt_tokens_details"),
+            ("output_tokens_details", "completion_tokens_details"),
+        ] {
+            if let Some(field) = usage.get(source) {
+                projected_usage.insert(target.to_string(), field.clone());
+            }
+        }
+        projected["usage"] = Value::Object(projected_usage);
+    }
+    Ok(projected)
 }
 
 fn frame_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {

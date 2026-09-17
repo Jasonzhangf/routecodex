@@ -1064,6 +1064,224 @@ fn relay_sse_tool_terminal_projects_tool_calls_finish_reason() {
     };
     let frame = first_sse_data_json(&String::from_utf8_lossy(frame.as_bytes()));
     assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
+    assert!(frame["choices"][0]["delta"].get("tool_calls").is_none());
+}
+
+#[test]
+fn relay_sse_tool_stream_uses_one_stable_tool_call_without_terminal_duplicate() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-relay-sse-tool-stream",
+        "chat",
+        "responses",
+        "relay",
+    );
+    let (added_disposition, added_report) = processor
+        .execute_provider_response_scoped(
+            &runtime,
+            transport_frame(
+                b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n",
+            ),
+        )
+        .expect("tool item added must project");
+    assert!(
+        added_report
+            .as_ref()
+            .and_then(|report| report.provider_sse_reducer.as_ref())
+            .is_some(),
+        "reducer state must return from the registered inbound owner"
+    );
+    let added = added_disposition;
+    let ResponseStreamDisposition::Continue { frame: added } = added else {
+        panic!("tool item added must remain non-terminal");
+    };
+    let added = first_sse_data_json(&String::from_utf8_lossy(added.as_bytes()));
+    let added_tool = &added["choices"][0]["delta"]["tool_calls"][0];
+    assert_eq!(added_tool["index"], 1);
+    assert_eq!(added_tool["id"], "call_1");
+    assert_eq!(added_tool["function"]["name"], "lookup");
+    assert_eq!(added_tool["function"]["arguments"], "");
+
+    let delta = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"call_id\":\"call_1\",\"delta\":\"{\\\"q\\\":\\\"v4\\\"}\"}\n\n",
+            ),
+        )
+        .expect("tool arguments must project");
+    let ResponseStreamDisposition::Continue { frame: delta } = delta else {
+        panic!("tool arguments delta must remain non-terminal");
+    };
+    let delta = first_sse_data_json(&String::from_utf8_lossy(delta.as_bytes()));
+    let delta_tool = &delta["choices"][0]["delta"]["tool_calls"][0];
+    assert_eq!(delta_tool["index"], 1);
+    assert_eq!(delta_tool["function"]["arguments"], "{\"q\":\"v4\"}");
+
+    let (terminal, terminal_report) = processor
+        .execute_provider_response_scoped(
+            &runtime,
+            transport_frame(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool\",\"model\":\"m\",\"status\":\"completed\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n",
+            ),
+        )
+        .expect("terminal without output must use reduced finish truth");
+    assert_eq!(
+        terminal_report
+            .as_ref()
+            .and_then(|report| report.provider_sse_reducer.as_ref())
+            .and_then(|reducer| reducer.get("output_items"))
+            .and_then(|items| items.get("1"))
+            .and_then(|item| item.get("call_id")),
+        Some(&serde_json::Value::String("call_1".to_string())),
+        "reducer must retain the streamed tool item across registered inbound dispatches"
+    );
+    let ResponseStreamDisposition::Terminal { frame } = terminal else {
+        panic!("response.completed must be terminal");
+    };
+    let frame = first_sse_data_json(&String::from_utf8_lossy(frame.as_bytes()));
+    assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(frame["usage"]["prompt_tokens"], 11);
+    assert!(frame["choices"][0]["delta"].get("tool_calls").is_none());
+}
+
+#[test]
+fn relay_sse_terminal_replaces_matching_tool_item_with_reduced_arguments() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-relay-sse-tool-replace",
+        "chat",
+        "responses",
+        "relay",
+    );
+    processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\"}}\n\n",
+            ),
+        )
+        .expect("tool item added must be reduced");
+    processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"call_id\":\"call_1\",\"delta\":\"{\\\"q\\\":\\\"v4\\\"}\"}\n\n",
+            ),
+        )
+        .expect("tool arguments must be reduced");
+    let terminal = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n",
+            ),
+        )
+        .expect("terminal matching output must be replaced by reduced item");
+    let ResponseStreamDisposition::Terminal { frame } = terminal else {
+        panic!("response.completed must be terminal");
+    };
+    let frame = first_sse_data_json(&String::from_utf8_lossy(frame.as_bytes()));
+    assert_eq!(frame["choices"][0]["finish_reason"], "tool_calls");
+    assert!(frame["choices"][0]["delta"].get("tool_calls").is_none());
+}
+
+#[test]
+fn relay_sse_terminal_does_not_duplicate_streamed_message_item() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-relay-sse-message-reducer",
+        "chat",
+        "responses",
+        "relay",
+    );
+    processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n",
+            ),
+        )
+        .expect("message item added must be reduced");
+    processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n",
+            ),
+        )
+        .expect("message item done must be reduced");
+    let terminal = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_message\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n",
+            ),
+        )
+        .expect("terminal message response must reduce");
+    let ResponseStreamDisposition::Terminal { frame } = terminal else {
+        panic!("response.completed must be terminal");
+    };
+    let frame = first_sse_data_json(&String::from_utf8_lossy(frame.as_bytes()));
+    assert_eq!(frame["choices"][0]["finish_reason"], "stop");
+    assert_eq!(frame["choices"][0]["delta"].get("content"), None);
+}
+
+#[test]
+fn relay_sse_incomplete_is_terminal_and_finishes() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-relay-sse-incomplete",
+        "chat",
+        "responses",
+        "relay",
+    );
+    let terminal = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"model\":\"m\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n",
+            ),
+        )
+        .expect("response.incomplete must traverse the stream processor");
+    let ResponseStreamDisposition::Terminal { frame } = terminal else {
+        panic!("response.incomplete must be terminal");
+    };
+    let frame = first_sse_data_json(&String::from_utf8_lossy(frame.as_bytes()));
+    assert_eq!(frame["choices"][0]["finish_reason"], "length");
+    assert_eq!(frame["usage"]["total_tokens"], 5);
+    processor
+        .finish()
+        .expect("terminal incomplete stream must finish cleanly");
+}
+
+#[test]
+fn relay_sse_provider_done_without_completed_fails_at_eof() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-relay-sse-provider-done",
+        "chat",
+        "responses",
+        "relay",
+    );
+    let disposition = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_done\",\"model\":\"m\",\"status\":\"completed\",\"output\":[]}}\n\n",
+            ),
+        )
+        .expect("provider response.done must traverse as a non-terminal frame");
+    assert!(matches!(disposition, ResponseStreamDisposition::Continue { .. }));
+    let fault = processor
+        .finish()
+        .expect_err("provider response.done must not satisfy terminal truth");
+    assert_eq!(fault.code, "provider_sse_eof_before_terminal");
 }
 
 #[test]

@@ -238,6 +238,7 @@ resources:
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
   - V4HubReqExecution04Planned
+  - V4ProviderRespInbound01Raw
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
@@ -266,6 +267,7 @@ resources:
   - V4ProviderReqCompat07ProviderCompat
   - V4ProviderReqOutbound08WirePayload
   - V4HubRespOutbound05ClientSemantic
+  - V4ProviderRespInbound01Raw
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
@@ -293,6 +295,7 @@ resources:
   - V4ProviderReqOutbound08WirePayload
   - V4ProviderRespCompat02ProviderCompat
   - V4HubRespOutbound05ClientSemantic
+  - V4ProviderRespInbound01Raw
   forbidden_writers:
   - SseIngressPlugin
   - SseEgressPlugin
@@ -381,6 +384,30 @@ resources:
   allowed_readers:
   - V4DirectResp03ClientProtocol
   - V4ServerRespOutbound06ClientFrame
+  forbidden_writers:
+  - V4HubRespChatProcess04Governed
+  - V4HubRespOutbound05ClientSemantic
+  - SseIngressPlugin
+  - SseEgressPlugin
+  may_enter_provider_body: false
+  may_enter_client_body: false
+  binding_status: anchored
+- resource_id: v4.control.provider_sse_reducer
+  axis: control
+  verification_gate:
+  - v4_direct_relay_sse
+  - v4_direct_relay_sse_red
+  - v4_parity_gate_standard_plugins
+  resource_kind: provider_sse_reducer
+  lifecycle: v4.pipeline.response
+  owner_crate: routecodex-v4-standard-plugins
+  owner_node: V4ProviderRespInbound01Raw
+  owner_symbols:
+  - provider_sse_decode
+  allowed_writers:
+  - V4ProviderRespInbound01Raw
+  allowed_readers:
+  - V4ProviderRespInbound01Raw
   forbidden_writers:
   - V4HubRespChatProcess04Governed
   - V4HubRespOutbound05ClientSemantic
