@@ -159,6 +159,144 @@ fn weighted_priority_forwarder_manifest() -> V3Config05ManifestPublished {
     manifest
 }
 
+fn provider_priority_schedule_manifest() -> V3Config05ManifestPublished {
+    let mut manifest = weighted_priority_forwarder_manifest();
+    let default_pool = manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap();
+    default_pool.targets = vec![
+        V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("a".into()),
+            model: Some("m".into()),
+            key: Some("ka".into()),
+            priority: Some(100),
+            weight: Some(1),
+        },
+        V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("b".into()),
+            model: Some("m".into()),
+            key: Some("kb".into()),
+            priority: Some(50),
+            weight: Some(1),
+        },
+        V3RoutePoolTargetManifest {
+            kind: V3RouteTargetKind::ProviderModel,
+            id: None,
+            provider: Some("c".into()),
+            model: Some("m".into()),
+            key: Some("kc".into()),
+            priority: Some(10),
+            weight: Some(1),
+        },
+    ];
+    manifest
+        .servers
+        .get_mut("s")
+        .unwrap()
+        .provider_priority_schedule =
+        routecodex_v3_config::V3ProviderPriorityScheduleAuthoringConfig {
+            timezone: "Asia/Shanghai".into(),
+            peak_periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+                start: "09:00".into(),
+                end: "18:00".into(),
+            }],
+            providers: vec![
+                routecodex_v3_config::V3ProviderPriorityScheduleEntryAuthoringConfig {
+                    provider: "a".into(),
+                    peak_tier: 3,
+                    off_peak_tier: 1,
+                },
+            ],
+        };
+    manifest
+}
+
+#[test]
+fn provider_priority_schedule_switches_tier_without_bypassing_availability() {
+    let manifest = provider_priority_schedule_manifest();
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+
+    let peak = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_229_200_000,
+        )
+        .unwrap();
+    assert_eq!(peak.candidate.provider_id, "b");
+
+    let off_peak = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_272_400_000,
+        )
+        .unwrap();
+    assert_eq!(off_peak.candidate.provider_id, "a");
+
+    let a_blocked = Availability {
+        blocked: BTreeSet::from(["a:ka:m".into()]),
+    };
+    let blocked_off_peak = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &a_blocked,
+            1_767_272_400_000,
+        )
+        .unwrap();
+    assert_eq!(blocked_off_peak.candidate.provider_id, "b");
+}
+
+#[test]
+fn provider_priority_schedule_honors_timezone_and_cross_midnight_window() {
+    let mut manifest = provider_priority_schedule_manifest();
+    let schedule = &mut manifest
+        .servers
+        .get_mut("s")
+        .unwrap()
+        .provider_priority_schedule;
+    schedule.timezone = "America/Los_Angeles".into();
+    schedule.peak_periods = vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+        start: "22:00".into(),
+        end: "02:00".into(),
+    }];
+
+    let target = V3TargetInterpreter::default();
+    let available = Availability {
+        blocked: BTreeSet::new(),
+    };
+    // 2026-01-01 22:00 PST: provider a is in the configured peak tier.
+    let peak = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_333_600_000,
+        )
+        .unwrap();
+    assert_eq!(peak.candidate.provider_id, "b");
+
+    // 2026-01-01 03:00 PST: the cross-midnight window has ended.
+    let off_peak = target
+        .select_available(
+            expanded_with(&manifest, &target, 0),
+            &available,
+            1_767_265_200_000,
+        )
+        .unwrap();
+    assert_eq!(off_peak.candidate.provider_id, "a");
+}
+
 #[test]
 fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();

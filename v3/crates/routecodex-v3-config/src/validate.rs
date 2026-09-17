@@ -47,6 +47,7 @@ pub(crate) fn build_resource_registry(
         &route_groups,
         hub_v1.is_some(),
         http_sse_keepalive_ms,
+        &providers,
     )?;
     let admin_webui = compile_admin_webui(authoring.admin_webui)?;
     ensure_unique_listen_addresses(&servers, admin_webui.as_ref())?;
@@ -457,6 +458,7 @@ fn compile_servers(
     route_groups: &BTreeMap<String, V3RouteGroupManifest>,
     hub_v1_enabled: bool,
     http_sse_keepalive_ms: u64,
+    providers: &BTreeMap<String, V3ProviderManifest>,
 ) -> Result<BTreeMap<String, V3ServerManifest>, V3ConfigError> {
     authoring
         .into_iter()
@@ -490,6 +492,18 @@ fn compile_servers(
                     )));
                 }
             }
+            server
+                .provider_priority_schedule
+                .validate(&format!("server {id}.provider_priority_schedule"))
+                .map_err(validation)?;
+            for entry in &server.provider_priority_schedule.providers {
+                if !providers.contains_key(&entry.provider) {
+                    return Err(validation(format!(
+                        "server {id}.provider_priority_schedule references unknown provider {}",
+                        entry.provider
+                    )));
+                }
+            }
             let execution = match server.execution {
                 Some(execution) => Some(compile_server_execution(&id, execution)?),
                 None if hub_v1_enabled => Some(compile_server_execution(
@@ -515,6 +529,7 @@ fn compile_servers(
                     execution,
                     http_sse_keepalive_ms,
                     expose_models: server.expose_models,
+                    provider_priority_schedule: server.provider_priority_schedule,
                 },
             ))
         })

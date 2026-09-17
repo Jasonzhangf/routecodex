@@ -196,6 +196,7 @@ fn test_v3_listener_state_with_debug(
         execution: None,
         http_sse_keepalive_ms: 3_000,
         expose_models: Vec::new(),
+        provider_priority_schedule: Default::default(),
     };
     servers.insert(server.id.clone(), server.clone());
     let manifest = Arc::new(V3Config05ManifestPublished {
@@ -3527,6 +3528,7 @@ fn error_projection_appends_human_console_failure_line() {
         execution: None,
         http_sse_keepalive_ms: 3_000,
         expose_models: Vec::new(),
+        provider_priority_schedule: Default::default(),
     };
     servers.insert(server.id.clone(), server.clone());
     let manifest = Arc::new(V3Config05ManifestPublished {
