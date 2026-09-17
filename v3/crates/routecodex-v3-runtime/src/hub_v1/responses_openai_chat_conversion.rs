@@ -437,7 +437,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             Value::String(arguments.to_string()),
         ),
     ]);
-    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut item);
+    provider_compat_core::namespace_tools::restore_responses_mcp_namespace(&mut item);
     Ok(Value::Object(item))
 }
 

@@ -1320,9 +1320,10 @@ fn normalize_openai_chat_messages_payload(
         .and_then(|value| value.as_str().map(str::to_string))
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
-    super::request_outbound_mcp_names::qualify_openai_chat_missing_mcp_tool_call_names(
+    provider_compat_core::namespace_tools::qualify_openai_chat_missing_mcp_tool_call_names(
         &mut normalized,
     );
+    provider_compat_core::namespace_tools::normalize_provider_wire_function_names(&mut normalized);
     let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(normalized);
     };
@@ -1368,9 +1369,6 @@ fn normalize_openai_chat_messages_payload(
         let Some(message_row) = message.as_object_mut() else {
             continue;
         };
-        super::request_outbound_mcp_names::normalize_openai_chat_message_tool_call_names(
-            message_row,
-        );
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
         let Some(content) = message_row.get_mut("content") else {
             continue;

@@ -1,5 +1,315 @@
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// Normalize the provider-facing function name used in call history.
+///
+/// Codex may expose MCP calls in history as `functions.mcp__server.tool`,
+/// while provider function names only allow ASCII letters, digits, `_`, and
+/// `-`. MCP path separators are flattened to the namespace convention.
+/// Unrelated names are preserved exactly.
+pub fn canonical_provider_function_name(name: &str) -> String {
+    let name = name
+        .strip_prefix("functions.")
+        .filter(|value| value.starts_with("mcp__"))
+        .unwrap_or(name);
+    if let Some(rest) = name.strip_prefix("mcp__") {
+        if rest.contains('.') && rest.split('.').all(is_provider_function_name_component) {
+            return format!("mcp__{}", rest.replace('.', "__"));
+        }
+    }
+    if let Some((namespace, child)) = name.split_once('.') {
+        if !child.is_empty()
+            && !child.contains('.')
+            && is_provider_function_name_component(namespace)
+            && is_provider_function_name_component(child)
+            && matches!(namespace, "servertool" | "mcp" | "native")
+        {
+            return format!("{namespace}__{child}");
+        }
+    }
+    name.to_owned()
+}
+
+/// Apply the provider-facing function-name convention to every call-history
+/// shape that can cross a provider wire.
+///
+/// This is the final wire projection, not a protocol codec. It normalizes
+/// `function_call`, `custom_tool_call`, `tool_call`, `tool_use`, nested Chat
+/// `function.name`, and Chat tool-result content part names while preserving
+/// every unrelated field byte-for-byte. `tool_search` control history is
+/// deliberately excluded because it carries client control semantics rather
+/// than a provider function declaration.
+pub fn normalize_provider_wire_function_names(body: &mut Value) {
+    let Some(root) = body.as_object_mut() else {
+        return;
+    };
+    if let Some(input) = root.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            normalize_provider_wire_history_item(item);
+        }
+    }
+    if let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            normalize_provider_wire_message(message);
+        }
+    }
+}
+
+/// Qualify namespace-less Responses-origin MCP history from the current
+/// provider tool declaration set.
+///
+/// The mapping is applied only when a provider tool set exposes exactly one
+/// MCP tool with the same leaf name and no ordinary function with that name.
+/// Custom calls, unrelated native functions, and ambiguous leaves remain
+/// unchanged.
+pub fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    let Some(tools) = root.get("tools").and_then(Value::as_array).cloned() else {
+        return;
+    };
+    let Some(messages) = root.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let mut qualified_by_leaf = HashMap::<String, Option<String>>::new();
+    let mut ordinary_callable_names = HashSet::new();
+    for tool in &tools {
+        if let Ok(Some(children)) = flatten_namespace_tool_for_provider("openai-chat", tool) {
+            for child in children {
+                if let Some(name) = provider_function_tool_name(&child) {
+                    insert_provider_mcp_name(&mut qualified_by_leaf, name);
+                }
+            }
+            continue;
+        }
+        if let Some(name) = provider_function_tool_name(tool) {
+            if mcp_tool_leaf_name(name).is_some() {
+                insert_provider_mcp_name(&mut qualified_by_leaf, name);
+            } else {
+                ordinary_callable_names.insert(name.to_owned());
+            }
+        }
+    }
+    for name in ordinary_callable_names {
+        if qualified_by_leaf.contains_key(&name) {
+            qualified_by_leaf.insert(name, None);
+        }
+    }
+    if qualified_by_leaf.is_empty() {
+        return;
+    }
+    for message in messages {
+        let Some(message_row) = message.as_object_mut() else {
+            continue;
+        };
+        let Some(tool_calls) = message_row
+            .get_mut("tool_calls")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        for tool_call in tool_calls {
+            let Some(tool_call_row) = tool_call.as_object_mut() else {
+                continue;
+            };
+            if is_custom_tool_call(tool_call_row) || !has_responses_item_id(tool_call_row) {
+                continue;
+            }
+            let Some(name) = tool_call_row
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+            if name.starts_with("mcp__") {
+                continue;
+            }
+            let Some(qualified) = qualified_by_leaf.get(&name).and_then(Option::as_ref) else {
+                continue;
+            };
+            if let Some(function) = tool_call_row
+                .get_mut("function")
+                .and_then(Value::as_object_mut)
+            {
+                function.insert("name".to_string(), Value::String(qualified.clone()));
+            }
+        }
+    }
+}
+
+/// Restore a flattened provider MCP function name into the reversible
+/// Responses client shape (`namespace` + leaf `name`).
+pub fn restore_responses_mcp_namespace(object: &mut Map<String, Value>) -> bool {
+    if object.get("namespace").is_some() {
+        return false;
+    }
+    let Some(name) = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let Some(rest) = name.strip_prefix("mcp__") else {
+        return false;
+    };
+    // Provider wire flattens a client namespace path into
+    // `mcp__<server>[__<nested>...]__<tool>`: the tool is the last segment and
+    // every earlier segment is namespace path. Using the last separator keeps
+    // nested declarations (mcp__mcpx__workspace__read) reversible to
+    // namespace `mcp__mcpx__workspace` + name `read` instead of gluing the
+    // remaining path onto the tool name.
+    let Some((namespace, tool)) = rest.rsplit_once("__") else {
+        return false;
+    };
+    if namespace.is_empty() || tool.is_empty() {
+        return false;
+    }
+    object.insert(
+        "namespace".to_owned(),
+        Value::String(format!("mcp__{namespace}")),
+    );
+    object.insert("name".to_owned(), Value::String(tool.to_owned()));
+    true
+}
+
+fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {
+    tool_call
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_tool_call_type"))
+        .and_then(Value::as_str)
+        == Some("custom_tool_call")
+}
+
+fn has_responses_item_id(tool_call: &Map<String, Value>) -> bool {
+    tool_call
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get("responses_item_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn provider_function_tool_name(tool: &Value) -> Option<&str> {
+    tool.get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| tool.get("name").and_then(Value::as_str))
+}
+
+fn insert_provider_mcp_name(map: &mut HashMap<String, Option<String>>, name: &str) {
+    let Some(leaf) = mcp_tool_leaf_name(name) else {
+        return;
+    };
+    match map.get(leaf) {
+        Some(Some(existing)) if existing != name => {
+            map.insert(leaf.to_string(), None);
+        }
+        None => {
+            map.insert(leaf.to_string(), Some(name.to_string()));
+        }
+        _ => {}
+    }
+}
+
+fn mcp_tool_leaf_name(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix("mcp__")?;
+    let (_, tool) = rest.rsplit_once("__")?;
+    (!tool.is_empty()).then_some(tool)
+}
+
+fn normalize_provider_wire_history_item(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                normalize_provider_wire_history_item(item);
+            }
+        }
+        Value::Object(object) => {
+            let kind = object
+                .get("type")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if matches!(
+                kind.as_deref(),
+                Some("tool_search_call" | "tool_search_output")
+            ) {
+                return;
+            }
+            if matches!(
+                kind.as_deref(),
+                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
+            ) {
+                normalize_provider_wire_name_field(object, "name");
+            }
+            if matches!(kind.as_deref(), Some("tool_result")) {
+                normalize_provider_wire_name_field(object, "name");
+            }
+            if let Some(content) = object.get_mut("content") {
+                normalize_provider_wire_history_item(content);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_provider_wire_message(value: &mut Value) {
+    let Some(message) = value.as_object_mut() else {
+        return;
+    };
+    let tool_search_control = message
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .is_some_and(|extension| {
+            extension
+                .get("responses_tool_call_type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| matches!(kind, "tool_search_call" | "tool_search_output"))
+                || extension
+                    .get("responses_tool_output_type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind == "tool_search_output")
+        });
+    if tool_search_control {
+        return;
+    }
+    if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
+        for tool_call in tool_calls {
+            let Some(tool_call) = tool_call.as_object_mut() else {
+                continue;
+            };
+            if let Some(function) = tool_call.get_mut("function").and_then(Value::as_object_mut) {
+                normalize_provider_wire_name_field(function, "name");
+            }
+        }
+    }
+    if let Some(content) = message.get_mut("content") {
+        normalize_provider_wire_history_item(content);
+    }
+}
+
+fn normalize_provider_wire_name_field(object: &mut Map<String, Value>, field: &str) {
+    let Some(name) = object.get(field).and_then(Value::as_str) else {
+        return;
+    };
+    let normalized = canonical_provider_function_name(name);
+    if normalized != name {
+        object.insert(field.to_string(), Value::String(normalized));
+    }
+}
+
+fn is_provider_function_name_component(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
 
 /// Returns the reversible client namespace path -> provider function name map
 /// for a namespace declaration. The same traversal rules as flattening are
@@ -277,6 +587,96 @@ fn build_provider_function_tool(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn canonical_provider_function_name_normalizes_codex_mcp_history() {
+        assert_eq!(
+            canonical_provider_function_name("functions.mcp__codex_review__review_start"),
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            canonical_provider_function_name("mcp__mcpx.workspace.read"),
+            "mcp__mcpx__workspace__read"
+        );
+        assert_eq!(
+            canonical_provider_function_name("servertool.search"),
+            "servertool__search"
+        );
+    }
+
+    #[test]
+    fn canonical_provider_function_name_preserves_unrelated_names() {
+        assert_eq!(
+            canonical_provider_function_name("functions.lookup"),
+            "functions.lookup"
+        );
+        assert_eq!(canonical_provider_function_name("lookup"), "lookup");
+        assert_eq!(
+            canonical_provider_function_name("mcp__bad.name!"),
+            "mcp__bad.name!"
+        );
+    }
+
+    #[test]
+    fn provider_wire_normalization_covers_call_history_shapes() {
+        let mut body = json!({
+            "input": [
+                {"type":"function_call","name":"functions.mcp__codex_review__review_start"},
+                {"type":"custom_tool_call","name":"mcp__mcpx.workspace.read"},
+                {"type":"tool_use","name":"servertool.search"}
+            ],
+            "messages": [{
+                "role":"assistant",
+                "tool_calls": [{
+                    "type":"function",
+                    "function":{"name":"functions.mcp__codex_review__review_start"}
+                }],
+                "content":[{"type":"tool_result","name":"mcp__mcpx.workspace.read"}]
+            }]
+        });
+        normalize_provider_wire_function_names(&mut body);
+        assert_eq!(body["input"][0]["name"], "mcp__codex_review__review_start");
+        assert_eq!(body["input"][1]["name"], "mcp__mcpx__workspace__read");
+        assert_eq!(body["input"][2]["name"], "servertool__search");
+        assert_eq!(
+            body["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            body["messages"][0]["content"][0]["name"],
+            "mcp__mcpx__workspace__read"
+        );
+    }
+
+    #[test]
+    fn provider_wire_normalization_preserves_tool_search_control_history() {
+        let mut body = json!({
+            "input": [{
+                "type":"tool_search_call",
+                "name":"mcp__mcpx.workspace",
+                "tools": [{
+                    "type":"function",
+                    "name":"functions.mcp__codex_review__review_start"
+                }]
+            }, {
+                "type":"tool_search_output",
+                "tools": [{
+                    "type":"function",
+                    "name":"functions.mcp__codex_review__review_start"
+                }]
+            }]
+        });
+        normalize_provider_wire_function_names(&mut body);
+        assert_eq!(body["input"][0]["name"], "mcp__mcpx.workspace");
+        assert_eq!(
+            body["input"][0]["tools"][0]["name"],
+            "functions.mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            body["input"][1]["tools"][0]["name"],
+            "functions.mcp__codex_review__review_start"
+        );
+    }
 
     #[test]
     fn flattens_valid_namespace_children_for_openai_chat() {
