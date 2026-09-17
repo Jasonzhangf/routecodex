@@ -242,8 +242,17 @@ fn normalize_provider_sse_frame_with_lane(
     let text = std::str::from_utf8(frame)
         .map_err(|error| format!("provider_sse_utf8: {error}"))?;
     let mut output = Vec::new();
+    let mut current_event: Option<String> = None;
     for line in text.lines() {
         let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            current_event = None;
+            continue;
+        }
+        if let Some(event) = line.strip_prefix("event:") {
+            current_event = Some(event.trim().to_string());
+            continue;
+        }
         let Some(data) = line.strip_prefix("data:") else {
             continue;
         };
@@ -254,17 +263,29 @@ fn normalize_provider_sse_frame_with_lane(
         }
         let value: Value = serde_json::from_str(data)
             .map_err(|error| format!("provider_sse_malformed: {error}"))?;
-        let event = match protocol {
+        let mut event = match protocol {
             "openai" | "chat" => normalize_openai_sse_event(&value),
             "anthropic" => normalize_anthropic_sse_event(&value),
             "responses" => Some(normalize_responses_response(&value, None, allow_relay_instructions)?),
             other => return Err(format!("provider_protocol_unsupported: provider protocol {other} has no SSE normalizer")),
         };
+        if protocol == "responses" {
+            if let Some(event_object) = event.as_mut().and_then(Value::as_object_mut) {
+                if !event_object.contains_key("type") {
+                    if let Some(event_name) = current_event.as_ref().filter(|name| !name.trim().is_empty()) {
+                        event_object.insert("type".to_string(), Value::String(event_name.clone()));
+                    }
+                }
+            }
+        }
         if let Some(event) = event {
             let event_type = event
                 .get("type")
                 .and_then(Value::as_str)
-                .unwrap_or("response.output_text.delta");
+                .ok_or_else(|| {
+                    "provider Responses SSE event object must contain type after event-name normalization"
+                        .to_string()
+                })?;
             output.extend_from_slice(
                 format!(
                     "event: {event_type}\ndata: {}\n\n",

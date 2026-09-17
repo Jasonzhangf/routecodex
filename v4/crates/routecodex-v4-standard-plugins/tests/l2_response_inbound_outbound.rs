@@ -213,6 +213,42 @@ data: {"type":"response.created","extra_fields":{"provider":"openai","latency":4
 }
 
 #[test]
+fn provider_responses_sse_uses_event_name_as_type_when_data_object_omits_it() {
+    let normalized = normalize_provider_sse_frame(
+        "responses",
+        b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\nevent: response.completed\ndata: {\"response\":{\"status\":\"completed\"}}\n\n",
+    )
+    .expect("Responses SSE normalizer must retain event identity when data omits type");
+    let text = String::from_utf8(normalized).expect("utf8");
+    assert!(text.contains("\"type\":\"response.output_text.delta\""));
+    assert!(text.contains("\"type\":\"response.completed\""));
+}
+
+#[test]
+fn provider_responses_sse_event_name_does_not_leak_across_blocks() {
+    let error = normalize_provider_sse_frame(
+        "responses",
+        b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\ndata: {\"response\":{\"status\":\"completed\"}}\n\n",
+    )
+    .expect_err("an unnamed event block must not inherit the previous event name");
+    assert!(
+        error.contains("missing field `type`") || error.contains("must contain type"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn provider_sse_decoder_accepts_response_delta_without_data_type_but_with_event_name() {
+    let decoded = decode_provider_sse_frame(
+        b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n",
+    )
+    .expect("provider SSE boundary must accept event-name typed Responses frames");
+    assert_eq!(decoded.semantic["type"], "response.output_text.delta");
+    assert_eq!(decoded.semantic["delta"], "hi");
+    assert_eq!(decoded.disposition, ProviderSseEventDisposition::Continue);
+}
+
+#[test]
 fn provider_sse_uses_arc_transport_carrier_and_typed_terminal_control() {
     let bytes: Arc<[u8]> = Arc::from(
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"arc-1\"}}\n\n"
