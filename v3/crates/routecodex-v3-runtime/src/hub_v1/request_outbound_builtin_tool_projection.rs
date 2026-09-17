@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
+use super::request_outbound_mcp_names::provider_function_name;
 
 pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     payload: &mut Value,
@@ -476,20 +477,17 @@ fn normalize_openai_chat_function_tool(
     path: &str,
 ) -> Result<Value, String> {
     if let Some(function) = row.get("function").and_then(Value::as_object) {
-        // Req04 owns the only Tool-Thinking schema compilation. This adapter
-        // preserves the already-governed function declaration, while the
-        // provider wire name still shares the MCP history normalization owner.
+        // Req04 owns the only Tool-Thinking schema compilation. Preserve the
+        // governed declaration while normalizing only the legacy MCP name.
         let mut normalized = row.clone();
         if let Some(name) = function.get("name").and_then(Value::as_str) {
-            if let Some(normalized_function) = normalized
+            if let Some(function) = normalized
                 .get_mut("function")
                 .and_then(Value::as_object_mut)
             {
-                normalized_function.insert(
+                function.insert(
                     "name".to_string(),
-                    Value::String(super::request_outbound_mcp_names::provider_function_name(
-                        name,
-                    )),
+                    Value::String(provider_function_name(name)),
                 );
             }
         }
@@ -503,11 +501,7 @@ fn normalize_openai_chat_function_tool(
                 if key == "name" {
                     value
                         .as_str()
-                        .map(|name| {
-                            Value::String(
-                                super::request_outbound_mcp_names::provider_function_name(name),
-                            )
-                        })
+                        .map(|name| Value::String(provider_function_name(name)))
                         .unwrap_or_else(|| value.clone())
                 } else {
                     value.clone()

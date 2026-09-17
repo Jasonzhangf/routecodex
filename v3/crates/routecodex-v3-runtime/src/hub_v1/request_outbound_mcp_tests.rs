@@ -213,6 +213,28 @@ fn responses_function_call_history_without_namespace_is_qualified_from_provider_
 }
 
 #[test]
+fn legacy_mcp_declaration_qualifies_namespace_less_continuation_history() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-5.5",
+        "tools":[{"type":"function","name":"functions.mcp__mcpx__session","parameters":{"type":"object"}}],
+        "messages":[{"role":"assistant","tool_calls":[{
+            "id":"call_session",
+            "type":"function",
+            "function":{"name":"session","arguments":"{}"},
+            "routecodex_chat_extension":{"responses_item_id":"fc_session"}
+        }]}]
+    })).expect("legacy MCP declarations must qualify continuation history");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "mcp__mcpx__session"
+    );
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx__session"
+    );
+}
+
+#[test]
 fn openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.3",
@@ -262,7 +284,7 @@ fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
                         "type": "custom_tool_call",
                         "id": "ctc_custom_session",
                         "call_id": "call_custom_session",
-                        "name": "session",
+                        "name": "functions.custom.render",
                         "input": "custom payload"
                     },
                     {
@@ -284,7 +306,23 @@ fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
 
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
-        json!("session")
+        json!("functions.custom.render")
+    );
+}
+
+#[test]
+fn openai_chat_provider_preserves_custom_tool_output_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"gpt-5.5","messages":[{
+            "role":"tool",
+            "tool_call_id":"call_custom",
+            "content":[{"type":"tool_result","name":"functions.custom.render","content":"{}"}],
+            "routecodex_chat_extension":{"responses_tool_output_type":"custom_tool_call_output"}
+        }]
+    })).expect("custom tool output names must remain exact");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        json!("functions.custom.render")
     );
 }
 
