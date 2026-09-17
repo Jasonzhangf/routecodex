@@ -1107,19 +1107,8 @@
         "scope_hash": "sha256:4f5d5c7a37277170979e7723c5dbdd27c2a365affaa90996c5888ef8366cb7a4"
       }
     ],
-    "wiring_started": true,
-    "wiring_edges": [
-      "surface:Cargo.toml:sha256:637beb20bb48045b50e51934ad10f90ec9b244529ba5c90a83421542e868671a",
-      "surface:contracts/active-link/frozen-consumer-registry.json:sha256:480a4c6dd54da69ba39769358674d69281bb229f531ff55a499e2a7f4e653328",
-      "surface:contracts/real-runtime-admission.manifest.json:sha256:1dd63ba0bd84acbae162663b534bfe1c7d5f5315e66d5310822090a5121e863c",
-      "surface:crates/routecodex-v4-runtime-bin/**:sha256:4f5d5c7a37277170979e7723c5dbdd27c2a365affaa90996c5888ef8366cb7a4",
-      "surface:docs/architecture/maps/mainline-call-map.json:sha256:586e76df878b451e8fabcf4520954bcbdf99f4113a77adad32df9ec90a17e91f",
-      "surface:scripts/build.mjs:sha256:ec4b419c84d51230ba126da284bf38f9181763e664e76fac9ace1888e74fa8c8",
-      "surface:scripts/compile-real-runtime-manifest.mjs:sha256:a4756498aafa9d3c6726f1be982bbea76bec5daa5ddc4631c49666ba0e9902de",
-      "surface:scripts/install-rccv4.mjs:sha256:446933ac4f7536ea9dea8bbfd068883e2093f65c247b68cfa7ef225def5e5d5c",
-      "surface:scripts/verify-ci.mjs:sha256:7a599e4c4c913287e93e862f4f72ad78c4cd54faef4e2e97e8df70f80efbc8cc",
-      "surface:scripts/verify.mjs:sha256:a2cd04d8ac25d1ef781e14061e040ccd157ecc55cdea6fbc1cbcfa176a1f16ba"
-    ],
+    "wiring_started": false,
+    "wiring_edges": [],
     "resource_refs": {
       "merge_queue_state": ".appsdk/records/merge-queue-state.json",
       "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
