@@ -184,17 +184,17 @@ fn dispatch_request(
         .unwrap_or(session_scope);
     let continuation_owner = continuation_owner.to_string();
     let request_id = request.request_id.clone();
-    let request_lease = runtime
-        .lock()
-        .map_err(|_| {
+    let request_lease = {
+        let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
                 request,
                 RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
                 500,
             )
-        })?
-        .admit_request(&request_id)
-        .map_err(|fault| project_fault(request, fault, 598))?;
+        })?;
+        runtime_guard.admit_request(&request_id)
+    }
+    .map_err(|fault| project_fault(request, fault, 598))?;
     let project_fault = |request: &HttpRequest, fault: RuntimeFault, status: u16| -> HttpResponse {
         match runtime.lock() {
             Ok(runtime) => crate::response_error_port::project_http_fault_with_runtime(
@@ -228,22 +228,22 @@ fn dispatch_request(
             Err(_) => HttpResponse::error(500, "request runtime lock poisoned"),
         }
     };
-    let admission = runtime
-        .lock()
-        .map_err(|_| {
+    let admission = {
+        let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
                 request,
                 RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
                 500,
             )
-        })?
-        .execute_request_admission_with_lease(
+        })?;
+        runtime_guard.execute_request_admission_with_lease(
             &request.body,
             entry_protocol,
             &continuation_owner,
             &request_lease,
         )
-        .map_err(|fault| project_fault(request, fault, 400))?;
+    }
+    .map_err(|fault| project_fault(request, fault, 400))?;
     let model = admission.model.as_str();
     let stream_mode = admission.stream;
     let mut selection_request = TargetSelectionRequest::new(
@@ -298,54 +298,52 @@ fn dispatch_request(
             .collect::<Vec<_>>()
     };
     selection_request.unavailable_provider_ids = unavailable_provider_ids.clone();
-    let mut target = runtime
-        .lock()
-        .map_err(|_| {
+    let mut target = {
+        let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
                 request,
                 RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
                 500,
             )
-        })?
-        .execute_target_selection_with_lease(
+        })?;
+        runtime_guard.execute_target_selection_with_lease(
             &request_lease,
             request.port,
             session_scope,
             conversation_scope,
             &selection_request,
         )
-        .map_err(|error| {
-            let status = if !unavailable_provider_ids.is_empty() && error.code == "target_selection"
-            {
-                503
-            } else {
-                404
-            };
-            project_fault(
-                request,
-                RuntimeFault::new(
-                    if status == 503 {
-                        "provider_pool_exhausted"
-                    } else {
-                        "model_unavailable"
-                    },
-                    format!("{} (requested_model={})", error, model),
-                ),
-                status,
-            )
-        })?;
+    }
+    .map_err(|error| {
+        let status = if !unavailable_provider_ids.is_empty() && error.code == "target_selection" {
+            503
+        } else {
+            404
+        };
+        project_fault(
+            request,
+            RuntimeFault::new(
+                if status == 503 {
+                    "provider_pool_exhausted"
+                } else {
+                    "model_unavailable"
+                },
+                format!("{} (requested_model={})", error, model),
+            ),
+            status,
+        )
+    })?;
     let route_facts = selection_request.to_route_facts_value();
     let target_selection = target.to_control_value(&selection_request.execution_lane);
-    let request_report = runtime
-        .lock()
-        .map_err(|_| {
+    let request_report = {
+        let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
                 request,
                 RuntimeFault::new("request_runtime_lock", "request runtime lock poisoned"),
                 500,
             )
-        })?
-        .execute_request_json_scoped_for_target_with_route_facts_and_lease(
+        })?;
+        runtime_guard.execute_request_json_scoped_for_target_with_route_facts_and_lease(
             &String::from_utf8_lossy(&request.body),
             entry_protocol,
             &target.protocol,
@@ -360,7 +358,8 @@ fn dispatch_request(
             Some(target_selection),
             Some(&request_lease),
         )
-        .map_err(|fault| project_fault(request, fault, 598))?;
+    }
+    .map_err(|fault| project_fault(request, fault, 598))?;
     emit_payload_console_events(
         &request_report.trace,
         request,
@@ -919,16 +918,15 @@ fn dispatch_request(
             599,
         )
     })?;
-    let report = runtime
-        .lock()
-        .map_err(|_| {
+    let report = {
+        let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
                 request,
                 RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned"),
                 500,
             )
-        })?
-        .execute_provider_response_scoped_for_target_with_lease(
+        })?;
+        runtime_guard.execute_provider_response_scoped_for_target_with_lease(
             &provider_raw,
             &request_id,
             request.port,
@@ -939,7 +937,8 @@ fn dispatch_request(
             &continuation_owner,
             Some(&request_lease),
         )
-        .map_err(|fault| project_fault(request, fault, 502))?;
+    }
+    .map_err(|fault| project_fault(request, fault, 502))?;
     let frame = report.client_frame.ok_or_else(|| {
         project_fault(
             request,
@@ -1111,10 +1110,60 @@ pub fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{emit_payload_console_events_to, mark_provider_success_for_route};
+    use super::{dispatch, emit_payload_console_events_to, mark_provider_success_for_route};
+    use crate::SkeletonRuntime;
+    use routecodex_v4_config::{compile_runtime_config, RuntimeConfigManifest};
+    use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
     use routecodex_v4_provider::V4Availability01SessionScoped;
+    use routecodex_v4_router::{
+        TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+    };
     use routecodex_v4_server::HttpRequest;
+    use routecodex_v4_standard_plugins::StandardHandleRegistry;
     use std::io::{self, Write};
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    struct TestHandleRegistry {
+        standard: StandardHandleRegistry,
+        target_selection: TargetSelectionHandle,
+    }
+
+    impl TestHandleRegistry {
+        fn new(manifest: &RuntimeConfigManifest) -> Self {
+            Self {
+                standard: StandardHandleRegistry::new(),
+                target_selection: TargetSelectionHandle::new(
+                    manifest
+                        .product
+                        .clone()
+                        .expect("test manifest has product config"),
+                ),
+            }
+        }
+    }
+
+    impl HandleRegistry for TestHandleRegistry {
+        fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
+            if matches!(
+                plugin_id,
+                TARGET_SELECTION_PLUGIN_ID | DIRECT_TARGET_SELECTION_PLUGIN_ID
+            ) {
+                Some(&self.target_selection)
+            } else {
+                self.standard.get(plugin_id)
+            }
+        }
+
+        fn encode_client_error_sse(
+            &self,
+            entry_protocol: &str,
+            message: &str,
+        ) -> Result<Vec<u8>, String> {
+            self.standard
+                .encode_client_error_sse(entry_protocol, message)
+        }
+    }
 
     struct FailingWriter;
 
@@ -1169,5 +1218,121 @@ mod tests {
 
         assert!(!availability.is_eligible("5520", "first", "session", "provider"));
         assert!(availability.is_eligible("5520", "selected", "session", "provider"));
+    }
+
+    #[test]
+    fn admission_failure_projects_without_reentering_runtime_lock() {
+        let manifest = runtime_manifest();
+        let runtime = runtime_from_manifest(&manifest);
+        let runtime = Arc::new(Mutex::new(runtime));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: b"{".to_vec(),
+            request_id: "admission-lock-red".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(dispatch(
+                &manifest,
+                &runtime,
+                &availability,
+                &request,
+                "responses",
+                "direct",
+            ));
+        });
+
+        let response = match receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("admission failure must not deadlock")
+        {
+            Err(response) => response,
+            Ok(response) => panic!("invalid JSON unexpectedly succeeded: {}", response.status),
+        };
+        assert_eq!(response.status, 400);
+    }
+
+    fn runtime_manifest() -> RuntimeConfigManifest {
+        let manifest = compile_runtime_config(
+            r#"
+version = 4
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:5520"
+
+[[providers]]
+provider_id = "mock"
+config_path = "providers/mock.toml"
+protocol = "responses"
+wire_model = "mock-model"
+priority = 1
+entry_models = ["mock-model"]
+
+[[routes]]
+id = "default"
+models = ["mock-model"]
+targets = ["mock"]
+
+[product]
+source = "admission-lock-test"
+
+[[product.providers]]
+provider_id = "mock"
+protocol = "responses"
+config_path = "providers/mock.toml"
+
+[[product.providers.models]]
+model_id = "mock-model"
+wire_name = "mock-model"
+
+[[product.route_groups]]
+route_group_id = "default"
+
+[[product.route_groups.pools]]
+pool_id = "default"
+selection = "priority"
+
+[[product.route_groups.pools.targets]]
+provider_id = "mock"
+model_id = "mock-model"
+priority = 1
+"#,
+            None,
+        )
+        .expect("test runtime config compiles");
+        manifest.verify().expect("test manifest verifies");
+        manifest
+    }
+
+    fn runtime_from_manifest(manifest: &RuntimeConfigManifest) -> SkeletonRuntime {
+        let runtime = SkeletonRuntime::from_compiled_plan_with_registry(
+            manifest.execution_epoch.skeleton.clone(),
+            Arc::new(TestHandleRegistry::new(manifest)),
+        )
+        .expect("test runtime loads compiled plan");
+        let transaction_id = "admission-lock-red";
+        runtime
+            .prepare_compiled_execution_epoch(
+                transaction_id,
+                0,
+                routecodex_v4_node_container::ZERO_BASE_MANIFEST_HASH,
+                &manifest.execution_epoch.candidate,
+                &manifest.execution_epoch.graph_hash,
+                &manifest.execution_epoch.manifest_hash,
+            )
+            .expect("test epoch prepares");
+        runtime
+            .commit_execution_epoch(transaction_id)
+            .expect("test epoch commits");
+        runtime
     }
 }
