@@ -1,5 +1,8 @@
-use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
+use provider_compat_core::namespace_tools::{
+    flatten_namespace_tool_for_provider, push_unique_provider_function_tool,
+};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
@@ -156,6 +159,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     // 层（is_v3_gpt_canonical_model 委托 config 家族判定），本节点只消费结果。
     let is_gpt_model = model_id.is_some_and(is_v3_gpt_canonical_model);
     let mut normalized_tools = Vec::new();
+    let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
     let mut has_web_search = false;
     for (index, tool) in tools.iter().enumerate() {
@@ -164,7 +168,14 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             let flattened = flatten_namespace_tool_for_provider("openai-chat", tool)
                 .map_err(|error| format!("$.tools[{index}]: {error}"))?
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
-            normalized_tools.extend(flattened);
+            for tool in flattened {
+                push_unique_provider_function_tool(
+                    &mut normalized_tools,
+                    &mut normalized_tool_indexes,
+                    tool,
+                    "openai_chat",
+                )?;
+            }
             continue;
         }
         if matches!(tool_type, Some("web_search" | "web_search_preview")) {
@@ -185,11 +196,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
                 // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
-                normalized_tools.push(build_local_web_search_function_tool(
-                    tool,
-                    index,
-                    "websearch",
-                )?);
+                push_unique_provider_function_tool(
+                    &mut normalized_tools,
+                    &mut normalized_tool_indexes,
+                    build_local_web_search_function_tool(tool, index, "websearch")?,
+                    "openai_chat",
+                )?;
             } else if has_web_search_capability {
                 // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
                 // web_search_options 投影（与 HEAD 行为一致）。
@@ -204,7 +216,13 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             // web_search_options 完全移除（无能力 provider 不收到搜索工具，
             // 避免未知字段/误调用）。
         } else {
-            normalized_tools.push(normalize_openai_chat_provider_tool(tool, index)?);
+            let normalized = normalize_openai_chat_provider_tool(tool, index)?;
+            push_unique_provider_function_tool(
+                &mut normalized_tools,
+                &mut normalized_tool_indexes,
+                normalized,
+                "openai_chat",
+            )?;
         }
     }
     if !normalized_tools.is_empty() {

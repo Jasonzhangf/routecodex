@@ -1,6 +1,37 @@
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
+pub fn provider_function_tool_name(tool: &Value) -> Option<&str> {
+    tool.get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| tool.get("name").and_then(Value::as_str))
+}
+
+pub fn push_unique_provider_function_tool(
+    tools: &mut Vec<Value>,
+    tool_indexes: &mut HashMap<String, usize>,
+    tool: Value,
+    target_protocol: &str,
+) -> Result<(), String> {
+    let Some(name) = provider_function_tool_name(&tool) else {
+        tools.push(tool);
+        return Ok(());
+    };
+    if let Some(existing_index) = tool_indexes.get(name).copied() {
+        if tools[existing_index] != tool {
+            return Err(format!(
+                "ConflictingOutboundFields target_protocol={target_protocol} paths=$.tools[].name duplicate provider tool name `{name}` must have identical provider declaration"
+            ));
+        }
+        return Ok(());
+    }
+    tool_indexes.insert(name.to_string(), tools.len());
+    tools.push(tool);
+    Ok(())
+}
+
 /// Returns the reversible client namespace path -> provider function name map
 /// for a namespace declaration. The same traversal rules as flattening are
 /// used, so nested declarations cannot drift from their wire names.
