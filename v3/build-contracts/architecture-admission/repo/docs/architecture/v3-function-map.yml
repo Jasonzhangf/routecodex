@@ -958,6 +958,9 @@ features:
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
+  - A request-local failed provider excludes every auth-key/model candidate of that
+    provider for the current request; persistent provider health cooldown remains
+    keyed by providerId+authAlias+modelId.
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
     cannot bypass a currently available same-session alternative.
@@ -1987,6 +1990,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
@@ -2041,6 +2045,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/executors.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
@@ -2058,6 +2063,7 @@ features:
   - dynamic_hook_loader
   - fallback
   required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture
   - npm run test:v3-anthropic-relay-runtime-integration
   - npm run verify:v3-anthropic-relay-runtime-integration
   - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
@@ -2395,6 +2401,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
@@ -2442,6 +2450,7 @@ features:
   - build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat
   - project_v3_responses_arguments_to_openai_chat_wire
   - build_v3_openai_chat_standard_request_from_chat_canonical
+  - qualify_openai_chat_missing_mcp_tool_call_names
   - project_openai_client_metadata_to_metadata
   - unsupported_client_metadata_paths
   - validate_openai_metadata
@@ -2494,6 +2503,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs

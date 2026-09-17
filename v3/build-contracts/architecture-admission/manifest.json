@@ -468,7 +468,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.live_provider_compat.parity.yml",
       "source_path": "docs/architecture/manifests/v3.live_provider_compat.parity.yml",
-      "source_commit": "190c5e23fb19c30f44d0f4990fffb69df88e0e09",
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
       "sha256": "1779e5e064da81a77282f5012e7bd24565b7fb7c3222093f98802ed512dbac98"
     },
     {
@@ -570,7 +570,7 @@
     {
       "output_path": "repo/docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml",
       "source_path": "docs/architecture/manifests/v3.sse.protocol_codec_projection.mainline.yml",
-      "source_commit": "c665d90c3a105057d7e2a988b997b5e29027f917",
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
       "sha256": "27815155e13732bea420c53fd7589812659f459708ccbe6bb7c0d33bb31e8578"
     },
     {
@@ -732,8 +732,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
-      "sha256": "844952d9ba7c9e50af16ca3e092ec19ae1e8383d16ce77d1650ce55bdec6de23"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "34411519fdfd8ca1c33e48272b6507d4924c8d31e6a235fd8a726f476653a84f"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -750,8 +750,8 @@
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
-      "sha256": "c5ddf6feb66d5ef68534ff472cb434962e8d07b496f4db0c0aebbdc75ae390b2"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "a06aa581d7cf3333486782bcfb11eadd58441e4c991ba5aa7423c6eb2808bfb4"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
@@ -762,8 +762,8 @@
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
-      "sha256": "15b360188991e59a19dfc10888da21cb00b6e594e67db188f86c0e6075f0b49f"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "055857d5b2d56e64842ece973dfda8d3670201ceb56ce1301b2f1db71aaaf32f"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -1158,7 +1158,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-live-provider-compat-parity.md",
       "source_path": "docs/architecture/wiki/v3-live-provider-compat-parity.md",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
       "sha256": "99911d31a86055798a844d455135e8106cb1c57ad7de1cea4145bf313cfebd63"
     },
     {
@@ -1236,7 +1236,7 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md",
       "source_path": "docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md",
-      "source_commit": "1519efee567e924d25ac536924724503f7c4e613",
+      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
       "sha256": "035d891e78c43fc9982e8405e0f5ac23dbd97750509dddbb24fb16c55f171a68"
     },
     {
@@ -2190,7 +2190,7 @@
     {
       "output_path": "repo/docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
       "source_path": "docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
+      "source_commit": "9e51dd815494e20019ae133e291c6bf10adc2651",
       "sha256": "eb2d83d9afb57abe2f2179432dbcc9281ef7ad451d0ab102225e31e75929443d"
     },
     {
@@ -2430,7 +2430,7 @@
     {
       "output_path": "repo/docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
       "source_path": "docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
-      "source_commit": "abd04edd3149498da8025ee37e56c0b4f0e1442f",
+      "source_commit": "9e51dd815494e20019ae133e291c6bf10adc2651",
       "sha256": "cd48931de45a5cb4329b6995f04da3b11ccf22915ff4e1bc2da946c411717a93"
     },
     {
@@ -2830,5 +2830,5 @@
       "sha256": "fb611b669304c1ff1ae0285b6d2cb934fb6b6fbc5958191148a4e4a12bacc335"
     }
   ],
-  "manifest_digest": "354988dfec25da5bcd14fdd5f358007f365be204c8fc9b79aa5bd608a2812dc0"
+  "manifest_digest": "fd5cc08851dc32a1bd8f806b5831d9f16354c3726fed43638aa3ef09b00463ea"
 }
