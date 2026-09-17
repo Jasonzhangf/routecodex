@@ -1110,8 +1110,8 @@
     "wiring_started": false,
     "wiring_edges": [],
     "resource_refs": {
-      "merge_queue_state": ".appsdk/records/merge-queue-state.json",
-      "integration_candidate": ".appsdk/records/integration-record-v4-integration-m1-current.json"
+      "merge_queue_state": null,
+      "integration_candidate": null
     },
     "evidence_refs": []
   },

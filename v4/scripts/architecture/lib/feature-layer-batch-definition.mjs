@@ -110,6 +110,12 @@ function validateGuard(manifest, truth, failures, allowPendingGuard) {
       || !requireExactKeys(integration.resource_refs, ['merge_queue_state', 'integration_candidate'], failures, 'INTEGRATION_RESOURCE_REFS', 'integration.resource_refs')) {
     addFailure(failures, 'INTEGRATION_STATE_INVALID', 'integration owner/admission/typed state drifted');
   }
+  if (!integration.wiring_started
+      && (integration.resource_refs?.merge_queue_state !== null
+        || integration.resource_refs?.integration_candidate !== null)) {
+    addFailure(failures, 'INTEGRATION_RESOURCE_REFS',
+      'unwired integration must not reference merge/integration truth stores');
+  }
   const surfaces = integration.guarded_surfaces ?? [];
   if (!sameOrdered(surfaces.map((surface) => surface.path), GUARDED_WIRING_SURFACES)
       || surfaces.some((surface) => !requireExactKeys(surface, ['path', 'scope_hash'], failures, 'GUARD_SURFACE_INVALID', `guard ${surface.path}`))) {

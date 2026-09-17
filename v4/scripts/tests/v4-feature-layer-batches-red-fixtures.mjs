@@ -444,6 +444,17 @@ export function runFeatureLayerBatchRedFixtures({
       options: { mode: 'definition', allowPendingGuard: true },
     },
     {
+      name: 'unwired integration references merge truth stores',
+      expected: ['INTEGRATION_RESOURCE_REFS'],
+      mutate(input) {
+        input.manifest.integration.resource_refs = {
+          merge_queue_state: '.appsdk/records/merge-queue-state.json',
+          integration_candidate: '.appsdk/records/integration-record-v4-integration-m1-current.json',
+        };
+      },
+      options: { mode: 'definition', allowPendingGuard: true },
+    },
+    {
       name: 'unbound guard reaches production definition',
       expected: ['INTEGRATION_GUARD_UNBOUND'],
       mutate(input) { resetPendingGuard(input); },
