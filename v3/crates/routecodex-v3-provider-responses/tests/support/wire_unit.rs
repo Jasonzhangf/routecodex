@@ -226,7 +226,7 @@ mod tests {
         let body = json!({
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": [
-                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+                {"type": "tool_use", "name": "mcp__codex_review.review_start!", "input": {}}
             ]}]
         });
         let error =
@@ -243,7 +243,7 @@ mod tests {
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": "", "tool_calls": [
                 {"id": "call-review", "type": "function", "function": {
-                    "name": "mcp__codex_review.review_start",
+                    "name": "mcp__codex_review.review_start!",
                     "arguments": "{}"
                 }}
             ]}]
