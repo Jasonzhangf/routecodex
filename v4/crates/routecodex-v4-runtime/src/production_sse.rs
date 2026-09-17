@@ -7,7 +7,7 @@
 
 use crate::{
     production_pipeline::emit_payload_console_events, ResponseStreamDisposition,
-    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
+    ResponseStreamProcessor, RuntimeFault, SkeletonRuntime, V4RuntimeTimingSummary,
 };
 use routecodex_v4_provider::{NativeProviderResponseStream, ProviderResponseStream};
 use routecodex_v4_server::{HttpRequest, ResponseStream};
@@ -114,6 +114,7 @@ pub struct SseTransportDriver<S = ProviderResponseStream> {
     request: HttpRequest,
     provider: String,
     model: String,
+    timing: V4RuntimeTimingSummary,
 }
 
 impl<S: ProviderSseSource> SseTransportDriver<S> {
@@ -124,6 +125,7 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
         request: HttpRequest,
         provider: String,
         model: String,
+        timing: V4RuntimeTimingSummary,
     ) -> Self {
         let (ingress, egress) = production_transport_pair(std::time::Instant::now())
             .expect("constant SSE transport policy");
@@ -139,6 +141,7 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
             request,
             provider,
             model,
+            timing,
         }
     }
 
@@ -169,7 +172,13 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                         format!("provider SSE closeout failed: {error}"),
                     )
                 })?;
+                self.timing
+                    .finish_external()
+                    .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
                 self.processor.finish()?;
+                self.timing
+                    .finish_runtime()
+                    .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
                 return Ok(());
             }
             let frames = self
@@ -231,12 +240,21 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                                 format!("provider SSE closeout failed: {error}"),
                             )
                         })?;
+                        self.timing
+                            .finish_external()
+                            .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
+                        self.timing
+                            .finish_runtime()
+                            .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
                         return Ok(());
                     }
                     ResponseStreamDisposition::Failure { frame } => {
                         self.pending_client_frames.clear();
                         self.pending_client_frames.push_back(frame);
                         self.close_after_pending = true;
+                        self.timing
+                            .finish_external()
+                            .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
                         return Ok(());
                     }
                 }
@@ -251,6 +269,9 @@ impl<S: ProviderSseSource> ResponseStream for SseTransportDriver<S> {
             match self.commit_attempt() {
                 Ok(()) => {}
                 Err(fault) => {
+                    self.timing
+                        .finish_external_if_active()
+                        .map_err(std::io::Error::other)?;
                     self.egress.drain_closeout();
                     let runtime = self
                         .runtime

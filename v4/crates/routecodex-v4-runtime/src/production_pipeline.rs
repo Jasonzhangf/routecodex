@@ -6,7 +6,7 @@
 
 use crate::{
     NativeProviderSseSource, ResponseStreamProcessor, RuntimeFault, SkeletonRuntime,
-    SseTransportDriver,
+    SseTransportDriver, V4RuntimeTimingSummary,
 };
 use routecodex_v4_config::RuntimeConfigManifest;
 use routecodex_v4_provider::{
@@ -176,6 +176,8 @@ fn dispatch_request(
     provider_runtime: Option<tokio::runtime::Handle>,
 ) -> Result<HttpResponse, HttpResponse> {
     let started_at = std::time::Instant::now();
+    let request_timing = V4RuntimeTimingSummary::new();
+    request_timing.start_request();
     let session_scope = request
         .header("x-rccv4-session-id")
         .unwrap_or(&request.request_id);
@@ -419,6 +421,21 @@ fn dispatch_request(
                              wire_body: &Value,
                              stream: bool|
      -> Result<ProviderTransportResult, ProviderTransportError> {
+        let request = ProviderTransportRequest::new(
+            &target.protocol,
+            &target.config_path,
+            target.auth_alias.as_deref(),
+            &target.wire_model,
+            wire_body.clone(),
+            stream,
+        )?;
+        request_timing
+            .begin_external()
+            .map_err(|message| ProviderTransportError {
+                code: "runtime_timing".to_string(),
+                message,
+                status: None,
+            })?;
         if stream {
             let cancellation = request_cancellation
                 .clone()
@@ -431,26 +448,31 @@ fn dispatch_request(
                         "streaming provider transport requires an explicit async runtime handle"
                             .to_string(),
                     status: None,
-                })?;
-            let request = ProviderTransportRequest::new(
-                &target.protocol,
-                &target.config_path,
-                target.auth_alias.as_deref(),
-                &target.wire_model,
-                wire_body.clone(),
-                true,
-            )?;
-            return ProviderTransportPort::execute_streaming(request, cancellation, &runtime);
+                });
+            let runtime = match runtime {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let _ = request_timing.finish_external();
+                    return Err(error);
+                }
+            };
+            return match ProviderTransportPort::execute_streaming(request, cancellation, &runtime) {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    let _ = request_timing.finish_external();
+                    Err(error)
+                }
+            };
         }
-        let request = ProviderTransportRequest::new(
-            &target.protocol,
-            &target.config_path,
-            target.auth_alias.as_deref(),
-            &target.wire_model,
-            wire_body.clone(),
-            stream,
-        )?;
-        ProviderTransportPort::execute(request)
+        let result = ProviderTransportPort::execute(request);
+        request_timing
+            .finish_external()
+            .map_err(|message| ProviderTransportError {
+                code: "runtime_timing".to_string(),
+                message,
+                status: None,
+            })?;
+        result
     };
     let record_provider_failure = |provider_id: &str,
                                    cooldown_policy: bool,
@@ -502,6 +524,7 @@ fn dispatch_request(
             )
         })? {
             ProviderTransportResult::Stream(_) => {
+                let _ = request_timing.finish_external_if_active();
                 return Err(project_upstream_fault(
                     request,
                     RuntimeFault::new(
@@ -519,21 +542,26 @@ fn dispatch_request(
                 request_cancellation
                     .clone()
                     .unwrap_or_else(CancellationToken::new),
-                provider_runtime.clone().ok_or_else(|| {
-                    project_upstream_fault(
-                        request,
-                        RuntimeFault::new(
-                            "provider_async_runtime",
-                            "streaming provider transport requires an explicit async runtime handle",
-                        ),
-                        502,
-                        manifest.product.as_ref(),
-                        &target.provider_id,
-                        "",
-                    )
-                })?,
+                match provider_runtime.clone() {
+                    Some(runtime) => runtime,
+                    None => {
+                        let _ = request_timing.finish_external_if_active();
+                        return Err(project_upstream_fault(
+                            request,
+                            RuntimeFault::new(
+                                "provider_async_runtime",
+                                "streaming provider transport requires an explicit async runtime handle",
+                            ),
+                            502,
+                            manifest.product.as_ref(),
+                            &target.provider_id,
+                            "",
+                        ));
+                    }
+                },
             ),
             ProviderTransportResult::Response(_) => {
+                let _ = request_timing.finish_external_if_active();
                 return Err(project_fault(
                     request,
                     RuntimeFault::new(
@@ -546,20 +574,25 @@ fn dispatch_request(
         };
         let mut response_body = String::new();
         if stream.status() >= 400 {
-            let bytes = stream.read_error_body().map_err(|error| {
-                project_upstream_fault(
-                    request,
-                    RuntimeFault::new(
-                        "provider_response_read",
-                        format!("provider error body read failed: {error}"),
-                    )
-                    .with_status(stream.status()),
-                    stream.status(),
-                    manifest.product.as_ref(),
-                    &target.provider_id,
-                    "",
-                )
-            })?;
+            let bytes = match stream.read_error_body() {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    let _ = request_timing.finish_external_if_active();
+                    return Err(project_upstream_fault(
+                        request,
+                        RuntimeFault::new(
+                            "provider_response_read",
+                            format!("provider error body read failed: {error}"),
+                        )
+                        .with_status(stream.status()),
+                        stream.status(),
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
+                    ));
+                }
+            };
+            let _ = request_timing.finish_external();
             response_body = String::from_utf8_lossy(&bytes).into_owned();
             if let Some(product) = manifest.product.as_ref() {
                 if let Some(policy) = ProductErrorPolicyPort::evaluate(
@@ -617,6 +650,7 @@ fn dispatch_request(
                                     )
                                 })? {
                                     ProviderTransportResult::Stream(_) => {
+                                        let _ = request_timing.finish_external_if_active();
                                         return Err(project_upstream_fault(
                                             request,
                                             RuntimeFault::new(
@@ -635,22 +669,28 @@ fn dispatch_request(
                                             request_cancellation
                                                 .clone()
                                                 .unwrap_or_else(CancellationToken::new),
-                                            provider_runtime.clone().ok_or_else(|| {
-                                                project_upstream_fault(
-                                                    request,
-                                                    RuntimeFault::new(
-                                                        "provider_async_runtime",
-                                                        "streaming provider transport requires an explicit async runtime handle",
-                                                    ),
-                                                    502,
-                                                    manifest.product.as_ref(),
-                                                    &target.provider_id,
-                                                    "",
-                                                )
-                                            })?,
+                                            match provider_runtime.clone() {
+                                                Some(runtime) => runtime,
+                                                None => {
+                                                    let _ =
+                                                        request_timing.finish_external_if_active();
+                                                    return Err(project_upstream_fault(
+                                                        request,
+                                                        RuntimeFault::new(
+                                                            "provider_async_runtime",
+                                                            "streaming provider transport requires an explicit async runtime handle",
+                                                        ),
+                                                        502,
+                                                        manifest.product.as_ref(),
+                                                        &target.provider_id,
+                                                        "",
+                                                    ));
+                                                }
+                                            },
                                         )
                                     }
                                     ProviderTransportResult::Response(_) => {
+                                        let _ = request_timing.finish_external_if_active();
                                         return Err(project_upstream_fault(
                                             request,
                                             RuntimeFault::new(
@@ -665,9 +705,11 @@ fn dispatch_request(
                                     }
                                 };
                             if stream.status() >= 400 {
-                                let retry_response_body =
-                                    stream.read_error_body().map_err(|error| {
-                                        project_upstream_fault(
+                                let retry_response_body = match stream.read_error_body() {
+                                    Ok(bytes) => bytes,
+                                    Err(error) => {
+                                        let _ = request_timing.finish_external_if_active();
+                                        return Err(project_upstream_fault(
                                             request,
                                             RuntimeFault::new(
                                                 "provider_response_read",
@@ -678,10 +720,12 @@ fn dispatch_request(
                                             manifest.product.as_ref(),
                                             &target.provider_id,
                                             "",
-                                        )
-                                    })?;
+                                        ));
+                                    }
+                                };
                                 let retry_response_body =
                                     String::from_utf8_lossy(&retry_response_body);
+                                let _ = request_timing.finish_external();
                                 response_body = retry_response_body.into_owned();
                             }
                         }
@@ -709,6 +753,7 @@ fn dispatch_request(
             .to_ascii_lowercase()
             .contains("text/event-stream")
         {
+            let _ = request_timing.finish_external_if_active();
             return Err(project_fault(
                 request,
                 RuntimeFault::new(
@@ -727,7 +772,7 @@ fn dispatch_request(
             status
         };
         let _ = std::io::stdout().flush();
-        let response_processor = ResponseStreamProcessor::new(
+        let response_processor = match ResponseStreamProcessor::new(
             request_lease,
             request_scope,
             request.port,
@@ -736,8 +781,15 @@ fn dispatch_request(
             &continuation_owner,
             session_scope,
             conversation_scope,
-        )
-        .map_err(|fault| crate::response_error_port::project_http_fault(request, fault, 599))?;
+        ) {
+            Ok(processor) => processor,
+            Err(fault) => {
+                let _ = request_timing.finish_external_if_active();
+                return Err(crate::response_error_port::project_http_fault(
+                    request, fault, 599,
+                ));
+            }
+        };
         let response_stream = SseTransportDriver::new(
             stream,
             Arc::clone(runtime),
@@ -745,14 +797,18 @@ fn dispatch_request(
             request.clone(),
             target.provider_id.clone(),
             target.wire_model.clone(),
+            request_timing.clone(),
         );
-        return Ok(HttpResponse::streaming(
+        let mut response = HttpResponse::streaming(
             client_status,
             "text/event-stream",
             Box::new(response_stream),
-        ));
+        );
+        response.timing = Some(Arc::new(request_timing));
+        return Ok(response);
     }
     let mut raw = match execute_transport(&target, &wire_body, false).map_err(|error| {
+        let _ = request_timing.finish_external_if_active();
         project_upstream_fault(
             request,
             RuntimeFault::new(error.code.as_str(), error.message),
@@ -828,6 +884,7 @@ fn dispatch_request(
                     target = candidate;
                     reselected = true;
                     raw = match execute_transport(&target, &retry_body, false).map_err(|error| {
+                        let _ = request_timing.finish_external_if_active();
                         project_upstream_fault(
                             request,
                             RuntimeFault::new(&error.code, error.message),
@@ -939,6 +996,9 @@ fn dispatch_request(
         )
     }
     .map_err(|fault| project_fault(request, fault, 502))?;
+    request_timing
+        .finish_runtime()
+        .map_err(|message| project_fault(request, RuntimeFault::new("runtime_timing", message), 598))?;
     let frame = report.client_frame.ok_or_else(|| {
         project_fault(
             request,
@@ -972,7 +1032,9 @@ fn dispatch_request(
         started_at.elapsed(),
     );
     let _ = std::io::stdout().flush();
-    Ok(json_response(client_status, projected))
+    let mut response = json_response(client_status, projected);
+    response.timing = Some(Arc::new(request_timing));
+    Ok(response)
 }
 
 pub(crate) fn emit_payload_console_events(
@@ -1120,7 +1182,8 @@ mod tests {
     };
     use routecodex_v4_server::HttpRequest;
     use routecodex_v4_standard_plugins::StandardHandleRegistry;
-    use std::io::{self, Write};
+    use std::io::{self, Read, Write};
+    use std::net::TcpListener;
     use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
@@ -1257,9 +1320,101 @@ mod tests {
         assert_eq!(response.status, 400);
     }
 
+    #[test]
+    fn successful_production_dispatch_exposes_terminal_timing_projection() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let provider_address = provider.local_addr().expect("provider address");
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = br#"{"id":"resp_timing","object":"response","model":"mock-model","output":[]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("provider headers");
+            stream.write_all(body).expect("provider body");
+        });
+        let provider_config = std::env::temp_dir().join(format!(
+            "v4-provider-timing-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &provider_config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{provider_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let manifest = runtime_manifest_with_provider_config(
+            provider_config.to_str().expect("provider config path"),
+        );
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello"}"#.to_vec(),
+            request_id: "production-timing".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+
+        let response = match dispatch(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "production dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        let timing = response
+            .timing
+            .as_ref()
+            .expect("successful dispatch exposes timing")
+            .snapshot()
+            .expect("timing is frozen before response returns");
+        assert!(timing.external_ms <= timing.internal_ms + timing.external_ms);
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(provider_config).ok();
+    }
+
     fn runtime_manifest() -> RuntimeConfigManifest {
+        runtime_manifest_with_provider_config("providers/mock.toml")
+    }
+
+    fn runtime_manifest_with_provider_config(config_path: &str) -> RuntimeConfigManifest {
         let manifest = compile_runtime_config(
-            r#"
+            &format!(
+                r#"
 version = 4
 
 [runtime]
@@ -1271,7 +1426,7 @@ address = "127.0.0.1:5520"
 
 [[providers]]
 provider_id = "mock"
-config_path = "providers/mock.toml"
+config_path = "{config_path}"
 protocol = "responses"
 wire_model = "mock-model"
 priority = 1
@@ -1288,7 +1443,7 @@ source = "admission-lock-test"
 [[product.providers]]
 provider_id = "mock"
 protocol = "responses"
-config_path = "providers/mock.toml"
+config_path = "{config_path}"
 
 [[product.providers.models]]
 model_id = "mock-model"
@@ -1305,7 +1460,8 @@ selection = "priority"
 provider_id = "mock"
 model_id = "mock-model"
 priority = 1
-"#,
+"#
+            ),
             None,
         )
         .expect("test runtime config compiles");

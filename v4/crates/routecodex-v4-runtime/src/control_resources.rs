@@ -11,6 +11,8 @@
 //!   provider/client wire effect.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Stopless current-turn control state (registered Req04 injection /
 /// Resp03 provenance stripping exception only).
@@ -333,11 +335,22 @@ impl V4RuntimeObservability {
 #[derive(Debug, Clone, Default)]
 pub struct V4RuntimeTimingState {
     by_phase: BTreeMap<String, Vec<u128>>,
+    request_started: Option<Instant>,
+    external_started: Option<Instant>,
+    external: Duration,
+    attempts: u64,
+    summary: Option<routecodex_v4_server::RequestTimingSnapshot>,
 }
 
 impl V4RuntimeTimingState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn start_request(&mut self) {
+        if self.request_started.is_none() {
+            self.request_started = Some(Instant::now());
+        }
     }
 
     pub fn record_phase(&mut self, phase: &str, duration_micros: u128) {
@@ -353,12 +366,87 @@ impl V4RuntimeTimingState {
             .map(|values| values.iter().sum())
             .unwrap_or(0)
     }
+
+    pub fn start_external(&mut self) -> Result<(), String> {
+        if self.request_started.is_none() {
+            return Err("V4 Runtime request timing is not active".to_string());
+        }
+        if self.external_started.is_some() {
+            return Err("V4 Runtime external timing attempt is already active".to_string());
+        }
+        self.external_started = Some(Instant::now());
+        self.attempts = self.attempts.saturating_add(1);
+        Ok(())
+    }
+
+    pub fn finish_external(&mut self) -> Result<(), String> {
+        if self.request_started.is_none() {
+            return Err("V4 Runtime request timing is not active".to_string());
+        }
+        let started = self
+            .external_started
+            .take()
+            .ok_or_else(|| "V4 Runtime external timing attempt is not active".to_string())?;
+        self.external = self
+            .external
+            .checked_add(started.elapsed())
+            .ok_or_else(|| "V4 Runtime external timing overflowed".to_string())?;
+        Ok(())
+    }
+
+    pub fn finish_external_if_active(&mut self) -> Result<bool, String> {
+        if self.request_started.is_none() {
+            return Err("V4 Runtime request timing is not active".to_string());
+        }
+        let Some(started) = self.external_started.take() else {
+            return Ok(false);
+        };
+        self.external = self
+            .external
+            .checked_add(started.elapsed())
+            .ok_or_else(|| "V4 Runtime external timing overflowed".to_string())?;
+        Ok(true)
+    }
+
+    pub fn finish_runtime(&mut self) -> Result<routecodex_v4_server::RequestTimingSnapshot, String> {
+        if self.summary.is_some() {
+            return Err("V4 Runtime timing is already terminal".to_string());
+        }
+        let started = self
+            .request_started
+            .ok_or_else(|| "V4 Runtime request timing is not active".to_string())?;
+        if self.external_started.is_some() {
+            return Err("V4 Runtime external timing attempt is still active".to_string());
+        }
+        if self.attempts == 0 {
+            return Err("V4 Runtime request timing has no provider attempt".to_string());
+        }
+        let runtime = started.elapsed();
+        let external = self.external;
+        let internal = runtime
+            .checked_sub(external)
+            .ok_or_else(|| "V4 Runtime external timing exceeds runtime timing".to_string())?;
+        let summary = routecodex_v4_server::RequestTimingSnapshot {
+            internal_ms: internal.as_millis().try_into().unwrap_or(u64::MAX),
+            external_ms: external.as_millis().try_into().unwrap_or(u64::MAX),
+        };
+        self.summary = Some(summary);
+        Ok(summary)
+    }
 }
 
 /// Runtime timing summary projection handle (diagnostic side-channel only).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct V4RuntimeTimingSummary {
-    state: V4RuntimeTimingState,
+    state: Arc<Mutex<V4RuntimeTimingState>>,
+}
+
+impl Default for V4RuntimeTimingSummary {
+    fn default() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(V4RuntimeTimingState::new())),
+        }
+    }
 }
 
 impl V4RuntimeTimingSummary {
@@ -366,11 +454,49 @@ impl V4RuntimeTimingSummary {
         Self::default()
     }
 
-    pub fn state(&mut self) -> &mut V4RuntimeTimingState {
-        &mut self.state
+    pub fn state(&self) -> std::sync::MutexGuard<'_, V4RuntimeTimingState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn total_micros(&self, phase: &str) -> u128 {
-        self.state.total_micros(phase)
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .total_micros(phase)
+    }
+
+    pub fn start_request(&self) {
+        self.state().start_request();
+    }
+
+    pub fn begin_external(&self) -> Result<(), String> {
+        self.state().start_external()
+    }
+
+    pub fn finish_external(&self) -> Result<(), String> {
+        self.state().finish_external()
+    }
+
+    pub fn finish_external_if_active(&self) -> Result<bool, String> {
+        self.state().finish_external_if_active()
+    }
+
+    pub fn finish_runtime(&self) -> Result<routecodex_v4_server::RequestTimingSnapshot, String> {
+        self.state().finish_runtime()
+    }
+
+    pub fn request_snapshot(&self) -> Option<routecodex_v4_server::RequestTimingSnapshot> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .summary
+    }
+}
+
+impl routecodex_v4_server::RequestTiming for V4RuntimeTimingSummary {
+    fn snapshot(&self) -> Option<routecodex_v4_server::RequestTimingSnapshot> {
+        self.request_snapshot()
     }
 }

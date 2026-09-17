@@ -53,6 +53,20 @@ pub struct HttpResponse {
     pub content_type: String,
     pub body: Vec<u8>,
     pub stream: Option<Box<dyn ResponseStream>>,
+    pub timing: Option<std::sync::Arc<dyn RequestTiming>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestTimingSnapshot {
+    pub internal_ms: u64,
+    pub external_ms: u64,
+}
+
+/// Read-only timing projection carried beside an HTTP response. The runtime
+/// owns the timing state and writes it through its own typed resource; the
+/// server only snapshots the terminal projection for the request record.
+pub trait RequestTiming: Send + Sync {
+    fn snapshot(&self) -> Option<RequestTimingSnapshot>;
 }
 
 pub trait ResponseStream: Send {
@@ -66,6 +80,7 @@ impl HttpResponse {
             content_type: content_type.into(),
             body,
             stream: None,
+            timing: None,
         }
     }
 
@@ -91,6 +106,7 @@ impl HttpResponse {
             content_type: content_type.into(),
             body: Vec::new(),
             stream: Some(stream),
+            timing: None,
         }
     }
 }
@@ -110,7 +126,16 @@ pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), 
         &request.path,
         status,
         0,
+        unix_epoch_ms()?,
+        None,
     )
+}
+
+fn unix_epoch_ms() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .map_err(|error| error.to_string())
 }
 
 fn persist_request_record_fields_with_duration(
@@ -120,6 +145,8 @@ fn persist_request_record_fields_with_duration(
     endpoint: &str,
     status: u16,
     duration_ms: u64,
+    started_epoch_ms: u64,
+    timing: Option<std::sync::Arc<dyn RequestTiming>>,
 ) -> Result<(), String> {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
@@ -130,10 +157,8 @@ fn persist_request_record_fields_with_duration(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_millis() as u64;
+    let finished_epoch_ms = unix_epoch_ms()?;
+    let timing = V4ConsoleTerminalOutput::timing_snapshot(timing);
     let result = if (200..400).contains(&status) {
         "success"
     } else {
@@ -142,9 +167,9 @@ fn persist_request_record_fields_with_duration(
     let row = serde_json::json!({
         "request_key": format!("{port}:{request_id}"),
         "event_type": if result == "success" { "request.completed" } else { "request.failed" },
-        "started_epoch_ms": now,
-        "updated_epoch_ms": now,
-        "finished_epoch_ms": now,
+        "started_epoch_ms": started_epoch_ms,
+        "updated_epoch_ms": finished_epoch_ms,
+        "finished_epoch_ms": finished_epoch_ms,
         "duration_ms": duration_ms,
         "meta": {
             "request_id": request_id,
@@ -159,8 +184,8 @@ fn persist_request_record_fields_with_duration(
         "failed_attempts": if result == "success" { 0 } else { 1 },
         "switches": 0,
         "usage": null,
-        "timing_internal_ms": null,
-        "timing_external_ms": null,
+        "timing_internal_ms": timing.map(|timing| timing.internal_ms),
+        "timing_external_ms": timing.map(|timing| timing.external_ms),
         "servertool": false,
         "stopless": false,
         "raw_artifact_ref": null
@@ -280,6 +305,7 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     port: u16,
 ) -> Result<(), std::io::Error> {
     let started_at = std::time::Instant::now();
+    let started_epoch_ms = unix_epoch_ms().map_err(std::io::Error::other)?;
     let mut request_bytes = Vec::with_capacity(4096);
     let header_end = loop {
         let mut chunk = [0u8; 4096];
@@ -369,6 +395,7 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     let record_port = request.port;
     let cancellation = server_stop.child_token();
     let response = handler.handle_async(request, cancellation.clone()).await;
+    let timing = response.timing.clone();
     let streaming = response.stream.is_some();
     let head = if streaming {
         format!(
@@ -440,8 +467,12 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
         &record_endpoint,
         response.status,
         started_at.elapsed().as_millis() as u64,
+        started_epoch_ms,
+        timing,
     )
-        .map_err(|error| std::io::Error::other(format!("request record persistence failed: {error}")))?;
+    .map_err(|error| {
+        std::io::Error::other(format!("request record persistence failed: {error}"))
+    })?;
     Ok(())
 }
 
@@ -583,6 +614,7 @@ fn serve_connection<H: HttpHandler>(
     port: u16,
 ) -> Result<(), ConnectionError> {
     let started_at = std::time::Instant::now();
+    let started_epoch_ms = unix_epoch_ms().map_err(ConnectionError::Request)?;
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(ConnectionError::ClientDisconnected) => {
@@ -602,6 +634,7 @@ fn serve_connection<H: HttpHandler>(
     };
     let response = handler.handle(request.clone());
     let status = response.status;
+    let timing = response.timing.clone();
     write_response(&mut stream, response)?;
     persist_request_record_fields_with_duration(
         &request.request_id,
@@ -610,6 +643,8 @@ fn serve_connection<H: HttpHandler>(
         &request.path,
         status,
         started_at.elapsed().as_millis() as u64,
+        started_epoch_ms,
+        timing,
     )
     .map_err(ConnectionError::Request)
 }
@@ -830,6 +865,15 @@ impl V4ConsoleTerminalOutput {
 
     pub fn lines(&self) -> impl Iterator<Item = &ConsoleLine> {
         self.lines.iter()
+    }
+
+    /// The console projection is the registered diagnostic reader of
+    /// `v4.debug.timing_observability`; request-record persistence consumes
+    /// only this read-only projection.
+    fn timing_snapshot(
+        timing: Option<std::sync::Arc<dyn RequestTiming>>,
+    ) -> Option<RequestTimingSnapshot> {
+        timing.and_then(|timing| timing.snapshot())
     }
 }
 

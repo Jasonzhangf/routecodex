@@ -9,12 +9,15 @@ use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
     project_runtime_fault_with_policy, release_scope_via_bridge, select_relay_operator,
     ContinuationFacts, ContinuationKey, ExecutionBinding, ExecutionContext, PayloadCycleError,
-    PayloadCycleRegistry, PayloadCycleState, RelayOperator, ResponseStreamDisposition,
-    ResponseStreamProcessor, ScopeError, ScopeRegistry, SkeletonRuntime,
+    PayloadCycleRegistry, PayloadCycleState, ProviderSseSource, RelayOperator,
+    ResponseStreamDisposition, ResponseStreamProcessor, ScopeError, ScopeRegistry, SkeletonRuntime,
+    SseTransportDriver, V4RuntimeTimingSummary,
 };
+use routecodex_v4_server::{HttpRequest, ResponseStream};
 use routecodex_v4_standard_plugins::sse_transport::SseTransportFrame;
 use serde_json::json;
 use std::fs;
+use std::sync::{Arc, Mutex};
 
 mod support;
 
@@ -768,10 +771,7 @@ fn positive_provider_response_chain_projects_client_frame() {
         )
         .expect("provider response chain runs");
     let frame: serde_json::Value = serde_json::from_str(
-        report
-            .client_frame
-            .as_deref()
-            .expect("client frame produced"),
+        report.client_frame.as_deref().expect("client frame produced"),
     )
     .expect("client frame is Responses JSON");
     assert_eq!(frame["output"][0]["content"][0]["text"], "ok");
@@ -795,7 +795,10 @@ fn direct_response_chain_projects_raw_provider_body() {
         )
         .expect("direct response envelope must traverse response plan");
     let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("client frame produced"),
+        report
+            .client_frame
+            .as_deref()
+            .expect("client frame produced"),
     )
     .expect("client frame is JSON");
     assert_eq!(frame["id"], "resp_env");
@@ -887,6 +890,192 @@ fn direct_stream_processor_keeps_continue_and_terminal_typed() {
     assert!(String::from_utf8_lossy(frame.as_bytes()).contains("event: response.completed"));
     processor.finish().expect("terminal stream closes cleanly");
     assert_eq!(processor.lease_snapshot().in_flight_leases, 1);
+}
+
+#[test]
+fn runtime_timing_summary_accumulates_external_attempts_without_ambiguous_closeout() {
+    let timing = V4RuntimeTimingSummary::new();
+    assert!(timing.request_snapshot().is_none());
+    assert!(timing.finish_external().is_err());
+    timing.start_request();
+    timing.begin_external().expect("first attempt starts");
+    assert!(
+        timing.begin_external().is_err(),
+        "duplicate attempt must fail"
+    );
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    timing.finish_external().expect("first attempt closes");
+    assert!(
+        timing.finish_external().is_err(),
+        "duplicate close must fail"
+    );
+    timing.begin_external().expect("retry attempt starts");
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    timing.finish_external().expect("retry attempt closes");
+    let summary = timing.finish_runtime().expect("runtime timing freezes");
+    assert!(timing.finish_runtime().is_err(), "duplicate freeze must fail");
+    let snapshot = timing.request_snapshot().expect("timing snapshot");
+    assert_eq!(snapshot, summary);
+    assert!(snapshot.external_ms >= 6, "{snapshot:?}");
+    assert!(snapshot.internal_ms + snapshot.external_ms >= snapshot.external_ms);
+}
+
+#[test]
+fn runtime_timing_ignores_provider_request_construction_without_an_external_attempt() {
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    assert!(
+        timing.request_snapshot().is_none(),
+        "no provider attempt means no successful timing projection"
+    );
+    assert!(
+        timing.finish_runtime().is_err(),
+        "provider request construction failures must not fabricate timing"
+    );
+}
+
+struct ScriptedProviderSource {
+    chunks: Vec<Vec<u8>>,
+    next: usize,
+    reads: usize,
+}
+
+impl ScriptedProviderSource {
+    fn new(chunks: Vec<Vec<u8>>) -> Self {
+        Self {
+            chunks,
+            next: 0,
+            reads: 0,
+        }
+    }
+}
+
+impl ProviderSseSource for ScriptedProviderSource {
+    fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
+        self.reads += 1;
+        let Some(next) = self.chunks.get(self.next) else {
+            return Ok(0);
+        };
+        self.next += 1;
+        assert!(
+            next.len() <= chunk.len(),
+            "test chunk exceeds transport buffer"
+        );
+        chunk[..next.len()].copy_from_slice(next);
+        Ok(next.len())
+    }
+
+    fn wait(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+fn sse_driver_with_source(
+    runtime: SkeletonRuntime,
+    request_id: &str,
+    source: ScriptedProviderSource,
+    timing: V4RuntimeTimingSummary,
+) -> SseTransportDriver<ScriptedProviderSource> {
+    let processor =
+        response_stream_processor(&runtime, request_id, "responses", "responses", "direct");
+    SseTransportDriver::new(
+        source,
+        Arc::new(Mutex::new(runtime)),
+        processor,
+        HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            request_id: request_id.to_string(),
+            server_id: "runtime-timing-test".to_string(),
+            port: 5555,
+        },
+        "mock".to_string(),
+        "m".to_string(),
+        timing,
+    )
+}
+
+#[test]
+fn sse_transport_seals_terminal_without_consuming_trailing_provider_frame() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-sse-terminal-seal",
+        ScriptedProviderSource::new(vec![
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"output\":[]}}\n\n".to_vec(),
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n".to_vec(),
+        ]),
+        timing.clone(),
+    );
+    let mut chunk = Vec::new();
+    assert!(driver.next_chunk(&mut chunk).expect("terminal chunk"));
+    let text = String::from_utf8_lossy(&chunk);
+    assert!(text.contains("response.completed"), "{text}");
+    assert!(!text.contains("late"), "{text}");
+    assert!(
+        timing.request_snapshot().is_some(),
+        "terminal timing closes"
+    );
+}
+
+#[test]
+fn sse_transport_projects_provider_failure_without_publishing_timing() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-sse-provider-failure",
+        ScriptedProviderSource::new(vec![
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n".to_vec(),
+        ]),
+        timing.clone(),
+    );
+    let mut chunk = Vec::new();
+    assert!(driver.next_chunk(&mut chunk).expect("failure chunk"));
+    let text = String::from_utf8_lossy(&chunk);
+    assert!(text.contains("upstream failed"), "{text}");
+    assert!(!text.contains("response.completed"), "{text}");
+    assert!(
+        timing.request_snapshot().is_none(),
+        "failure paths must not fabricate successful timing"
+    );
+}
+
+#[test]
+fn sse_transport_does_not_publish_timing_after_premature_external_closeout() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    timing
+        .finish_external()
+        .expect("simulate a duplicate closeout before terminal");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-sse-premature-timing-closeout",
+        ScriptedProviderSource::new(vec![
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"output\":[]}}\n\n".to_vec(),
+        ]),
+        timing.clone(),
+    );
+    let mut chunk = Vec::new();
+    assert!(driver.next_chunk(&mut chunk).expect("failure chunk"));
+    let text = String::from_utf8_lossy(&chunk);
+    assert!(
+        text.contains("external timing attempt is not active"),
+        "{text}"
+    );
+    assert!(
+        timing.request_snapshot().is_none(),
+        "premature or duplicate closeout must not fabricate a successful timing projection"
+    );
 }
 
 #[test]
@@ -1537,7 +1726,7 @@ fn control_resources_lifecycle_positive_and_red() {
         "deepseek-v4-flash",
     );
     assert_eq!(observability.summaries().count(), 1);
-    let mut timing = V4RuntimeTimingSummary::new();
+    let timing = V4RuntimeTimingSummary::new();
     timing.state().record_phase("resp_chatprocess", 42);
     assert_eq!(timing.total_micros("resp_chatprocess"), 42);
 }
