@@ -170,7 +170,10 @@ fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input(
     let wire = responses_direct_request_projection_hook(&policy)
         .expect("Responses provider must not receive Chat messages on /v1/responses");
     let body = wire.body();
-    assert!(body.get("messages").is_none(), "Chat messages leaked: {body}");
+    assert!(
+        body.get("messages").is_none(),
+        "Chat messages leaked: {body}"
+    );
     assert_eq!(body["input"][0]["role"], "user");
     assert_eq!(body["input"][0]["content"][0]["text"], "hello");
 }

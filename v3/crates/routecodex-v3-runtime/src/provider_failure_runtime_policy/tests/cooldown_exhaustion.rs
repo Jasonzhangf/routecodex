@@ -27,12 +27,17 @@ fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
     }
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let mut excluded = BTreeSet::new();
-    excluded.insert(v3_relay_provider_candidate_key_parts(
-        "first",
-        Some("key1"),
-        Some("gpt-test"),
-    ));
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("first provider must be selectable before failure"),
+    };
+    let expanded = expand_v3_relay_target_plan_for_selected(&manifest, &selected, 0)
+        .expect("provider family expansion");
+    let excluded = expand_request_local_provider_failure_scope(
+        V3RequestLocalProviderFailureScope::Provider,
+        &selected,
+        &expanded,
+    );
 
     let V3RelayProviderTargetResolution::Selected(selected) =
         resolve_target(&manifest, scope, &excluded, &health)

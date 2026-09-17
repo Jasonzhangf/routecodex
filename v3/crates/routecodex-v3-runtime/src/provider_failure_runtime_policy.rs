@@ -144,6 +144,51 @@ pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'stati
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3RequestLocalProviderFailureScope {
+    Candidate,
+    Provider,
+}
+
+pub(crate) fn request_local_provider_failure_scope(
+    source_stage: &str,
+    status: u16,
+    error_type: Option<&str>,
+) -> V3RequestLocalProviderFailureScope {
+    let request_local_compat = source_stage == "ProviderReqCompat06ProviderCompat"
+        || error_type == Some("provider_request_compat_error")
+        // Provider semantic invalid-request responses describe this request,
+        // not provider health. Relay may surface them as a runtime 502 after
+        // decoding an HTTP-200 SSE error event, so status alone is insufficient.
+        || error_type == Some("invalid_request_error")
+        // HTTP 400 is a request/provider-compatibility rejection (for example
+        // context-window or wire-shape limits), not an account-health signal.
+        || status == 400;
+    if request_local_compat {
+        V3RequestLocalProviderFailureScope::Candidate
+    } else {
+        V3RequestLocalProviderFailureScope::Provider
+    }
+}
+
+pub(crate) fn expand_request_local_provider_failure_scope(
+    scope: V3RequestLocalProviderFailureScope,
+    selected: &V3Target10ConcreteProviderSelected,
+    expanded: &V3Target09CandidateSetExpanded,
+) -> BTreeSet<String> {
+    let mut failed = BTreeSet::from([v3_relay_provider_candidate_key(&selected.candidate)]);
+    if scope == V3RequestLocalProviderFailureScope::Provider {
+        failed.extend(
+            expanded
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.provider_id == selected.candidate.provider_id)
+                .map(v3_relay_provider_candidate_key),
+        );
+    }
+    failed
+}
+
 pub(crate) fn project_v3_client_disconnect(
     provider_id: &str,
     source_stage: &'static str,
@@ -294,9 +339,10 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
         let session =
             self.session
                 .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
-        // A request-local provider failure is stronger than the persistent
-        // provider:key:model cooldown identity: once a provider fails this
-        // request, the next attempt must move to another provider family.
+        // Request-local exclusions are already expanded by the failure policy
+        // to the correct candidate or provider-family scope. Keep this reader
+        // exact-key so candidate-scoped compatibility failures do not poison
+        // sibling models through a second prefix rule.
         let excluded_candidate = self
             .excluded
             .contains(&v3_relay_provider_candidate_key_parts(
@@ -304,19 +350,13 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 Some(auth_alias),
                 Some(model_id),
             ));
-        let provider_prefix = format!("{provider_id}:");
-        let excluded_provider = self
-            .excluded
-            .iter()
-            .any(|key| key.starts_with(&provider_prefix));
         projection.blocked_scopes.extend(session.blocked_scopes);
-        if excluded_candidate || excluded_provider {
+        if excluded_candidate {
             projection
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
-        projection.available =
-            projection.available && session.available && !excluded_candidate && !excluded_provider;
+        projection.available = projection.available && session.available && !excluded_candidate;
         projection
     }
 }
@@ -1089,17 +1129,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         )
     });
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
-    let is_request_local_compat_failure = source_stage == "ProviderReqCompat06ProviderCompat"
-        || error_type.as_deref() == Some("provider_request_compat_error")
-        // Provider semantic invalid-request responses describe this request,
-        // not provider health.  Relay may surface them as a runtime 502 after
-        // decoding an HTTP-200 SSE error event, so status alone is insufficient.
-        || error_type.as_deref() == Some("invalid_request_error")
-        // HTTP 400 is a request/provider-compatibility rejection (for example
-        // context-window or wire-shape limits), not an account-health signal.
-        // Keep it health-neutral so all keys do not enter cooldown for the
-        // same request-shaped failure.
-        || status == 400;
+    let request_local_scope =
+        request_local_provider_failure_scope(source_stage, status, error_type.as_deref());
+    let is_request_local_compat_failure =
+        request_local_scope == V3RequestLocalProviderFailureScope::Candidate;
     // SSE/transport failures are provider-health events as well. The
     // failure action builder classifies them as recoverable, so they enter
     // the shared rolling score/cooldown path instead of a synthetic local
@@ -1133,6 +1166,27 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             )
             .map_err(|error| error.to_string())?
     };
+    let provider_scope_expansion =
+        if request_local_scope == V3RequestLocalProviderFailureScope::Provider {
+            let expanded = match context.captured_target_09 {
+                Some(captured) => Ok(captured.clone()),
+                None => expand_v3_relay_target_plan_for_selected(
+                    context.manifest,
+                    &selected,
+                    context.deterministic_sample,
+                )
+                .map_err(|error| {
+                    target_resolution_source(
+                        "V3Target09CandidateSetExpanded",
+                        "captured_target_plan_expansion_failed",
+                        error,
+                    )
+                }),
+            };
+            Some(expanded)
+        } else {
+            None
+        };
     let retries_done = state
         .same_candidate_retries
         .get(&candidate_key)
@@ -1140,13 +1194,36 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .unwrap_or(0);
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
-    let resolution = reselect_from_captured_target_plan(
-        context,
-        &selected,
-        &excluded_with_failed,
-        v3_relay_provider_policy_now_epoch_ms()?,
-    )
-    .await;
+    let resolution = match provider_scope_expansion {
+        Some(Ok(expanded)) => {
+            state
+                .failed_candidates
+                .extend(expand_request_local_provider_failure_scope(
+                    request_local_scope,
+                    &selected,
+                    &expanded,
+                ));
+            excluded_with_failed = state.failed_candidates.clone();
+            excluded_with_failed.insert(candidate_key.clone());
+            reselect_from_captured_target_plan(
+                context,
+                &selected,
+                &excluded_with_failed,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .await
+        }
+        Some(Err(source)) => V3RelayProviderTargetResolution::Failed(source),
+        None => {
+            reselect_from_captured_target_plan(
+                context,
+                &selected,
+                &excluded_with_failed,
+                v3_relay_provider_policy_now_epoch_ms()?,
+            )
+            .await
+        }
+    };
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);

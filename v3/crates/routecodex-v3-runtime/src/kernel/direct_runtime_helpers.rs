@@ -162,15 +162,42 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             retryable_transient: false,
         });
     }
-    let health_record = record_v3_direct_provider_failure_record(
-        context.provider_health,
-        context.failure_session_scope,
-        selected,
-        &source,
-        context.now_epoch_ms,
-    )?;
-
+    let observed_status = source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.status)
+        .filter(|external_status| *external_status >= 400)
+        .unwrap_or(status);
+    let request_local_scope =
+        crate::provider_failure_runtime_policy::request_local_provider_failure_scope(
+            source.source_stage,
+            observed_status,
+            source
+                .external_error
+                .as_ref()
+                .and_then(|error| error.code.as_deref()),
+        );
     let failed_key = candidate_key(&selected.candidate);
+    let health_record = if request_local_scope
+        == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate
+    {
+        V3ProviderFailureRecord {
+            scope_label: failed_key.clone(),
+            provider_key: failed_key.clone(),
+            state: "request_local_provider_compat".to_string(),
+            failure_count: 0,
+            cooldown_until_ms: None,
+            reason: (!source.message.trim().is_empty()).then(|| source.message.clone()),
+        }
+    } else {
+        record_v3_direct_provider_failure_record(
+            context.provider_health,
+            context.failure_session_scope,
+            selected,
+            &source,
+            context.now_epoch_ms,
+        )?
+    };
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
         (None, true) => None,
@@ -181,8 +208,37 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
-    let mut failed_with_current = state.failed_candidates.clone();
-    failed_with_current.insert(failed_key.clone());
+    let request_local_excluded = context.expanded.map_or_else(
+        || {
+            if request_local_scope
+                == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Provider
+            {
+                expanded_candidates.map_or_else(
+                    || BTreeSet::from([failed_key.clone()]),
+                    |expanded_candidates| {
+                        expanded_candidates
+                            .iter()
+                            .filter(|candidate| {
+                                candidate.provider_id == selected.candidate.provider_id
+                            })
+                            .map(candidate_key)
+                            .collect()
+                    },
+                )
+            } else {
+                BTreeSet::from([failed_key.clone()])
+            }
+        },
+        |expanded| {
+            crate::provider_failure_runtime_policy::expand_request_local_provider_failure_scope(
+                request_local_scope,
+                selected,
+                expanded,
+            )
+        },
+    );
+    state.failed_candidates.extend(request_local_excluded.clone());
+    let failed_with_current = state.failed_candidates.clone();
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
             expanded_candidates,
@@ -238,7 +294,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     let provider_scope = V3ErrorActionScope::ProviderInstance {
         provider_id: selected.candidate.provider_id.clone(),
     };
-    let recovery_record = if remaining > 0 {
+    let recovery_record = if remaining > 0
+        && request_local_scope
+            == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Provider
+    {
         Some(
             context
                 .provider_health
@@ -254,20 +313,30 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     } else {
         None
     };
+    let recovery_witness = match recovery_record.as_ref() {
+        Some(record) => Some(
+            record
+                .recovery_witness()
+                .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
+        ),
+        None if remaining > 0 => Some(
+            routecodex_v3_error::V3Error05RecoveryAdmissionWitness::new(
+                context.failure_session_scope.clone(),
+                failed_key.clone(),
+                source.code.clone(),
+                1,
+            )
+            .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
+        ),
+        None => None,
+    };
     let decision = (context.run_error)(
         source.clone(),
         provider_scope,
         remaining,
         false,
         false,
-        match recovery_record.as_ref() {
-            Some(record) => Some(
-                record
-                    .recovery_witness()
-                    .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
-            ),
-            None => None,
-        },
+        recovery_witness,
     );
     state
         .trace
@@ -276,24 +345,28 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         decision.action,
         V3Error05ExecutionAction::WaitThenReselect { .. }
     ) {
-        let failure_record = recovery_record
-            .as_ref()
-            .expect("reselect Error05 must carry its recorded recovery witness");
-        state.failed_candidates.insert(failed_key);
         state.trace.push("V3TargetLocalReselected");
         return Ok(V3DirectProviderFailurePolicyResult {
             decision,
             retry_selected: None,
             event: Some(build_v3_direct_provider_failure_observation(
                 selected,
-                status,
+                observed_status,
                 &source,
                 &health_record,
                 "switch_provider",
                 next_provider_key,
-                Some(failure_record.minimum_delay_ms),
+                Some(
+                    recovery_record
+                        .as_ref()
+                        .map_or(0, |record| record.minimum_delay_ms),
+                ),
             )),
-            retryable_transient: false,
+            // Candidate-scoped request/provider compatibility failures are
+            // health-neutral and must reselect immediately without entering
+            // the provider action gate.
+            retryable_transient: request_local_scope
+                == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate,
         });
     }
     if matches!(decision.action, V3Error05ExecutionAction::WaitThenRetrySame { .. }) {
@@ -342,7 +415,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         retry_selected: None,
         event: Some(build_v3_direct_provider_failure_observation(
             selected,
-            status,
+            observed_status,
             &source,
             &health_record,
             "terminal_default_floor_exhausted",
