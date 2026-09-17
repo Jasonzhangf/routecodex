@@ -1,0 +1,35 @@
+{
+  "evidence_id": "boundary-audit-59a7253b9b22",
+  "issue_id": "V4-PLUGIN-002",
+  "experiment_id": "v4-feature-layer-d-v4-plugin-002",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "execution_surface": "development_whitebox",
+  "source_commit": "59a7253b9b22795dc4b1e76d31f5993126bb2988",
+  "scope": {
+    "feature_id": "V4-PLUGIN-002",
+    "module_id": "routecodex-v4-standard-plugins"
+  },
+  "producer": {
+    "adapter": "node",
+    "identity": "v4_plugin_request_boundary"
+  },
+  "command_argv": [
+    "node",
+    "scripts/architecture/verify-v4-standard-plugins.mjs"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-09-17T14:33:56.918Z",
+  "expires_at": "2026-09-24T14:33:56.918Z",
+  "input_hashes": [
+    "sha256:2a4ffbfdf79dcf8e049342828428e93520e24e1efa2682abddbe1c68665cb923",
+    "sha256:51085e183b1a69168603db12333758f775d874f0624367702f17d558abdb2543",
+    "sha256:7a35cc9fb7c7462464acadd82d46032dcf37e03f3f1d5ee73f159892d26c7c61",
+    "sha256:7d8156b43abaf9fddfdffa44e97d9787fa2efee0ceebd488ae0dacaef35ea936",
+    "sha256:dff52c2f4537d23ac667caa18e6353439e2954ed217cbc98b8e0e5b31e751894",
+    "sha256:e8e2e5316e66309aa75256e56ba3264cfa92d1e5d860979ea191da450721957e",
+    "sha256:f487a2184f1acc5f642cdbe0225115f897f12ba66eb25fe08b8d9b0fbb928704"
+  ],
+  "scope_hash": "sha256:47acad4106385b7cf94de31144b742fe1adfd08c2f91172aaa7864e8ab733e48"
+}
