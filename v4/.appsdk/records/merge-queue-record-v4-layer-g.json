@@ -1,0 +1,17 @@
+{
+  "candidate_commit": "356cd11f3357406460dea751df624e67feaf96a2",
+  "collaboration_id": "v4-item06-feature-layer-admission-0917",
+  "created_at": "2026-09-17T17:03:00Z",
+  "delivery_mode": "commit_merge_each_milestone",
+  "effectiveness_id": "v4-layer-batch-g-current",
+  "fix_candidate_id": "v4-layer-batch-g-current",
+  "issue_id": "V4-LAYER-BATCH-G",
+  "main_base_commit": "4ddebdc394d9d8ecf9c77b54d9a69f2972739c05",
+  "merge_owner": "appsdk::merge_queue",
+  "milestone_id": "M1",
+  "module_id": "routecodex-v4-governance",
+  "queue_entry_id": "v4-layer-g",
+  "queue_position": 7,
+  "status": "admitted",
+  "strategy": "integration_merge_then_fast_forward"
+}

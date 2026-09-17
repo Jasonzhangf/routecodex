@@ -1,0 +1,17 @@
+{
+  "candidate_commit": "55f5529cc075e14ac07a587fbde2680c5ad3c1e0",
+  "collaboration_id": "v4-item06-feature-layer-admission-0917",
+  "created_at": "2026-09-17T17:03:00Z",
+  "delivery_mode": "commit_merge_each_milestone",
+  "effectiveness_id": "v4-layer-batch-c-current",
+  "fix_candidate_id": "v4-layer-batch-c-current",
+  "issue_id": "V4-LAYER-BATCH-C",
+  "main_base_commit": "9181843f786b13ebe8b33ad5e4b7ecc4a9b1ec38",
+  "merge_owner": "appsdk::merge_queue",
+  "milestone_id": "M1",
+  "module_id": "routecodex-v4-cordis-bridge",
+  "queue_entry_id": "v4-layer-c",
+  "queue_position": 3,
+  "status": "admitted",
+  "strategy": "integration_merge_then_fast_forward"
+}
