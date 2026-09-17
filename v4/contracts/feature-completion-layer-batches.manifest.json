@@ -93,60 +93,195 @@
     {
       "batch_id": "A",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.parity.product_ledger",
+      "module_ids": [
+        "routecodex-v4-parity"
+      ],
+      "owned_paths": [
+        "scripts/architecture/verify-v4-product-differential.mjs",
+        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
+        "scripts/architecture/verify-v4-product-parity-status.mjs",
+        "scripts/architecture/verify-v4-v3-baseline-delta.mjs"
+      ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-PARITY-001",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate-4d5d120e453b.json",
+          "function_ids": [
+            "v4.parity.product_ledger"
+          ],
+          "resource_ids": [
+            "v4.parity.product_ledger"
+          ],
+          "source_paths": [
+            "scripts/architecture/verify-v4-product-parity-ledger.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_parity_ledger_boundary",
+            "v4_parity_ledger_plane",
+            "v4_parity_ledger_positive",
+            "v4_parity_ledger_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_parity_ledger_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-001/boundary-audit-4d5d120e453b.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_ledger_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-001/plane-isolation-4d5d120e453b.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_parity_ledger_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-001/positive-4d5d120e453b.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_parity_ledger_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-001/red-gate-4d5d120e453b.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PARITY-002",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate-4d5d120e453b.json",
+          "function_ids": [
+            "v4.parity.baseline_delta"
+          ],
+          "resource_ids": [
+            "v4.parity.baseline_delta"
+          ],
+          "source_paths": [
+            "scripts/architecture/verify-v4-v3-baseline-delta.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_parity_ledger_boundary",
+            "v4_parity_ledger_plane",
+            "v4_parity_ledger_positive",
+            "v4_parity_ledger_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_parity_ledger_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-002/boundary-audit-4d5d120e453b.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_ledger_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-002/plane-isolation-4d5d120e453b.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_parity_ledger_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-002/positive-4d5d120e453b.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_parity_ledger_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-002/red-gate-4d5d120e453b.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PARITY-003",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate-4d5d120e453b.json",
+          "function_ids": [
+            "v4.parity.status_gate"
+          ],
+          "resource_ids": [
+            "v4.parity.status_gate"
+          ],
+          "source_paths": [
+            "scripts/architecture/verify-v4-product-parity-status.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_parity_ledger_boundary",
+            "v4_parity_ledger_plane",
+            "v4_parity_ledger_positive",
+            "v4_parity_ledger_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_parity_ledger_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-003/boundary-audit-4d5d120e453b.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_ledger_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-003/plane-isolation-4d5d120e453b.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_parity_ledger_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-003/positive-4d5d120e453b.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_parity_ledger_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-003/red-gate-4d5d120e453b.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PARITY-HARNESS-001",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-A/fix-candidate-4d5d120e453b.json",
+          "function_ids": [
+            "v4.parity.differential_harness"
+          ],
+          "resource_ids": [
+            "v4.parity.differential_harness"
+          ],
+          "source_paths": [
+            "scripts/architecture/verify-v4-product-differential.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_parity_ledger_boundary",
+            "v4_parity_ledger_plane",
+            "v4_parity_ledger_positive",
+            "v4_parity_ledger_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_parity_ledger_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/boundary-audit-4d5d120e453b.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_ledger_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/plane-isolation-4d5d120e453b.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_parity_ledger_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/positive-4d5d120e453b.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_parity_ledger_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PARITY-HARNESS-001/red-gate-4d5d120e453b.json"
+            }
+          ]
         }
       ]
     },
@@ -162,163 +297,503 @@
         "crates/routecodex-v4-plugin-plan/**"
       ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-RUNTIME-003",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-B/fix-candidate-2e5b27cd27e9.json",
+          "function_ids": [
+            "v4.runtime.node_plan_bundle"
+          ],
+          "resource_ids": [
+            "v4.runtime.node_plan_bundle"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-plugin-plan/src/lib.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_runtime_003_plan_bundle_boundary",
+            "v4_runtime_003_plan_bundle_plane",
+            "v4_runtime_003_plan_bundle_positive",
+            "v4_runtime_003_plan_bundle_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_runtime_003_plan_bundle_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-003/boundary-audit-2e5b27cd27e9.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_runtime_003_plan_bundle_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-003/plane-isolation-2e5b27cd27e9.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_runtime_003_plan_bundle_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-003/positive-2e5b27cd27e9.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_runtime_003_plan_bundle_red",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-003/red-gate-2e5b27cd27e9.json"
+            }
+          ]
         }
       ]
     },
     {
       "batch_id": "C",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.runtime.cordis_mount_candidate",
+      "module_ids": [
+        "routecodex-v4-cordis-bridge"
+      ],
+      "owned_paths": [
+        "crates/routecodex-v4-cordis-bridge/**"
+      ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-RUNTIME-004",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-C/fix-candidate-55f5529cc075.json",
+          "function_ids": [
+            "v4.runtime.cordis_mount_candidate"
+          ],
+          "resource_ids": [
+            "v4.cordis.mount_candidate"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-cordis-bridge/src/lib.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_runtime_004_mount_boundary",
+            "v4_runtime_004_mount_plane",
+            "v4_runtime_004_mount_positive",
+            "v4_runtime_004_mount_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_runtime_004_mount_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-004/boundary-audit-55f5529cc075.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_runtime_004_mount_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-004/plane-isolation-55f5529cc075.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_runtime_004_mount_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-004/positive-55f5529cc075.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_runtime_004_mount_red",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-004/red-gate-55f5529cc075.json"
+            }
+          ]
         }
       ]
     },
     {
       "batch_id": "D",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.plugin.request.responses_normalize",
+      "module_ids": [
+        "routecodex-v4-standard-plugins"
+      ],
+      "owned_paths": [
+        "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
+        "crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+        "crates/routecodex-v4-standard-plugins/src/request_governance.rs",
+        "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
+        "crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
+        "crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"
+      ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-PLUGIN-001",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
+          "function_ids": [
+            "v4.plugin.request.responses_normalize"
+          ],
+          "resource_ids": [
+            "v4.plugin.request.responses_normalize"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
+            "crates/routecodex-v4-standard-plugins/src/request_plugins.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_request_boundary",
+            "v4_plugin_request_plane",
+            "v4_plugin_request_positive",
+            "v4_plugin_request_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_request_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/boundary-audit-e8f5f231545a.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_request_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/plane-isolation-e8f5f231545a.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_request_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/positive-e8f5f231545a.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_request_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/red-gate-e8f5f231545a.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-002",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
+          "function_ids": [
+            "v4.plugin.request.chat_to_responses"
+          ],
+          "resource_ids": [
+            "v4.plugin.request.chat_to_responses"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_request_boundary",
+            "v4_plugin_request_plane",
+            "v4_plugin_request_positive",
+            "v4_plugin_request_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_request_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/boundary-audit-e8f5f231545a.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_request_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/plane-isolation-e8f5f231545a.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_request_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/positive-e8f5f231545a.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_request_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/red-gate-e8f5f231545a.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-003",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
+          "function_ids": [
+            "v4.plugin.request.governance"
+          ],
+          "resource_ids": [
+            "v4.plugin.request.governance"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/request_governance.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_request_boundary",
+            "v4_plugin_request_plane",
+            "v4_plugin_request_positive",
+            "v4_plugin_request_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_request_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/boundary-audit-e8f5f231545a.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_request_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/plane-isolation-e8f5f231545a.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_request_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/positive-e8f5f231545a.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_request_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/red-gate-e8f5f231545a.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-004",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
+          "function_ids": [
+            "v4.plugin.request.provider_semantic"
+          ],
+          "resource_ids": [
+            "v4.plugin.request.provider_semantic"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/model_hooks.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_request_boundary",
+            "v4_plugin_request_plane",
+            "v4_plugin_request_positive",
+            "v4_plugin_request_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_request_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/boundary-audit-e8f5f231545a.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_request_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/plane-isolation-e8f5f231545a.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_request_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/positive-e8f5f231545a.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_request_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/red-gate-e8f5f231545a.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-005",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
+          "function_ids": [
+            "v4.plugin.request.responses_wire_build"
+          ],
+          "resource_ids": [
+            "v4.plugin.request.responses_wire_build"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_request_boundary",
+            "v4_plugin_request_plane",
+            "v4_plugin_request_positive",
+            "v4_plugin_request_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_request_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/boundary-audit-e8f5f231545a.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_request_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/plane-isolation-e8f5f231545a.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_request_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/positive-e8f5f231545a.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_request_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/red-gate-e8f5f231545a.json"
+            }
+          ]
         }
       ]
     },
     {
       "batch_id": "E",
       "conditional": false,
-      "owner_binding_status": "pending",
-      "owner_function_id": null,
-      "module_ids": [],
-      "owned_paths": [],
+      "owner_binding_status": "bound",
+      "owner_function_id": "v4.plugin.response.decode",
+      "module_ids": [
+        "routecodex-v4-standard-plugins"
+      ],
+      "owned_paths": [
+        "crates/routecodex-v4-standard-plugins/src/response_decode.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_fault.rs",
+        "crates/routecodex-v4-standard-plugins/src/response_governance.rs"
+      ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-PLUGIN-006",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate-cdc7c84f85be.json",
+          "function_ids": [
+            "v4.plugin.response.decode"
+          ],
+          "resource_ids": [
+            "v4.plugin.response.decode"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/response_decode.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_response_boundary",
+            "v4_plugin_response_plane",
+            "v4_plugin_response_positive",
+            "v4_plugin_response_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_response_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-006/boundary-audit-cdc7c84f85be.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_response_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-006/plane-isolation-cdc7c84f85be.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_response_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-006/positive-cdc7c84f85be.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_response_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-006/red-gate-cdc7c84f85be.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-007",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate-cdc7c84f85be.json",
+          "function_ids": [
+            "v4.plugin.response.governance"
+          ],
+          "resource_ids": [
+            "v4.plugin.response.governance"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/response_governance.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_response_boundary",
+            "v4_plugin_response_plane",
+            "v4_plugin_response_positive",
+            "v4_plugin_response_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_response_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-007/boundary-audit-cdc7c84f85be.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_response_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-007/plane-isolation-cdc7c84f85be.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_response_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-007/positive-cdc7c84f85be.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_response_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-007/red-gate-cdc7c84f85be.json"
+            }
+          ]
         },
         {
           "task_id": "V4-PLUGIN-008",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-E/fix-candidate-cdc7c84f85be.json",
+          "function_ids": [
+            "v4.plugin.response.fault_intake"
+          ],
+          "resource_ids": [
+            "v4.plugin.response.fault_intake"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-standard-plugins/src/response_fault.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_plugin_response_boundary",
+            "v4_plugin_response_plane",
+            "v4_plugin_response_positive",
+            "v4_plugin_response_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_plugin_response_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-008/boundary-audit-cdc7c84f85be.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_plugin_response_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-008/plane-isolation-cdc7c84f85be.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_plugin_response_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-008/positive-cdc7c84f85be.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_plugin_response_red",
+              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-008/red-gate-cdc7c84f85be.json"
+            }
+          ]
         }
       ]
     },
@@ -334,31 +809,96 @@
         "crates/routecodex-v4-runtime/**"
       ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-RUNTIME-005",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-F/fix-candidate-d67a902713ab.json",
+          "function_ids": [
+            "v4.runtime.request_port"
+          ],
+          "resource_ids": [
+            "v4.runtime.request_port"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-runtime/src/request_port.rs",
+            "crates/routecodex-v4-runtime/tests/l2_ports.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_runtime_005_request_port_boundary",
+            "v4_runtime_005_request_port_plane",
+            "v4_runtime_005_request_port_positive",
+            "v4_runtime_005_request_port_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_runtime_005_request_port_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-005/boundary-audit-d67a902713ab.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_runtime_005_request_port_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-005/plane-isolation-d67a902713ab.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_runtime_005_request_port_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-005/positive-d67a902713ab.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_runtime_005_request_port_red",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-005/red-gate-d67a902713ab.json"
+            }
+          ]
         },
         {
           "task_id": "V4-RUNTIME-006",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-F/fix-candidate-d67a902713ab.json",
+          "function_ids": [
+            "v4.runtime.response_error_port"
+          ],
+          "resource_ids": [
+            "v4.runtime.response_error_port"
+          ],
+          "source_paths": [
+            "crates/routecodex-v4-runtime/src/response_error_port.rs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_runtime_006_response_error_boundary",
+            "v4_runtime_006_response_error_plane",
+            "v4_runtime_006_response_error_positive",
+            "v4_runtime_006_response_error_red"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_runtime_006_response_error_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-006/boundary-audit-d67a902713ab.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_runtime_006_response_error_plane",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-006/plane-isolation-d67a902713ab.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_runtime_006_response_error_positive",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-006/positive-d67a902713ab.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_runtime_006_response_error_red",
+              "path": "docs/evidence/feature-completion/M1/V4-RUNTIME-006/red-gate-d67a902713ab.json"
+            }
+          ]
         }
       ]
     },
@@ -393,31 +933,95 @@
         "scripts/verify-ci.mjs"
       ],
       "source_dependencies": [],
-      "status": "pending",
+      "status": "source_green",
       "tasks": [
         {
           "task_id": "V4-GATE-001",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-G/fix-candidate-356cd11f3357.json",
+          "function_ids": [
+            "v4.governance.feature_layer_gate_contract"
+          ],
+          "resource_ids": [
+            "v4.governance.feature_layer_gate_contract"
+          ],
+          "source_paths": [
+            "scripts/architecture/verify-v4-feature-layer-batches.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_feature_layer_batches",
+            "v4_feature_layer_batches_boundary",
+            "v4_feature_layer_batches_red",
+            "v4_feature_layer_batches_self_test"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_feature_layer_batches_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-GATE-001/boundary-audit-356cd11f3357.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_feature_layer_batches_red",
+              "path": "docs/evidence/feature-completion/M1/V4-GATE-001/red-gate-356cd11f3357.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_feature_layer_batches_self_test",
+              "path": "docs/evidence/feature-completion/M1/V4-GATE-001/positive-356cd11f3357.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_gate_plane_isolation",
+              "path": "docs/evidence/feature-completion/M1/V4-GATE-001/plane-isolation-356cd11f3357.json"
+            }
+          ]
         },
         {
           "task_id": "V4-LAYER-GATE-001",
-          "status": "pending",
-          "candidate_record": null,
-          "function_ids": [],
-          "resource_ids": [],
-          "source_paths": [],
+          "status": "source_green",
+          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-G/fix-candidate-356cd11f3357.json",
+          "function_ids": [
+            "v4.governance.feature_layer_product_lockstep"
+          ],
+          "resource_ids": [
+            "v4.governance.feature_layer_product_lockstep"
+          ],
+          "source_paths": [
+            "scripts/architecture/lib/feature-layer-batch-source.mjs"
+          ],
           "support_paths": [],
-          "required_gate_ids": [],
+          "required_gate_ids": [
+            "v4_feature_layer_batches",
+            "v4_feature_layer_batches_boundary",
+            "v4_feature_layer_batches_red",
+            "v4_feature_layer_batches_self_test"
+          ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": []
+          "evidence_refs": [
+            {
+              "role": "boundary_audit",
+              "gate_id": "v4_feature_layer_batches_boundary",
+              "path": "docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/boundary-audit-356cd11f3357.json"
+            },
+            {
+              "role": "red_gate",
+              "gate_id": "v4_feature_layer_batches_red",
+              "path": "docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/red-gate-356cd11f3357.json"
+            },
+            {
+              "role": "positive",
+              "gate_id": "v4_feature_layer_batches_self_test",
+              "path": "docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/positive-356cd11f3357.json"
+            },
+            {
+              "role": "plane_isolation",
+              "gate_id": "v4_parity_gate_plane_isolation",
+              "path": "docs/evidence/feature-completion/M1/V4-LAYER-GATE-001/plane-isolation-356cd11f3357.json"
+            }
+          ]
         }
       ]
     },
