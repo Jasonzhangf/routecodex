@@ -368,7 +368,7 @@ export function main({ now = Date.now() } = {}) {
         });
         if (ref) task.evidence_refs.push(ref);
       }
-      if (batch.batch_id === 'G' && task.task_id === 'V4-GATE-001') {
+      if (batch.batch_id === 'G') {
         const planeGate = gateById(verificationMap, 'v4_parity_gate_plane_isolation');
         const ref = writeEvidence({
           truth,
