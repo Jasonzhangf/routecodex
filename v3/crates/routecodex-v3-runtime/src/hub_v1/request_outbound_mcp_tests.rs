@@ -363,6 +363,29 @@ fn openai_chat_tool_search_history_strips_legacy_functions_mcp_prefix() {
 }
 
 #[test]
+fn openai_responses_provider_strips_functions_prefix_from_history_names() {
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&json!({
+        "model": "deepseek-v4.1-flash",
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "review_1",
+                "type": "function",
+                "function": {
+                    "name": "functions.mcp__codex_review__review_start",
+                    "arguments": "{}"
+                }
+            }]
+        }]
+    }))
+    .expect("Responses provider history names must be legal on provider wire");
+    assert_eq!(
+        request["input"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
 fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
