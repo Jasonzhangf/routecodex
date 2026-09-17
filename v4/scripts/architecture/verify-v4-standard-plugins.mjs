@@ -172,8 +172,18 @@ const NODE_PERMISSIONS = new Map([
     writes: ['v4.response.provider_raw'],
   }],
   ['V4ProviderRespInbound01Raw', {
-    reads: ['v4.response.provider_raw'],
-    writes: ['v4.response.provider_raw', 'v4.control.stream_terminal'],
+    reads: [
+      'v4.response.provider_raw',
+      'v4.control.provider_sse_reducer',
+      'v4.information.execution_lane',
+      'v4.information.client_protocol',
+      'v4.information.provider_protocol',
+    ],
+    writes: [
+      'v4.response.provider_raw',
+      'v4.control.stream_terminal',
+      'v4.control.provider_sse_reducer',
+    ],
   }],
   ['V4HubRespChatProcess04Governed', {
     reads: ['v4.response.normal_payload'],

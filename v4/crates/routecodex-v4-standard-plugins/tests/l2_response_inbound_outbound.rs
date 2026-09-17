@@ -5,11 +5,11 @@
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput, SharedTransportCarrier};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::{compile_node_plan, PlanError};
-use routecodex_v4_standard_plugins::response_inbound::{
-    decode_provider_sse_frame, ProviderSseEventDisposition,
-};
 use routecodex_v4_standard_plugins::protocol::provider_response::{
     normalize_provider_response, normalize_provider_sse_frame,
+};
+use routecodex_v4_standard_plugins::response_inbound::{
+    decode_provider_sse_frame, ProviderSseEventDisposition, ProviderSseReducer,
 };
 use routecodex_v4_standard_plugins::response_outbound::{
     encode_client_error_sse_frame, encode_client_sse_frame,
@@ -233,12 +233,8 @@ fn provider_sse_uses_arc_transport_carrier_and_typed_terminal_control() {
         manifest_hash: hash.clone(),
         loaded_plan_hash: hash,
     };
-    let mut container = NodeContainer::declare(
-        "V4ProviderRespInbound01Raw",
-        plan,
-        bindings,
-    )
-    .expect("provider SSE container binds");
+    let mut container = NodeContainer::declare("V4ProviderRespInbound01Raw", plan, bindings)
+        .expect("provider SSE container binds");
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
@@ -354,6 +350,250 @@ fn relay_response_hook_projects_responses_function_arguments_delta() {
         projected["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
         "{\"city\":"
     );
+}
+
+#[test]
+fn relay_response_hook_projects_responses_tool_item_identity() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "type": "response.output_item.added",
+            "output_index": 1,
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": ""
+            }
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("Responses function call item must project through the Relay response hook");
+
+    let tool = &projected["choices"][0]["delta"]["tool_calls"][0];
+    assert_eq!(tool["index"], 1);
+    assert_eq!(tool["id"], "call_1");
+    assert_eq!(tool["type"], "function");
+    assert_eq!(tool["function"]["name"], "lookup");
+    assert_eq!(tool["function"]["arguments"], "");
+}
+
+#[test]
+fn relay_response_hook_projects_responses_terminal_usage() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "model": "m",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                    "input_tokens": 11,
+                    "output_tokens": 7,
+                    "total_tokens": 18
+                }
+            }
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("Responses terminal must project through the Relay response hook");
+
+    assert_eq!(projected["usage"]["prompt_tokens"], 11);
+    assert_eq!(projected["usage"]["completion_tokens"], 7);
+    assert_eq!(projected["usage"]["total_tokens"], 18);
+    assert!(projected["choices"][0]["delta"].get("tool_calls").is_none());
+}
+
+#[test]
+fn relay_response_hook_projects_incomplete_reason_to_chat_finish_reason() {
+    for (reason, finish_reason) in [
+        ("max_output_tokens", "length"),
+        ("content_filter", "content_filter"),
+    ] {
+        let projected = execute(
+            "V4HubRespOutbound05ClientSemantic",
+            5,
+            "v4.hook.relay.response",
+            json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete",
+                    "model": "m",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": reason}
+                }
+            }),
+            json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+        )
+        .expect("Responses incomplete terminal must project through the Relay response hook");
+
+        assert_eq!(projected["choices"][0]["finish_reason"], finish_reason);
+    }
+}
+
+#[test]
+fn relay_response_hook_projects_json_incomplete_reason_to_chat_finish_reason() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "id": "resp_incomplete_json",
+            "model": "m",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": []
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("JSON incomplete response must project through the Relay response hook");
+
+    assert_eq!(projected["choices"][0]["finish_reason"], "length");
+}
+
+#[test]
+fn relay_response_hook_rejects_incomplete_without_supported_reason() {
+    for payload in [
+        json!({
+            "type": "response.incomplete",
+            "response": {"id":"resp_1","status":"incomplete"}
+        }),
+        json!({
+            "type": "response.incomplete",
+            "response": {
+                "id":"resp_1",
+                "status":"incomplete",
+                "incomplete_details":{"reason":"internal_error"}
+            }
+        }),
+        json!({
+            "id":"resp_1",
+            "status":"incomplete",
+            "incomplete_details":{"reason":"internal_error"},
+            "output":[]
+        }),
+    ] {
+        let error = execute(
+            "V4HubRespOutbound05ClientSemantic",
+            5,
+            "v4.hook.relay.response",
+            payload,
+            json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+        )
+        .expect_err("invalid incomplete reason must fail at the projection owner");
+        assert!(format!("{error}").contains("response.incomplete"));
+    }
+}
+
+#[test]
+fn relay_response_hook_does_not_project_provider_done_as_client_finish() {
+    let projected = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "type": "response.done",
+            "response": {"id":"resp_done","model":"m","status":"completed","output":[]}
+        }),
+        json!({"provider_protocol":"openai-responses","client_protocol":"openai-chat"}),
+    )
+    .expect("provider response.done must remain a non-terminal semantic event");
+
+    assert_eq!(projected["choices"][0]["delta"], json!({}));
+    assert_eq!(projected["choices"][0]["finish_reason"], Value::Null);
+}
+
+#[test]
+fn provider_sse_reducer_materializes_streamed_message_once() {
+    let mut reducer = ProviderSseReducer::default();
+    reducer
+        .reduce_frame(
+            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n",
+        )
+        .expect("message added frame reduces");
+    reducer
+        .reduce_frame(
+            b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n",
+        )
+        .expect("message done frame reduces");
+    let terminal = reducer
+        .reduce_frame(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_message\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n",
+        )
+        .expect("terminal frame materializes");
+    let terminal = String::from_utf8(terminal).expect("terminal frame is utf8");
+    let payload = terminal
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("terminal data line");
+    let payload: Value = serde_json::from_str(payload).expect("terminal data is JSON");
+    let output = payload["response"]["output"]
+        .as_array()
+        .expect("materialized output is an array");
+    assert_eq!(output.len(), 1, "streamed message must not be duplicated");
+    assert_eq!(output[0]["content"][0]["text"], "hello");
+}
+
+#[test]
+fn provider_sse_reducer_preserves_terminal_item_with_different_type_at_same_index() {
+    let mut reducer = ProviderSseReducer::default();
+    reducer
+        .reduce_frame(
+            b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"stream text\"}]}}\n\n",
+        )
+        .expect("message item reduces");
+    let terminal = reducer
+        .reduce_frame(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_identity_merge\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"terminal reasoning\"}]}]}}\n\n",
+        )
+        .expect("terminal frame materializes");
+    let terminal = String::from_utf8(terminal).expect("terminal frame is utf8");
+    let payload = terminal
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("terminal data line");
+    let payload: Value = serde_json::from_str(payload).expect("terminal data is JSON");
+    let output = payload["response"]["output"]
+        .as_array()
+        .expect("materialized output is an array");
+    assert_eq!(output.len(), 2);
+    assert_eq!(output[0]["type"], "message");
+    assert_eq!(output[1]["type"], "reasoning");
+}
+
+#[test]
+fn provider_sse_reducer_rejects_incomplete_without_supported_reason() {
+    let mut reducer = ProviderSseReducer::default();
+    for payload in [
+        br#"event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":"incomplete"}}
+
+"#.as_slice(),
+        br#"event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":"incomplete","incomplete_details":{"reason":"internal_error"}}}
+
+"#.as_slice(),
+    ] {
+        let error = reducer
+            .reduce_frame(payload)
+            .expect_err("incomplete terminal without supported reason must fail fast");
+        assert!(error.contains("response.incomplete"));
+    }
+}
+
+#[test]
+fn provider_sse_decoder_does_not_treat_response_done_as_provider_terminal() {
+    let decoded = decode_provider_sse_frame(
+        b"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_done\",\"status\":\"completed\"}}\n\n",
+    )
+    .expect("response.done remains a valid non-terminal provider frame");
+    assert_eq!(decoded.disposition, ProviderSseEventDisposition::Continue);
 }
 
 #[test]

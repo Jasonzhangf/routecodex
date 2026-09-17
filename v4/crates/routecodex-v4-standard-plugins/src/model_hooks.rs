@@ -53,7 +53,9 @@ pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), Stri
     let stream = admission_facts
         .get("stream")
         .and_then(Value::as_bool)
-        .ok_or_else(|| "direct_model_passthrough requires boolean stream admission fact".to_string())?;
+        .ok_or_else(|| {
+            "direct_model_passthrough requires boolean stream admission fact".to_string()
+        })?;
     value.insert("model".to_string(), Value::String(wire_model));
     value.insert("stream".to_string(), Value::Bool(stream));
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
@@ -166,7 +168,7 @@ pub(crate) fn relay_response_projection(ctx: &mut ExecCtx<'_>) -> Result<(), Str
     let projected = match (provider_protocol.as_str(), client_protocol.as_str()) {
         (provider, client) if provider == client => Value::Object(value),
         ("openai-responses", "openai-chat") => {
-            super::response_outbound::project_responses_to_chat(&Value::Object(value))
+            super::response_outbound::project_responses_to_chat(&Value::Object(value))?
         }
         (provider, client) => {
             return Err(format!(

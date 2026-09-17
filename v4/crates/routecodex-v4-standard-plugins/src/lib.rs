@@ -280,6 +280,10 @@ pub fn standard_resource_registry() -> ResourceRegistry {
                 axis: ResourceAxis::Control,
             },
             ResourceEntry {
+                resource_id: "v4.control.provider_sse_reducer".to_string(),
+                axis: ResourceAxis::Control,
+            },
+            ResourceEntry {
                 resource_id: "v4.control.error_chain".to_string(),
                 axis: ResourceAxis::Control,
             },
@@ -358,6 +362,7 @@ pub fn standard_allowed_reads() -> Vec<String> {
         "v4.control.target_selection".to_string(),
         "v4.control.request_admission_facts".to_string(),
         "v4.control.stream_terminal".to_string(),
+        "v4.control.provider_sse_reducer".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.lifecycle.payload_cycle".to_string(),
         "v4.config.manifest".to_string(),
@@ -388,6 +393,7 @@ pub fn standard_allowed_writes() -> Vec<String> {
         "v4.control.target_selection".to_string(),
         "v4.control.request_admission_facts".to_string(),
         "v4.control.stream_terminal".to_string(),
+        "v4.control.provider_sse_reducer".to_string(),
         "v4.control.error_chain".to_string(),
         "v4.lifecycle.payload_cycle".to_string(),
         "v4.control.side_channel".to_string(),
@@ -401,7 +407,13 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
         "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
-        "V4ProviderRespInbound01Raw" => vec!["v4.response.provider_raw".to_string()],
+        "V4ProviderRespInbound01Raw" => vec![
+            "v4.response.provider_raw".to_string(),
+            "v4.control.provider_sse_reducer".to_string(),
+            "v4.information.execution_lane".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4ServerReqInbound01ClientRaw" => vec!["v4.request.normal_payload".to_string()],
         "V4DirectReq03ProviderWire" => {
             vec!["v4.direct.request.provider_wire".to_string()]
@@ -521,6 +533,7 @@ pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
         "V4ProviderRespInbound01Raw" => vec![
             "v4.response.provider_raw".to_string(),
             "v4.control.stream_terminal".to_string(),
+            "v4.control.provider_sse_reducer".to_string(),
         ],
         "V4DirectResp01ProviderRaw" => vec![
             "v4.direct.response.provider_raw".to_string(),
