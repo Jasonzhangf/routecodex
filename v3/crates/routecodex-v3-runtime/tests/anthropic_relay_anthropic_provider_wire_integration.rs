@@ -6,7 +6,9 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime, execute_v3_anthropic_relay_runtime_with_client_headers,
+    execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
     V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput,
+    V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -153,6 +155,148 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 "#.to_vec()),
             Ok(br#"event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+"#.to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+struct AnthropicProviderSseEofThenSuccessTransport {
+    attempts: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderSseEofThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.attempts.lock().unwrap().push(provider_id.clone());
+
+        if provider_id == "flaky" {
+            let stream = futures_util::stream::iter([
+                Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_anthropic_eof","type":"message","role":"assistant","model":"MiniMax-M3","content":[]}}
+
+"#.to_vec()),
+                Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+                Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+"#.to_vec()),
+            ]);
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ));
+        }
+
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_anthropic_reselected","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null,"usage":{"input_tokens":3}}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"reselect ok"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}
+
+"#.to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+struct ResponsesProviderSseEofThenSuccessTransport {
+    attempts: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesProviderSseEofThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.attempts.lock().unwrap().push(provider_id.clone());
+
+        if provider_id == "flaky" {
+            let stream = futures_util::stream::iter([
+                Ok(br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_flaky_eof","status":"in_progress","output":[]}}
+
+"#.to_vec()),
+                Ok(br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","response_id":"resp_flaky_eof","delta":"partial"}
+
+"#.to_vec()),
+            ]);
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream),
+            ));
+        }
+
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_stable","status":"in_progress","output":[]}}
+
+"#.to_vec()),
+            Ok(br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","response_id":"resp_stable","delta":"reselect ok"}
+
+"#.to_vec()),
+            Ok(br#"event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_stable","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"reselect ok"}]}]}}
 
 "#.to_vec()),
         ]);
@@ -462,8 +606,11 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() {
     let server_id = "anthropic_wire_sse_eof_failure";
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest(server_id),
+    let manifest = manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -482,6 +629,8 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
             }),
         },
         &AnthropicProviderSseEofBeforeStopTransport,
+        Vec::new(),
+        provider_health.runtime_health(),
     )
     .await
     .unwrap();
@@ -502,10 +651,143 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 }
 
 #[tokio::test]
+async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
+    let server_id = "anthropic_wire_sse_eof_reselect";
+    let manifest = anthropic_reselect_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = AnthropicProviderSseEofThenSuccessTransport {
+        attempts: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
+        V3AnthropicRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
+            request_id: "req-anthropic-provider-sse-eof-reselect".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"partial stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        Vec::new(),
+        provider_health.runtime_health(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        output.status, 200,
+        "node_trace={:?} response={}",
+        output.node_trace, output.client_response
+    );
+    assert!(output.error_chain.is_none());
+    assert!(
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "node_trace={:?} attempts={:?}",
+        output.node_trace,
+        transport.attempts.lock().unwrap()
+    );
+    assert!(
+        !output.node_trace.contains(&"V3TargetPolicyRetriedSame"),
+        "truncated Anthropic provider SSE must switch candidates: {:?}",
+        output.node_trace
+    );
+    let events = output.client_response["events"]
+        .as_array()
+        .expect("reselect success must project Anthropic SSE events");
+    assert!(events.iter().any(
+        |event| event.pointer("/data/delta/text").and_then(Value::as_str) == Some("reselect ok")
+    ));
+    assert_eq!(events.last().unwrap()["event"], "message_stop");
+    assert_eq!(
+        transport.attempts.lock().unwrap().as_slice(),
+        ["flaky", "stable"]
+    );
+}
+
+#[tokio::test]
+async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
+    let server_id = "anthropic_wire_responses_sse_eof_reselect";
+    let manifest = responses_reselect_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = ResponsesProviderSseEofThenSuccessTransport {
+        attempts: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
+        V3AnthropicRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
+            request_id: "req-anthropic-responses-provider-sse-eof-reselect".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"partial stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        Vec::new(),
+        provider_health.runtime_health(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        output.status, 200,
+        "node_trace={:?} response={}",
+        output.node_trace, output.client_response
+    );
+    assert!(output.error_chain.is_none());
+    assert!(
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "node_trace={:?} attempts={:?}",
+        output.node_trace,
+        transport.attempts.lock().unwrap()
+    );
+    assert!(
+        !output.node_trace.contains(&"V3TargetPolicyRetriedSame"),
+        "truncated Responses provider SSE must switch candidates: {:?}",
+        output.node_trace
+    );
+    let events = output.client_response["events"]
+        .as_array()
+        .expect("reselect success must project Anthropic SSE events");
+    assert!(events.iter().any(
+        |event| event.pointer("/data/delta/text").and_then(Value::as_str) == Some("reselect ok")
+    ));
+    assert_eq!(events.last().unwrap()["event"], "message_stop");
+    assert_eq!(
+        transport.attempts.lock().unwrap().as_slice(),
+        ["flaky", "stable"]
+    );
+}
+
+#[tokio::test]
 async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_inference() {
     let server_id = "anthropic_wire_tool_missing_name_failure";
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest(server_id),
+    let manifest = manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -530,6 +812,8 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
             }),
         },
         &AnthropicProviderJsonToolMissingNameTransport,
+        Vec::new(),
+        provider_health.runtime_health(),
     )
     .await
     .unwrap();
@@ -583,6 +867,114 @@ selection = {{ strategy = "priority" }}
 targets = [
   {{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }},
   {{ kind = "provider_model", provider = "minimax", model = "claude-fable-5", key = "key1", priority = 1 }},
+]
+"#),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn anthropic_reselect_manifest(
+    server_id: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            &format!(r#"
+version = 3
+
+[servers.{server_id}]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "{server_id}"
+endpoints = ["anthropic"]
+
+[servers.{server_id}.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json", "sse"]
+
+[providers.flaky]
+type = "anthropic"
+base_url = "http://flaky.invalid/anthropic"
+default_model = "MiniMax-M3"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "FLAKY_TEST_KEY" }}] }}
+
+[providers.flaky.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[providers.stable]
+type = "anthropic"
+base_url = "http://stable.invalid/anthropic"
+default_model = "MiniMax-M3"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "STABLE_TEST_KEY" }}] }}
+
+[providers.stable.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[route_groups.{server_id}.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "flaky", model = "MiniMax-M3", key = "key1", priority = 2 }},
+  {{ kind = "provider_model", provider = "stable", model = "MiniMax-M3", key = "key1", priority = 1 }},
+]
+"#),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn responses_reselect_manifest(
+    server_id: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            &format!(r#"
+version = 3
+
+[servers.{server_id}]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "{server_id}"
+endpoints = ["anthropic"]
+
+[servers.{server_id}.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json", "sse"]
+
+[providers.flaky]
+type = "responses"
+base_url = "http://flaky.invalid/v1"
+default_model = "MiniMax-M3"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "FLAKY_TEST_KEY" }}] }}
+
+[providers.flaky.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[providers.stable]
+type = "responses"
+base_url = "http://stable.invalid/v1"
+default_model = "MiniMax-M3"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "STABLE_TEST_KEY" }}] }}
+
+[providers.stable.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[route_groups.{server_id}.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "flaky", model = "MiniMax-M3", key = "key1", priority = 2 }},
+  {{ kind = "provider_model", provider = "stable", model = "MiniMax-M3", key = "key1", priority = 1 }},
 ]
 "#),
         )

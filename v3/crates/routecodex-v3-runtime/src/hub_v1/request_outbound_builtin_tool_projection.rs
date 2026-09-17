@@ -475,15 +475,44 @@ fn normalize_openai_chat_function_tool(
     row: &Map<String, Value>,
     path: &str,
 ) -> Result<Value, String> {
-    if row.get("function").and_then(Value::as_object).is_some() {
+    if let Some(function) = row.get("function").and_then(Value::as_object) {
         // Req04 owns the only Tool-Thinking schema compilation. This adapter
-        // preserves the already-governed function declaration verbatim.
-        return Ok(Value::Object(row.clone()));
+        // preserves the already-governed function declaration, while the
+        // provider wire name still shares the MCP history normalization owner.
+        let mut normalized = row.clone();
+        if let Some(name) = function.get("name").and_then(Value::as_str) {
+            if let Some(normalized_function) = normalized
+                .get_mut("function")
+                .and_then(Value::as_object_mut)
+            {
+                normalized_function.insert(
+                    "name".to_string(),
+                    Value::String(super::request_outbound_mcp_names::provider_function_name(
+                        name,
+                    )),
+                );
+            }
+        }
+        return Ok(Value::Object(normalized));
     }
     let mut function = Map::new();
     for key in ["name", "description", "parameters", "strict"] {
         if let Some(value) = row.get(key) {
-            function.insert(key.to_string(), value.clone());
+            function.insert(
+                key.to_string(),
+                if key == "name" {
+                    value
+                        .as_str()
+                        .map(|name| {
+                            Value::String(
+                                super::request_outbound_mcp_names::provider_function_name(name),
+                            )
+                        })
+                        .unwrap_or_else(|| value.clone())
+                } else {
+                    value.clone()
+                },
+            );
         }
     }
     Ok(Value::Object(Map::from_iter([

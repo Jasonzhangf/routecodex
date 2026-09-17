@@ -1370,6 +1370,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
   design:
@@ -1393,6 +1394,7 @@ features:
   - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
   - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth
   required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture
   - npm run test:v3-anthropic-relay-runtime-integration
   - npm run verify:v3-anthropic-relay-runtime-integration
   - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
@@ -1686,6 +1688,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -1745,6 +1749,8 @@ features:
     policy before provider send.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
+  - Responses function-call history with an MCP namespace projects to the qualified provider tool name, while namespace-less Responses-origin history is qualified only when the provider tool set
+    makes that mapping unambiguous. Custom tool calls and ordinary native functions never borrow a colliding MCP leaf name.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -1773,6 +1779,11 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
+  - responses_function_call_history_without_namespace_is_qualified_from_provider_tools
+  - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
+  - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
+  - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action`
     after the complete typed node chain.
   - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.

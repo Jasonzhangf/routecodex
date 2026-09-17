@@ -1320,6 +1320,9 @@ fn normalize_openai_chat_messages_payload(
         .and_then(|value| value.as_str().map(str::to_string))
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
+    super::request_outbound_mcp_names::qualify_openai_chat_missing_mcp_tool_call_names(
+        &mut normalized,
+    );
     let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
         return Ok(normalized);
     };

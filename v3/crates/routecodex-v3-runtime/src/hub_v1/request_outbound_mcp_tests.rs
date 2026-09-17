@@ -10,6 +10,114 @@ fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
 }
 
 #[test]
+fn openai_chat_provider_strips_functions_prefix_from_history_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_search",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_search",
+                "content": [{
+                    "type": "tool_result",
+                    "name": "functions.mcp__codex_review__review_start",
+                    "content": "{}"
+                }]
+            }
+        ]
+    }))
+    .expect("functions-prefixed MCP history names must be legal on provider wire");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn openai_chat_provider_normalizes_mcp_declaration_and_history_names_consistently() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "functions.mcp__codex_review__review_start",
+                "description": "Start review",
+                "parameters": {"type": "object"}
+            }
+        }],
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_review",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_review",
+                "content": [{
+                    "type": "tool_result",
+                    "name": "functions.mcp__codex_review__review_start",
+                    "content": "{}"
+                }]
+            }
+        ]
+    }))
+    .expect("MCP declaration and history names must share the provider identity");
+    let expected = json!("mcp__codex_review__review_start");
+    assert_eq!(request["tools"][0]["function"]["name"], expected);
+    assert_eq!(request["messages"][0]["tool_calls"][0]["function"]["name"], expected);
+    assert_eq!(request["messages"][1]["content"][0]["name"], expected);
+}
+
+#[test]
+fn openai_chat_provider_preserves_non_mcp_functions_prefix() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "functions.exec_command",
+                "parameters": {"type": "object"}
+            }
+        }],
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_exec",
+                "type": "function",
+                "function": {"name": "functions.exec_command", "arguments": "{}"}
+            }]
+        }]
+    }))
+    .expect("non-MCP function names must not use the MCP legacy rewrite");
+    assert_eq!(request["tools"][0]["function"]["name"], "functions.exec_command");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions.exec_command"
+    );
+}
+
+#[test]
 fn openai_chat_provider_preserves_tool_search_control_history_names() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model":"glm-5.3","messages":[{"role":"assistant","tool_calls":[{"id":"search_1","type":"function","function":{"name":"mcp__mcpx.workspace","arguments":"{}"}}],"routecodex_chat_extension":{"responses_tool_call_type":"tool_search_call"}}]
@@ -55,6 +163,181 @@ fn responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_w
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
         json!("mcp__mcpx__session")
+    );
+}
+
+#[test]
+fn responses_function_call_history_without_namespace_is_qualified_from_provider_tools() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__mcpx",
+                    "tools": [{
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }]
+                }],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_mcpx_session",
+                        "call_id": "call_mcpx_session",
+                        "name": "session",
+                        "arguments": r#"{"action":"list","workspace":"routecodex"}"#
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_mcpx_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses MCP namespace-less history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical MCP namespace-less history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("mcp__mcpx__session")
+    );
+}
+
+#[test]
+fn openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "namespace",
+            "name": "mcp__mcpx",
+            "tools": [{
+                "type": "function",
+                "name": "session",
+                "parameters": {"type": "object"}
+            }]
+        }],
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_native_session",
+                "type": "function",
+                "function": {"name": "session", "arguments": "{}"}
+            }]
+        }]
+    }))
+    .expect("OpenAI Chat history must remain projectable");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
+    );
+}
+
+#[test]
+fn responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__mcpx",
+                    "tools": [{
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }]
+                }],
+                "input": [
+                    {
+                        "type": "custom_tool_call",
+                        "id": "ctc_custom_session",
+                        "call_id": "call_custom_session",
+                        "name": "session",
+                        "input": "custom payload"
+                    },
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": "call_custom_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses custom tool history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical custom tool history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
+    );
+}
+
+#[test]
+fn responses_native_function_does_not_borrow_colliding_mcp_leaf_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "mcp__mcpx",
+                        "tools": [{
+                            "type": "function",
+                            "name": "session",
+                            "parameters": {"type": "object"}
+                        }]
+                    },
+                    {
+                        "type": "function",
+                        "name": "session",
+                        "parameters": {"type": "object"}
+                    }
+                ],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_native_session",
+                        "call_id": "call_native_session",
+                        "name": "session",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_native_session",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses native function history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("canonical native function history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("session")
     );
 }
 
