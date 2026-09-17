@@ -50,7 +50,7 @@ const LANES = new Map([
   }],
   ['D', {
     base: '65065c1888f4178fe07224a9b82c657e52982c8f',
-    head: '59a7253b9b22795dc4b1e76d31f5993126bb2988',
+    head: 'e8f5f231545a4192c4b63221ab8f655de43d4bf0',
     module: 'routecodex-v4-standard-plugins',
     owner: 'v4.plugin.request.responses_normalize',
     paths: [
@@ -64,7 +64,7 @@ const LANES = new Map([
   }],
   ['E', {
     base: '652648a99541b8c5f5ca32f5af3b2616af35018b',
-    head: 'a784f3722f7b1ca83597754ef87f3eb7b9a4a4f0',
+    head: 'cdc7c84f85beb89e9ae6f73c3b35f9648e917726',
     module: 'routecodex-v4-standard-plugins',
     owner: 'v4.plugin.response.decode',
     paths: [
