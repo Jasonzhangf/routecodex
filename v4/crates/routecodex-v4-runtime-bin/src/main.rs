@@ -1759,6 +1759,9 @@ priority = 1
             "conversation-1",
         )
         .expect("test stream processor");
+        let timing = routecodex_v4_runtime::V4RuntimeTimingSummary::new();
+        timing.start_request();
+        timing.begin_external().expect("test timing starts");
         SseTransportDriver::new(
             MockSseSource {
                 chunks: chunks.into(),
@@ -1778,6 +1781,7 @@ priority = 1
             },
             "test-provider".into(),
             "m".into(),
+            timing,
         )
     }
 
@@ -1820,6 +1824,9 @@ priority = 1
             "conversation-1",
         )
         .expect("test stream processor");
+        let timing = routecodex_v4_runtime::V4RuntimeTimingSummary::new();
+        timing.start_request();
+        timing.begin_external().expect("test timing starts");
         SseTransportDriver::new(
             GatedSseSource {
                 chunks: chunks.into(),
@@ -1840,6 +1847,7 @@ priority = 1
             },
             "test-provider".into(),
             "m".into(),
+            timing,
         )
     }
 
