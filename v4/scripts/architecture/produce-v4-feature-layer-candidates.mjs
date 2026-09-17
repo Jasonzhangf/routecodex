@@ -378,7 +378,7 @@ export function main({ now = Date.now() } = {}) {
           lane,
           gate: planeGate,
           sourcePathsValue: evidenceSourcePaths,
-          gateInputPaths: inputPathsForGate(planeGate, gateInputContract),
+          gateInputPaths,
           createdAt,
         });
         if (ref) task.evidence_refs.push(ref);
