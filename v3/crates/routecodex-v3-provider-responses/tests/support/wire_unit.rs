@@ -226,7 +226,7 @@ mod tests {
         let body = json!({
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": [
-                {"type": "tool_use", "name": "mcp__codex_review.review_start", "input": {}}
+                {"type": "tool_use", "name": "mcp__codex_review.review_start!", "input": {}}
             ]}]
         });
         let error =
@@ -243,7 +243,7 @@ mod tests {
             "model": "upstream-model",
             "messages": [{"role": "assistant", "content": "", "tool_calls": [
                 {"id": "call-review", "type": "function", "function": {
-                    "name": "mcp__codex_review.review_start",
+                    "name": "mcp__codex_review.review_start!",
                     "arguments": "{}"
                 }}
             ]}]
@@ -331,6 +331,60 @@ mod tests {
         );
         assert_eq!(wire.body()["input"][0]["call_id"], "call-review");
         assert_eq!(wire.body()["input"][1]["call_id"], "call-review");
+    }
+
+    #[test]
+    fn wire_maps_functions_prefixed_mcp_call_name_from_codex_history() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [{
+                "type": "function_call",
+                "call_id": "call-review",
+                "name": "functions.mcp__codex_review__review_start",
+                "arguments": "{}"
+            }]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-functions-prefixed-mcp",
+            target(),
+            body,
+        )
+        .expect("Codex functions-prefixed MCP history must normalize before provider send");
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
+    fn wire_maps_functions_prefixed_mcp_chat_call_name_from_codex_history() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-review",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            }]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-functions-prefixed-mcp-chat",
+            chat_target,
+            body,
+        )
+        .expect("Codex functions-prefixed MCP Chat history must normalize before provider send");
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "mcp__codex_review__review_start"
+        );
     }
 
     #[test]

@@ -21,6 +21,86 @@ fn openai_chat_provider_preserves_tool_search_control_history_names() {
 }
 
 #[test]
+fn responses_function_call_history_normalizes_functions_prefixed_mcp_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_review_start",
+                        "call_id": "call_review_start",
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_review_start",
+                        "output": "unsupported call: functions.mcp__codex_review__review_start"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue"}]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses history with functions-prefixed MCP name must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("functions-prefixed MCP history must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("mcp__codex_review__review_start")
+    );
+}
+
+#[test]
+fn openai_chat_provider_normalizes_functions_prefixed_mcp_content_name() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"glm-5.3",
+        "messages":[{
+            "role":"tool",
+            "tool_call_id":"call_review_start",
+            "content":[{
+                "type":"tool_result",
+                "name":"functions.mcp__codex_review__review_start",
+                "content":"{}"
+            }]
+        }]
+    }))
+    .expect("functions-prefixed MCP content name must project to OpenAI Chat");
+
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn openai_chat_provider_keeps_unrelated_functions_prefixed_name() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"glm-5.3",
+        "messages":[{
+            "role":"assistant",
+            "tool_calls":[{
+                "id":"call_native",
+                "type":"function",
+                "function":{"name":"functions.lookup","arguments":"{}"}
+            }]
+        }]
+    }))
+    .expect("unrelated functions-prefixed history must remain projectable");
+
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions.lookup"
+    );
+}
+
+#[test]
 fn responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(

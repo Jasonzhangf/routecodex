@@ -2,6 +2,7 @@ use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use provider_compat_core::namespace_tools::{
     flatten_namespace_tool_for_provider, namespace_tool_name_map,
+    normalize_provider_wire_function_names,
 };
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
@@ -220,6 +221,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
+    normalize_provider_wire_function_names(&mut body);
     validate_provider_wire_tool_names(&request_id, &body)?;
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
@@ -637,21 +639,11 @@ fn expand_namespace_tools_in_responses_wire_body(
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(
-            &mut body,
-            provider_type == "openai_chat",
-        );
         return Ok(body);
     };
     let has_namespace = tools
         .iter()
         .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
-    if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(
-            &mut body,
-            provider_type == "openai_chat",
-        );
-    }
     if !has_namespace && provider_type != "openai_chat" {
         return Ok(body);
     }
@@ -689,14 +681,6 @@ fn expand_namespace_tools_in_responses_wire_body(
     }
     body["tools"] = Value::Array(expanded);
     rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
-    // Historical inputs may carry an MCP-qualified call even when the current
-    // tool declaration is incomplete or omitted its child. Apply the same
-    // validated convention mapping as the no-tools path so strict providers
-    // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(
-        &mut body,
-        provider_type == "openai_chat",
-    );
     Ok(body)
 }
 
@@ -773,93 +757,6 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
             }
         }
     }
-}
-
-fn rewrite_namespace_qualified_call_names_from_convention(
-    body: &mut Value,
-    rewrite_chat_tool_calls: bool,
-) {
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input {
-            let kind = item.get("type").and_then(Value::as_str);
-            if !matches!(
-                kind,
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                continue;
-            }
-            let Some(name) = item.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-                .or_else(|| map_known_internal_qualified_call_name(name))
-            {
-                item["name"] = Value::String(mapped);
-            }
-        }
-    }
-    if rewrite_chat_tool_calls {
-        if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-            for message in messages {
-                let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
-                else {
-                    continue;
-                };
-                for tool_call in tool_calls {
-                    if tool_call.get("type").and_then(Value::as_str) != Some("function") {
-                        continue;
-                    }
-                    if let Some(function) =
-                        tool_call.get_mut("function").and_then(Value::as_object_mut)
-                    {
-                        let Some(name) = function.get("name").and_then(Value::as_str) else {
-                            continue;
-                        };
-                        if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-                            .or_else(|| map_known_internal_qualified_call_name(name))
-                        {
-                            function.insert("name".to_string(), Value::String(mapped));
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {
-    let (namespace, child) = name.split_once('.')?;
-    if child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    match namespace {
-        "servertool" | "mcp" | "native" => Some(format!("{namespace}__{child}")),
-        _ => None,
-    }
-}
-
-fn map_known_namespace_qualified_call_name(name: &str) -> Option<String> {
-    let remainder = name.strip_prefix("mcp__")?;
-    let (namespace, child) = remainder.split_once('.')?;
-    if namespace.is_empty()
-        || child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    Some(format!("mcp__{namespace}__{child}"))
-}
-
-fn is_namespace_component(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn validate_provider_wire_tool_names(

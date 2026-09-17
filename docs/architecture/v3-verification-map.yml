@@ -1644,8 +1644,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
+  - v3/crates/provider-compat-core/src/namespace_tools.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -1740,6 +1740,11 @@ features:
   - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
   - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
   - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
+  - responses_function_call_history_normalizes_functions_prefixed_mcp_name
+  - openai_chat_provider_normalizes_functions_prefixed_mcp_content_name
+  - openai_chat_provider_keeps_unrelated_functions_prefixed_name
+  - wire_maps_functions_prefixed_mcp_call_name_from_codex_history
+  - wire_maps_functions_prefixed_mcp_chat_call_name_from_codex_history
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action`
     after the complete typed node chain.
   - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
@@ -1749,6 +1754,7 @@ features:
   - npm run verify:v3-protocol-conversion-field-parity
   - npm run test:v3-protocol-conversion-field-parity-red-fixtures
   - npm run verify:v3-protocol-conversion-field-parity-ci
+  - npm run test:v3-responses-continuation-namespace-contract
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-rust-only
   - npm run verify:v3-architecture-docs
