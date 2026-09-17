@@ -10,6 +10,114 @@ fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
 }
 
 #[test]
+fn openai_chat_provider_strips_functions_prefix_from_history_names() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_search",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_search",
+                "content": [{
+                    "type": "tool_result",
+                    "name": "functions.mcp__codex_review__review_start",
+                    "content": "{}"
+                }]
+            }
+        ]
+    }))
+    .expect("functions-prefixed MCP history names must be legal on provider wire");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
+fn openai_chat_provider_normalizes_mcp_declaration_and_history_names_consistently() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "functions.mcp__codex_review__review_start",
+                "description": "Start review",
+                "parameters": {"type": "object"}
+            }
+        }],
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_review",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_review",
+                "content": [{
+                    "type": "tool_result",
+                    "name": "functions.mcp__codex_review__review_start",
+                    "content": "{}"
+                }]
+            }
+        ]
+    }))
+    .expect("MCP declaration and history names must share the provider identity");
+    let expected = json!("mcp__codex_review__review_start");
+    assert_eq!(request["tools"][0]["function"]["name"], expected);
+    assert_eq!(request["messages"][0]["tool_calls"][0]["function"]["name"], expected);
+    assert_eq!(request["messages"][1]["content"][0]["name"], expected);
+}
+
+#[test]
+fn openai_chat_provider_preserves_non_mcp_functions_prefix() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "glm-5.3",
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "functions.exec_command",
+                "parameters": {"type": "object"}
+            }
+        }],
+        "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_exec",
+                "type": "function",
+                "function": {"name": "functions.exec_command", "arguments": "{}"}
+            }]
+        }]
+    }))
+    .expect("non-MCP function names must not use the MCP legacy rewrite");
+    assert_eq!(request["tools"][0]["function"]["name"], "functions.exec_command");
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions.exec_command"
+    );
+}
+
+#[test]
 fn openai_chat_provider_preserves_tool_search_control_history_names() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model":"glm-5.3","messages":[{"role":"assistant","tool_calls":[{"id":"search_1","type":"function","function":{"name":"mcp__mcpx.workspace","arguments":"{}"}}],"routecodex_chat_extension":{"responses_tool_call_type":"tool_search_call"}}]

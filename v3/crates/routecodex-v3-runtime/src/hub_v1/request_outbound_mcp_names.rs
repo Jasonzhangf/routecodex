@@ -2,15 +2,19 @@ use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
-fn provider_function_name(name: &str) -> String {
-    if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
+pub(super) fn provider_function_name(name: &str) -> String {
+    let mut normalized = name
+        .strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"))
+        .unwrap_or_else(|| name.to_owned());
+    if let Some(dot) = normalized
+        .strip_prefix("mcp__")
+        .and_then(|value| value.find('.'))
+    {
         let dot = dot + "mcp__".len();
-        let mut normalized = name.to_owned();
         normalized.replace_range(dot..=dot, "__");
-        normalized
-    } else {
-        name.to_owned()
     }
+    normalized
 }
 
 pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
