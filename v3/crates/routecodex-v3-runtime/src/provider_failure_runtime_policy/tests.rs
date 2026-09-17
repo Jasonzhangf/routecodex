@@ -151,7 +151,8 @@ async fn cancelled_scheduled_probe_releases_single_flight_permit() {
                     let started = started.clone();
                     async move {
                         started.notify_one();
-                        futures_util::future::pending::<Result<(), String>>().await
+                        futures_util::future::pending::<Result<(), V3ProviderHealthProbeFailure>>()
+                            .await
                     }
                 })
                 .await

@@ -108,17 +108,17 @@ use routecodex_v3_runtime::{
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3RelayProviderSnapshots,
-    V3RequestExecutionControl, V3Resp15ClientPayload, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
-    V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody, V3ResponsesRelayClientStream,
-    V3ResponsesRelayDryRunOutcome, V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayProviderSnapshotCapture, V3ResponsesRelayRuntimeError,
-    V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput, V3ResponsesRelayServerToolScope,
-    V3ResponsesRelayServerToolState, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
-    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
-    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
-    V3RuntimeUsageSummary,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
+    V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
+    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
+    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
+    V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
+    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
+    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
+    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
+    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -550,7 +550,8 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                             &provider_id,
                             auth_alias.as_deref(),
                             model_id.as_deref(),
-                        )?;
+                        )
+                        .map_err(V3ProviderHealthProbeFailure::Internal)?;
                         probe_v3_provider_global_target(target).await
                     }
                 },
@@ -580,7 +581,8 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                                 &provider_id,
                                 auth_alias.as_deref(),
                                 model_id.as_deref(),
-                            )?;
+                            )
+                            .map_err(V3ProviderHealthProbeFailure::Internal)?;
                             probe_v3_provider_global_target(target).await
                         }
                     }).await;
