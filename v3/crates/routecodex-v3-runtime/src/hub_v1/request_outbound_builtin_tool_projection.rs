@@ -4,6 +4,7 @@ use serde_json::{Map, Value};
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
 use super::is_v3_gpt_canonical_model;
+use super::request_outbound_mcp_names::provider_function_name;
 
 pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     payload: &mut Value,
@@ -475,15 +476,37 @@ fn normalize_openai_chat_function_tool(
     row: &Map<String, Value>,
     path: &str,
 ) -> Result<Value, String> {
-    if row.get("function").and_then(Value::as_object).is_some() {
-        // Req04 owns the only Tool-Thinking schema compilation. This adapter
-        // preserves the already-governed function declaration verbatim.
-        return Ok(Value::Object(row.clone()));
+    if let Some(function) = row.get("function").and_then(Value::as_object) {
+        // Req04 owns the only Tool-Thinking schema compilation. Preserve the
+        // governed declaration while normalizing only the legacy MCP name.
+        let mut normalized = row.clone();
+        if let Some(name) = function.get("name").and_then(Value::as_str) {
+            if let Some(function) = normalized
+                .get_mut("function")
+                .and_then(Value::as_object_mut)
+            {
+                function.insert(
+                    "name".to_string(),
+                    Value::String(provider_function_name(name)),
+                );
+            }
+        }
+        return Ok(Value::Object(normalized));
     }
     let mut function = Map::new();
     for key in ["name", "description", "parameters", "strict"] {
         if let Some(value) = row.get(key) {
-            function.insert(key.to_string(), value.clone());
+            function.insert(
+                key.to_string(),
+                if key == "name" {
+                    value
+                        .as_str()
+                        .map(|name| Value::String(provider_function_name(name)))
+                        .unwrap_or_else(|| value.clone())
+                } else {
+                    value.clone()
+                },
+            );
         }
     }
     Ok(Value::Object(Map::from_iter([

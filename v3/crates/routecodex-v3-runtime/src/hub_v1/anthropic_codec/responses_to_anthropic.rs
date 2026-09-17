@@ -143,14 +143,17 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         Some(value) => value.to_owned(),
         None => json!({}),
     };
+    let name = function
+        .and_then(|function| function.get("name"))
+        .or_else(|| object.get("name"))
+        .and_then(Value::as_str)
+        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(Value::String)
+        .unwrap_or(Value::Null);
     Ok(json!({
         "type":"tool_use",
         "id": object.get("id").cloned().unwrap_or(Value::Null),
-        "name": function
-            .and_then(|function| function.get("name"))
-            .or_else(|| object.get("name"))
-            .cloned()
-            .unwrap_or(Value::Null),
+        "name": name,
         "input": input
     }))
 }
@@ -392,10 +395,16 @@ pub(super) fn responses_tool_output_id_value(object: &Map<String, Value>) -> Val
 pub(super) fn responses_tool_call_as_anthropic_tool_use(
     object: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(Value::String)
+        .unwrap_or(Value::Null);
     Ok(json!({
         "type":"tool_use",
         "id": responses_tool_call_id_value(object),
-        "name": object.get("name").cloned().unwrap_or(Value::Null),
+        "name": name,
         "input": responses_function_call_input(object)?
     }))
 }
@@ -885,7 +894,12 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
                     if child_object.get("type").and_then(Value::as_str) != Some("namespace") {
                         child_object.insert(
                             "name".to_string(),
-                            Value::String(format!("{namespace}__{child_name}")),
+                            Value::String(format!(
+                                "{namespace}__{}",
+                                super::super::request_outbound_mcp_names::provider_function_name(
+                                    child_name
+                                )
+                            )),
                         );
                     }
                 }
@@ -974,7 +988,10 @@ pub(super) fn responses_tool_as_anthropic_tool(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "tools[].name",
         })?;
-    output.insert("name".to_string(), Value::String(name));
+    output.insert(
+        "name".to_string(),
+        Value::String(super::super::request_outbound_mcp_names::provider_function_name(&name)),
+    );
     if let Some(description) = tool.get("description").or_else(|| {
         tool.get("function")
             .and_then(|function| function.get("description"))
@@ -1289,6 +1306,70 @@ mod tests {
         assert_eq!(
             tool_use["input"],
             json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
+        );
+    }
+
+    #[test]
+    fn anthropic_tool_use_normalizes_legacy_mcp_function_name() {
+        let mut system_parts = Vec::new();
+        let messages = chat_messages_as_anthropic_messages(
+            &json!([{
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call_review",
+                    "type": "function",
+                    "function": {
+                        "name": "functions.mcp__codex_review__review_start",
+                        "arguments": "{}"
+                    }
+                }]
+            }]),
+            &mut system_parts,
+        )
+        .expect("Anthropic messages must use the provider-safe MCP name");
+        assert_eq!(
+            messages[0]["content"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
+    fn anthropic_tool_declaration_normalizes_legacy_mcp_function_name() {
+        let tools = responses_tools_for_anthropic_wire(
+            json!({
+                    "tools": [{
+                        "type": "function",
+                        "function": {
+                            "name": "functions.mcp__codex_review__review_start",
+                            "parameters": {"type": "object"}
+                        }
+                    }]
+                }
+            )
+            .as_object()
+            .unwrap(),
+        )
+        .expect("Anthropic tools must use the provider-safe MCP name");
+        assert_eq!(tools[0]["name"], "mcp__codex_review__review_start");
+    }
+
+    #[test]
+    fn responses_tool_history_normalizes_legacy_mcp_function_name() {
+        let mut messages = Vec::new();
+        responses_input_item_as_anthropic_messages(
+            &json!({
+                "type": "function_call",
+                "call_id": "call_review",
+                "name": "functions.mcp__codex_review__review_start",
+                "arguments": "{}"
+            }),
+            &mut messages,
+            &mut Vec::new(),
+        )
+        .expect("Responses tool history must use the provider-safe MCP name");
+        assert_eq!(
+            messages[0]["content"][0]["name"],
+            "mcp__codex_review__review_start"
         );
     }
 

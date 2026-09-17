@@ -137,6 +137,7 @@ impl V3RequestExecutionControl {
 
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
+    transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
@@ -205,6 +206,9 @@ impl V3AttemptBudget {
         Self {
             inner: Arc::new(V3AttemptBudgetInner {
                 limits,
+                // Zero means no Target10 candidate plan has been installed;
+                // admission then uses the configured request ceiling.
+                transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
@@ -235,18 +239,30 @@ impl V3AttemptBudget {
 
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
+        let planned_limit = self.inner.transport_attempt_limit.load(Ordering::Acquire);
+        let limit = if planned_limit == 0 {
+            self.inner.limits.request_max_attempts
+        } else {
+            planned_limit.min(self.inner.limits.request_max_attempts)
+        };
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                (current < self.inner.limits.request_max_attempts).then_some(current + 1)
+                (current < limit).then_some(current + 1)
             })
             .map(|previous| previous + 1)
             .map_err(|_| {
                 V3AttemptStoreError::LocalResourceExhausted(format!(
                     "request provider transport attempt limit {} exhausted",
-                    self.inner.limits.request_max_attempts
+                    limit
                 ))
             })
+    }
+
+    pub(crate) fn set_transport_attempt_limit(&self, candidate_count: usize) {
+        self.inner
+            .transport_attempt_limit
+            .fetch_max(candidate_count.max(1), Ordering::AcqRel);
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {

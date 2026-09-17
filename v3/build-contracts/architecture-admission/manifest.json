@@ -732,8 +732,8 @@
     {
       "output_path": "repo/docs/architecture/v3-function-map.yml",
       "source_path": "docs/architecture/v3-function-map.yml",
-      "source_commit": "ab7720a82048c1c09c23626dc7e8537d858d91b7",
-      "sha256": "48bc95f52d575201fbe807d626f16a2aee23f66889e074ac31e5a9413589ccb5"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "34411519fdfd8ca1c33e48272b6507d4924c8d31e6a235fd8a726f476653a84f"
     },
     {
       "output_path": "repo/docs/architecture/v3-global-audit-2026-08-11.md",
@@ -744,26 +744,26 @@
     {
       "output_path": "repo/docs/architecture/v3-mainline-call-map.yml",
       "source_path": "docs/architecture/v3-mainline-call-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "b973ed9551715f23b27e0bc8299b62532cf7d13ee8e30cec748d12824abce540"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "05ff471571a411c5d27c8ea67579dc654d530d02beaf9429b097e55850fcb93e"
     },
     {
       "output_path": "repo/docs/architecture/v3-resource-operation-map.yml",
       "source_path": "docs/architecture/v3-resource-operation-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "32f6d885a7a3401cce5c197a6fc8f4b9eccd8e65160741d5b0de5859be8b54f7"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "a06aa581d7cf3333486782bcfb11eadd58441e4c991ba5aa7423c6eb2808bfb4"
     },
     {
       "output_path": "repo/docs/architecture/v3-runtime-module-registry.yml",
       "source_path": "docs/architecture/v3-runtime-module-registry.yml",
-      "source_commit": "3073a4bd53d904b149c51b7acda2019b10d39b87",
-      "sha256": "6ef7979dc052cf3eb13909df974a3bb5873125eb7571d497ad9fca403d378778"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "bd621e2e4c1eb342e7d3f60cbaff96814a065b89717a6b88a15154b654c5eca1"
     },
     {
       "output_path": "repo/docs/architecture/v3-verification-map.yml",
       "source_path": "docs/architecture/v3-verification-map.yml",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "cccb95ef834c5626bffe5b6c6145140efd56468283f9c2679947b0f0d2502e33"
+      "source_commit": "df4b46ab07a70195b785430c6f79f3284f9ec7da",
+      "sha256": "055857d5b2d56e64842ece973dfda8d3670201ceb56ce1301b2f1db71aaaf32f"
     },
     {
       "output_path": "repo/docs/architecture/verification-map.yml",
@@ -936,8 +936,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-caller-flow.html",
       "source_path": "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "f28c231a9974a4c1ef0336c11095632c240125b978c1f3581d04ba626409e1f0"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "c7ad97b280f47b4df59ef77eecb859cc9f6ebd759df51ff2f9356d0ef940d00b"
     },
     {
       "output_path": "repo/docs/architecture/wiki/html/v3-mainline-skeleton-sop.html",
@@ -1164,8 +1164,8 @@
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-caller-flow.md",
       "source_path": "docs/architecture/wiki/v3-mainline-caller-flow.md",
-      "source_commit": "52d372b1ba7493617c0900cedb96b0b345fc1f96",
-      "sha256": "abcf1ac3689213aadc6ba6a309033d9592754cd0136f8a3062b1ca91d2efba68"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "c1bdb77de63048c9d1124795cbae9166de1c723678b07edfe38ae97e35c665e9"
     },
     {
       "output_path": "repo/docs/architecture/wiki/v3-mainline-skeleton-sop.md",
@@ -1334,6 +1334,18 @@
       "source_path": "docs/design/provider-failure-policy-ssot.md",
       "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
       "sha256": "04b074720053fe310510a6743aba12618112dacdeb862bfab3b925c9d1489de8"
+    },
+    {
+      "output_path": "repo/docs/design/rcc-internal-hooks-sidecar-contract.md",
+      "source_path": "docs/design/rcc-internal-hooks-sidecar-contract.md",
+      "source_commit": "e4a2c24dad9a04438db3ead6ea7a9b779cd1fbd0",
+      "sha256": "42713e79de14743a3e2cf81cb6362c027698e49558f0e27f3b64095eec3ada5a"
+    },
+    {
+      "output_path": "repo/docs/design/rcc-internal-hooks-sidecar-review-0914.md",
+      "source_path": "docs/design/rcc-internal-hooks-sidecar-review-0914.md",
+      "source_commit": "e4a2c24dad9a04438db3ead6ea7a9b779cd1fbd0",
+      "sha256": "95e5bdb66ab1ea86765168614cac58f612e60d4d84ac6375a7b8c48821cdcc1f"
     },
     {
       "output_path": "repo/docs/design/rcc-unified-fence-marker-spec.md",
@@ -1702,6 +1714,12 @@
       "sha256": "03deff707d4aa03a1447c48c6977ca17662504b42a15d5752ca9d676512a9002"
     },
     {
+      "output_path": "repo/docs/goals/rcc-internal-hooks-sidecar-plan.md",
+      "source_path": "docs/goals/rcc-internal-hooks-sidecar-plan.md",
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "011021742c794377d4b3e0723f95d519cc18bf4e75f38f644fe0dc7f5110b214"
+    },
+    {
       "output_path": "repo/docs/goals/repository-root-retirement-v4-v3-integration-plan.md",
       "source_path": "docs/goals/repository-root-retirement-v4-v3-integration-plan.md",
       "source_commit": "f23286b350f6e053a6a4fbc263eeeff207745b77",
@@ -1914,8 +1932,8 @@
     {
       "output_path": "repo/docs/goals/v3-codex-namespace-tool-openai-chat-wire-test-design.md",
       "source_path": "docs/goals/v3-codex-namespace-tool-openai-chat-wire-test-design.md",
-      "source_commit": "5086093c67d3ec15d0b49295b9bc78c70c899e2a",
-      "sha256": "9074b578a70c3ad95555b5c3aae372591fe0aa0ce3c820e105125c6f078d8d64"
+      "source_commit": "19cd798a955973582bc9ba6c17d7bf6463e42675",
+      "sha256": "39d772d584c6fcd9f536c1939c3df3273005fbc046ba413a518f127410d10dbe"
     },
     {
       "output_path": "repo/docs/goals/v3-codex-sample-retention-snap-scope-test-design.md",
@@ -2172,7 +2190,7 @@
     {
       "output_path": "repo/docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
       "source_path": "docs/goals/v3-live-provider-compat-parity-closeout-plan.md",
-      "source_commit": "00123160c7d24beb2d803f860c5693fddea13fe8",
+      "source_commit": "9e51dd815494e20019ae133e291c6bf10adc2651",
       "sha256": "eb2d83d9afb57abe2f2179432dbcc9281ef7ad451d0ab102225e31e75929443d"
     },
     {
@@ -2412,7 +2430,7 @@
     {
       "output_path": "repo/docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
       "source_path": "docs/goals/v3-responses-direct-remote-continuation-integration-plan.md",
-      "source_commit": "abd04edd3149498da8025ee37e56c0b4f0e1442f",
+      "source_commit": "9e51dd815494e20019ae133e291c6bf10adc2651",
       "sha256": "cd48931de45a5cb4329b6995f04da3b11ccf22915ff4e1bc2da946c411717a93"
     },
     {
@@ -2778,8 +2796,8 @@
     {
       "output_path": "repo/scripts/architecture/mainline-call-map-lib.mjs",
       "source_path": "scripts/architecture/mainline-call-map-lib.mjs",
-      "source_commit": "6e282014395718880ba67943aba70f36798e3617",
-      "sha256": "7838e048d75971e026c82c9bba27b0a809de8f41d03a76f0e3f07e5a92222c7f"
+      "source_commit": "d38ff088c6656bd706b6f27c2403092cc050fe60",
+      "sha256": "6122991e8e52a97d1b52f0486296746cbfe02f450517c1c0d532bb2dd2f611e8"
     },
     {
       "output_path": "repo/scripts/architecture/v3-root-thin-dispatch-contract.mjs",
@@ -2812,5 +2830,5 @@
       "sha256": "fb611b669304c1ff1ae0285b6d2cb934fb6b6fbc5958191148a4e4a12bacc335"
     }
   ],
-  "manifest_digest": "60b8e2360289ec38e07f964bf656421b2caeb87847895a8ae0f5e2038cfae4ac"
+  "manifest_digest": "fd5cc08851dc32a1bd8f806b5831d9f16354c3726fed43638aa3ef09b00463ea"
 }
