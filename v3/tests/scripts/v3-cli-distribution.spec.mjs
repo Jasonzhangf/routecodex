@@ -35,6 +35,7 @@ test('V3 owns local runtime binaries, Admin host, and command alias contract', (
 });
 
 test('install builds release inside V3 and atomically publishes runtime, Admin, and hooks sidecar binaries', () => {
+  assert.equal(installScript.includes('bump-version.mjs'), false);
   assert.ok(installScript.includes("path.join(v3Root, 'build-control', 'install-target'"));
   assert.match(installScript, /runInterruptibleCommand\('cargo', \[[\s\S]*'--locked',[\s\S]*'--release'/);
   assert.ok(installScript.includes("path.join(cargoTargetDir, 'release', binaryName)"));

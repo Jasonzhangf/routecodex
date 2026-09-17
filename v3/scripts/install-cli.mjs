@@ -316,7 +316,6 @@ function installAliasAtomic(aliasPath, binaryPath) {
 }
 
 async function main() {
-  await import('./bump-version.mjs');
   return withOwnedV3CargoTarget(async (build) => {
     const sourceBin = await buildV3Cli(build);
     copyExecutableAtomic(sourceBin, repoBin);
