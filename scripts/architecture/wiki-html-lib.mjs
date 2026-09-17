@@ -136,6 +136,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     ],
     logicCards: [
       ['Gemini codec owns Gemini semantics', 'URL/model, candidates, functionCall, finishReason, and stream terminal rules stay in Gemini codec/runtime.'],
+      ['Client commit is terminal-gated', 'Controlled SSE evidence proves provider terminal validation precedes client SSE commit and no full client-stream materialization.'],
       ['Server consumes binding only', 'Server dispatches to the Gemini runtime owner and transports typed output; it does not parse Gemini response semantics.'],
       ['Malformed streams fail explicitly', 'Malformed JSON, EOF without terminal, and post-terminal frames are provider/runtime errors, not hidden successes.'],
     ],
