@@ -19,9 +19,9 @@
   ],
   "exit_status": 0,
   "result": "pass",
-  "receipt_hash": "sha256:5141ce047387eae467c2884b8223d174e2b2e4ef6d97bf04e48513eb49c4a993",
-  "created_at": "2026-09-17T17:50:27.106Z",
-  "expires_at": "2026-09-24T17:50:27.106Z",
+  "receipt_hash": "sha256:a7db8d3cf7a500cb5f4d7ec9d3dc1ebe4e17ff999c8eef0ef6a62244cd469e3c",
+  "created_at": "2026-09-17T19:28:10.935Z",
+  "expires_at": "2026-09-24T19:28:10.935Z",
   "input_hashes": [
     "sha256:3dbbaef0b4f28eac39b0c120af4df03eccbcaf6c1a76a285a4ed9b4e157a4d0f",
     "sha256:820b97b459ebac7bbb25eefc4d2a447845d9f527932e642c164155e32e8b7a3a",
