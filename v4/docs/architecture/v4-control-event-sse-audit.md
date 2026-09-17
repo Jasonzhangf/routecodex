@@ -31,6 +31,8 @@ The provider owns transport and raw bytes only. Runtime owns semantic frame deci
 
 Payload bytes remain complete. Native async provider chunks use shared `Bytes` ownership and bounded splitting; no payload fields are removed to reduce allocation. The changed provider test directly proves chunk-cap and concatenation equality; runtime-bin and server stream behavior remain covered by their existing focused suites. Control-plane coverage is the ten-domain lifecycle test plus payload/metadata leakage negatives.
 
+For a streaming Direct attempt, the runtime provider boundary remains fully buffered until a protocol terminal. Provider frames are materialized into a private attempt buffer before the first client egress commit; a read, framing, or projection failure before that terminal cannot expose a partial success response. A clean EOF without a protocol terminal is an explicit error. Once the complete attempt has been validated, the runtime seals it and does not wait for provider TCP EOF, so late transport-close noise cannot roll back the committed semantic attempt. Client egress buffering is a separate post-commit queue and is not the provider-attempt bound.
+
 ## 2026-08-27 master audit result
 
 The boundary was checked against the current Rust call sites and focused tests:
