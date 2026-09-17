@@ -138,13 +138,15 @@ function functionsForTask(task, functionMap) {
     entry.status === 'active' && entry.feature_id === task.task_id);
 }
 
-function sourcePaths(task, functionMap) {
+function sourcePaths(task, functionMap, functionIds = null) {
   return [...new Set(functionsForTask(task, functionMap)
+    .filter((fn) => functionIds === null || functionIds.includes(fn.function_id))
     .flatMap((fn) => fn.source_paths ?? []))].sort();
 }
 
-function taskProjection(task, functionMap, resourceMap) {
-  const functions = functionsForTask(task, functionMap);
+function taskProjection(task, functionMap, resourceMap, functionIds = null) {
+  const functions = functionsForTask(task, functionMap)
+    .filter((fn) => functionIds === null || functionIds.includes(fn.function_id));
   if (functions.length === 0) throw new Error(`FUNCTION_MISSING:${task.task_id}`);
   const resourceIds = [...new Set(functions.flatMap((fn) => fn.resource_ids ?? []))].sort();
   for (const resourceId of resourceIds) {
@@ -155,7 +157,7 @@ function taskProjection(task, functionMap, resourceMap) {
     functionIds: functions.map((fn) => fn.function_id).sort(),
     resourceIds,
     gateIds: [...new Set(functions.flatMap((fn) => fn.required_gates ?? []))].sort(),
-    sourcePaths: sourcePaths(task, functionMap),
+    sourcePaths: sourcePaths(task, functionMap, functionIds),
   };
 }
 
@@ -231,12 +233,22 @@ function candidateRecord({ candidate, lane, batch, tasks, createdAt }) {
   };
 }
 
-function writeEvidence({ truth, candidate, task, batchId, lane, gate, sourcePathsValue, createdAt }) {
+function writeEvidence({
+  truth,
+  candidate,
+  task,
+  batchId,
+  lane,
+  gate,
+  sourcePathsValue,
+  gateInputPaths,
+  createdAt,
+}) {
   const gateInputContract = readJson(gateInputContractPath);
   const role = gate.evidence_role;
   if (!ROLE_CONTRACT.has(role)) return null;
   const evidenceName = `${ROLE_EVIDENCE.get(role)}-${lane.head.slice(0, 12)}`;
-  const inputPaths = inputPathsForGate(gate, gateInputContract);
+  const inputPaths = gateInputPaths ?? inputPathsForGate(gate, gateInputContract);
   const scope = evidenceScope(
     truth,
     lane.head,
@@ -289,6 +301,11 @@ export function main({ now = Date.now() } = {}) {
   const createdAt = new Date(now).toISOString();
   const next = JSON.parse(JSON.stringify(manifest));
   const records = [];
+  const gateInputContract = readJson(gateInputContractPath);
+  const G_TASK_FUNCTIONS = new Map([
+    ['V4-GATE-001', ['v4.governance.feature_layer_gate_contract']],
+    ['V4-LAYER-GATE-001', ['v4.governance.feature_layer_product_lockstep']],
+  ]);
   for (const batch of next.batches) {
     const lane = LANES.get(batch.batch_id);
     if (!lane) continue;
@@ -300,7 +317,13 @@ export function main({ now = Date.now() } = {}) {
     batch.status = 'source_green';
     const candidatePath = `docs/evidence/feature-completion/M1/V4-LAYER-BATCH-${batch.batch_id}/fix-candidate-${lane.head.slice(0, 12)}.json`;
     const tasks = batch.tasks.map((task) => {
-      const projection = taskProjection(task, functionMap, resourceMap);
+      const functionIds = batch.batch_id === 'G'
+        ? G_TASK_FUNCTIONS.get(task.task_id)
+        : null;
+      if (batch.batch_id === 'G' && !functionIds) {
+        throw new Error(`G_TASK_FUNCTION_BINDING_MISSING:${task.task_id}`);
+      }
+      const projection = taskProjection(task, functionMap, resourceMap, functionIds);
       return {
         task_id: task.task_id,
         status: 'source_green',
@@ -316,6 +339,20 @@ export function main({ now = Date.now() } = {}) {
     });
     const candidate = candidateIdentity({ truth, lane, batch, tasks });
     for (const task of tasks) {
+      const evidenceSourcePaths = batch.batch_id === 'F'
+        ? [...new Set(tasks.flatMap((candidateTask) => [
+          ...candidateTask.source_paths,
+          ...candidateTask.support_paths,
+        ]))].sort()
+        : [...task.source_paths, ...task.support_paths];
+      const projection = taskProjection(
+        task,
+        functionMap,
+        resourceMap,
+        batch.batch_id === 'G' ? G_TASK_FUNCTIONS.get(task.task_id) : null,
+      );
+      const gateInputPaths = [...new Set(projection.gateIds.flatMap((gateId) =>
+        inputPathsForGate(gateById(verificationMap, gateId), gateInputContract)))].sort();
       for (const gateId of task.required_gate_ids) {
         const gate = gateById(verificationMap, gateId);
         const ref = writeEvidence({
@@ -325,7 +362,23 @@ export function main({ now = Date.now() } = {}) {
           batchId: batch.batch_id,
           lane,
           gate,
-          sourcePathsValue: task.source_paths,
+          sourcePathsValue: evidenceSourcePaths,
+          gateInputPaths,
+          createdAt,
+        });
+        if (ref) task.evidence_refs.push(ref);
+      }
+      if (batch.batch_id === 'G' && task.task_id === 'V4-GATE-001') {
+        const planeGate = gateById(verificationMap, 'v4_parity_gate_plane_isolation');
+        const ref = writeEvidence({
+          truth,
+          candidate,
+          task,
+          batchId: batch.batch_id,
+          lane,
+          gate: planeGate,
+          sourcePathsValue: evidenceSourcePaths,
+          gateInputPaths: inputPathsForGate(planeGate, gateInputContract),
           createdAt,
         });
         if (ref) task.evidence_refs.push(ref);
