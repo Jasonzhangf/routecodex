@@ -125,6 +125,26 @@ pub(crate) fn project_responses_to_chat(value: &Value) -> Result<Value, String> 
     }))
 }
 
+pub(crate) fn client_semantic_projection_entry(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
+    let data = ctx.read_data();
+    let governed = data
+        .as_object()
+        .ok_or_else(|| "client_semantic_projection requires an object response".to_string())?;
+    governed
+        .get("requestId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "client_semantic_projection requires string requestId".to_string())?;
+
+    reject_control_fields(governed)?;
+    let mut semantic = governed.clone();
+    semantic.remove("providerId");
+    semantic.remove("statusCode");
+    semantic.remove("semantic");
+    semantic.remove("governance");
+    ctx.write_data(Value::Object(semantic))
+        .map_err(|error| error.to_string())
+}
+
 fn project_incomplete_finish_reason(
     response: &Value,
     event: &Value,
