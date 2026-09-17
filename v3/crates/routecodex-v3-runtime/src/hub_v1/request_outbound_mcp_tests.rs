@@ -342,6 +342,27 @@ fn responses_native_function_does_not_borrow_colliding_mcp_leaf_name() {
 }
 
 #[test]
+fn openai_chat_tool_search_history_strips_legacy_functions_mcp_prefix() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"glm-5.3",
+        "messages":[{
+            "role":"assistant",
+            "content":[{"type":"tool_use","name":"functions.mcp__codex_review__review_start","input":{}}],
+            "tool_calls":[{"id":"review_1","type":"function","function":{"name":"functions.mcp__codex_review__review_start","arguments":"{}"}}],
+            "routecodex_chat_extension":{"responses_tool_call_type":"tool_search_call"}
+        }]
+    })).expect("tool_search history must strip the legacy functions MCP prefix");
+    assert_eq!(
+        request["messages"][0]["content"][0]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+}
+
+#[test]
 fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
