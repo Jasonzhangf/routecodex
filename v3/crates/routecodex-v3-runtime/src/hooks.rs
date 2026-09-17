@@ -383,6 +383,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
                 V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             )
         })?;
+    // A Responses provider entry must always use the Responses wire protocol,
+    // even if a forwarder/compat target initially resolves it to OpenAI Chat.
+    // cc-sol returns HTTP 400 for Chat-shaped messages on /v1/responses.
+    let provider_protocol = if candidate.provider_type.trim() == "responses" {
+        crate::hub_v1::V3HubProviderWireProtocol::Responses
+    } else {
+        provider_protocol
+    };
     let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
@@ -423,6 +431,22 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
                 "Responses direct does not have a response-side Anthropic projection contract",
                 V3InternalErrorCode::V3Provider12ResponsesWirePayload,
             ));
+        }
+        crate::hub_v1::V3HubProviderWireProtocol::Responses
+            if request_body.get("messages").is_some() =>
+        {
+            crate::hub_v1::build_v3_openai_responses_standard_request_from_chat_canonical(
+                &request_body,
+            )
+            .map_err(|error| {
+                build_v3_error_01_source_raised_internal(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ResponsesDirect11Policy",
+                    "responses_provider_request_projection_failed",
+                    error,
+                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+                )
+            })?
         }
         _ => request_body,
     };
