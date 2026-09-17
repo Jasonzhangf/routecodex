@@ -90,6 +90,136 @@ fn openai_chat_provider_normalizes_mcp_declaration_and_history_names_consistentl
 }
 
 #[test]
+fn openai_chat_provider_deduplicates_legacy_and_dotted_mcp_tools_after_normalization() {
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model": "deepseek-v4.1-flash",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "functions.mcp__mcpx__workspace",
+                    "description": "List workspaces",
+                    "parameters": {"type": "object"}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__mcpx.workspace",
+                    "description": "List workspaces",
+                    "parameters": {"type": "object"}
+                }
+            }
+        ],
+        "messages": [{"role": "user", "content": "list workspaces"}]
+    }))
+    .expect("equivalent MCP declarations must project to one provider identity");
+
+    let tools = request["tools"].as_array().expect("provider tools");
+    assert_eq!(
+        tools.len(),
+        1,
+        "legacy and dotted MCP aliases must not reach the provider as duplicate names: {request}"
+    );
+    assert_eq!(tools[0]["function"]["name"], "mcp__mcpx__workspace");
+}
+
+#[test]
+fn responses_tool_search_output_dedupes_same_flattened_provider_tool_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {
+                        "type": "tool_search_call",
+                        "call_id": "call_search_one",
+                        "execution": "client",
+                        "status": "completed",
+                        "arguments": {"query": "MCPX workspace"}
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_search_one",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "mcp__mcpx",
+                            "description": "first catalog",
+                            "tools": [{
+                                "type": "function",
+                                "name": "workspace",
+                                "description": "List workspaces",
+                                "parameters": {"type": "object"}
+                            }]
+                        }]
+                    },
+                    {
+                        "type": "tool_search_call",
+                        "call_id": "call_search_two",
+                        "execution": "client",
+                        "status": "completed",
+                        "arguments": {"query": "MCPX workspace"}
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_search_two",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "mcp__mcpx",
+                            "description": "second catalog",
+                            "tools": [{
+                                "type": "function",
+                                "name": "workspace",
+                                "description": "List workspaces",
+                                "parameters": {"type": "object"}
+                            }]
+                        }]
+                    }
+                ]
+            }),
+        )
+        .expect("Responses tool search history must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("duplicate discovered provider tools must remain projectable");
+
+    let tools = request["tools"].as_array().expect("provider tools");
+    let workspace_tools = tools
+        .iter()
+        .filter(|tool| tool["function"]["name"] == "mcp__mcpx__workspace")
+        .count();
+    assert_eq!(
+        workspace_tools, 1,
+        "OpenAI Chat provider tools must contain one declaration per function name: {request}"
+    );
+}
+
+#[test]
+fn openai_chat_provider_tools_reject_conflicting_duplicate_function_names() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "use workspace"}],
+        "tools": [
+            {
+                "type": "function",
+                "name": "mcp__mcpx__workspace",
+                "description": "first declaration",
+                "parameters": {"type": "object"}
+            },
+            {
+                "type": "function",
+                "name": "mcp__mcpx__workspace",
+                "description": "conflicting declaration",
+                "parameters": {"type": "object", "properties": {"scope": {"type": "string"}}}
+            }
+        ]
+    });
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("conflicting provider tool declarations must fail explicitly");
+    assert!(error.contains("ConflictingOutboundFields"), "{error}");
+    assert!(error.contains("mcp__mcpx__workspace"), "{error}");
+}
+
+#[test]
 fn openai_chat_provider_preserves_non_mcp_functions_prefix() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model": "glm-5.3",
