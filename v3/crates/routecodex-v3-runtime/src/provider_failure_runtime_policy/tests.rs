@@ -969,8 +969,8 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         .contains("prior provider returned 429"));
 }
 
-#[test]
-fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
+#[tokio::test]
+async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
     let mut manifest = global_pool_alive_manifest("relay_protocol_filter");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(
@@ -1007,7 +1007,8 @@ fn captured_relay_protocol_admission_does_not_truncate_failure_reselection() {
         &selected,
         &BTreeSet::from([selected_key.clone()]),
         1,
-    );
+    )
+    .await;
     let V3RelayProviderTargetResolution::Selected(reselected) = resolution else {
         panic!("provider failure must reselect from the full captured route pool");
     };
@@ -1144,7 +1145,7 @@ targets = [
 }
 
 #[tokio::test]
-async fn transport_error_excludes_only_the_failed_provider_key() {
+async fn transport_error_switches_provider_family() {
     let manifest = transport_thrash_manifest("transport_thrash");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
@@ -1196,13 +1197,13 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         .retry_selected
         .expect("transport failure must reselect");
     assert_eq!(
-        reselected.candidate.provider_id, "first",
-        "transport failure must leave the same provider's other key selectable"
+        reselected.candidate.provider_id, "second",
+        "transport failure must switch provider families"
     );
     assert_eq!(
         state.failed_candidates.len(),
         1,
-        "transport error must exclude only the failed provider key"
+        "failure evidence must retain the exact failed provider key"
     );
     assert!(state
         .failed_candidates

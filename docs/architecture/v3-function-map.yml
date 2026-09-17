@@ -1,6 +1,78 @@
 version: 1
 status: h1_typed_skeleton_and_static_registry_bound
 features:
+- feature_id: v3.rcc_internal_hooks_sidecar
+  status: source_active_live_verification_required
+  change_risk: high
+  owner_kind: rust_v3_internal_hooks_sidecar
+  owner_scope: Optional RouteCodex-owned hooks sidecar process, native Codex App Server transport, mounted hook dispatch, timers, forwarding, and typed delivery evidence.
+  owner_crates:
+  - routecodex-v3-hooks
+  - routecodex-v3-lifecycle
+  owner_files:
+  - v3/crates/routecodex-v3-hooks/src/lib.rs
+  - v3/crates/routecodex-v3-hooks/src/appserver.rs
+  - v3/crates/routecodex-v3-hooks/src/control.rs
+  - v3/crates/routecodex-v3-hooks/src/bin/rccv3-hooksd.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/hooks_install.rs
+  resource_bindings:
+  - v3.hooks.sidecar_install_record
+  - v3.hooks.control_socket
+  - v3.hooks.native_appserver_transport
+  - v3.hooks.delivery_ledger
+  - v3.hooks.schedule_registry
+  - v3.hooks.mounted_handler_registry
+  - v3.hooks.session_status
+  entry_symbols:
+  - HooksSidecarCore::forward
+  - HooksSidecarCore::dispatch_hook_event
+  - HooksSidecarCore::run_due_schedules
+  - HooksSidecarCore::session_status
+  - NativeAppServerTransport::send_message
+  - NativeAppServerTransport::delivery_evidence
+  - ControlServer::with_native_sockets_handlers_and_state
+  - start_configured_hooks_sidecar
+  allowed_paths:
+  - v3/crates/routecodex-v3-hooks
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar
+  - v3/crates/routecodex-v3-lifecycle/src/internal_hooksd_tests.rs
+  - v3/scripts/copy-cli-bin.mjs
+  - v3/scripts/install-cli.mjs
+  - v3/scripts/pack-release.mjs
+  - v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - v3/Cargo.toml
+  - v3/Cargo.lock
+  - docs/architecture
+  - docs/design/rcc-internal-hooks-sidecar-contract.md
+  - docs/goals/rcc-internal-hooks-sidecar-plan.md
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - routing
+  - retry
+  - continuation
+  - v3/crates/routecodex-v3-server
+  - v3/crates/routecodex-v3-runtime
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+  - node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+  live_required:
+  - real TUI/TUI and TUI/Desktop App Server same-entry replay with native accepted/delivered/replied/read evidence or an explicit highest-layer capability gap
+  - sidecar missing/crash/timeout leaves RouteCodex Running with hooks_unavailable:<reason>
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    live_replay: required
+    production_restart: supervisor_owned
 - feature_id: v3.provider_key_health_model_granularity
   status: source_controlled_runtime_pending_live_replay
   change_risk: high
@@ -886,6 +958,9 @@ features:
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
+  - A request-local failed provider excludes every auth-key/model candidate of that
+    provider for the current request; persistent provider health cooldown remains
+    keyed by providerId+authAlias+modelId.
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
     cannot bypass a currently available same-session alternative.

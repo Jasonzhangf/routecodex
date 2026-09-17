@@ -294,20 +294,29 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
         let session =
             self.session
                 .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
-        let excluded = self
+        // A request-local provider failure is stronger than the persistent
+        // provider:key:model cooldown identity: once a provider fails this
+        // request, the next attempt must move to another provider family.
+        let excluded_candidate = self
             .excluded
             .contains(&v3_relay_provider_candidate_key_parts(
                 provider_id,
                 Some(auth_alias),
                 Some(model_id),
             ));
+        let provider_prefix = format!("{provider_id}:");
+        let excluded_provider = self
+            .excluded
+            .iter()
+            .any(|key| key.starts_with(&provider_prefix));
         projection.blocked_scopes.extend(session.blocked_scopes);
-        if excluded {
+        if excluded_candidate || excluded_provider {
             projection
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
-        projection.available = projection.available && session.available && !excluded;
+        projection.available =
+            projection.available && session.available && !excluded_candidate && !excluded_provider;
         projection
     }
 }
@@ -1000,16 +1009,16 @@ impl V3ProviderAvailabilityReader for V3ProviderFailureRuntimeHealth {
     }
 }
 
-fn reselect_from_captured_target_plan(
+async fn reselect_from_captured_target_plan(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: &V3Target10ConcreteProviderSelected,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
 ) -> V3RelayProviderTargetResolution {
-    let target = V3TargetInterpreter::default();
     let expanded = match context.captured_target_09 {
         Some(expanded) => expanded.clone(),
         None => {
+            let target = V3TargetInterpreter::default();
             let classified = target.classify_kind(selected.route.clone());
             match target.expand_candidates(
                 context.manifest,
@@ -1027,22 +1036,29 @@ fn reselect_from_captured_target_plan(
             }
         }
     };
-    let session_bound_availability = context
-        .provider_health
-        .session_bound_availability(&context.failure_session_scope);
-    match select_v3_target_with_session_then_global(
-        &target,
+    match select_v3_expanded_target_with_exhaustion_rescue(
+        context.manifest,
         expanded,
-        &session_bound_availability,
+        &context.failure_session_scope,
         context.provider_health,
         request_local_excluded_candidates,
         now_ms,
         context.deterministic_sample,
-    ) {
-        Ok(selected) => V3RelayProviderTargetResolution::Selected(selected),
-        Err(exhausted) => V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates: exhausted.attempted_candidates,
-        },
+        true,
+    )
+    .await
+    {
+        V3TargetSelectionAfterRescue::Selected(selected) => {
+            V3RelayProviderTargetResolution::Selected(selected)
+        }
+        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3RelayProviderTargetResolution::Exhausted {
+                attempted_candidates: exhausted.attempted_candidates,
+            }
+        }
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            V3RelayProviderTargetResolution::Failed(source)
+        }
     }
 }
 
@@ -1057,6 +1073,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
 ) -> Result<V3RelayProviderFailurePolicyResult, String> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
+    // Request-local provider failure exclusion is monotonic. Record it before
+    // health/policy or target-resolution work so every exit path forbids the
+    // failed provider:key:model from being sent again.
+    state.failed_candidates.insert(candidate_key.clone());
     let matched_policy = matched_policy_directive.or_else(|| {
         find_matching_provider_error_policy(
             context.manifest,
@@ -1125,11 +1145,19 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         &selected,
         &excluded_with_failed,
         v3_relay_provider_policy_now_epoch_ms()?,
-    );
+    )
+    .await;
     let route_resolution_proved_no_alternative = match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
-            if alternative_key != candidate_key || !alternative.default_floor_protected {
+            if alternative_key == candidate_key
+                || state.failed_candidates.contains(&alternative_key)
+            {
+                return Err(format!(
+                    "provider failure reselection returned an already failed candidate: {alternative_key}"
+                ));
+            }
+            if !alternative.default_floor_protected {
                 let request_local_recovery = || {
                     V3Error05RecoveryAdmissionWitness::new(
                         context.failure_session_scope.clone(),

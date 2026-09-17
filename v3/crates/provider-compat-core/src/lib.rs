@@ -149,7 +149,7 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     }
 
-    if is_glm_unsupported_fields_profile(profile_id) {
+    if is_openai_chat_unsupported_fields_profile(profile_id) {
         if provider_protocol_matches(
             adapter_context.provider_protocol.as_ref(),
             "openai-responses",
@@ -414,8 +414,10 @@ fn is_responses_temperature_unsupported_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:temperature-unsupported")
 }
 
-fn is_glm_unsupported_fields_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:glm-unsupported-prompt-cache-key-verbosity")
+fn is_openai_chat_unsupported_fields_profile(profile: &str) -> bool {
+    profile_matches(profile, "chat:openai")
+        || profile_matches(profile, "chat:glm")
+        || profile_matches(profile, "chat:glm-unsupported-prompt-cache-key-verbosity")
 }
 
 fn is_lmstudio_profile(profile: &str) -> bool {

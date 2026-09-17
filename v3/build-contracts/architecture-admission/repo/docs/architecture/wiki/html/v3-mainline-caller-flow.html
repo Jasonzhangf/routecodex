@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>72 functional paths</span>
-        <span>418 caller edges</span>
+        <span>73 functional paths</span>
+        <span>425 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>13</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>334</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>341</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -552,6 +552,7 @@ flowchart TD
       <table>
 <thead><tr><th>Audit item</th><th>State</th><th>Edges</th><th>Resources</th><th>Owner</th><th>Current fingerprint</th></tr></thead>
 <tbody>
+<tr><td><a href="#chain-v3_rcc_internal_hooks_sidecar"><code>v3.rcc_internal_hooks_sidecar</code></a><br/>v 3.rcc_internal_hooks_sidecar</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>9</td><td><code>v3.rcc_internal_hooks_sidecar</code></td><td><code>sha256:84e9c2b171ac…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_global_cooldown_persistence"><code>v3.provider_global_cooldown_persistence</code></a><br/>v 3.provider_global_cooldown_persistence</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>4</td><td><code>v3.provider_global_cooldown_persistence</code></td><td><code>sha256:9f569275ae56…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_key_health_model_granularity"><code>v3.provider_key_health_model_granularity</code></a><br/>v 3.provider_key_health_model_granularity</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.provider_key_health_model_granularity</code></td><td><code>sha256:fd2c62f27661…</code></td></tr>
 <tr><td><a href="#chain-v3_global_binary_install"><code>v3.global_binary_install</code></a><br/>v 3.global_binary_install</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>1</td><td><code>v3.global_binary_install</code></td><td><code>sha256:34c3f3e588a9…</code></td></tr>
@@ -633,7 +634,14 @@ flowchart TD
     <section class="branch-group">
       <h3>Other branches</h3>
       <div class="branch-grid">
-        <a class="branch-card" href="#chain-v3_provider_global_cooldown_persistence">
+        <a class="branch-card" href="#chain-v3_rcc_internal_hooks_sidecar">
+            <span class="chain-id">v 3.rcc_internal_hooks_sidecar</span>
+            <span>V3Lifecycle04ChildSpawned → HookRegistry</span>
+            <span><code>v3.rcc_internal_hooks_sidecar</code></span>
+            <span>7 edges · 9 resources · routecodex-v3-hooks, v3-lifecycle</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_provider_global_cooldown_persistence">
             <span class="chain-id">v 3.provider_global_cooldown_persistence</span>
             <span>V3Config05ManifestPublished → V3ProviderHealthStore</span>
             <span><code>v3.provider_global_cooldown_persistence</code></span>
@@ -1181,6 +1189,58 @@ flowchart TD
       <p>每个分支图都由该 chain 的 <code>from_node -> to_node</code> edge 自动生成，默认 top-down；表格保留 caller/callee/source 文件用于审计。</p>
     </section>
 
+    <details class="branch-detail" id="chain-v3_rcc_internal_hooks_sidecar" open>
+      <summary>
+        <span class="summary-main">v 3.rcc_internal_hooks_sidecar</span>
+        <span class="summary-sub">V3Lifecycle04ChildSpawned → HookRegistry</span>
+        <span class="summary-sub">7 edges · <code>v3.rcc_internal_hooks_sidecar</code> · V3Lifecycle04ChildSpawned → HookRegistry</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Optional RouteCodex lifecycle starts the installed rccv3-hooksd; the daemon uses only the default Codex App Server socket for session status, send, and continuation evidence.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.rcc_internal_hooks_sidecar</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-hooks · v3-lifecycle</code></span>
+          <span>resources: <code>9</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_rcc_internal_hooks_sidecar_0[&quot;&lt;b&gt;Lifecycle 04 Child Spawned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3Lifecycle04ChildSpawned&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_1[&quot;&lt;b&gt;Hooks Install Record&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3HooksInstallRecord&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_2[&quot;&lt;b&gt;Control Server&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ControlServer&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_3[&quot;&lt;b&gt;Hooks Sidecar Core&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;HooksSidecarCore&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_4[&quot;&lt;b&gt;Native App Server Transport&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;NativeAppServerTransport&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_5[&quot;&lt;b&gt;Hook Registry&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;HookRegistry&lt;/small&gt;&quot;]
+  n_v3_rcc_internal_hooks_sidecar_0 --&gt;|v3-hooks-sidecar-life-01&lt;br/&gt;v3-lifecycle → v3-lifecycle| n_v3_rcc_internal_hooks_sidecar_1
+  n_v3_rcc_internal_hooks_sidecar_1 --&gt;|v3-hooks-sidecar-life-02&lt;br/&gt;v3-lifecycle → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_2
+  n_v3_rcc_internal_hooks_sidecar_2 --&gt;|v3-hooks-sidecar-forward-01&lt;br/&gt;routecodex-v3-hooks → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_3
+  n_v3_rcc_internal_hooks_sidecar_3 --&gt;|v3-hooks-sidecar-native-01&lt;br/&gt;routecodex-v3-hooks → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_4
+  n_v3_rcc_internal_hooks_sidecar_2 --&gt;|v3-hooks-sidecar-status-01&lt;br/&gt;routecodex-v3-hooks → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_4
+  n_v3_rcc_internal_hooks_sidecar_2 --&gt;|v3-hooks-sidecar-timer-01&lt;br/&gt;routecodex-v3-hooks → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_3
+  n_v3_rcc_internal_hooks_sidecar_3 --&gt;|v3-hooks-sidecar-hook-01&lt;br/&gt;routecodex-v3-hooks → routecodex-v3-hooks| n_v3_rcc_internal_hooks_sidecar_5
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_rcc_internal_hooks_sidecar_0,n_v3_rcc_internal_hooks_sidecar_1,n_v3_rcc_internal_hooks_sidecar_2,n_v3_rcc_internal_hooks_sidecar_3,n_v3_rcc_internal_hooks_sidecar_4,n_v3_rcc_internal_hooks_sidecar_5 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-hooks-sidecar-life-01</code></td><td><code>V3Lifecycle04ChildSpawned</code><br/>→ <code>V3HooksInstallRecord</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.hooks_sidecar_declaration</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.sidecar_install_record</code></div></td><td><code>start_configured_hooks_sidecar</code><br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small></td><td><code>hooks_runtime_mode</code><br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-life-02</code></td><td><code>V3HooksInstallRecord</code><br/>→ <code>ControlServer</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.sidecar_install_record</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.lifecycle.hooks_sidecar_process</code> <code>v3.hooks.control_socket</code></div></td><td><code>start_configured_hooks_sidecar</code><br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small></td><td><code>ControlServer::with_native_sockets_handlers_and_state</code><br/><small>routecodex-v3-hooks/src/control.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-forward-01</code></td><td><code>ControlServer</code><br/>→ <code>HooksSidecarCore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.control_socket</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.delivery_ledger</code></div></td><td><code>handle_control_request</code><br/><small>routecodex-v3-hooks/src/control.rs</small></td><td><code>HooksSidecarCore::forward</code><br/><small>routecodex-v3-hooks/src/lib.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-native-01</code></td><td><code>HooksSidecarCore</code><br/>→ <code>NativeAppServerTransport</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.delivery_ledger</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.native_appserver_transport</code></div></td><td><code>HooksSidecarCore::send_to_target</code><br/><small>routecodex-v3-hooks/src/lib.rs</small></td><td><code>NativeAppServerTransport::send_message</code><br/><small>routecodex-v3-hooks/src/appserver.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-status-01</code></td><td><code>ControlServer</code><br/>→ <code>NativeAppServerTransport</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.control_socket</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.session_status</code></div></td><td><code>handle_control_request</code><br/><small>routecodex-v3-hooks/src/control.rs</small></td><td><code>NativeAppServerTransport::session_status</code><br/><small>routecodex-v3-hooks/src/appserver.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-timer-01</code></td><td><code>ControlServer</code><br/>→ <code>HooksSidecarCore</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.schedule_registry</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.delivery_ledger</code></div></td><td><code>timer_tick</code><br/><small>routecodex-v3-hooks/src/control.rs</small></td><td><code>HooksSidecarCore::run_due_schedules</code><br/><small>routecodex-v3-hooks/src/lib.rs</small></td></tr>
+<tr><td><code>v3-hooks-sidecar-hook-01</code></td><td><code>HooksSidecarCore</code><br/>→ <code>HookRegistry</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hooks.mounted_handler_registry</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hooks.delivery_ledger</code></div></td><td><code>HooksSidecarCore::dispatch_hook_event</code><br/><small>routecodex-v3-hooks/src/lib.rs</small></td><td><code>HookRegistry::dispatch</code><br/><small>routecodex-v3-hooks/src/lib.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
     <details class="branch-detail" id="chain-v3_provider_global_cooldown_persistence" open>
       <summary>
         <span class="summary-main">v 3.provider_global_cooldown_persistence</span>
@@ -1223,7 +1283,7 @@ flowchart TD
     </details>
 
 
-    <details class="branch-detail" id="chain-v3_provider_key_health_model_granularity" open>
+    <details class="branch-detail" id="chain-v3_provider_key_health_model_granularity" >
       <summary>
         <span class="summary-main">v 3.provider_key_health_model_granularity</span>
         <span class="summary-sub">V3Error02Classified → V3Target10ConcreteProviderSelected</span>

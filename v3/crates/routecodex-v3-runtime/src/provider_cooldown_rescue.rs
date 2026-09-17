@@ -5,14 +5,14 @@ pub(crate) enum V3TargetSelectionAfterRescue {
 }
 
 impl V3ProviderFailureRuntimeHealth {
-    pub(crate) async fn run_exhaustion_rescue_probes(
+    async fn run_cooldown_rescue_probes_for_candidates(
         &self,
         manifest: &V3Config05ManifestPublished,
-        expanded: &V3Target09CandidateSetExpanded,
+        candidates: &[V3TargetCandidate],
     ) -> Result<(), String> {
         let mut identities = BTreeSet::new();
         let mut probes = Vec::new();
-        for candidate in &expanded.candidates {
+        for candidate in candidates {
             let identity = (
                 &candidate.provider_id,
                 &candidate.auth_alias,
@@ -91,7 +91,7 @@ impl V3ProviderFailureRuntimeHealth {
                                 v3_relay_provider_policy_now_epoch_ms()?,
                                 Some(permit.expected_generation()),
                             )
-                        .map_err(|store_error| store_error.to_string())?;
+                            .map_err(|store_error| store_error.to_string())?;
                         Ok(())
                     }
                 };
@@ -103,6 +103,15 @@ impl V3ProviderFailureRuntimeHealth {
             result?;
         }
         Ok(())
+    }
+
+    pub(crate) async fn run_exhaustion_rescue_probes(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+    ) -> Result<(), String> {
+        self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates)
+            .await
     }
 }
 
@@ -151,7 +160,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
     let session_availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut rescue_attempted = false;
+    let mut exhaustion_rescue_probe_scheduled = false;
     let initial_selection = select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
@@ -163,10 +172,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     );
     let initial_exhaustion = match initial_selection {
         Ok(selected) => {
-            // Probe the already-cooled members before the final currently
-            // available member is allowed to fail and empty the pool.  This
-            // is deliberately owned by target selection: provider failure
-            // callers do not each grow a second cooldown/probe path.
             let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
             let available_count = expanded
                 .candidates
@@ -199,10 +204,58 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                         .iter()
                         .any(|scope| scope.contains("cooldown"))
             });
-            if allow_exhaustion_rescue_probe && available_count == 1 && cooled_peer_exists {
-                rescue_attempted = true;
+            let selected_tier = V3TargetInterpreter::route_tier_index_for_candidate(
+                &selected.route,
+                &selected.candidate,
+            );
+            let preceding_tier_candidates = if selected_tier == usize::MAX {
+                Vec::new()
+            } else {
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| {
+                        let key = v3_relay_provider_candidate_key(candidate);
+                        V3TargetInterpreter::route_tier_index_for_candidate(
+                            &selected.route,
+                            candidate,
+                        ) < selected_tier
+                            && !request_local_excluded_candidates.contains(&key)
+                            && provider_health
+                                .availability(
+                                    &candidate.provider_id,
+                                    Some(&candidate.auth_alias),
+                                    Some(&candidate.model_id),
+                                    now_ms,
+                                )
+                                .blocked_scopes
+                                .iter()
+                                .any(|scope| scope.contains("cooldown"))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            // A later tier is selected only after its preceding tiers are
+            // unavailable. Probe those cooled members before committing to the
+            // later tier. Request-local failures stay excluded permanently.
+            let rescue_candidates = if !preceding_tier_candidates.is_empty() {
+                preceding_tier_candidates
+            } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
+                expanded
+                    .candidates
+                    .iter()
+                    .filter(|candidate| {
+                        !request_local_excluded_candidates
+                            .contains(&v3_relay_provider_candidate_key(candidate))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
                 if let Err(error) = provider_health
-                    .run_exhaustion_rescue_probes(manifest, &expanded)
+                    .run_cooldown_rescue_probes_for_candidates(manifest, &rescue_candidates)
                     .await
                 {
                     return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
@@ -244,22 +297,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     }
     let mut did_rescue_probe = false;
     loop {
-        if !rescue_attempted {
-            let pre_rescue_generation = provider_health.store.availability_generation();
-            if let Err(error) = provider_health
-                .run_exhaustion_rescue_probes(manifest, &expanded)
-                .await
-            {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_probe_failed",
-                    error,
-                ));
-            }
-            rescue_attempted = true;
-            did_rescue_probe = provider_health.store.availability_generation()
-                != pre_rescue_generation;
-        }
         let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
             Err(error) => {
@@ -287,13 +324,33 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
         if provider_health.store.availability_generation() != observed_generation {
             continue;
         }
-        if did_rescue_probe || !v3_exhaustion_is_cooldown_only(
+        if !v3_exhaustion_is_cooldown_only(
             &expanded,
             request_local_excluded_candidates,
             failure_session_scope,
             provider_health,
             retry_now_ms,
         ) {
+            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
+        }
+        if !exhaustion_rescue_probe_scheduled {
+            let pre_rescue_generation = provider_health.store.availability_generation();
+            if let Err(error) = provider_health
+                .run_exhaustion_rescue_probes(manifest, &expanded)
+                .await
+            {
+                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_exhaustion_rescue_probe_failed",
+                    error,
+                ));
+            }
+            exhaustion_rescue_probe_scheduled = true;
+            did_rescue_probe = provider_health.store.availability_generation()
+                != pre_rescue_generation;
+            continue;
+        }
+        if did_rescue_probe {
             return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
         }
         if let Err(error) = provider_health

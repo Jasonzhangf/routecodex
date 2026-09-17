@@ -637,20 +637,14 @@ fn expand_namespace_tools_in_responses_wire_body(
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(
-            &mut body,
-            provider_type == "openai_chat",
-        );
+        rewrite_namespace_qualified_call_names_from_convention(&mut body);
         return Ok(body);
     };
     let has_namespace = tools
         .iter()
         .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
     if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(
-            &mut body,
-            provider_type == "openai_chat",
-        );
+        rewrite_namespace_qualified_call_names_from_convention(&mut body);
     }
     if !has_namespace && provider_type != "openai_chat" {
         return Ok(body);
@@ -693,10 +687,7 @@ fn expand_namespace_tools_in_responses_wire_body(
     // tool declaration is incomplete or omitted its child. Apply the same
     // validated convention mapping as the no-tools path so strict providers
     // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(
-        &mut body,
-        provider_type == "openai_chat",
-    );
+    rewrite_namespace_qualified_call_names_from_convention(&mut body);
     Ok(body)
 }
 
@@ -775,10 +766,7 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
     }
 }
 
-fn rewrite_namespace_qualified_call_names_from_convention(
-    body: &mut Value,
-    rewrite_chat_tool_calls: bool,
-) {
+fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
             let kind = item.get("type").and_then(Value::as_str);
@@ -791,20 +779,14 @@ fn rewrite_namespace_qualified_call_names_from_convention(
             let Some(name) = item.get("name").and_then(Value::as_str) else {
                 continue;
             };
-            if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-                .or_else(|| map_known_internal_qualified_call_name(name))
-            {
+            if let Some(mapped) = map_known_provider_call_name(name) {
                 item["name"] = Value::String(mapped);
             }
         }
     }
-    if rewrite_chat_tool_calls {
-        if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-            for message in messages {
-                let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
-                else {
-                    continue;
-                };
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
                 for tool_call in tool_calls {
                     if tool_call.get("type").and_then(Value::as_str) != Some("function") {
                         continue;
@@ -812,19 +794,44 @@ fn rewrite_namespace_qualified_call_names_from_convention(
                     if let Some(function) =
                         tool_call.get_mut("function").and_then(Value::as_object_mut)
                     {
-                        let Some(name) = function.get("name").and_then(Value::as_str) else {
-                            continue;
-                        };
-                        if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-                            .or_else(|| map_known_internal_qualified_call_name(name))
-                        {
-                            function.insert("name".to_string(), Value::String(mapped));
-                        }
+                        map_call_name_from_convention(function);
+                    }
+                }
+            }
+            if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
+                for part in content {
+                    if matches!(
+                        part.get("type").and_then(Value::as_str),
+                        Some("tool_use" | "function_call" | "custom_tool_call")
+                    ) {
+                        map_call_name_from_convention(
+                            part.as_object_mut()
+                                .expect("matched tool call must be an object"),
+                        );
                     }
                 }
             }
         }
     }
+}
+
+fn map_call_name_from_convention(object: &mut Map<String, Value>) {
+    let Some(name) = object.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    if let Some(mapped) = map_known_provider_call_name(name) {
+        object.insert("name".to_string(), Value::String(mapped));
+    }
+}
+
+fn map_known_provider_call_name(name: &str) -> Option<String> {
+    let legacy_mcp_name = name
+        .strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"));
+    let candidate = legacy_mcp_name.as_deref().unwrap_or(name);
+    map_known_namespace_qualified_call_name(candidate)
+        .or_else(|| map_known_internal_qualified_call_name(candidate))
+        .or(legacy_mcp_name)
 }
 
 fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {

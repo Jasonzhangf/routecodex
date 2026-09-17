@@ -375,37 +375,41 @@ fn responses_temperature_unsupported_profile_normalizes_tools_and_removes_temper
 
 #[test]
 fn glm_unsupported_fields_profile_removes_unsupported_provider_fields() {
-    for provider_protocol in ["openai-responses", "openai-chat"] {
-        let input = ReqOutboundCompatInput {
-            payload: json!({
-                "model": "glm-5.3",
-                "prompt_cache_key": "client-cache-1",
-                "verbosity": "high",
-                "messages": [{"role": "user", "content": "hello"}]
-            }),
-            adapter_context: AdapterContext {
-                compatibility_profile: Some(
-                    "chat:glm-unsupported-prompt-cache-key-verbosity".to_string(),
-                ),
-                provider_protocol: Some(provider_protocol.to_string()),
-                ..Default::default()
-            },
-            explicit_profile: None,
-        };
+    for profile in [
+        "chat:openai",
+        "chat:glm",
+        "chat:glm-unsupported-prompt-cache-key-verbosity",
+    ] {
+        for (provider_protocol, model) in [
+            ("openai-responses", "glm-5.3-flash"),
+            ("openai-chat", "deepseek-v4.1-flash"),
+        ] {
+            let input = ReqOutboundCompatInput {
+                payload: json!({
+                    "model": model,
+                    "prompt_cache_key": "client-cache-1",
+                    "verbosity": "high",
+                    "messages": [{"role": "user", "content": "hello"}]
+                }),
+                adapter_context: AdapterContext {
+                    compatibility_profile: Some(profile.to_string()),
+                    provider_protocol: Some(provider_protocol.to_string()),
+                    ..Default::default()
+                },
+                explicit_profile: None,
+            };
 
-        let result = run_req_outbound_stage3_compat(input).unwrap();
-        assert_eq!(
-            result.applied_profile.as_deref(),
-            Some("chat:glm-unsupported-prompt-cache-key-verbosity")
-        );
-        assert!(
-            result.payload.get("prompt_cache_key").is_none(),
-            "unsupported prompt_cache_key must not cross to provider: {provider_protocol}"
-        );
-        assert!(
-            result.payload.get("verbosity").is_none(),
-            "unsupported verbosity must not cross to provider: {provider_protocol}"
-        );
+            let result = run_req_outbound_stage3_compat(input).unwrap();
+            assert_eq!(result.applied_profile.as_deref(), Some(profile));
+            assert!(
+                result.payload.get("prompt_cache_key").is_none(),
+                "unsupported prompt_cache_key must not cross to provider: profile={profile} protocol={provider_protocol} model={model}"
+            );
+            assert!(
+                result.payload.get("verbosity").is_none(),
+                "unsupported verbosity must not cross to provider: profile={profile} protocol={provider_protocol} model={model}"
+            );
+        }
     }
 }
 

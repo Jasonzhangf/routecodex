@@ -35,6 +35,54 @@ fn attempt_budget_counts_all_transport_attempts_without_reset() {
 }
 
 #[test]
+fn attempt_budget_limit_follows_candidate_plan() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process_bytes);
+    budget.set_transport_attempt_limit(14);
+    for expected in 1..=3 {
+        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
+    }
+    assert!(matches!(
+        budget.admit_transport_attempt(),
+        Err(V3AttemptStoreError::LocalResourceExhausted(message))
+            if message.contains("limit 3")
+    ));
+}
+
+#[test]
+fn attempt_budget_limit_does_not_shrink_after_reselection() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 8);
+    limits.request_max_attempts = 5;
+    let budget = V3AttemptBudget::new_isolated(limits, process_bytes);
+    budget.set_transport_attempt_limit(4);
+    budget.set_transport_attempt_limit(1);
+    for expected in 1..=4 {
+        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
+    }
+    assert!(matches!(
+        budget.admit_transport_attempt(),
+        Err(V3AttemptStoreError::LocalResourceExhausted(message))
+            if message.contains("limit 4")
+    ));
+}
+
+#[test]
+fn attempt_budget_limit_follows_one_candidate_plan_below_configured_ceiling() {
+    let process_bytes = Arc::new(AtomicUsize::new(0));
+    let mut limits = test_limits(8, 8, 8);
+    limits.request_max_attempts = 10;
+    let budget = V3AttemptBudget::new_isolated(limits, process_bytes);
+    budget.set_transport_attempt_limit(1);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    assert!(matches!(
+        budget.admit_transport_attempt(),
+        Err(V3AttemptStoreError::LocalResourceExhausted(message))
+            if message.contains("limit 1")
+    ));
+}
+
+#[test]
 fn attempt_budget_consumes_compiled_server_policy() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(

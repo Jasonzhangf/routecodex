@@ -597,6 +597,7 @@ where
                 }
             }
         };
+        attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();

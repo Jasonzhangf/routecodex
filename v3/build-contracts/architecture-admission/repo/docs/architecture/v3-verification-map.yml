@@ -2,6 +2,50 @@ version: 2
 status: p6_frozen_hub_v1_h1_typed_skeleton_implemented
 scope: routecodex-v3-p0-p6-plus-hub-v1-h1
 features:
+- feature_id: v3.rcc_internal_hooks_sidecar
+  status: source_active_live_verification_required
+  change_risk: high
+  owner_kind: rust_v3_internal_hooks_sidecar
+  owner_scope: Optional RouteCodex-owned hooks sidecar process and native Codex App Server communication boundary.
+  owner_modules:
+  - routecodex-v3-hooks
+  - routecodex-v3-lifecycle
+  contract:
+  - docs/design/rcc-internal-hooks-sidecar-contract.md
+  - docs/goals/rcc-internal-hooks-sidecar-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - An enabled install record declares internal_hooksd and starts the installed rccv3-hooksd without selecting another runtime.
+  - Forwarding, mounted hook dispatch, and timers use the same typed send gate and preserve intent identity.
+  - Session status and send operations use only the Codex default TUI/Desktop App Server socket.
+  - Queue acceptance remains accepted until native receipt/reply evidence is observed; read evidence requires an actual read observation.
+  - Sidecar missing, crash, timeout, or invalid readiness leaves RouteCodex Running with hooks_unavailable:<reason> and preserves lifecycle control resources.
+  required_negative:
+  - A missing rccv3-hooksd with the default internal_hooksd declaration fails with hooks_unavailable:missing and never falls back to legacy_supervisor.
+  - Unknown hook kinds and unmounted handlers fail closed; handler errors are not swallowed.
+  - Same-session forwarding, unknown/disconnected targets, and idle_only while working fail or defer explicitly.
+  - No native read/cursor/read_item_id is synthesized from reply evidence.
+  - Hook control state never enters request, response, provider wire, or Error payloads.
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+  - node --test v3/tests/scripts/v3-cli-distribution.spec.mjs
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+  live_required:
+  - Real TUI/TUI and TUI/Desktop same-entry replay with native accepted/delivered/replied/read evidence, or an explicit highest-layer capability gap.
+  - Real sidecar failure injection proves RouteCodex health remains available with hooks_unavailable:<reason>.
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    live_replay: required
+    global_install_restart: supervisor_owned
+    merge: supervisor_owned
 - feature_id: v3.provider_key_health_model_granularity
   status: source_controlled_runtime_pending_live_replay
   change_risk: high
@@ -191,7 +235,7 @@ features:
   - Config-owned source identity is stable, source-sensitive, deterministic, and secret-free
   - deterministic identity and strict state schema
   - configured hooks sidecar starts only after CodexApp readiness and drains before CodexApp when ready; because hooks are an optional integration, missing/invalid readiness leaves the RouteCodex service Running with an explicit degraded detail, preserves lifecycle control resources, and never claims hooks readiness
-  - hooks sidecar stop/restart cleanup failure is explicit, persists the exact failure, retains lifecycle control resources, and never reports stopped or execs a replacement while the process group may remain alive
+  - hooks sidecar stop/restart cleanup failure is explicit as degraded lifecycle detail, completes the main stop or restart path, and preserves any hooks process record whose cleanup cannot be completed with persisted ownership evidence; hooks failure never blocks the main service lifecycle
   - exclusive operation lock and auth-handle preflight
   - no resolved secret in lifecycle projection
   - wrong identity, stale state, duplicate-start takeover, explicit listener PID force release, foreign managed multi-port port-scoped release, and already-stopped failures
@@ -1230,6 +1274,7 @@ features:
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding/longcontext
       never hard-reject a candidate
   - After genuine web_search/search and multimodal/vision capability validation, Target10 preserves configured candidate order among candidates within their declared context window; a candidate whose max_context_tokens is below request_input_tokens is marked context_window_exceeded and skipped before availability/transport. Explicit direct pins and the default-pool floor remain last-resort eligible with the typed overflow reason, while provider health and request-local provider-failure exclusion remain explicit switch inputs
+  - Request-local provider-failure exclusion is provider-scoped across all auth keys/models for the failed provider; persistent cooldown remains provider-key-model scoped
   - A non-null previous_response_id is rejected before routing; it never selects an exact-pin target, local restore, or Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
   - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
@@ -1326,6 +1371,7 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-runtime/tests/anthropic_relay_anthropic_provider_wire_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/bin/v3-anthropic-relay-driver.rs
   design:
@@ -1349,6 +1395,7 @@ features:
   - side-channel control debug resource and selected-target fields never enter provider or client normal payloads
   - the controlled driver calls the Server-owned wrapper and never reads expected fixture truth
   required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture
   - npm run test:v3-anthropic-relay-runtime-integration
   - npm run verify:v3-anthropic-relay-runtime-integration
   - npm run test:v3-anthropic-relay-runtime-integration-red-fixtures
@@ -1642,6 +1689,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
@@ -1701,6 +1750,8 @@ features:
     policy before provider send.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
+  - Responses function-call history with an MCP namespace projects to the qualified provider tool name, while namespace-less Responses-origin history is qualified only when the provider tool set
+    makes that mapping unambiguous. Custom tool calls and ordinary native functions never borrow a colliding MCP leaf name.
   - Direct parity test is a verification binding over existing Direct mainline edges `v3-rd-09-direct-policy` and `v3-rd-10`; it must not create a second protocol-parity owner edge for those production
     nodes.
   required_blackbox:
@@ -1729,6 +1780,11 @@ features:
   - responses_inbound_does_not_rewrite_string_session_id_schema
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - responses_function_call_history_keeps_mcp_namespace_on_openai_chat_provider_wire
+  - responses_function_call_history_without_namespace_is_qualified_from_provider_tools
+  - openai_chat_history_does_not_qualify_same_leaf_name_without_responses_origin
+  - responses_custom_tool_call_does_not_borrow_colliding_mcp_leaf_name
+  - responses_native_function_does_not_borrow_colliding_mcp_leaf_name
   - Live V3 0.90.4017 request `openai-responses-router-gpt-5.5-20260801T215453223-700406-1956` entered on 5520, targeted `modrouter_anthropic[key2].claude-fable-5`, and returned HTTP 200 `requires_action`
     after the complete typed node chain.
   - Managed instance `v3-91d56506a37701333e88` reported build 0.90.4017 healthy on 5520, 5555, and 10000; installed binary SHA256 was `01c4144679fbb424771ba5f15341eedf1f05cc2b78d3ba7a92578177ee00af9c`.
