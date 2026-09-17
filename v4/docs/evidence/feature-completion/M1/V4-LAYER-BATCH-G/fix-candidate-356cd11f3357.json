@@ -1,0 +1,28 @@
+{
+  "fix_candidate_id": "v4-layer-batch-g-current",
+  "issue_id": "V4-LAYER-BATCH-G",
+  "module_id": "routecodex-v4-governance",
+  "worktree_id": "v4-item06-feature-layer-admission-0917",
+  "base_commit": "4ddebdc394d9d8ecf9c77b54d9a69f2972739c05",
+  "head_commit": "356cd11f3357406460dea751df624e67feaf96a2",
+  "tree_hash": "2561bccf23c4b135646e718fe71a9f1d8fc7fc1b",
+  "diff_hash": "sha256:c3b143fefbdc3d259222ddff8551833c050d299ba8c1e996cbe3eca09e01f3c5",
+  "design_id": "v4-feature-layer-batch-g",
+  "owner": "routecodex-v4-governance",
+  "scope_hash": "sha256:6a5e896239bee923f707195b55341d1b6189ef43d554609c0c8a4bc33db3dbf2",
+  "changed_paths": [
+    "v4/scripts/architecture/verify-v4-feature-layer-batches.mjs"
+  ],
+  "verification_evidence_ids": [
+    "boundary-audit-356cd11f3357",
+    "plane-isolation-356cd11f3357",
+    "positive-356cd11f3357",
+    "red-gate-356cd11f3357"
+  ],
+  "created_at": "2026-09-17T15:56:08.702Z",
+  "batch_id": "G",
+  "task_ids": [
+    "V4-GATE-001",
+    "V4-LAYER-GATE-001"
+  ]
+}

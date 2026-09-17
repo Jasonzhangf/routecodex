@@ -68,10 +68,10 @@ export function loadCanonicalInput() {
   };
 }
 
-export function createProductionContext() {
+export function createProductionContext({ readStagedIndex = false } = {}) {
   return {
     io: createIo(),
-    truth: createGitTruth({ repoRoot, v4Root }),
+    truth: createGitTruth({ repoRoot, v4Root, readStagedIndex }),
     now: Date.now(),
   };
 }
@@ -139,7 +139,7 @@ function modeFromArgs(args) {
 function runProductionMode(mode) {
   const failures = validateFeatureLayerBatchAdmission(
     loadCanonicalInput(),
-    createProductionContext(),
+    createProductionContext({ readStagedIndex: mode === 'build-guard' }),
     { mode, allowPendingGuard: allowPendingGuardForMode(mode) },
   );
   if (failures.length > 0) {
