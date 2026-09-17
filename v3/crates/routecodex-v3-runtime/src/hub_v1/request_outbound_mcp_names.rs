@@ -17,11 +17,17 @@ pub(super) fn provider_function_name(name: &str) -> String {
     normalized
 }
 
+fn provider_function_name_preserving_mcp_namespace(name: &str) -> String {
+    name.strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"))
+        .unwrap_or_else(|| name.to_owned())
+}
+
 pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<String, Value>) {
     let responses_extension = message
         .get("routecodex_chat_extension")
         .and_then(Value::as_object);
-    if responses_extension.is_some_and(|extension| {
+    let preserve_mcp_namespace = responses_extension.is_some_and(|extension| {
         extension
             .get("responses_tool_call_type")
             .and_then(Value::as_str)
@@ -30,9 +36,7 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
                 .get("responses_tool_output_type")
                 .and_then(Value::as_str)
                 .is_some_and(|kind| kind == "tool_search_output")
-    }) {
-        return;
-    }
+    });
     if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
         for call in tool_calls {
             let Some(call) = call.as_object_mut() else {
@@ -41,14 +45,22 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             if let Some(name) = call.get("name").and_then(Value::as_str) {
                 call.insert(
                     "name".to_string(),
-                    Value::String(provider_function_name(name)),
+                    Value::String(if preserve_mcp_namespace {
+                        provider_function_name_preserving_mcp_namespace(name)
+                    } else {
+                        provider_function_name(name)
+                    }),
                 );
             }
             if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
                 if let Some(name) = function.get("name").and_then(Value::as_str) {
                     function.insert(
                         "name".to_string(),
-                        Value::String(provider_function_name(name)),
+                        Value::String(if preserve_mcp_namespace {
+                            provider_function_name_preserving_mcp_namespace(name)
+                        } else {
+                            provider_function_name(name)
+                        }),
                     );
                 }
             }
@@ -62,7 +74,11 @@ pub(super) fn normalize_openai_chat_message_tool_call_names(message: &mut Map<St
             if let Some(name) = part_object.get("name").and_then(Value::as_str) {
                 part_object.insert(
                     "name".to_string(),
-                    Value::String(provider_function_name(name)),
+                    Value::String(if preserve_mcp_namespace {
+                        provider_function_name_preserving_mcp_namespace(name)
+                    } else {
+                        provider_function_name(name)
+                    }),
                 );
             }
         }
