@@ -2,6 +2,46 @@ use super::*;
 use serde_json::json;
 use std::time::Duration;
 
+#[test]
+fn request_local_provider_failure_excludes_all_auth_keys_for_provider() {
+    let scope = "request_local_provider_exclusion";
+    let mut manifest = global_pool_alive_manifest(scope);
+    let primary = manifest.providers.get_mut("first").expect("first provider");
+    let mut key2 = primary.auth.entries[0].clone();
+    key2.alias = "key2".to_string();
+    primary.auth.entries.push(key2);
+
+    let group = manifest
+        .route_groups
+        .get_mut(scope)
+        .expect("request-local provider exclusion group");
+    for pool in group.pools.values_mut() {
+        for target in &mut pool.targets {
+            if target.provider.as_deref() == Some("first") {
+                target.key = None;
+                target.priority = Some(2);
+            } else {
+                target.priority = Some(1);
+            }
+        }
+    }
+
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let mut excluded = BTreeSet::new();
+    excluded.insert(v3_relay_provider_candidate_key_parts(
+        "first",
+        Some("key1"),
+        Some("gpt-test"),
+    ));
+
+    let V3RelayProviderTargetResolution::Selected(selected) =
+        resolve_target(&manifest, scope, &excluded, &health)
+    else {
+        panic!("the second provider must remain selectable");
+    };
+    assert_eq!(selected.candidate.provider_id, "second");
+}
+
 #[tokio::test]
 async fn cooldown_only_exhaustion_returns_without_waiting_for_availability_change() {
     let server_id = "cooldown_only_exhaustion";

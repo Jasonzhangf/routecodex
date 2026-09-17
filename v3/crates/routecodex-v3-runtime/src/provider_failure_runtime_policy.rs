@@ -294,20 +294,29 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
         let session =
             self.session
                 .availability(provider_id, Some(auth_alias), Some(model_id), now_ms);
-        let excluded = self
+        // A request-local provider failure is stronger than the persistent
+        // provider:key:model cooldown identity: once a provider fails this
+        // request, the next attempt must move to another provider family.
+        let excluded_candidate = self
             .excluded
             .contains(&v3_relay_provider_candidate_key_parts(
                 provider_id,
                 Some(auth_alias),
                 Some(model_id),
             ));
+        let provider_prefix = format!("{provider_id}:");
+        let excluded_provider = self
+            .excluded
+            .iter()
+            .any(|key| key.starts_with(&provider_prefix));
         projection.blocked_scopes.extend(session.blocked_scopes);
-        if excluded {
+        if excluded_candidate || excluded_provider {
             projection
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
-        projection.available = projection.available && session.available && !excluded;
+        projection.available =
+            projection.available && session.available && !excluded_candidate && !excluded_provider;
         projection
     }
 }

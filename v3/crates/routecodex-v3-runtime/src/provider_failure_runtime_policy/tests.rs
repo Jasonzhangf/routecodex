@@ -1145,7 +1145,7 @@ targets = [
 }
 
 #[tokio::test]
-async fn transport_error_excludes_only_the_failed_provider_key() {
+async fn transport_error_switches_provider_family() {
     let manifest = transport_thrash_manifest("transport_thrash");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
@@ -1197,13 +1197,13 @@ async fn transport_error_excludes_only_the_failed_provider_key() {
         .retry_selected
         .expect("transport failure must reselect");
     assert_eq!(
-        reselected.candidate.provider_id, "first",
-        "transport failure must leave the same provider's other key selectable"
+        reselected.candidate.provider_id, "second",
+        "transport failure must switch provider families"
     );
     assert_eq!(
         state.failed_candidates.len(),
         1,
-        "transport error must exclude only the failed provider key"
+        "failure evidence must retain the exact failed provider key"
     );
     assert!(state
         .failed_candidates
