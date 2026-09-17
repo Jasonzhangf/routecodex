@@ -129,3 +129,28 @@ The focused integration must stay compatible with:
   changed.
 - Controlled loopback proves source/runtime integration shape, not global or production Gemini
   compatibility.
+
+## 9. Execution Evidence
+
+Review receipt is bound to candidate `3bce94f29` in the clean worktree:
+
+```text
+/Users/fanzhang/Documents/github/routecodex/playground/8e89837-pool-hold-0916
+```
+
+Commands run from that worktree all exited `0`:
+
+```text
+npm run render:architecture-wiki-html
+npm run verify:architecture-wiki-html-sync
+npm run verify:v3-gemini-relay-runtime-integration
+npm run test:v3-gemini-relay-runtime-integration-red-fixtures
+npm run verify:v3-architecture-ci
+CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion -- --nocapture
+```
+
+Key receipts:
+
+- `test:v3-gemini-relay-runtime-integration-red-fixtures`: `ok (10 forbidden mutations rejected)`
+- `verify:v3-architecture-ci`: `ok (39/39 sub-gates green)`
+- `cooldown_exhaustion`: `4 passed; 0 failed`
