@@ -376,7 +376,20 @@ async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
     ensure_private_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": root.path(),
+        })
+        .to_string(),
+    )
+    .unwrap();
     let mut child = tokio::process::Command::new("sh")
         .arg("-c")
         .arg("while :; do sleep 1; done")
@@ -392,6 +405,7 @@ async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
         ),
     )
     .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
 
     let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
 
@@ -409,6 +423,7 @@ async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
     assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
     assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
     let _ = child.wait().await;
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
 }
 
 #[test]
