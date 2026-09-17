@@ -779,9 +779,7 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
             let Some(name) = item.get("name").and_then(Value::as_str) else {
                 continue;
             };
-            if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-                .or_else(|| map_known_internal_qualified_call_name(name))
-            {
+            if let Some(mapped) = map_known_provider_call_name(name) {
                 item["name"] = Value::String(mapped);
             }
         }
@@ -821,11 +819,19 @@ fn map_call_name_from_convention(object: &mut Map<String, Value>) {
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return;
     };
-    if let Some(mapped) = map_known_namespace_qualified_call_name(name)
-        .or_else(|| map_known_internal_qualified_call_name(name))
-    {
+    if let Some(mapped) = map_known_provider_call_name(name) {
         object.insert("name".to_string(), Value::String(mapped));
     }
+}
+
+fn map_known_provider_call_name(name: &str) -> Option<String> {
+    let legacy_mcp_name = name
+        .strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"));
+    let candidate = legacy_mcp_name.as_deref().unwrap_or(name);
+    map_known_namespace_qualified_call_name(candidate)
+        .or_else(|| map_known_internal_qualified_call_name(candidate))
+        .or(legacy_mcp_name)
 }
 
 fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {

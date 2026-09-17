@@ -260,6 +260,33 @@ mod tests {
     }
 
     #[test]
+    fn wire_maps_legacy_functions_mcp_names_before_provider_validation() {
+        let mut anthropic_target = target();
+        anthropic_target.provider_type = "anthropic".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "assistant", "content": [
+                {"type": "tool_use", "name": "functions.mcp__codex_review.review_start", "input": {}}
+            ]}],
+            "input": [{"type": "function_call", "name": "functions.mcp__codex_review__review_start"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-legacy-functions-mcp-name",
+            anthropic_target,
+            body,
+        )
+        .expect("legacy MCP names must be normalized before provider wire validation");
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+        assert_eq!(
+            wire.body()["input"][0]["name"],
+            "mcp__codex_review__review_start"
+        );
+    }
+
+    #[test]
     fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
         let body = json!({
             "model": "upstream-model",
