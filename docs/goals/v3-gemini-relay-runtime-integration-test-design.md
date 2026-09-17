@@ -143,6 +143,7 @@ Commands run from that worktree all exited `0`:
 ```text
 npm run render:architecture-wiki-html
 npm run verify:architecture-wiki-html-sync
+npm run test:v3-gemini-relay-runtime-integration
 npm run verify:v3-gemini-relay-runtime-integration
 npm run test:v3-gemini-relay-runtime-integration-red-fixtures
 npm run verify:v3-architecture-ci
@@ -151,6 +152,7 @@ CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-ru
 
 Key receipts:
 
+- `test:v3-gemini-relay-runtime-integration`: runtime `20 passed; 0 failed`, server controlled `1 passed; 0 failed`
 - `test:v3-gemini-relay-runtime-integration-red-fixtures`: `ok (10 forbidden mutations rejected)`
 - `verify:v3-architecture-ci`: `ok (39/39 sub-gates green)`
 - `cooldown_exhaustion`: `4 passed; 0 failed`
