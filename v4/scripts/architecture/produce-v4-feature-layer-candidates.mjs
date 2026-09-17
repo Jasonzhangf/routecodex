@@ -128,9 +128,9 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function writeExclusive(file, value) {
+function writeGenerated(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function functionsForTask(task, functionMap) {
@@ -233,6 +233,17 @@ function candidateRecord({ candidate, lane, batch, tasks, createdAt }) {
   };
 }
 
+function executeGate({ truth, gate, gateReceipts }) {
+  const existing = gateReceipts.get(gate.gate_id);
+  if (existing) return existing;
+  const receipt = truth.runGate(gate.argv);
+  if (receipt.status !== 0) {
+    throw new Error(`SOURCE_GATE_FAILED:${gate.gate_id}:${receipt.status}\n${receipt.stderr}${receipt.stdout}`);
+  }
+  gateReceipts.set(gate.gate_id, receipt);
+  return receipt;
+}
+
 function writeEvidence({
   truth,
   candidate,
@@ -240,6 +251,7 @@ function writeEvidence({
   batchId,
   lane,
   gate,
+  gateReceipts,
   sourcePathsValue,
   gateInputPaths,
   createdAt,
@@ -249,6 +261,7 @@ function writeEvidence({
   if (!ROLE_CONTRACT.has(role)) return null;
   const evidenceName = `${ROLE_EVIDENCE.get(role)}-${lane.head.slice(0, 12)}`;
   const inputPaths = gateInputPaths ?? inputPathsForGate(gate, gateInputContract);
+  const receipt = executeGate({ truth, gate, gateReceipts });
   const scope = evidenceScope(
     truth,
     lane.head,
@@ -269,15 +282,16 @@ function writeEvidence({
     scope: { feature_id: task.task_id, module_id: lane.module },
     producer: gate.producer,
     command_argv: gate.argv,
-    exit_status: 0,
+    exit_status: receipt.status,
     result: 'pass',
+    receipt_hash: receipt.receipt_hash,
     created_at: createdAt,
     expires_at: new Date(Date.parse(createdAt) + MAX_EVIDENCE_TTL_MS).toISOString(),
     input_hashes: scope.input_hashes,
     scope_hash: candidate.scope_hash,
   };
   const relativePath = `docs/evidence/feature-completion/M1/${task.task_id}/${evidenceName}.json`;
-  writeExclusive(path.join(v4Root, relativePath), evidence);
+  writeGenerated(path.join(v4Root, relativePath), evidence);
   return { role, gate_id: gate.gate_id, path: relativePath };
 }
 
@@ -301,6 +315,7 @@ export function main({ now = Date.now() } = {}) {
   const createdAt = new Date(now).toISOString();
   const next = JSON.parse(JSON.stringify(manifest));
   const records = [];
+  const gateReceipts = new Map();
   const gateInputContract = readJson(gateInputContractPath);
   const G_TASK_FUNCTIONS = new Map([
     ['V4-GATE-001', ['v4.governance.feature_layer_gate_contract']],
@@ -362,6 +377,7 @@ export function main({ now = Date.now() } = {}) {
           batchId: batch.batch_id,
           lane,
           gate,
+          gateReceipts,
           sourcePathsValue: evidenceSourcePaths,
           gateInputPaths,
           createdAt,
@@ -377,6 +393,7 @@ export function main({ now = Date.now() } = {}) {
           batchId: batch.batch_id,
           lane,
           gate: planeGate,
+          gateReceipts,
           sourcePathsValue: evidenceSourcePaths,
           gateInputPaths,
           createdAt,
@@ -386,10 +403,10 @@ export function main({ now = Date.now() } = {}) {
     }
     batch.tasks = tasks;
     const record = candidateRecord({ candidate, lane, batch, tasks, createdAt });
-    writeExclusive(path.join(v4Root, candidatePath), record);
+    writeGenerated(path.join(v4Root, candidatePath), record);
     records.push(candidatePath);
   }
-  writeExclusive(`${manifestPath}.next`, next);
+  writeGenerated(`${manifestPath}.next`, next);
   return {
     head: currentHead,
     candidate_records: records,
