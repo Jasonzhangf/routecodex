@@ -161,6 +161,19 @@ targets = []
 }
 
 #[test]
+fn provider_priority_schedule_rejects_unknown_provider_in_native_config() {
+    let invalid = FULL_CONFIG.replace(
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]",
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]\n[servers.primary.provider_priority_schedule]\n[[servers.primary.provider_priority_schedule.providers]]\nprovider = \"missing\"\npeak_tier = 1\noff_peak_tier = 1",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("provider_priority_schedule references unknown provider missing"));
+}
+
+#[test]
 fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
     let invalid = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",

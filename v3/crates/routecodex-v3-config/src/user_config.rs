@@ -55,6 +55,11 @@ pub struct V3UserServerAuthoringConfig {
     pub execution: Option<crate::V3ServerExecutionAuthoringConfig>,
     #[serde(default)]
     pub expose_models: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::V3ProviderPriorityScheduleAuthoringConfig::is_default"
+    )]
+    pub provider_priority_schedule: crate::V3ProviderPriorityScheduleAuthoringConfig,
     pub routes: BTreeMap<String, V3UserRoutePool>,
 }
 
@@ -302,6 +307,20 @@ pub fn project_v3_user_config_03_authoring(
                 "user config server {server_id} port must be non-zero"
             )));
         }
+        server
+            .provider_priority_schedule
+            .validate(&format!(
+                "user config server {server_id}.provider_priority_schedule"
+            ))
+            .map_err(validation)?;
+        for entry in &server.provider_priority_schedule.providers {
+            if !provider_catalogue.contains_key(&entry.provider) {
+                return Err(validation(format!(
+                    "user config server {server_id}.provider_priority_schedule references unknown provider {}",
+                    entry.provider
+                )));
+            }
+        }
         let default_targets = compile_pool_targets(
             server
                 .routes
@@ -309,6 +328,7 @@ pub fn project_v3_user_config_03_authoring(
                 .cloned()
                 .expect("validated default"),
             provider_catalogue,
+            &server.provider_priority_schedule,
         )?;
         let mut group = template.clone();
         for (pool_id, pool) in &mut group.pools {
@@ -316,7 +336,11 @@ pub fn project_v3_user_config_03_authoring(
                 strategy: V3SelectionStrategy::Priority,
             };
             pool.targets = match server.routes.get(pool_id) {
-                Some(user_pool) => compile_pool_targets(user_pool.clone(), provider_catalogue)?,
+                Some(user_pool) => compile_pool_targets(
+                    user_pool.clone(),
+                    provider_catalogue,
+                    &server.provider_priority_schedule,
+                )?,
                 None => default_targets.clone(),
             };
         }
@@ -332,6 +356,7 @@ pub fn project_v3_user_config_03_authoring(
                 features: server.features,
                 execution: server.execution,
                 expose_models: server.expose_models,
+                provider_priority_schedule: server.provider_priority_schedule,
             },
         );
     }
@@ -352,9 +377,11 @@ pub fn project_v3_user_config_03_authoring(
 fn compile_pool_targets(
     user_pool: V3UserRoutePool,
     provider_catalogue: &BTreeMap<String, BTreeSet<String>>,
+    priority_schedule: &crate::V3ProviderPriorityScheduleAuthoringConfig,
 ) -> Result<Vec<V3RoutePoolTargetAuthoringConfig>, V3ConfigError> {
     let tier_count = i32::try_from(user_pool.tiers.len())
         .map_err(|_| validation("user config contains too many route tiers"))?;
+    let tier_count_usize = user_pool.tiers.len();
     let mut targets = Vec::new();
     for (tier_index, tier) in user_pool.tiers.into_iter().enumerate() {
         let priority = tier_count
@@ -374,6 +401,19 @@ fn compile_pool_targets(
                     "user config references unknown provider/model {}/{}",
                     member.provider, member.model
                 )));
+            }
+
+            if let Some(entry) = priority_schedule
+                .providers
+                .iter()
+                .find(|entry| entry.provider == member.provider)
+            {
+                if entry.peak_tier > tier_count_usize || entry.off_peak_tier > tier_count_usize {
+                    return Err(validation(format!(
+                        "user config provider {} schedule tier exceeds pool tier count {}",
+                        entry.provider, tier_count_usize
+                    )));
+                }
             }
 
             targets.push(V3RoutePoolTargetAuthoringConfig {

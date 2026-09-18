@@ -128,3 +128,43 @@ fn parsed_roundtrip_keeps_server_local_routes() {
         parse_v3_user_config_02_routing(&generated).unwrap();
     assert_eq!(parsed, reparsed);
 }
+
+#[test]
+fn provider_priority_schedule_defaults_to_beijing_and_projects() {
+    let projected = project(
+        "[servers.any-name.provider_priority_schedule]\npeak_periods = [{ start = \"09:00\", end = \"18:00\" }]\n[[servers.any-name.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 1\noff_peak_tier = 1\n[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",
+    );
+    let schedule = &projected.servers["any-name"].provider_priority_schedule;
+    assert_eq!(schedule.timezone, "Asia/Shanghai");
+    assert_eq!(schedule.providers[0].provider, "cc");
+    assert_eq!(schedule.providers[0].peak_tier, 1);
+}
+
+#[test]
+fn provider_priority_schedule_rejects_invalid_timezone_and_pool_tier() {
+    let invalid_timezone = user_config(
+        "[servers.any-name.provider_priority_schedule]\ntimezone = \"Mars/Olympus\"\npeak_periods = [{ start = \"09:00\", end = \"18:00\" }]\n[[servers.any-name.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 1\noff_peak_tier = 1\n[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",
+    );
+    assert!(parse_v3_user_config_02_routing(&invalid_timezone)
+        .and_then(|parsed| {
+            project_v3_user_config_03_authoring(
+                parsed,
+                parse_v3_config_02_authoring(INTERNAL_BASE).unwrap(),
+                &catalogue(),
+            )
+        })
+        .is_err());
+
+    let tier_out_of_range = user_config(
+        "[servers.any-name.provider_priority_schedule]\npeak_periods = [{ start = \"09:00\", end = \"18:00\" }]\n[[servers.any-name.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 2\noff_peak_tier = 1\n[servers.any-name.routes.default]\ntiers = [[{ use = \"cc/model\" }]]",
+    );
+    assert!(parse_v3_user_config_02_routing(&tier_out_of_range)
+        .and_then(|parsed| {
+            project_v3_user_config_03_authoring(
+                parsed,
+                parse_v3_config_02_authoring(INTERNAL_BASE).unwrap(),
+                &catalogue(),
+            )
+        })
+        .is_err());
+}

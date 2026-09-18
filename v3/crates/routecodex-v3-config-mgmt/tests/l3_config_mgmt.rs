@@ -288,6 +288,7 @@ fn invalid_commit_fails_without_touching_file() {
             features: Default::default(),
             execution: None,
             expose_models: vec![],
+            provider_priority_schedule: Default::default(),
         },
     );
     broken

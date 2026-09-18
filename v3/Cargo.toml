@@ -49,6 +49,8 @@ dead_code = "allow"
 [workspace.dependencies]
 async-trait = "0.1"
 axum = "0.7"
+chrono = "0.4"
+chrono-tz = "0.10"
 base64 = "0.22"
 bytes = "1"
 clap = { version = "4.5", features = ["derive"] }
