@@ -2392,6 +2392,18 @@ impl SkeletonRuntime {
         continuation_owner: Option<&str>,
         request_lease: Option<&RuntimeLease>,
     ) -> Result<ExecutionReport, RuntimeFault> {
+        let route_facts = TargetSelectionRequest::new(
+            None,
+            wire_model,
+            client_protocol,
+            continuation_owner.ok_or_else(|| {
+                RuntimeFault::new(
+                    "execution_lane_missing",
+                    "Direct/Relay execution lane is required",
+                )
+            })?,
+        )
+        .to_route_facts_value();
         self.execute_request_json_scoped_for_target_with_route_facts_and_lease(
             body,
             client_protocol,
@@ -2403,7 +2415,7 @@ impl SkeletonRuntime {
             session_scope,
             conversation_scope,
             continuation_owner,
-            None,
+            Some(route_facts),
             None,
             request_lease,
         )

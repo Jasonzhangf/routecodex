@@ -49,7 +49,7 @@ impl HandleRegistry for TestHandleRegistry {
     }
 }
 
-fn test_product() -> RuntimeProductConfig {
+pub fn test_product() -> RuntimeProductConfig {
     let models = [
         "m",
         "gpt-wire",

@@ -3,8 +3,19 @@
 //! --source-deps routecodex-v4-skeleton).
 
 use routecodex_v4_base_node::Scope;
+use routecodex_v4_cordis_bridge::{
+    compile_node, execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, PluginHandle,
+};
 use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
 use routecodex_v4_error::{DecisionAction, ErrorChain, ErrorStage, ExecutionDecision, RetryPolicy};
+use routecodex_v4_plugin_contract::{
+    NodePluginDescriptor, NodeSelector, PluginEffect, PluginKind, PluginPhase, ResourceAxis,
+    ResourceEntry, ResourceRegistry,
+};
+use routecodex_v4_plugin_plan::AuthoringPlugin;
+use routecodex_v4_router::{
+    TargetSelectionHandle, TARGET_SELECTION_PLUGIN_ID,
+};
 use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
     project_runtime_fault_with_policy, release_scope_via_bridge, select_relay_operator,
@@ -16,6 +27,7 @@ use routecodex_v4_runtime::{
 use routecodex_v4_server::{HttpRequest, ResponseStream};
 use routecodex_v4_standard_plugins::sse_transport::SseTransportFrame;
 use serde_json::json;
+use std::collections::HashMap;
 use std::fs;
 use std::sync::{Arc, Mutex};
 
@@ -287,6 +299,7 @@ fn relay_request_rejects_prebound_target_selection_drift() {
             Some("relay"),
             Some(json!({
                 "route_group_id": "default",
+                "requested_model": "m",
                 "entry_protocol": "chat",
                 "execution_lane": "relay"
             })),
@@ -689,6 +702,7 @@ fn responses_request_selects_relay_lane_when_selected_provider_is_chat() {
             Some("relay"),
             Some(json!({
                 "route_group_id": "default",
+                "requested_model": "deepseek-v4.1-flash",
                 "entry_protocol": "responses",
                 "execution_lane": "relay"
             })),
@@ -713,6 +727,236 @@ fn responses_request_selects_relay_lane_when_selected_provider_is_chat() {
         .trace
         .iter()
         .any(|entry| entry == "request.provider_semantic"));
+}
+
+#[test]
+fn prebound_direct_pin_uses_requested_model_after_wire_binding() {
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-prebound-direct-pin")
+        .expect("admission");
+    let report = runtime
+        .execute_request_json_scoped_for_target_with_route_facts_and_lease(
+            r#"{"model":"mock.client-pin","input":"hello"}"#,
+            "responses",
+            "responses",
+            "deepseek-v4.1-flash",
+            false,
+            "r-prebound-direct-pin",
+            5555,
+            "session-prebound-direct-pin",
+            "conversation-prebound-direct-pin",
+            Some("direct"),
+            Some(json!({
+                "route_group_id": "default",
+                "requested_model": "mock.client-pin",
+                "entry_protocol": "responses",
+                "execution_lane": "direct"
+            })),
+            Some(json!({
+                "provider_id": "mock",
+                "config_path": "mock-provider.toml",
+                "protocol": "responses",
+                "wire_model": "deepseek-v4.1-flash",
+                "auth_alias": null,
+                "execution_lane": "direct"
+            })),
+            Some(&lease),
+        )
+        .expect("prebound direct pin must survive provider wire-model binding");
+    let wire = report.provider_wire_value.expect("provider wire produced");
+    assert_eq!(wire["model"], json!("deepseek-v4.1-flash"));
+    assert_eq!(wire["input"], json!("hello"));
+}
+
+#[test]
+fn target_selection_requires_requested_model_fact() {
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-missing-requested-model")
+        .expect("admission");
+    let error = runtime
+        .execute_request_json_scoped_for_target_with_route_facts_and_lease(
+            r#"{"model":"m","messages":[]}"#,
+            "chat",
+            "responses",
+            "m",
+            false,
+            "r-missing-requested-model",
+            5555,
+            "session-missing-requested-model",
+            "conversation-missing-requested-model",
+            Some("relay"),
+            Some(json!({
+                "route_group_id": "default",
+                "entry_protocol": "chat",
+                "execution_lane": "relay"
+            })),
+            None,
+            Some(&lease),
+        )
+        .expect_err("target selection must fail without requested model facts");
+    assert!(error.message.contains("requires requested model"));
+}
+
+struct RouterTestRegistry {
+    handles: HashMap<String, Box<dyn PluginHandle>>,
+}
+
+impl RouterTestRegistry {
+    fn new() -> Self {
+        Self {
+            handles: HashMap::new(),
+        }
+    }
+
+    fn register(mut self, plugin_id: &str, handle: impl PluginHandle + 'static) -> Self {
+        self.handles.insert(plugin_id.to_string(), Box::new(handle));
+        self
+    }
+}
+
+impl HandleRegistry for RouterTestRegistry {
+    fn get(&self, plugin_id: &str) -> Option<&dyn PluginHandle> {
+        self.handles.get(plugin_id).map(|handle| handle.as_ref())
+    }
+}
+
+fn target_selection_node_plan() -> routecodex_v4_plugin_plan::NodePluginPlan {
+    let authoring = vec![AuthoringPlugin {
+        descriptor: NodePluginDescriptor {
+            plugin_id: TARGET_SELECTION_PLUGIN_ID.to_string(),
+            version: "0.1.0".to_string(),
+            owner: "routecodex-v4-router".to_string(),
+            artifact_hash: "a".repeat(64),
+            contract_hash: "b".repeat(64),
+            kind: PluginKind::Operator,
+            effect: PluginEffect::ControlOnly,
+            phase: PluginPhase::Semantic,
+            order: 360,
+            before: vec![],
+            after: vec![],
+            depends_on: vec![],
+            selection_group: None,
+            node_selector: NodeSelector {
+                role_id: "request_execution".to_string(),
+                node_id: "V4HubReqTarget05Resolved".to_string(),
+                position: 5,
+            },
+            services_provided: vec![],
+            inject: vec![],
+            reads: vec![
+                "v4.control.route_facts".to_string(),
+                "v4.control.target_selection".to_string(),
+                "v4.information.client_protocol".to_string(),
+                "v4.information.model".to_string(),
+            ],
+            writes: vec!["v4.control.target_selection".to_string()],
+        },
+        enabled: true,
+    }];
+    compile_node(
+        "V4HubReqTarget05Resolved",
+        "request_execution",
+        "relay_request",
+        5,
+        &authoring,
+        &[
+            "v4.control.route_facts".to_string(),
+            "v4.control.target_selection".to_string(),
+            "v4.information.client_protocol".to_string(),
+            "v4.information.model".to_string(),
+        ],
+        &["v4.control.target_selection".to_string()],
+        &ResourceRegistry {
+            resources: vec![
+                ResourceEntry {
+                    resource_id: "v4.control.route_facts".to_string(),
+                    axis: ResourceAxis::Control,
+                },
+                ResourceEntry {
+                    resource_id: "v4.control.target_selection".to_string(),
+                    axis: ResourceAxis::Control,
+                },
+                ResourceEntry {
+                    resource_id: "v4.information.client_protocol".to_string(),
+                    axis: ResourceAxis::Information,
+                },
+                ResourceEntry {
+                    resource_id: "v4.information.model".to_string(),
+                    axis: ResourceAxis::Information,
+                },
+            ],
+        },
+        &[],
+    )
+    .expect("target selection plan compiles")
+}
+
+#[test]
+fn target_selection_uses_requested_model_not_information_wire_model() {
+    let mut product = support::test_product();
+    product.providers[0].models[5].aliases = vec!["client-pin".to_string()];
+    let plan = target_selection_node_plan();
+    let registry = RouterTestRegistry::new()
+        .register(TARGET_SELECTION_PLUGIN_ID, TargetSelectionHandle::new(product));
+    let output = execute_plan(
+        &plan,
+        NodeExecutionInput {
+            data: json!({}),
+            control: json!({
+                "route_facts": {
+                    "route_group_id": "responses",
+                    "requested_model": "mock.client-pin",
+                    "entry_protocol": "responses",
+                    "execution_lane": "direct"
+                }
+            }),
+            information: json!({"model": "wire-model"}),
+            transport: None,
+        },
+        &registry,
+    )
+    .expect("target selection executes");
+    assert_eq!(
+        output.control["target_selection"]["wire_model"],
+        json!("deepseek-v4.1-flash")
+    );
+    assert_eq!(
+        output.control["target_selection"]["provider_id"],
+        json!("mock")
+    );
+}
+
+#[test]
+fn target_selection_rejects_missing_requested_model_fact() {
+    let plan = target_selection_node_plan();
+    let registry = RouterTestRegistry::new().register(
+        TARGET_SELECTION_PLUGIN_ID,
+        TargetSelectionHandle::new(support::test_product()),
+    );
+    let error = execute_plan(
+        &plan,
+        NodeExecutionInput {
+            data: json!({}),
+            control: json!({
+                "route_facts": {
+                    "route_group_id": "responses",
+                    "entry_protocol": "responses",
+                    "execution_lane": "direct"
+                }
+            }),
+            information: json!({"model": "wire-model"}),
+            transport: None,
+        },
+        &registry,
+    )
+    .expect_err("target selection requires requested_model");
+    assert!(matches!(
+        error,
+        BridgeError::HandleError { message, .. }
+            if message.contains("requires requested model")
+    ));
 }
 
 #[test]
