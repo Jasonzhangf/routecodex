@@ -1210,16 +1210,37 @@ fn responses_client_accepts_openai_chat_provider_sse_and_preserves_items() {
     assert!(text.contains("response.output_item.added"), "{text}");
     assert!(text.contains("\"call_id\":\"call_1\""), "{text}");
 
-    let terminal = processor
+    let finish = processor
         .process_frame(
             &runtime,
             transport_frame(
                 b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
             ),
         )
-        .expect("Chat provider terminal must project to Responses client SSE");
+        .expect("Chat provider finish_reason must be retained");
+    assert!(matches!(
+        finish,
+        ResponseStreamDisposition::Continue { .. }
+    ));
+
+    let usage = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+            ),
+        )
+        .expect("Chat provider usage-only closeout must remain non-terminal");
+    assert!(matches!(
+        usage,
+        ResponseStreamDisposition::Continue { .. }
+    ));
+
+    let terminal = processor
+        .process_frame(&runtime, transport_frame(b"data: [DONE]\n\n"))
+        .expect("Chat provider DONE must materialize the Responses terminal");
     let ResponseStreamDisposition::Terminal { frame } = terminal else {
-        panic!("Chat finish_reason must be terminal");
+        panic!("Chat provider DONE must be terminal");
     };
     let text = String::from_utf8_lossy(frame.as_bytes());
     assert!(text.contains("response.completed"), "{text}");

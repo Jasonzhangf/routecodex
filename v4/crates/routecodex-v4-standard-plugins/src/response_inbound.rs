@@ -430,6 +430,27 @@ impl ProviderSseReducer {
             .as_object()
             .cloned()
             .ok_or_else(|| "provider SSE terminal event must be an object".to_string())?;
+        let retained_status = self
+            .response
+            .as_ref()
+            .and_then(|response| response.get("status"))
+            .and_then(Value::as_str);
+        let explicit_terminal = terminal
+            .get("response")
+            .and_then(Value::as_object)
+            .is_some_and(|response| !response.is_empty());
+        if !explicit_terminal && !matches!(retained_status, Some("completed" | "incomplete")) {
+            return Err(
+                "provider SSE terminal requires a prior completed or incomplete finish reason"
+                    .to_string(),
+            );
+        }
+        if retained_status == Some("incomplete") {
+            terminal.insert(
+                "type".to_string(),
+                Value::String("response.incomplete".to_string()),
+            );
+        }
         let mut response = terminal
             .get("response")
             .and_then(Value::as_object)

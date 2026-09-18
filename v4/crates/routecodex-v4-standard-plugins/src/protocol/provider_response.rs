@@ -229,6 +229,20 @@ fn normalize_openai_sse_event(value: &Value) -> Result<Vec<Value>, String> {
     let usage = normalize_chat_usage(value);
     let mut events = Vec::new();
 
+    if choices.is_empty() {
+        if let Some(usage) = usage {
+            events.push(json!({
+                "type": "response.in_progress",
+                "response": {
+                    "id": response_id,
+                    "model": response_model,
+                    "usage": usage
+                }
+            }));
+        }
+        return Ok(events);
+    }
+
     for choice in choices {
         let choice = choice
             .as_object()
@@ -307,16 +321,15 @@ fn normalize_openai_sse_event(value: &Value) -> Result<Vec<Value>, String> {
             .map(str::trim)
             .filter(|reason| !reason.is_empty())
         {
-            let (event_type, status, incomplete_reason) = match finish_reason {
+            let (status, incomplete_reason) = match finish_reason {
                 "stop" | "tool_calls" | "function_call" => {
-                    ("response.completed", "completed", None)
+                    ("completed", None)
                 }
                 "length" => (
-                    "response.incomplete",
                     "incomplete",
                     Some("max_output_tokens"),
                 ),
-                "content_filter" => ("response.incomplete", "incomplete", Some("content_filter")),
+                "content_filter" => ("incomplete", Some("content_filter")),
                 other => {
                     return Err(format!(
                         "OpenAI Chat SSE finish_reason is unsupported: {other}"
@@ -335,7 +348,7 @@ fn normalize_openai_sse_event(value: &Value) -> Result<Vec<Value>, String> {
             if let Some(usage) = usage.clone() {
                 response["usage"] = usage;
             }
-            events.push(json!({"type": event_type, "response": response}));
+            events.push(json!({"type": "response.in_progress", "response": response}));
         } else if events.len() == before_delta && delta.contains_key("role") {
             events.push(json!({
                 "type": "response.in_progress",
@@ -402,7 +415,9 @@ fn normalize_provider_sse_frame_with_lane(
         };
         let data = data.trim();
         if data == "[DONE]" {
-            output.extend_from_slice(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+            output.extend_from_slice(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+            );
             continue;
         }
         let value: Value = serde_json::from_str(data)

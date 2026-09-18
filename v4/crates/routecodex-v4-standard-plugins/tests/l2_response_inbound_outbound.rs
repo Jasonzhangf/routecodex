@@ -190,6 +190,19 @@ fn provider_response_sse_hooks_project_text_and_terminal_events() {
     assert!(text.contains("response.output_text.delta"));
     assert!(text.contains("response.completed"));
 
+    let usage_only = normalize_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage-only Chat chunks are valid before [DONE]");
+    let usage_only = String::from_utf8(usage_only).expect("utf8");
+    assert!(usage_only.contains("response.in_progress"), "{usage_only}");
+    assert!(usage_only.contains("\"input_tokens\":7"), "{usage_only}");
+    assert!(usage_only.contains("\"output_tokens\":3"), "{usage_only}");
+    assert!(usage_only.contains("\"total_tokens\":10"), "{usage_only}");
+    assert!(!usage_only.contains("\"status\""), "{usage_only}");
+    assert!(!usage_only.contains("response.completed"), "{usage_only}");
+
     let anthropic = normalize_provider_sse_frame(
         "anthropic",
         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
@@ -640,6 +653,110 @@ data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":
             .expect_err("incomplete terminal without supported reason must fail fast");
         assert!(error.contains("response.incomplete"));
     }
+}
+
+#[test]
+fn provider_sse_reducer_consumes_chat_usage_closeout_before_done() {
+    let mut reducer = ProviderSseReducer::default();
+    let content = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+    )
+    .expect("content frame decodes");
+    assert_eq!(content.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(content.semantic)
+        .expect("content frame reduces");
+
+    let finish = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    )
+    .expect("finish frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(finish.semantic)
+        .expect("finish frame is retained");
+
+    let usage = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage closeout decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(usage.semantic)
+        .expect("usage closeout is retained");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    let terminal = reducer
+        .reduce_event(done.semantic)
+        .expect("DONE materializes the retained completion");
+    assert_eq!(terminal["type"], "response.completed");
+    assert_eq!(terminal["response"]["status"], "completed");
+    assert_eq!(terminal["response"]["usage"]["input_tokens"], 7);
+    assert_eq!(terminal["response"]["usage"]["output_tokens"], 3);
+    assert_eq!(terminal["response"]["usage"]["total_tokens"], 10);
+}
+
+#[test]
+fn provider_sse_reducer_preserves_chat_incomplete_until_done() {
+    let mut reducer = ProviderSseReducer::default();
+    let finish = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+    )
+    .expect("length finish frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(finish.semantic)
+        .expect("length finish frame is retained");
+
+    let usage = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage closeout decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(usage.semantic)
+        .expect("usage closeout is retained");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    let terminal = reducer
+        .reduce_event(done.semantic)
+        .expect("DONE materializes the retained incomplete response");
+    assert_eq!(terminal["type"], "response.incomplete");
+    assert_eq!(terminal["response"]["status"], "incomplete");
+    assert_eq!(
+        terminal["response"]["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+    assert_eq!(terminal["response"]["usage"]["total_tokens"], 10);
+}
+
+#[test]
+fn provider_sse_reducer_rejects_chat_done_without_finish_reason() {
+    let mut reducer = ProviderSseReducer::default();
+    let content = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+    )
+    .expect("content frame decodes");
+    reducer
+        .reduce_event(content.semantic)
+        .expect("content frame reduces");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    let error = reducer
+        .reduce_event(done.semantic)
+        .expect_err("[DONE] without finish_reason must fail closed");
+    assert!(error.contains("finish reason"), "{error}");
 }
 
 #[test]
