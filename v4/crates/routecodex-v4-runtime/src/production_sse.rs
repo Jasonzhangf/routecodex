@@ -245,6 +245,7 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
     fn commit_attempt(&mut self) -> Result<(), RuntimeFault> {
         let mut staged_bytes = 0usize;
         loop {
+            let read_started = std::time::Instant::now();
             let mut bytes = [0u8; 8192];
             let count = self.stream.read_chunk(&mut bytes).map_err(|error| {
                 RuntimeFault::new(
@@ -252,6 +253,9 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                     format!("provider SSE read failed: {error}"),
                 )
             })?;
+            self.timing
+                .state()
+                .record_phase("provider_read", read_started.elapsed().as_micros());
             if count == 0 {
                 self.ingress.finish().map_err(|error| match error {
                     SseTransportError::IncompleteFrame => RuntimeFault::new(
@@ -278,6 +282,7 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                     .map_err(|message| RuntimeFault::new("runtime_timing", message))?;
                 return Ok(());
             }
+            let framing_started = std::time::Instant::now();
             let frames = self
                 .ingress
                 .push_chunk(&bytes[..count], std::time::Instant::now())
@@ -287,6 +292,10 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                         format!("provider SSE framing failed: {error:?}"),
                     )
                 })?;
+            self.timing.state().record_phase(
+                "provider_sse_framing",
+                framing_started.elapsed().as_micros(),
+            );
             for frame in frames {
                 staged_bytes = staged_bytes.saturating_add(frame.len());
                 if staged_bytes > MAX_PROVIDER_ATTEMPT_BYTES {
@@ -295,6 +304,7 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                         "provider SSE attempt exceeded bounded staging",
                     ));
                 }
+                let processing_started = std::time::Instant::now();
                 let runtime = self.runtime.lock().map_err(|_| {
                     RuntimeFault::new("response_runtime_lock", "response runtime lock poisoned")
                 })?;
@@ -325,6 +335,11 @@ impl<S: ProviderSseSource> SseTransportDriver<S> {
                     }
                     Err(fault) => return Err(fault),
                 };
+                drop(runtime);
+                self.timing.state().record_phase(
+                    "response_processing",
+                    processing_started.elapsed().as_micros(),
+                );
                 match disposition {
                     ResponseStreamDisposition::Continue { frame } => {
                         self.pending_client_frames.push_back(frame);

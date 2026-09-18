@@ -60,6 +60,14 @@ pub struct HttpResponse {
 pub struct RequestTimingSnapshot {
     pub internal_ms: u64,
     pub external_ms: u64,
+    pub phases_ms: RequestTimingPhases,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RequestTimingPhases {
+    pub provider_read_ms: u64,
+    pub provider_sse_framing_ms: u64,
+    pub response_processing_ms: u64,
 }
 
 /// Read-only timing projection carried beside an HTTP response. The runtime
@@ -240,6 +248,11 @@ fn persist_request_record_fields_with_duration(
         "usage": null,
         "timing_internal_ms": timing.map(|timing| timing.internal_ms),
         "timing_external_ms": timing.map(|timing| timing.external_ms),
+        "timing_phases_ms": timing.map(|timing| serde_json::json!({
+            "provider_read": timing.phases_ms.provider_read_ms,
+            "provider_sse_framing": timing.phases_ms.provider_sse_framing_ms,
+            "response_processing": timing.phases_ms.response_processing_ms,
+        })),
         "servertool": false,
         "stopless": false,
         "raw_artifact_ref": null
