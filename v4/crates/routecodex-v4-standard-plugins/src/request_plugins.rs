@@ -16,8 +16,7 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
 pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
 pub const REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str = "v4.std.request.admission_facts";
-pub const DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str =
-    "v4.std.direct.request.admission_facts";
+pub const DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str = "v4.std.direct.request.admission_facts";
 
 pub(crate) fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
     super::boundary::reject_control_fields(object)
@@ -75,10 +74,28 @@ pub fn project_responses_request_to_chat(body: &Value) -> Result<Value, String> 
         .as_object()
         .cloned()
         .ok_or_else(|| "Responses request must be an object".to_string())?;
-    if object.contains_key("previous_response_id") {
-        return Err(
-            "Responses-to-Chat wire projection does not support previous_response_id".to_string(),
-        );
+    if let Some(unsupported) = object.keys().find(|field| {
+        !matches!(
+            field.as_str(),
+            "model"
+                | "input"
+                | "instructions"
+                | "tools"
+                | "tool_choice"
+                | "parallel_tool_calls"
+                | "temperature"
+                | "top_p"
+                | "max_output_tokens"
+                | "stream"
+                | "stop"
+                | "user"
+                | "service_tier"
+                | "protocol"
+        )
+    }) {
+        return Err(format!(
+            "Responses-to-Chat wire projection does not support field {unsupported}"
+        ));
     }
     let input = object
         .remove("input")
@@ -251,11 +268,7 @@ pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 pub(crate) fn request_protocol_parse(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_protocol_parse")?;
     reject_control(&object)?;
-    if object
-        .get("model")
-        .and_then(Value::as_str)
-        .is_none()
-    {
+    if object.get("model").and_then(Value::as_str).is_none() {
         return Err("request_protocol_parse requires model".to_string());
     }
     Ok(())
@@ -323,8 +336,7 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map(str::to_string);
     let wire_model = selected_wire_model
         .or(information_wire_model)
-        .ok_or_else(|| "wire_build requires selected provider model information".to_string())?
-        ;
+        .ok_or_else(|| "wire_build requires selected provider model information".to_string())?;
     let admission_facts = ctx
         .read_control_resource("v4.control.request_admission_facts")
         .map_err(|error| error.to_string())?

@@ -75,7 +75,10 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             PluginEffect::Semantic,
             PluginPhase::Semantic,
             150,
-            vec!["v4.direct.response.provider_raw"],
+            vec![
+                "v4.direct.response.provider_raw",
+                "v4.information.provider_protocol",
+            ],
             vec![
                 "v4.direct.response.provider_raw",
                 "v4.control.stream_terminal",
@@ -189,8 +192,10 @@ fn should_reduce_provider_sse(ctx: &mut ExecCtx<'_>) -> Result<bool, String> {
         .unwrap_or_default()
         .to_string();
     Ok(execution_lane == "relay"
-        && entry_protocol == "openai-chat"
-        && provider_protocol == "openai-responses")
+        && matches!(
+            (entry_protocol.as_str(), provider_protocol.as_str()),
+            ("openai-chat", "openai-responses") | ("openai-responses", "openai-chat")
+        ))
 }
 
 fn read_provider_sse_reducer(ctx: &mut ExecCtx<'_>) -> Result<ProviderSseReducer, String> {
@@ -223,10 +228,17 @@ fn direct_provider_sse_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn provider_sse_decode_common(ctx: &mut ExecCtx<'_>, reduce: bool) -> Result<(), String> {
+    let provider_protocol = ctx
+        .read_information_resource("v4.information.provider_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider SSE boundary requires provider protocol".to_string())?
+        .to_string();
     let Some(frame) = ctx.read_transport_bytes() else {
         return Ok(());
     };
-    let decoded = decode_provider_sse_frame(frame)?;
+    let frame = frame.to_vec();
+    let decoded = decode_provider_sse_frame(&provider_protocol, &frame)?;
     let semantic = if reduce && should_reduce_provider_sse(ctx)? {
         let mut reducer = read_provider_sse_reducer(ctx)?;
         let semantic = reducer.reduce_event(decoded.semantic.clone())?;
@@ -293,7 +305,7 @@ pub struct ProviderSseReducer {
 
 impl ProviderSseReducer {
     pub fn reduce_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, String> {
-        let decoded = decode_provider_sse_frame(frame)?;
+        let decoded = decode_provider_sse_frame("responses", frame)?;
         let event = self.reduce_event(decoded.semantic)?;
         let event_type = event
             .get("type")
@@ -484,15 +496,28 @@ impl ProviderSseReducer {
 
 /// Adjacent provider protocol codec. Transport framing is already complete;
 /// this owner parses one Responses event into its semantic object.
-pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
-    let normalized = provider_response::normalize_provider_sse_frame_for_relay("responses", frame)
-        .map_err(|error| {
-            if error.starts_with("provider_sse_malformed:") {
-                format!("provider SSE data is invalid JSON: {error}")
-            } else {
-                format!("provider SSE normalization failed: {error}")
-            }
-        })?;
+pub fn decode_provider_sse_frame(
+    provider_protocol: &str,
+    frame: &[u8],
+) -> Result<DecodedProviderSseFrame, String> {
+    let provider_protocol = match provider_protocol {
+        "openai-responses" | "responses" => "responses",
+        "openai-chat" | "openai" | "chat" => "chat",
+        other => {
+            return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            ))
+        }
+    };
+    let normalized =
+        provider_response::normalize_provider_sse_frame_for_relay(provider_protocol, frame)
+            .map_err(|error| {
+                if error.starts_with("provider_sse_malformed:") {
+                    format!("provider SSE data is invalid JSON: {error}")
+                } else {
+                    format!("provider SSE normalization failed: {error}")
+                }
+            })?;
     let text = std::str::from_utf8(&normalized)
         .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
     let mut event = None;

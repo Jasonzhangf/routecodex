@@ -324,7 +324,10 @@ fn relay_request_chat_to_responses_is_plugin_owned() {
     assert_eq!(wire["input"][0]["content"], "hello");
     assert!(wire.get("messages").is_none());
     assert_eq!(wire["max_output_tokens"], 8);
-    assert!(wire.get("codec").is_none(), "production wire must not use mock codec handle");
+    assert!(
+        wire.get("codec").is_none(),
+        "production wire must not use mock codec handle"
+    );
     assert!(report
         .trace
         .iter()
@@ -349,9 +352,7 @@ fn relay_request_runs_all_contract_bound_request_plugins() {
             None,
         )
         .expect("relay request with full contract plugin set runs");
-    let wire = report
-        .provider_wire_value
-        .expect("provider wire produced");
+    let wire = report.provider_wire_value.expect("provider wire produced");
     assert_eq!(
         wire["input"][0]["content"],
         json!("hello"),
@@ -366,9 +367,18 @@ fn production_execution_publishes_lifecycle_event_topics() {
     {
         let mut bus = bus.lock().unwrap();
         for (subscriber_id, topic) in [
-            ("entry-reader", routecodex_v4_debug::SubscriptionTopic::NodeEntry),
-            ("exit-reader", routecodex_v4_debug::SubscriptionTopic::NodeExit),
-            ("transition-reader", routecodex_v4_debug::SubscriptionTopic::StateTransition),
+            (
+                "entry-reader",
+                routecodex_v4_debug::SubscriptionTopic::NodeEntry,
+            ),
+            (
+                "exit-reader",
+                routecodex_v4_debug::SubscriptionTopic::NodeExit,
+            ),
+            (
+                "transition-reader",
+                routecodex_v4_debug::SubscriptionTopic::StateTransition,
+            ),
         ] {
             bus.subscribe(subscriber_id, topic, "r-production-events")
                 .unwrap();
@@ -403,7 +413,8 @@ fn production_execution_publishes_lifecycle_event_topics() {
     assert!(bus
         .published_facts()
         .iter()
-        .any(|fact| fact.envelope().topic() == &routecodex_v4_debug::SubscriptionTopic::StateTransition));
+        .any(|fact| fact.envelope().topic()
+            == &routecodex_v4_debug::SubscriptionTopic::StateTransition));
 }
 
 #[test]
@@ -539,11 +550,13 @@ fn one_admission_lease_survives_request_provider_response_to_terminal() {
         )
         .expect("request through admitted lease");
     assert_eq!(request.request_id, "r-lease-lifecycle");
-    assert!(request
-        .trace
-        .iter()
-        .any(|entry| entry.starts_with("v4.hook.direct.request:plugin.executed:")),
-        "request must carry a typed plugin execution witness, trace={:?}", request.trace
+    assert!(
+        request
+            .trace
+            .iter()
+            .any(|entry| entry.starts_with("v4.hook.direct.request:plugin.executed:")),
+        "request must carry a typed plugin execution witness, trace={:?}",
+        request.trace
     );
     assert_eq!(lease.snapshot().in_flight_leases, 1);
     let response = runtime
@@ -566,7 +579,9 @@ fn one_admission_lease_survives_request_provider_response_to_terminal() {
 #[test]
 fn request_admission_facts_are_emitted_by_inbound_plan() {
     let runtime = active_runtime();
-    let lease = runtime.admit_request("r-admission-plugin").expect("admission");
+    let lease = runtime
+        .admit_request("r-admission-plugin")
+        .expect("admission");
     let facts = runtime
         .execute_request_admission_with_lease(
             br#"{"model":"admission-model","stream":true,"input":[]}"#,
@@ -582,7 +597,9 @@ fn request_admission_facts_are_emitted_by_inbound_plan() {
 #[test]
 fn request_admission_plugin_rejects_relay_continuation() {
     let runtime = active_runtime();
-    let lease = runtime.admit_request("r-admission-continuation").expect("admission");
+    let lease = runtime
+        .admit_request("r-admission-continuation")
+        .expect("admission");
     let error = runtime
         .execute_request_admission_with_lease(
             br#"{"model":"m","messages":[],"previous_response_id":"resp_1"}"#,
@@ -817,7 +834,10 @@ fn positive_provider_response_chain_projects_client_frame() {
         )
         .expect("provider response chain runs");
     let frame: serde_json::Value = serde_json::from_str(
-        report.client_frame.as_deref().expect("client frame produced"),
+        report
+            .client_frame
+            .as_deref()
+            .expect("client frame produced"),
     )
     .expect("client frame is Responses JSON");
     assert_eq!(frame["output"][0]["content"][0]["text"], "ok");
@@ -959,7 +979,10 @@ fn runtime_timing_summary_accumulates_external_attempts_without_ambiguous_closeo
     std::thread::sleep(std::time::Duration::from_millis(3));
     timing.finish_external().expect("retry attempt closes");
     let summary = timing.finish_runtime().expect("runtime timing freezes");
-    assert!(timing.finish_runtime().is_err(), "duplicate freeze must fail");
+    assert!(
+        timing.finish_runtime().is_err(),
+        "duplicate freeze must fail"
+    );
     let snapshot = timing.request_snapshot().expect("timing snapshot");
     assert_eq!(snapshot, summary);
     assert!(snapshot.external_ms >= 6, "{snapshot:?}");
@@ -1147,6 +1170,67 @@ fn relay_stream_processor_projects_client_protocol_after_response_chain() {
 }
 
 #[test]
+fn responses_client_accepts_openai_chat_provider_sse_and_preserves_items() {
+    let runtime = active_runtime();
+    let mut processor = response_stream_processor(
+        &runtime,
+        "r-stream-responses-from-chat",
+        "responses",
+        "chat",
+        "relay",
+    );
+
+    let delta = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"},\"finish_reason\":null}]}\n\n",
+            ),
+        )
+        .expect("Chat provider text delta must project to Responses client SSE");
+    let ResponseStreamDisposition::Continue { frame } = delta else {
+        panic!("text delta must remain non-terminal");
+    };
+    let text = String::from_utf8_lossy(frame.as_bytes());
+    assert!(text.contains("response.output_text.delta"), "{text}");
+    assert!(text.contains("hello"), "{text}");
+
+    let tool = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]},\"finish_reason\":null}]}\n\n",
+            ),
+        )
+        .expect("Chat provider tool call must project to Responses client SSE");
+    let ResponseStreamDisposition::Continue { frame } = tool else {
+        panic!("tool call must remain non-terminal");
+    };
+    let text = String::from_utf8_lossy(frame.as_bytes());
+    assert!(text.contains("response.output_item.added"), "{text}");
+    assert!(text.contains("\"call_id\":\"call_1\""), "{text}");
+
+    let terminal = processor
+        .process_frame(
+            &runtime,
+            transport_frame(
+                b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+            ),
+        )
+        .expect("Chat provider terminal must project to Responses client SSE");
+    let ResponseStreamDisposition::Terminal { frame } = terminal else {
+        panic!("Chat finish_reason must be terminal");
+    };
+    let text = String::from_utf8_lossy(frame.as_bytes());
+    assert!(text.contains("response.completed"), "{text}");
+    assert!(text.contains("\"input_tokens\":7"), "{text}");
+    assert!(text.contains("\"output_tokens\":3"), "{text}");
+    processor
+        .finish()
+        .expect("terminal Chat provider stream must close cleanly");
+}
+
+#[test]
 fn response_failed_projects_one_error_without_success_closeout() {
     let runtime = active_runtime();
     let mut processor =
@@ -1168,10 +1252,10 @@ fn response_failed_projects_one_error_without_success_closeout() {
     assert!(!text.contains("[DONE]"));
 
     let duplicate = processor
-        .project_failure(&runtime, routecodex_v4_runtime::RuntimeFault::new(
-            "second_failure",
-            "must not project twice",
-        ))
+        .project_failure(
+            &runtime,
+            routecodex_v4_runtime::RuntimeFault::new("second_failure", "must not project twice"),
+        )
         .expect_err("one stream may project only one failure");
     assert_eq!(duplicate.code, "response_stream_failure_duplicate");
 }
@@ -1512,7 +1596,10 @@ fn relay_sse_provider_done_without_completed_fails_at_eof() {
             ),
         )
         .expect("provider response.done must traverse as a non-terminal frame");
-    assert!(matches!(disposition, ResponseStreamDisposition::Continue { .. }));
+    assert!(matches!(
+        disposition,
+        ResponseStreamDisposition::Continue { .. }
+    ));
     let fault = processor
         .finish()
         .expect_err("provider response.done must not satisfy terminal truth");

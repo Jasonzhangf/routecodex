@@ -58,15 +58,7 @@ fn execute_with_information(
     data: Value,
     information: Value,
 ) -> Result<Value, NodeContainerError> {
-    execute_with_context(
-        node,
-        role,
-        position,
-        plugin,
-        data,
-        json!({}),
-        information,
-    )
+    execute_with_context(node, role, position, plugin, data, json!({}), information)
 }
 
 #[test]
@@ -304,8 +296,14 @@ fn relay_request_preserves_responses_tool_history_for_openai_chat() {
     )
     .expect("tool history must retain call identity in the Chat wire");
 
-    assert_eq!(semantic["messages"][0]["tool_calls"][0]["id"], json!("call_1"));
-    assert_eq!(semantic["messages"][0]["tool_calls"][0]["function"]["name"], json!("lookup"));
+    assert_eq!(
+        semantic["messages"][0]["tool_calls"][0]["id"],
+        json!("call_1")
+    );
+    assert_eq!(
+        semantic["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("lookup")
+    );
     assert_eq!(semantic["messages"][1]["tool_call_id"], json!("call_1"));
     assert_eq!(semantic["messages"][1]["content"], json!("ok"));
 }
@@ -331,5 +329,64 @@ fn relay_request_rejects_unmapped_responses_to_chat_field() {
     assert!(
         format!("{error}").contains("previous_response_id"),
         "failure must identify the unmapped field: {error}"
+    );
+}
+
+#[test]
+fn relay_request_rejects_responses_only_fields_instead_of_leaking_them_to_chat() {
+    for field in [
+        json!({"background": true}),
+        json!({"reasoning": {"effort": "high"}}),
+        json!({"text": {"verbosity": "low"}}),
+        json!({"include": ["reasoning.encrypted_content"]}),
+        json!({"truncation": "auto"}),
+        json!({"prompt_cache_key": "cache-key"}),
+    ] {
+        let mut request = json!({
+            "model": "gpt-5.5",
+            "input": "hello"
+        });
+        let (field, value) = field.as_object().unwrap().iter().next().unwrap();
+        request[field] = value.clone();
+        let error = execute_with_information(
+            "V4HubReqOutbound06ProviderSemantic",
+            "request_outbound",
+            6,
+            "v4.hook.relay.request",
+            request,
+            json!({
+                "client_protocol": "openai-responses",
+                "provider_protocol": "openai-chat"
+            }),
+        )
+        .expect_err("unmapped Responses fields must fail before provider wire");
+        assert!(
+            format!("{error}").contains(field),
+            "failure must identify {field}: {error}"
+        );
+    }
+}
+
+#[test]
+fn relay_request_rejects_unknown_responses_fields_instead_of_forwarding_them() {
+    let error = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "unmapped_provider_field": "must-not-cross"
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect_err("unknown Responses fields must not be forwarded to Chat wire");
+    assert!(
+        format!("{error}").contains("unmapped_provider_field"),
+        "failure must identify the unknown field: {error}"
     );
 }

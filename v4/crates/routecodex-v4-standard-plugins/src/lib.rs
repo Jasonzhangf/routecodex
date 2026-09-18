@@ -422,7 +422,10 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
             "v4.direct.request.client_payload".to_string(),
             "v4.control.request_admission_facts".to_string(),
         ],
-        "V4DirectResp01ProviderRaw" => vec!["v4.direct.response.provider_raw".to_string()],
+        "V4DirectResp01ProviderRaw" => vec![
+            "v4.direct.response.provider_raw".to_string(),
+            "v4.information.provider_protocol".to_string(),
+        ],
         "V4DirectResp03ClientProtocol" => vec![
             "v4.direct.response.client_payload".to_string(),
             "v4.information.client_protocol".to_string(),
@@ -1699,6 +1702,10 @@ mod tests {
                 .writes
                 .iter()
                 .any(|resource| resource == "v4.control.stream_terminal"));
+            assert!(plan.entries[0]
+                .reads
+                .iter()
+                .any(|resource| resource == "v4.information.provider_protocol"));
             assert!(standard_node_allowed_writes(node_id).contains(&resource_id.to_string()));
         }
     }

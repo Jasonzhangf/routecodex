@@ -240,6 +240,7 @@ fn provider_responses_sse_event_name_does_not_leak_across_blocks() {
 #[test]
 fn provider_sse_decoder_accepts_response_delta_without_data_type_but_with_event_name() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n",
     )
     .expect("provider SSE boundary must accept event-name typed Responses frames");
@@ -644,6 +645,7 @@ data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":
 #[test]
 fn provider_sse_decoder_does_not_treat_response_done_as_provider_terminal() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_done\",\"status\":\"completed\"}}\n\n",
     )
     .expect("response.done remains a valid non-terminal provider frame");
@@ -717,6 +719,7 @@ fn frame_builder_cannot_bind_to_chat_process_node() {
 #[test]
 fn provider_sse_codec_classifies_continue_complete_and_failure() {
     let continuing = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
     )
     .expect("delta frame decodes");
@@ -726,6 +729,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
     );
 
     let completed = decode_provider_sse_frame(
+        "responses",
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n\n",
     )
     .expect("completed frame decodes");
@@ -735,6 +739,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
     );
 
     let failed = decode_provider_sse_frame(
+        "responses",
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n",
     )
     .expect("failed frame decodes");
@@ -749,6 +754,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
 #[test]
 fn provider_sse_codec_rejects_failed_event_without_error_truth() {
     let error = decode_provider_sse_frame(
+        "responses",
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{}}\n\n",
     )
     .expect_err("failed event without error truth must fail fast");
@@ -758,6 +764,7 @@ fn provider_sse_codec_rejects_failed_event_without_error_truth() {
 #[test]
 fn provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
     )
     .expect("diagnostic extra_fields are consumed by provider normalization");
@@ -771,7 +778,7 @@ fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":{}}\n\n".as_slice(),
     ] {
-        let error = decode_provider_sse_frame(frame)
+        let error = decode_provider_sse_frame("responses", frame)
             .expect_err("malformed function arguments delta must fail at provider codec");
         assert!(error.contains("response.function_call_arguments.delta"));
     }
