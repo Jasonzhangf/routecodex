@@ -81,6 +81,49 @@ async fn provider_sse_requires_action_without_completed_is_terminal_missing() {
         .contains("provider response event stream ended before response.completed"));
 }
 
+#[tokio::test]
+async fn openai_chat_stream_usage_preserves_cached_input_tokens() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(concat!(
+            "data: {\"id\":\"chatcmpl_cache\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-v4.1-flash\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null,\"index\":0}]}\n\n",
+            "data: {\"id\":\"chatcmpl_cache\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-v4.1-flash\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}]}\n\n",
+        )
+        .as_bytes()
+        .to_vec()),
+        Ok(concat!(
+            "data: {\"id\":\"chatcmpl_cache\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-v4.1-flash\",\"choices\":[],\"usage\":{\"prompt_tokens\":2712,\"completion_tokens\":3,\"total_tokens\":2715,\"prompt_tokens_details\":{\"cached_tokens\":2560},\"cache_read_input_tokens\":2560,\"prompt_cache_hit_tokens\":2560,\"prompt_cache_miss_tokens\":152}}\n\n",
+            "data: [DONE]\n\n",
+        )
+        .as_bytes()
+        .to_vec()),
+    ]));
+    let provider_payload = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        provider,
+        &observation,
+    )
+    .await
+    .expect("Chat SSE usage must materialize before Responses projection");
+
+    assert_eq!(provider_payload["usage"]["prompt_tokens"], 2712);
+    assert_eq!(
+        provider_payload["usage"]["prompt_tokens_details"]["cached_tokens"],
+        2560
+    );
+
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &provider_payload,
+        &json!({"tools": []}),
+    )
+    .expect("Chat completion usage must project to Responses");
+
+    assert_eq!(response["usage"]["input_tokens"], 2712);
+    assert_eq!(
+        response["usage"]["input_tokens_details"]["cached_tokens"],
+        2560
+    );
+}
+
 #[path = "responses_relay_runtime_extra_tests.rs"]
 mod extracted_tests_tail;
 #[path = "responses_relay_runtime_extra_tail_tests.rs"]

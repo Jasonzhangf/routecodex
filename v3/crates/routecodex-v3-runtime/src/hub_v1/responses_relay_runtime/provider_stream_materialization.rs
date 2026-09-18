@@ -341,11 +341,16 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut reducer = V3OpenAiChatSseReducerState::default();
     let mut terminal_seen = false;
+    let mut terminal_usage_closeout_seen = false;
     let mut done_seen = false;
     let mut stop_after_terminal = false;
 
     while let Some(chunk) = provider.next().await {
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) if terminal_seen => break,
+            Err(error) => return Err(error.into()),
+        };
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
             .map_err(|error| {
@@ -457,9 +462,12 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
             reducer.apply_chunk(&projected).map_err(|error| {
                 V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
             })?;
+            if terminal_seen && is_v3_openai_chat_usage_closeout_frame(&projected) {
+                terminal_usage_closeout_seen = true;
+            }
             terminal_seen = reducer.terminal.is_some();
         }
-        if terminal_seen || stop_after_terminal {
+        if (terminal_seen && (terminal_usage_closeout_seen || done_seen)) || stop_after_terminal {
             break;
         }
     }
@@ -622,6 +630,36 @@ mod tests {
             "rewritten by relay hook"
         );
         assert_eq!(output["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn chat_materialization_stops_at_non_usage_frame_after_terminal() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            concat!(
+                "data: {\"id\":\"chatcmpl_stop\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"id\":\"chatcmpl_stop\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: {\"id\":\"chatcmpl_stop\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"late\"},\"finish_reason\":null}]}\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+        )]));
+        let mut hook = RewriteChatMaterializationHook { notifications: 0 };
+
+        let output =
+            build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events_with_hook(
+                provider,
+                &observation,
+                &mut hook,
+            )
+            .await
+            .expect("terminal frame must close the materialized response");
+
+        assert_eq!(
+            output["choices"][0]["message"]["content"],
+            "rewritten by relay hook"
+        );
+        assert_eq!(hook.notifications, 2);
     }
 
     #[tokio::test]
