@@ -653,6 +653,52 @@ fn relay_operator_select_uses_typed_facts_only() {
 }
 
 #[test]
+fn responses_request_selects_relay_lane_when_selected_provider_is_chat() {
+    let runtime = active_runtime();
+    let lease = runtime
+        .admit_request("r-responses-chat-lane")
+        .expect("admission");
+    let report = runtime
+        .execute_request_json_scoped_for_target_with_route_facts_and_lease(
+            r#"{"model":"gpt-5.5","input":"hello"}"#,
+            "responses",
+            "openai-chat",
+            "deepseek-v4.1-flash",
+            false,
+            "r-responses-chat-lane",
+            5555,
+            "session-responses-chat",
+            "conversation-responses-chat",
+            Some("relay"),
+            Some(json!({
+                "route_group_id": "default",
+                "entry_protocol": "responses",
+                "execution_lane": "relay"
+            })),
+            Some(json!({
+                "provider_id": "mock-chat",
+                "config_path": "mock-chat.toml",
+                "protocol": "openai_chat",
+                "wire_model": "deepseek-v4.1-flash",
+                "auth_alias": null,
+                "execution_lane": "relay"
+            })),
+            Some(&lease),
+        )
+        .expect("Responses entry must execute the Relay lane for a Chat provider");
+    let wire = report.provider_wire_value.expect("Chat provider wire");
+    assert_eq!(wire["model"], json!("deepseek-v4.1-flash"));
+    assert_eq!(wire["messages"][0]["role"], json!("user"));
+    assert_eq!(wire["messages"][0]["content"], json!("hello"));
+    assert!(wire.get("input").is_none());
+    assert_eq!(report.continuation_owner.as_deref(), Some("relay"));
+    assert!(report
+        .trace
+        .iter()
+        .any(|entry| entry == "request.provider_semantic"));
+}
+
+#[test]
 fn responses_relay_lane_does_not_create_local_continuation() {
     let runtime = active_runtime();
     let report = runtime

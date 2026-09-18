@@ -249,3 +249,87 @@ fn direct_and_relay_model_hooks_are_protocol_scoped() {
     assert_eq!(relay["protocol"], json!("responses"));
     assert!(relay.get("messages").is_none());
 }
+
+#[test]
+fn relay_request_projects_responses_to_openai_chat_without_dropping_tools() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "instructions": "be concise",
+            "input": [
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+            ],
+            "tools": [
+                {"type":"function","name":"lookup","description":"lookup","parameters":{"type":"object"}}
+            ]
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("Responses to OpenAI Chat is a registered Relay projection");
+
+    assert_eq!(semantic["messages"][0]["role"], json!("system"));
+    assert_eq!(semantic["messages"][0]["content"], json!("be concise"));
+    assert_eq!(semantic["messages"][1]["role"], json!("user"));
+    assert_eq!(semantic["messages"][1]["content"], json!("hello"));
+    assert_eq!(semantic["tools"][0]["type"], json!("function"));
+    assert_eq!(semantic["tools"][0]["function"]["name"], json!("lookup"));
+    assert!(semantic.get("input").is_none());
+}
+
+#[test]
+fn relay_request_preserves_responses_tool_history_for_openai_chat() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"},
+                {"type":"function_call_output","call_id":"call_1","output":"ok"}
+            ]
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("tool history must retain call identity in the Chat wire");
+
+    assert_eq!(semantic["messages"][0]["tool_calls"][0]["id"], json!("call_1"));
+    assert_eq!(semantic["messages"][0]["tool_calls"][0]["function"]["name"], json!("lookup"));
+    assert_eq!(semantic["messages"][1]["tool_call_id"], json!("call_1"));
+    assert_eq!(semantic["messages"][1]["content"], json!("ok"));
+}
+
+#[test]
+fn relay_request_rejects_unmapped_responses_to_chat_field() {
+    let error = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "previous_response_id": "resp_previous"
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect_err("Responses-only continuation fields must fail instead of being silently dropped");
+    assert!(
+        format!("{error}").contains("previous_response_id"),
+        "failure must identify the unmapped field: {error}"
+    );
+}

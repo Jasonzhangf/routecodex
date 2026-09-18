@@ -78,6 +78,9 @@ pub(crate) fn relay_model_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String
         ("openai-chat", "openai-responses") => {
             super::request_plugins::project_chat_request_to_responses(&Value::Object(value))?
         }
+        ("openai-responses", "openai-chat") => {
+            super::request_plugins::project_responses_request_to_chat(&Value::Object(value))?
+        }
         (client, provider) => {
             return Err(format!(
                 "unsupported Relay request projection {client} -> {provider}"
@@ -167,6 +170,9 @@ pub(crate) fn relay_response_projection(ctx: &mut ExecCtx<'_>) -> Result<(), Str
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     let projected = match (provider_protocol.as_str(), client_protocol.as_str()) {
         (provider, client) if provider == client => Value::Object(value),
+        // Provider inbound normalizes OpenAI Chat wire data into canonical
+        // Responses semantics before this boundary.
+        ("openai-chat", "openai-responses") => Value::Object(value),
         ("openai-responses", "openai-chat") => {
             super::response_outbound::project_responses_to_chat(&Value::Object(value))?
         }

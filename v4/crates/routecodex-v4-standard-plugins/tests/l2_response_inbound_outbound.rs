@@ -361,6 +361,24 @@ fn relay_response_hook_projects_only_registered_protocol_pair() {
         json!({"provider_protocol":"openai-responses","client_protocol":"gemini"}),
     )
     .is_err());
+
+    let normalized_chat_provider = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "id":"resp-3",
+            "object":"response",
+            "status":"completed",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]
+        }),
+        json!({"provider_protocol":"openai-chat","client_protocol":"openai-responses"}),
+    )
+    .expect("provider inbound already normalized Chat wire into Responses semantics");
+    assert_eq!(
+        normalized_chat_provider["output"][0]["content"][0]["text"],
+        json!("hello")
+    );
 }
 
 #[test]
