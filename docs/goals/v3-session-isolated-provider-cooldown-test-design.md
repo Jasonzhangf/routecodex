@@ -152,7 +152,7 @@ provider HTTP 400 scope change:
 
 ```text
 worktree: /Users/fanzhang/Documents/github/routecodex/playground/provider-scope-family-0917
-source candidate: 495eecd45
+tested source candidate: 3cd6c3b0a
 
 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_exhausts_provider_family -- --nocapture
 cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait -- --nocapture
@@ -165,8 +165,10 @@ npm run test:v3-provider-action-gate-red-fixtures
 All commands exited `0`. The three focused runtime tests each passed `1/1`; the provider-action
 gate passed with 48 machine edges and synchronized symbols/callers/map-manifest endpoints; the
 architecture CI passed `39/39` sub-gates; and the provider-action red-fixture gate rejected all 54
-forbidden mutations. This is an independently captured writable-runner execution receipt, not a
-review decision or installed-runtime evidence.
+forbidden mutations. The receipt commit that follows `3cd6c3b0a` changes only this document; no
+runtime, test, build, configuration, or generated input changes after the tested source candidate.
+This is an independently captured writable-runner execution receipt, not a review decision or
+installed-runtime evidence.
 
 ## Known Gaps At Design Time
 
