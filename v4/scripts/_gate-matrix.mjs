@@ -40,6 +40,7 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-real-runtime-admission.mjs',
   'verify-v4-production-mainline-red.mjs',
   'verify-v4-cordis-production-admission.mjs',
+  'verify-v4-codex-tui-tool-round-trip.mjs',
   'verify-v4-transition-deps.mjs',
 ];
 

@@ -6,14 +6,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const sessionName = `rccv4-tool-round-trip-${process.pid}`;
-const marker = 'v4-tool-ok';
+const runNonce = `${Date.now()}-${process.pid}`;
+const sessionName = `rccv4-tool-round-trip-${runNonce}`;
+const marker = `v4-tool-ok-${runNonce}`;
 const prompt = `Use exec_command to run exactly: printf ${marker}. Then reply with exactly ${marker}.`;
 const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
 const sessionsRoot = path.join(codexHome, 'sessions');
 const timeoutMs = Number(process.env.RCCV4_CODEX_TOOL_ROUND_TRIP_TIMEOUT_MS ?? 180000);
 const pollMs = 1000;
 const expectedCwd = process.cwd();
+const contractOnly = process.argv.includes('--contract-self-test')
+  || process.env.RCCV4_CODEX_TOOL_ROUND_TRIP_MODE === 'contract'
+  || process.env.RCCV4_REAL_RUNTIME_ADMISSION_MODE === 'contract';
 
 function run(program, args, options = {}) {
   const result = spawnSync(program, args, {
@@ -71,7 +75,16 @@ function findRollout(startedAtMs) {
       && payload?.model_provider === 'long'
       && payload?.cwd === expectedCwd
     ) {
-      return candidate.file;
+      const records = readRolloutRecords(candidate.file, true);
+      const correlated = records.some((entry) => {
+        const item = entry?.payload;
+        return entry?.type === 'response_item'
+          && item?.type === 'message'
+          && item?.role === 'user'
+          && Array.isArray(item?.content)
+          && item.content.some((part) => part?.type === 'input_text' && part?.text === prompt);
+      });
+      if (correlated) return { file: candidate.file, mtimeMs: candidate.mtimeMs };
     }
   }
   return null;
@@ -93,8 +106,15 @@ function readRolloutRecords(file, allowIncompleteTail = false) {
   return records;
 }
 
-function observeRoundTrip(file, allowIncompleteTail = false) {
-  const records = readRolloutRecords(file, allowIncompleteTail);
+function hasRoundTripEvidence(records) {
+  const promptRecord = records.find((record) => {
+    const payload = record?.payload;
+    return record?.type === 'response_item'
+      && payload?.type === 'message'
+      && payload?.role === 'user'
+      && Array.isArray(payload?.content)
+      && payload.content.some((part) => part?.type === 'input_text' && part?.text === prompt);
+  });
   const toolCall = records.find((record) => {
     const payload = record?.payload;
     return record?.type === 'response_item'
@@ -127,12 +147,46 @@ function observeRoundTrip(file, allowIncompleteTail = false) {
       && payload?.type === 'task_complete'
       && payload?.last_agent_message === marker;
   });
-  return {
-    toolCall: Boolean(toolCall),
-    toolOutput: Boolean(toolOutput),
-    finalAnswer,
-    taskCompleted,
-  };
+  return Boolean(promptRecord && toolCall && toolOutput && finalAnswer && taskCompleted);
+}
+
+if (contractOnly) {
+  const records = [
+    {
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] },
+    },
+    {
+      type: 'response_item',
+      payload: { type: 'function_call', name: 'exec_command', call_id: 'call-1', arguments: `{\"cmd\":\"printf ${marker}\"}` },
+    },
+    {
+      type: 'response_item',
+      payload: { type: 'function_call_output', call_id: 'call-1', output: marker },
+    },
+    {
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: marker }] },
+    },
+    {
+      type: 'event_msg',
+      payload: { type: 'task_complete', last_agent_message: marker },
+    },
+  ];
+  const negativeCases = [
+    ['missing prompt correlation', records.filter((_, index) => index !== 0)],
+    ['wrong prompt correlation', records.map((record, index) => (
+      index === 0 ? { ...record, payload: { ...record.payload, content: [{ type: 'input_text', text: 'other prompt' }] } } : record
+    ))],
+    ['call/output mismatch', records.map((record, index) => (
+      index === 2 ? { ...record, payload: { ...record.payload, call_id: 'other-call' } } : record
+    ))],
+  ];
+  if (!hasRoundTripEvidence(records) || negativeCases.some(([, value]) => hasRoundTripEvidence(value))) {
+    throw new Error('codex TUI tool round-trip contract self-test failed');
+  }
+  console.log(`[v4_codex_tui_tool_round_trip] CONTRACT SELF-TEST OK marker=${marker}`);
+  process.exit(0);
 }
 
 if (run('tmux', ['-V']).status !== 0) {
@@ -192,15 +246,11 @@ try {
       }
     }
     if (!sent) continue;
-    rollout = findRollout(startedAtMs);
+    const candidate = findRollout(startedAtMs);
+    if (!candidate || candidate.mtimeMs < startedAtMs) continue;
+    rollout = candidate.file;
     if (!rollout) continue;
-    const observed = observeRoundTrip(rollout, true);
-    if (
-      observed.toolCall
-      && observed.toolOutput
-      && observed.finalAnswer
-      && observed.taskCompleted
-    ) {
+    if (hasRoundTripEvidence(readRolloutRecords(rollout, true))) {
       readRolloutRecords(rollout);
       console.log(
         `[v4_codex_tui_tool_round_trip] OK session=${sessionName} rollout=${rollout}`,

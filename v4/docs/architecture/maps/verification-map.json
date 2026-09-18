@@ -2804,10 +2804,10 @@
       "feature_ids": [
         "v4.cordis.production_admission"
       ],
-      "command": "node scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs",
+      "command": "node scripts/architecture/verify-v4-codex-tui-tool-round-trip.mjs",
       "argv": [
         "node",
-        "scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs"
+        "scripts/architecture/verify-v4-codex-tui-tool-round-trip.mjs"
       ],
       "producer": {
         "adapter": "node",
@@ -2816,7 +2816,7 @@
       "evidence_role": "positive_and_negative",
       "input_paths": [
         "crates/routecodex-v4-runtime-bin/src/main.rs",
-        "scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs"
+        "scripts/architecture/verify-v4-codex-tui-tool-round-trip.mjs"
       ],
       "required_for": [
         "v4.cordis.production_admission:deployed_blackbox"
