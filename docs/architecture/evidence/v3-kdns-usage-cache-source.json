@@ -1,0 +1,79 @@
+{
+  "evidence_id": "v3-kdns-usage-cache-source-20260918",
+  "feature_id": "v3.hub_relay_runtime_closeout",
+  "candidate_commit": "1e2a03ffc615bac8f85e8c66ef20c1f361589acb",
+  "candidate_tree": "934eb190fd4d1bbf915c60f00389d2b425b0098f",
+  "base_commit": "18aac1052914a940c13d200801df13ffa8ed7707",
+  "captured_at": "2026-09-18T01:30:00-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "v3.hub_relay_runtime_closeout",
+    "paths": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_stream_usage_preserves_cached_input_tokens -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib chat_terminal_is_not_reopened_by_late_provider_read_error -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib chat_materialization_stops_at_non_usage_frame_after_terminal -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-hub-relay-runtime-closeout",
+      "result": "pass",
+      "tests": "25 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run verify:v3-hub-relay-runtime-closeout",
+      "result": "pass"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-5520-duplicate-tool-identity",
+      "result": "pass",
+      "tests": "2 focused tests plus closeout verify and 29 red fixtures passed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_field_parity_integration -- --test-threads=1 --nocapture",
+      "result": "pass",
+      "tests": "7 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-hub-relay-runtime-closeout-red-fixtures",
+      "result": "pass",
+      "tests": "29 forbidden mutations rejected"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-workspace",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "npm run verify:v3-cargo-fmt",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-clippy",
+      "result": "baseline_failure_not_touched",
+      "tests": "routecodex-v3-route-classifier/src/active_turn.rs, routecodex-v3-route-classifier/src/tests.rs, routecodex-v3-agent-memory/src/lib.rs"
+    }
+  ]
+}
