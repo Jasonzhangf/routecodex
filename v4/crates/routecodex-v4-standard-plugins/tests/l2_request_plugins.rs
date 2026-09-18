@@ -58,15 +58,7 @@ fn execute_with_information(
     data: Value,
     information: Value,
 ) -> Result<Value, NodeContainerError> {
-    execute_with_context(
-        node,
-        role,
-        position,
-        plugin,
-        data,
-        json!({}),
-        information,
-    )
+    execute_with_context(node, role, position, plugin, data, json!({}), information)
 }
 
 #[test]
@@ -248,4 +240,226 @@ fn direct_and_relay_model_hooks_are_protocol_scoped() {
     .unwrap();
     assert_eq!(relay["protocol"], json!("responses"));
     assert!(relay.get("messages").is_none());
+}
+
+#[test]
+fn relay_request_projects_responses_to_openai_chat_without_dropping_tools() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "instructions": "be concise",
+            "input": [
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+            ],
+            "tools": [
+                {"type":"function","name":"lookup","description":"lookup","parameters":{"type":"object"}}
+            ]
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("Responses to OpenAI Chat is a registered Relay projection");
+
+    assert_eq!(semantic["messages"][0]["role"], json!("system"));
+    assert_eq!(semantic["messages"][0]["content"], json!("be concise"));
+    assert_eq!(semantic["messages"][1]["role"], json!("user"));
+    assert_eq!(semantic["messages"][1]["content"], json!("hello"));
+    assert_eq!(semantic["tools"][0]["type"], json!("function"));
+    assert_eq!(semantic["tools"][0]["function"]["name"], json!("lookup"));
+    assert!(semantic.get("input").is_none());
+}
+
+#[test]
+fn relay_request_projects_responses_sampling_tool_choice_and_format_fields() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "max_output_tokens": 512,
+            "tool_choice": {"type":"function","name":"lookup"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {"type":"object","properties":{"answer":{"type":"string"}}},
+                    "strict": true
+                }
+            }
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("Responses sampling, tool choice, and format fields must project");
+
+    assert_eq!(semantic["max_completion_tokens"], json!(512));
+    assert!(semantic.get("max_tokens").is_none());
+    assert_eq!(semantic["tool_choice"]["type"], json!("function"));
+    assert_eq!(semantic["tool_choice"]["function"]["name"], json!("lookup"));
+    assert_eq!(
+        semantic["response_format"]["json_schema"]["name"],
+        json!("answer")
+    );
+}
+
+#[test]
+fn relay_request_rejects_malformed_responses_tool_choice_and_response_format() {
+    for (field, value, expected) in [
+        (
+            "tool_choice",
+            json!({"type":"function"}),
+            "tool_choice",
+        ),
+        (
+            "response_format",
+            json!({"type":"json_schema","json_schema":{"schema":{"type":"object"}}}),
+            "response_format",
+        ),
+    ] {
+        let mut request = json!({"model":"gpt-5.5","input":"hello"});
+        request[field] = value;
+        let error = execute_with_information(
+            "V4HubReqOutbound06ProviderSemantic",
+            "request_outbound",
+            6,
+            "v4.hook.relay.request",
+            request,
+            json!({
+                "client_protocol": "openai-responses",
+                "provider_protocol": "openai-chat"
+            }),
+        )
+        .expect_err("malformed cross-protocol fields must fail");
+        assert!(
+            format!("{error}").contains(expected),
+            "failure must identify {expected}: {error}"
+        );
+    }
+}
+
+#[test]
+fn relay_request_preserves_responses_tool_history_for_openai_chat() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":\"x\"}"},
+                {"type":"function_call_output","call_id":"call_1","output":"ok"}
+            ]
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("tool history must retain call identity in the Chat wire");
+
+    assert_eq!(
+        semantic["messages"][0]["tool_calls"][0]["id"],
+        json!("call_1")
+    );
+    assert_eq!(
+        semantic["messages"][0]["tool_calls"][0]["function"]["name"],
+        json!("lookup")
+    );
+    assert_eq!(semantic["messages"][1]["tool_call_id"], json!("call_1"));
+    assert_eq!(semantic["messages"][1]["content"], json!("ok"));
+}
+
+#[test]
+fn relay_request_rejects_unmapped_responses_to_chat_field() {
+    let error = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "previous_response_id": "resp_previous"
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect_err("Responses-only continuation fields must fail instead of being silently dropped");
+    assert!(
+        format!("{error}").contains("previous_response_id"),
+        "failure must identify the unmapped field: {error}"
+    );
+}
+
+#[test]
+fn relay_request_rejects_responses_only_fields_instead_of_leaking_them_to_chat() {
+    for field in [
+        json!({"background": true}),
+        json!({"reasoning": {"effort": "high"}}),
+        json!({"text": {"verbosity": "low"}}),
+        json!({"include": ["reasoning.encrypted_content"]}),
+        json!({"truncation": "auto"}),
+        json!({"prompt_cache_key": "cache-key"}),
+    ] {
+        let mut request = json!({
+            "model": "gpt-5.5",
+            "input": "hello"
+        });
+        let (field, value) = field.as_object().unwrap().iter().next().unwrap();
+        request[field] = value.clone();
+        let error = execute_with_information(
+            "V4HubReqOutbound06ProviderSemantic",
+            "request_outbound",
+            6,
+            "v4.hook.relay.request",
+            request,
+            json!({
+                "client_protocol": "openai-responses",
+                "provider_protocol": "openai-chat"
+            }),
+        )
+        .expect_err("unmapped Responses fields must fail before provider wire");
+        assert!(
+            format!("{error}").contains(field),
+            "failure must identify {field}: {error}"
+        );
+    }
+}
+
+#[test]
+fn relay_request_rejects_unknown_responses_fields_instead_of_forwarding_them() {
+    let error = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "unmapped_provider_field": "must-not-cross"
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect_err("unknown Responses fields must not be forwarded to Chat wire");
+    assert!(
+        format!("{error}").contains("unmapped_provider_field"),
+        "failure must identify the unknown field: {error}"
+    );
 }

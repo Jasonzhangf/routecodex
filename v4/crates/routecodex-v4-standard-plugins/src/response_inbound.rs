@@ -75,7 +75,10 @@ pub(crate) fn protocol_decode_descriptors() -> Vec<StandardPlugin> {
             PluginEffect::Semantic,
             PluginPhase::Semantic,
             150,
-            vec!["v4.direct.response.provider_raw"],
+            vec![
+                "v4.direct.response.provider_raw",
+                "v4.information.provider_protocol",
+            ],
             vec![
                 "v4.direct.response.provider_raw",
                 "v4.control.stream_terminal",
@@ -189,8 +192,10 @@ fn should_reduce_provider_sse(ctx: &mut ExecCtx<'_>) -> Result<bool, String> {
         .unwrap_or_default()
         .to_string();
     Ok(execution_lane == "relay"
-        && entry_protocol == "openai-chat"
-        && provider_protocol == "openai-responses")
+        && matches!(
+            (entry_protocol.as_str(), provider_protocol.as_str()),
+            ("openai-chat", "openai-responses") | ("openai-responses", "openai-chat")
+        ))
 }
 
 fn read_provider_sse_reducer(ctx: &mut ExecCtx<'_>) -> Result<ProviderSseReducer, String> {
@@ -223,10 +228,21 @@ fn direct_provider_sse_decode(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn provider_sse_decode_common(ctx: &mut ExecCtx<'_>, reduce: bool) -> Result<(), String> {
+    let provider_protocol = ctx
+        .read_information_resource("v4.information.provider_protocol")
+        .map_err(|error| error.to_string())?
+        .and_then(Value::as_str)
+        .ok_or_else(|| "provider SSE boundary requires provider protocol".to_string())?
+        .to_string();
     let Some(frame) = ctx.read_transport_bytes() else {
         return Ok(());
     };
-    let decoded = decode_provider_sse_frame(frame)?;
+    let frame = frame.to_vec();
+    let decoded = if reduce {
+        decode_provider_sse_frame(&provider_protocol, &frame)?
+    } else {
+        decode_direct_provider_sse_frame(&provider_protocol, &frame)?
+    };
     let semantic = if reduce && should_reduce_provider_sse(ctx)? {
         let mut reducer = read_provider_sse_reducer(ctx)?;
         let semantic = reducer.reduce_event(decoded.semantic.clone())?;
@@ -293,7 +309,7 @@ pub struct ProviderSseReducer {
 
 impl ProviderSseReducer {
     pub fn reduce_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, String> {
-        let decoded = decode_provider_sse_frame(frame)?;
+        let decoded = decode_provider_sse_frame("responses", frame)?;
         let event = self.reduce_event(decoded.semantic)?;
         let event_type = event
             .get("type")
@@ -350,6 +366,40 @@ impl ProviderSseReducer {
                     item.insert("output_index".to_string(), Value::from(output_index));
                 }
                 self.output_items.insert(output_index, item);
+            }
+            Some("response.output_text.delta") => {
+                let output_index = object
+                    .get("output_index")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let delta = object.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    "provider SSE output text delta requires string delta".to_string()
+                })?;
+                let item = self.output_items.entry(output_index).or_insert_with(|| {
+                    json!({
+                        "type": "message",
+                        "status": "in_progress",
+                        "content": [{"type": "output_text", "text": ""}]
+                    })
+                });
+                if let Some(item) = item.as_object_mut() {
+                    item.insert("output_index".to_string(), Value::from(output_index));
+                }
+                let content = item
+                    .get_mut("content")
+                    .and_then(Value::as_array_mut)
+                    .and_then(|content| content.first_mut())
+                    .and_then(Value::as_object_mut)
+                    .ok_or_else(|| {
+                        "provider SSE output text item requires output_text content".to_string()
+                    })?;
+                let text = content
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string()
+                    + delta;
+                content.insert("text".to_string(), Value::String(text));
             }
             Some("response.function_call_arguments.delta") => {
                 let output_index = object
@@ -418,6 +468,27 @@ impl ProviderSseReducer {
             .as_object()
             .cloned()
             .ok_or_else(|| "provider SSE terminal event must be an object".to_string())?;
+        let retained_status = self
+            .response
+            .as_ref()
+            .and_then(|response| response.get("status"))
+            .and_then(Value::as_str);
+        let explicit_terminal = terminal
+            .get("response")
+            .and_then(Value::as_object)
+            .is_some_and(|response| !response.is_empty());
+        if !explicit_terminal && !matches!(retained_status, Some("completed" | "incomplete")) {
+            return Err(
+                "provider SSE terminal requires a prior completed or incomplete finish reason"
+                    .to_string(),
+            );
+        }
+        if retained_status == Some("incomplete") {
+            terminal.insert(
+                "type".to_string(),
+                Value::String("response.incomplete".to_string()),
+            );
+        }
         let mut response = terminal
             .get("response")
             .and_then(Value::as_object)
@@ -482,17 +553,99 @@ impl ProviderSseReducer {
     }
 }
 
+pub fn decode_direct_provider_sse_frame(
+    provider_protocol: &str,
+    frame: &[u8],
+) -> Result<DecodedProviderSseFrame, String> {
+    let provider_protocol = match provider_protocol {
+        "openai-responses" | "responses" => "responses",
+        "openai-chat" | "openai" | "chat" => "chat",
+        other => {
+            return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            ))
+        }
+    };
+    let text = std::str::from_utf8(frame)
+        .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
+    let mut data = Vec::new();
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.trim_start());
+        }
+    }
+    let raw = data.join("\n");
+    if provider_protocol == "chat" && raw.trim() == "[DONE]" {
+        return Ok(DecodedProviderSseFrame {
+            semantic: json!({}),
+            disposition: ProviderSseEventDisposition::Completed,
+        });
+    }
+    let semantic: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
+    semantic
+        .as_object()
+        .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
+    let disposition = match provider_protocol {
+        "chat" => ProviderSseEventDisposition::Continue,
+        "responses" => match semantic.get("type").and_then(Value::as_str) {
+            Some("response.completed" | "response.incomplete") => {
+                ProviderSseEventDisposition::Completed
+            }
+            Some("response.failed") => {
+                let message = semantic
+                    .pointer("/response/error/message")
+                    .or_else(|| semantic.pointer("/error/message"))
+                    .and_then(Value::as_str)
+                    .filter(|message| !message.trim().is_empty())
+                    .ok_or_else(|| {
+                        "provider SSE response.failed is missing error.message".to_string()
+                    })?;
+                ProviderSseEventDisposition::Failed {
+                    message: message.to_string(),
+                }
+            }
+            Some(_) => ProviderSseEventDisposition::Continue,
+            None => {
+                return Err("provider SSE semantic object is missing type".to_string());
+            }
+        },
+        other => {
+            return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            ))
+        }
+    };
+    Ok(DecodedProviderSseFrame {
+        semantic,
+        disposition,
+    })
+}
+
 /// Adjacent provider protocol codec. Transport framing is already complete;
 /// this owner parses one Responses event into its semantic object.
-pub fn decode_provider_sse_frame(frame: &[u8]) -> Result<DecodedProviderSseFrame, String> {
-    let normalized = provider_response::normalize_provider_sse_frame_for_relay("responses", frame)
-        .map_err(|error| {
-            if error.starts_with("provider_sse_malformed:") {
-                format!("provider SSE data is invalid JSON: {error}")
-            } else {
-                format!("provider SSE normalization failed: {error}")
-            }
-        })?;
+pub fn decode_provider_sse_frame(
+    provider_protocol: &str,
+    frame: &[u8],
+) -> Result<DecodedProviderSseFrame, String> {
+    let provider_protocol = match provider_protocol {
+        "openai-responses" | "responses" => "responses",
+        "openai-chat" | "openai" | "chat" => "chat",
+        other => {
+            return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            ))
+        }
+    };
+    let normalized =
+        provider_response::normalize_provider_sse_frame_for_relay(provider_protocol, frame)
+            .map_err(|error| {
+                if error.starts_with("provider_sse_malformed:") {
+                    format!("provider SSE data is invalid JSON: {error}")
+                } else {
+                    format!("provider SSE normalization failed: {error}")
+                }
+            })?;
     let text = std::str::from_utf8(&normalized)
         .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
     let mut event = None;

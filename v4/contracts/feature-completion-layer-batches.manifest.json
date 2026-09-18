@@ -422,22 +422,15 @@
         "crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"
       ],
       "source_dependencies": [],
-      "status": "source_green",
+      "status": "pending",
       "tasks": [
         {
           "task_id": "V4-PLUGIN-001",
-          "status": "source_green",
-          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
-          "function_ids": [
-            "v4.plugin.request.responses_normalize"
-          ],
-          "resource_ids": [
-            "v4.plugin.request.responses_normalize"
-          ],
-          "source_paths": [
-            "crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
-            "crates/routecodex-v4-standard-plugins/src/request_plugins.rs"
-          ],
+          "status": "pending",
+          "candidate_record": null,
+          "function_ids": [],
+          "resource_ids": [],
+          "source_paths": [],
           "support_paths": [],
           "required_gate_ids": [
             "v4_plugin_request_boundary",
@@ -446,42 +439,15 @@
             "v4_plugin_request_red"
           ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": [
-            {
-              "role": "boundary_audit",
-              "gate_id": "v4_plugin_request_boundary",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/boundary-audit-e8f5f231545a.json"
-            },
-            {
-              "role": "plane_isolation",
-              "gate_id": "v4_plugin_request_plane",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/plane-isolation-e8f5f231545a.json"
-            },
-            {
-              "role": "positive",
-              "gate_id": "v4_plugin_request_positive",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/positive-e8f5f231545a.json"
-            },
-            {
-              "role": "red_gate",
-              "gate_id": "v4_plugin_request_red",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-001/red-gate-e8f5f231545a.json"
-            }
-          ]
+          "evidence_refs": []
         },
         {
           "task_id": "V4-PLUGIN-002",
-          "status": "source_green",
-          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
-          "function_ids": [
-            "v4.plugin.request.chat_to_responses"
-          ],
-          "resource_ids": [
-            "v4.plugin.request.chat_to_responses"
-          ],
-          "source_paths": [
-            "crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"
-          ],
+          "status": "pending",
+          "candidate_record": null,
+          "function_ids": [],
+          "resource_ids": [],
+          "source_paths": [],
           "support_paths": [],
           "required_gate_ids": [
             "v4_plugin_request_boundary",
@@ -490,42 +456,15 @@
             "v4_plugin_request_red"
           ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": [
-            {
-              "role": "boundary_audit",
-              "gate_id": "v4_plugin_request_boundary",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/boundary-audit-e8f5f231545a.json"
-            },
-            {
-              "role": "plane_isolation",
-              "gate_id": "v4_plugin_request_plane",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/plane-isolation-e8f5f231545a.json"
-            },
-            {
-              "role": "positive",
-              "gate_id": "v4_plugin_request_positive",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/positive-e8f5f231545a.json"
-            },
-            {
-              "role": "red_gate",
-              "gate_id": "v4_plugin_request_red",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-002/red-gate-e8f5f231545a.json"
-            }
-          ]
+          "evidence_refs": []
         },
         {
           "task_id": "V4-PLUGIN-003",
-          "status": "source_green",
-          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
-          "function_ids": [
-            "v4.plugin.request.governance"
-          ],
-          "resource_ids": [
-            "v4.plugin.request.governance"
-          ],
-          "source_paths": [
-            "crates/routecodex-v4-standard-plugins/src/request_governance.rs"
-          ],
+          "status": "pending",
+          "candidate_record": null,
+          "function_ids": [],
+          "resource_ids": [],
+          "source_paths": [],
           "support_paths": [],
           "required_gate_ids": [
             "v4_plugin_request_boundary",
@@ -534,42 +473,15 @@
             "v4_plugin_request_red"
           ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": [
-            {
-              "role": "boundary_audit",
-              "gate_id": "v4_plugin_request_boundary",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/boundary-audit-e8f5f231545a.json"
-            },
-            {
-              "role": "plane_isolation",
-              "gate_id": "v4_plugin_request_plane",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/plane-isolation-e8f5f231545a.json"
-            },
-            {
-              "role": "positive",
-              "gate_id": "v4_plugin_request_positive",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/positive-e8f5f231545a.json"
-            },
-            {
-              "role": "red_gate",
-              "gate_id": "v4_plugin_request_red",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-003/red-gate-e8f5f231545a.json"
-            }
-          ]
+          "evidence_refs": []
         },
         {
           "task_id": "V4-PLUGIN-004",
-          "status": "source_green",
-          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
-          "function_ids": [
-            "v4.plugin.request.provider_semantic"
-          ],
-          "resource_ids": [
-            "v4.plugin.request.provider_semantic"
-          ],
-          "source_paths": [
-            "crates/routecodex-v4-standard-plugins/src/model_hooks.rs"
-          ],
+          "status": "pending",
+          "candidate_record": null,
+          "function_ids": [],
+          "resource_ids": [],
+          "source_paths": [],
           "support_paths": [],
           "required_gate_ids": [
             "v4_plugin_request_boundary",
@@ -578,42 +490,15 @@
             "v4_plugin_request_red"
           ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": [
-            {
-              "role": "boundary_audit",
-              "gate_id": "v4_plugin_request_boundary",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/boundary-audit-e8f5f231545a.json"
-            },
-            {
-              "role": "plane_isolation",
-              "gate_id": "v4_plugin_request_plane",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/plane-isolation-e8f5f231545a.json"
-            },
-            {
-              "role": "positive",
-              "gate_id": "v4_plugin_request_positive",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/positive-e8f5f231545a.json"
-            },
-            {
-              "role": "red_gate",
-              "gate_id": "v4_plugin_request_red",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-004/red-gate-e8f5f231545a.json"
-            }
-          ]
+          "evidence_refs": []
         },
         {
           "task_id": "V4-PLUGIN-005",
-          "status": "source_green",
-          "candidate_record": "docs/evidence/feature-completion/M1/V4-LAYER-BATCH-D/fix-candidate-e8f5f231545a.json",
-          "function_ids": [
-            "v4.plugin.request.responses_wire_build"
-          ],
-          "resource_ids": [
-            "v4.plugin.request.responses_wire_build"
-          ],
-          "source_paths": [
-            "crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"
-          ],
+          "status": "pending",
+          "candidate_record": null,
+          "function_ids": [],
+          "resource_ids": [],
+          "source_paths": [],
           "support_paths": [],
           "required_gate_ids": [
             "v4_plugin_request_boundary",
@@ -622,28 +507,7 @@
             "v4_plugin_request_red"
           ],
           "mainline_binding": "forbidden_before_integration",
-          "evidence_refs": [
-            {
-              "role": "boundary_audit",
-              "gate_id": "v4_plugin_request_boundary",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/boundary-audit-e8f5f231545a.json"
-            },
-            {
-              "role": "plane_isolation",
-              "gate_id": "v4_plugin_request_plane",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/plane-isolation-e8f5f231545a.json"
-            },
-            {
-              "role": "positive",
-              "gate_id": "v4_plugin_request_positive",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/positive-e8f5f231545a.json"
-            },
-            {
-              "role": "red_gate",
-              "gate_id": "v4_plugin_request_red",
-              "path": "docs/evidence/feature-completion/M1/V4-PLUGIN-005/red-gate-e8f5f231545a.json"
-            }
-          ]
+          "evidence_refs": []
         }
       ]
     },

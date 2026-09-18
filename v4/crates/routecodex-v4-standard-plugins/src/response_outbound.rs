@@ -172,6 +172,12 @@ pub fn encode_client_sse_frame(
     semantic: &Value,
     terminal: bool,
 ) -> Result<Vec<u8>, String> {
+    if entry_protocol == "chat"
+        && semantic.as_object().is_some_and(serde_json::Map::is_empty)
+        && terminal
+    {
+        return Ok(b"data: [DONE]\n\n".to_vec());
+    }
     let object = semantic
         .as_object()
         .ok_or_else(|| "client SSE semantic value must be an object".to_string())?;

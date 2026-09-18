@@ -9,7 +9,8 @@ use routecodex_v4_standard_plugins::protocol::provider_response::{
     normalize_provider_response, normalize_provider_sse_frame,
 };
 use routecodex_v4_standard_plugins::response_inbound::{
-    decode_provider_sse_frame, ProviderSseEventDisposition, ProviderSseReducer,
+    decode_direct_provider_sse_frame, decode_provider_sse_frame, ProviderSseEventDisposition,
+    ProviderSseReducer,
 };
 use routecodex_v4_standard_plugins::response_outbound::{
     encode_client_error_sse_frame, encode_client_sse_frame,
@@ -190,6 +191,19 @@ fn provider_response_sse_hooks_project_text_and_terminal_events() {
     assert!(text.contains("response.output_text.delta"));
     assert!(text.contains("response.completed"));
 
+    let usage_only = normalize_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage-only Chat chunks are valid before [DONE]");
+    let usage_only = String::from_utf8(usage_only).expect("utf8");
+    assert!(usage_only.contains("response.in_progress"), "{usage_only}");
+    assert!(usage_only.contains("\"input_tokens\":7"), "{usage_only}");
+    assert!(usage_only.contains("\"output_tokens\":3"), "{usage_only}");
+    assert!(usage_only.contains("\"total_tokens\":10"), "{usage_only}");
+    assert!(!usage_only.contains("\"status\""), "{usage_only}");
+    assert!(!usage_only.contains("response.completed"), "{usage_only}");
+
     let anthropic = normalize_provider_sse_frame(
         "anthropic",
         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
@@ -240,6 +254,7 @@ fn provider_responses_sse_event_name_does_not_leak_across_blocks() {
 #[test]
 fn provider_sse_decoder_accepts_response_delta_without_data_type_but_with_event_name() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"delta\":\"hi\"}\n\n",
     )
     .expect("provider SSE boundary must accept event-name typed Responses frames");
@@ -291,6 +306,79 @@ fn provider_sse_uses_arc_transport_carrier_and_typed_terminal_control() {
     assert!(carrier.shares_storage_with(&SharedTransportCarrier::from_shared_bytes(bytes)));
     container.drain().unwrap();
     container.dispose().unwrap();
+}
+
+#[test]
+fn direct_chat_sse_preserves_provider_wire_shape() {
+    let frame = b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n";
+    let bytes: Arc<[u8]> = Arc::from(frame.as_slice());
+    let carrier = SharedTransportCarrier::from_shared_bytes(Arc::clone(&bytes));
+    let plan = compile_standard_plan(
+        "V4DirectResp01ProviderRaw",
+        "response_inbound",
+        "direct_response",
+        1,
+        &["v4.std.direct.response.sse_frame_boundary"],
+    )
+    .expect("direct provider SSE boundary plan compiles");
+    let hash = plan.plan_hash();
+    let bindings = PlanBindings {
+        graph_hash: hash.clone(),
+        manifest_hash: hash.clone(),
+        loaded_plan_hash: hash,
+    };
+    let mut container = NodeContainer::declare("V4DirectResp01ProviderRaw", plan, bindings)
+        .expect("binding passes");
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.publish().unwrap();
+    let output = container
+        .execute(
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!({}),
+                information: json!({
+                    "provider_protocol": "openai-chat",
+                    "client_protocol": "openai-chat",
+                    "execution_lane": "direct"
+                }),
+                transport: Some(carrier.clone()),
+            },
+            &StandardHandleRegistry::new(),
+        )
+        .expect("direct Chat provider frame must be consumed");
+    assert_eq!(output.data["id"], "chatcmpl_direct");
+    assert_eq!(output.data["object"], "chat.completion.chunk");
+    assert_eq!(output.data["choices"][0]["delta"]["content"], "hi");
+    assert!(output.data.get("type").is_none());
+    assert_eq!(output.control["stream_terminal"], false);
+    assert!(carrier.shares_storage_with(&SharedTransportCarrier::from_shared_bytes(bytes)));
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
+fn direct_chat_sse_finish_and_usage_remain_non_terminal_until_done() {
+    let finish = decode_direct_provider_sse_frame(
+        "openai-chat",
+        b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    )
+    .expect("finish_reason frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    assert_eq!(finish.semantic["choices"][0]["finish_reason"], "stop");
+
+    let usage = decode_direct_provider_sse_frame(
+        "openai-chat",
+        b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage-only frame decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    assert_eq!(usage.semantic["usage"]["total_tokens"], 10);
+
+    let done = decode_direct_provider_sse_frame("openai-chat", b"data: [DONE]\n\n")
+        .expect("[DONE] decodes as the direct Chat terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    assert_eq!(done.semantic, json!({}));
 }
 
 #[test]
@@ -361,6 +449,24 @@ fn relay_response_hook_projects_only_registered_protocol_pair() {
         json!({"provider_protocol":"openai-responses","client_protocol":"gemini"}),
     )
     .is_err());
+
+    let normalized_chat_provider = execute(
+        "V4HubRespOutbound05ClientSemantic",
+        5,
+        "v4.hook.relay.response",
+        json!({
+            "id":"resp-3",
+            "object":"response",
+            "status":"completed",
+            "output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]
+        }),
+        json!({"provider_protocol":"openai-chat","client_protocol":"openai-responses"}),
+    )
+    .expect("provider inbound already normalized Chat wire into Responses semantics");
+    assert_eq!(
+        normalized_chat_provider["output"][0]["content"][0]["text"],
+        json!("hello")
+    );
 }
 
 #[test]
@@ -624,8 +730,118 @@ data: {"type":"response.incomplete","response":{"id":"resp_incomplete","status":
 }
 
 #[test]
+fn provider_sse_reducer_consumes_chat_usage_closeout_before_done() {
+    let mut reducer = ProviderSseReducer::default();
+    let content = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+    )
+    .expect("content frame decodes");
+    assert_eq!(content.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(content.semantic)
+        .expect("content frame reduces");
+
+    let finish = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    )
+    .expect("finish frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(finish.semantic)
+        .expect("finish frame is retained");
+
+    let usage = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage closeout decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(usage.semantic)
+        .expect("usage closeout is retained");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    let terminal = reducer
+        .reduce_event(done.semantic)
+        .expect("DONE materializes the retained completion");
+    assert_eq!(terminal["type"], "response.completed");
+    assert_eq!(terminal["response"]["status"], "completed");
+    assert_eq!(terminal["response"]["usage"]["input_tokens"], 7);
+    assert_eq!(terminal["response"]["usage"]["output_tokens"], 3);
+    assert_eq!(terminal["response"]["usage"]["total_tokens"], 10);
+    assert_eq!(terminal["response"]["output"][0]["type"], "message");
+    assert_eq!(
+        terminal["response"]["output"][0]["content"][0]["text"],
+        "hi"
+    );
+}
+
+#[test]
+fn provider_sse_reducer_preserves_chat_incomplete_until_done() {
+    let mut reducer = ProviderSseReducer::default();
+    let finish = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+    )
+    .expect("length finish frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(finish.semantic)
+        .expect("length finish frame is retained");
+
+    let usage = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage closeout decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    reducer
+        .reduce_event(usage.semantic)
+        .expect("usage closeout is retained");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    let terminal = reducer
+        .reduce_event(done.semantic)
+        .expect("DONE materializes the retained incomplete response");
+    assert_eq!(terminal["type"], "response.incomplete");
+    assert_eq!(terminal["response"]["status"], "incomplete");
+    assert_eq!(
+        terminal["response"]["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+    assert_eq!(terminal["response"]["usage"]["total_tokens"], 10);
+}
+
+#[test]
+fn provider_sse_reducer_rejects_chat_done_without_finish_reason() {
+    let mut reducer = ProviderSseReducer::default();
+    let content = decode_provider_sse_frame(
+        "openai",
+        b"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n",
+    )
+    .expect("content frame decodes");
+    reducer
+        .reduce_event(content.semantic)
+        .expect("content frame reduces");
+
+    let done = decode_provider_sse_frame("openai", b"data: [DONE]\n\n")
+        .expect("DONE decodes as the semantic terminal");
+    let error = reducer
+        .reduce_event(done.semantic)
+        .expect_err("[DONE] without finish_reason must fail closed");
+    assert!(error.contains("finish reason"), "{error}");
+}
+
+#[test]
 fn provider_sse_decoder_does_not_treat_response_done_as_provider_terminal() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_done\",\"status\":\"completed\"}}\n\n",
     )
     .expect("response.done remains a valid non-terminal provider frame");
@@ -699,6 +915,7 @@ fn frame_builder_cannot_bind_to_chat_process_node() {
 #[test]
 fn provider_sse_codec_classifies_continue_complete_and_failure() {
     let continuing = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n",
     )
     .expect("delta frame decodes");
@@ -708,6 +925,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
     );
 
     let completed = decode_provider_sse_frame(
+        "responses",
         b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n\n",
     )
     .expect("completed frame decodes");
@@ -717,6 +935,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
     );
 
     let failed = decode_provider_sse_frame(
+        "responses",
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"upstream failed\"}}}\n\n",
     )
     .expect("failed frame decodes");
@@ -731,6 +950,7 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
 #[test]
 fn provider_sse_codec_rejects_failed_event_without_error_truth() {
     let error = decode_provider_sse_frame(
+        "responses",
         b"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{}}\n\n",
     )
     .expect_err("failed event without error truth must fail fast");
@@ -740,6 +960,7 @@ fn provider_sse_codec_rejects_failed_event_without_error_truth() {
 #[test]
 fn provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
     let decoded = decode_provider_sse_frame(
+        "responses",
         b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
     )
     .expect("diagnostic extra_fields are consumed by provider normalization");
@@ -753,7 +974,7 @@ fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":{}}\n\n".as_slice(),
     ] {
-        let error = decode_provider_sse_frame(frame)
+        let error = decode_provider_sse_frame("responses", frame)
             .expect_err("malformed function arguments delta must fail at provider codec");
         assert!(error.contains("response.function_call_arguments.delta"));
     }

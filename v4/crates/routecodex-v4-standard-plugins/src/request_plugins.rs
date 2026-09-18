@@ -16,8 +16,7 @@ use super::{plugin, PluginCategory, PluginEffect, PluginKind, PluginPhase, Stand
 pub const REQUEST_NORMALIZE_PLUGIN_ID: &str = "v4.std.request.responses_normalize";
 pub const REQUEST_PROTOCOL_PARSE_PLUGIN_ID: &str = "v4.std.request.protocol_parse";
 pub const REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str = "v4.std.request.admission_facts";
-pub const DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str =
-    "v4.std.direct.request.admission_facts";
+pub const DIRECT_REQUEST_ADMISSION_FACTS_PLUGIN_ID: &str = "v4.std.direct.request.admission_facts";
 
 pub(crate) fn reject_control(object: &Map<String, Value>) -> Result<(), String> {
     super::boundary::reject_control_fields(object)
@@ -68,6 +67,276 @@ pub fn project_chat_request_to_responses(body: &Value) -> Result<Value, String> 
     Ok(Value::Object(projected))
 }
 
+/// Project a Responses request into the OpenAI Chat wire shape. This is the
+/// adjacent Relay request codec; it never performs routing or continuation.
+pub fn project_responses_request_to_chat(body: &Value) -> Result<Value, String> {
+    let mut object = body
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "Responses request must be an object".to_string())?;
+    if let Some(unsupported) = object.keys().find(|field| {
+        !matches!(
+            field.as_str(),
+            "model"
+                | "input"
+                | "instructions"
+                | "tools"
+                | "tool_choice"
+                | "parallel_tool_calls"
+                | "temperature"
+                | "top_p"
+                | "max_output_tokens"
+                | "response_format"
+                | "stream"
+                | "stop"
+                | "user"
+                | "service_tier"
+                | "protocol"
+        )
+    }) {
+        return Err(format!(
+            "Responses-to-Chat wire projection does not support field {unsupported}"
+        ));
+    }
+    let input = object
+        .remove("input")
+        .ok_or_else(|| "Responses request input is required".to_string())?;
+    let mut messages = Vec::new();
+    if let Some(instructions) = object
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        messages.push(json!({"role": "system", "content": instructions}));
+    }
+    object.remove("instructions");
+    match input {
+        Value::String(text) => messages.push(json!({"role": "user", "content": text})),
+        Value::Array(items) => {
+            for item in items {
+                let item = item
+                    .as_object()
+                    .ok_or_else(|| "Responses input items must be objects".to_string())?;
+                let item_type = item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("message");
+                match item_type {
+                    "message" => messages.push(project_responses_message_to_chat(item)?),
+                    "function_call" | "custom_tool_call" | "tool_call" => {
+                        messages.push(project_responses_tool_call_to_chat(item)?);
+                    }
+                    "function_call_output" | "tool_call_output" => {
+                        let call_id = item
+                            .get("call_id")
+                            .or_else(|| item.get("tool_call_id"))
+                            .and_then(Value::as_str)
+                            .filter(|value| !value.trim().is_empty())
+                            .ok_or_else(|| {
+                                "Responses function_call_output requires call_id".to_string()
+                            })?;
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": item.get("output").cloned().unwrap_or(Value::Null)
+                        }));
+                    }
+                    other => {
+                        return Err(format!(
+                            "Responses-to-Chat wire projection does not support input type {other}"
+                        ))
+                    }
+                }
+            }
+        }
+        _ => return Err("Responses request input must be a string or array".to_string()),
+    }
+    object.insert("messages".to_string(), Value::Array(messages));
+    if let Some(max_output_tokens) = object.remove("max_output_tokens") {
+        object.insert("max_completion_tokens".to_string(), max_output_tokens);
+    }
+    if let Some(tool_choice) = object.remove("tool_choice") {
+        object.insert(
+            "tool_choice".to_string(),
+            project_responses_tool_choice_to_chat(tool_choice)?,
+        );
+    }
+    if let Some(response_format) = object.get("response_format") {
+        validate_chat_response_format(response_format)?;
+    }
+    if let Some(tools) = object.get("tools").and_then(Value::as_array) {
+        let projected_tools = tools
+            .iter()
+            .map(|tool| {
+                let object = tool
+                    .as_object()
+                    .ok_or_else(|| "Responses tool must be an object".to_string())?;
+                let tool_type = object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "Responses tool type is required".to_string())?;
+                if tool_type != "function" {
+                    return Err(format!(
+                        "Responses-to-Chat wire projection does not support tool type {tool_type}"
+                    ));
+                }
+                let name = object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| "Responses function tool name is required".to_string())?;
+                Ok(json!({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": object.get("description").cloned().unwrap_or(Value::Null),
+                        "parameters": object.get("parameters").cloned().unwrap_or_else(|| json!({}))
+                    }
+                }))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        object.insert("tools".to_string(), Value::Array(projected_tools));
+    }
+    object.remove("protocol");
+    Ok(Value::Object(object))
+}
+
+fn project_responses_tool_choice_to_chat(tool_choice: Value) -> Result<Value, String> {
+    match tool_choice {
+        Value::String(policy) => match policy.as_str() {
+            "auto" | "none" | "required" => Ok(Value::String(policy)),
+            other => Err(format!(
+                "Responses-to-Chat wire projection does not support tool_choice {other}"
+            )),
+        },
+        Value::Object(object) => {
+            let choice_type = object
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses tool_choice requires type".to_string())?;
+            if choice_type != "function" {
+                return Err(format!(
+                    "Responses-to-Chat wire projection does not support tool_choice type {choice_type}"
+                ));
+            }
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Responses function tool_choice requires name".to_string())?;
+            Ok(json!({
+                "type": "function",
+                "function": {"name": name}
+            }))
+        }
+        _ => Err("Responses tool_choice must be a string or object".to_string()),
+    }
+}
+
+fn validate_chat_response_format(response_format: &Value) -> Result<(), String> {
+    let object = response_format
+        .as_object()
+        .ok_or_else(|| "Chat response_format must be an object".to_string())?;
+    let format_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Chat response_format requires type".to_string())?;
+    match format_type {
+        "text" | "json_object" => {
+            if object.len() != 1 {
+                return Err(format!(
+                    "Chat response_format type {format_type} only supports the type field"
+                ));
+            }
+            Ok(())
+        }
+        "json_schema" => {
+            let json_schema = object
+                .get("json_schema")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "Chat response_format json_schema requires object".to_string())?;
+            if object.len() != 2
+                || json_schema
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(|value| value.trim().is_empty())
+                || !json_schema.get("schema").is_some_and(Value::is_object)
+            {
+                return Err(
+                    "Chat response_format json_schema requires name and object schema".to_string(),
+                );
+            }
+            Ok(())
+        }
+        other => Err(format!(
+            "Responses-to-Chat wire projection does not support response_format type {other}"
+        )),
+    }
+}
+
+fn project_responses_message_to_chat(item: &Map<String, Value>) -> Result<Value, String> {
+    let role = item
+        .get("role")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Responses message requires role".to_string())?;
+    let content = match item.get("content") {
+        Some(Value::String(text)) => Value::String(text.clone()),
+        Some(Value::Array(parts)) => {
+            let text = parts
+                .iter()
+                .map(|part| {
+                    let part = part
+                        .as_object()
+                        .ok_or_else(|| "Responses message content parts must be objects".to_string())?;
+                    match part.get("type").and_then(Value::as_str) {
+                        Some("input_text" | "output_text" | "text") => part
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .ok_or_else(|| "Responses text content part requires text".to_string()),
+                        Some(other) => Err(format!(
+                            "Responses-to-Chat wire projection does not support content type {other}"
+                        )),
+                        None => Err("Responses content part type is required".to_string()),
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()?
+                .join("");
+            Value::String(text)
+        }
+        Some(Value::Null) | None => Value::Null,
+        Some(_) => return Err("Responses message content must be a string or array".to_string()),
+    };
+    Ok(json!({"role": role, "content": content}))
+}
+
+fn project_responses_tool_call_to_chat(item: &Map<String, Value>) -> Result<Value, String> {
+    let call_id = item
+        .get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses function_call requires call_id".to_string())?;
+    let name = item
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Responses function_call requires name".to_string())?;
+    Ok(json!({
+        "role": "assistant",
+        "content": Value::Null,
+        "tool_calls": [{
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": item.get("arguments").cloned().unwrap_or_else(|| Value::String(String::new()))
+            }
+        }]
+    }))
+}
+
 pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_normalize")?;
     reject_control(&object)?;
@@ -82,11 +351,7 @@ pub(crate) fn request_normalize(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 pub(crate) fn request_protocol_parse(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let object = require_object(ctx, "request_protocol_parse")?;
     reject_control(&object)?;
-    if object
-        .get("model")
-        .and_then(Value::as_str)
-        .is_none()
-    {
+    if object.get("model").and_then(Value::as_str).is_none() {
         return Err("request_protocol_parse requires model".to_string());
     }
     Ok(())
@@ -154,8 +419,7 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         .map(str::to_string);
     let wire_model = selected_wire_model
         .or(information_wire_model)
-        .ok_or_else(|| "wire_build requires selected provider model information".to_string())?
-        ;
+        .ok_or_else(|| "wire_build requires selected provider model information".to_string())?;
     let admission_facts = ctx
         .read_control_resource("v4.control.request_admission_facts")
         .map_err(|error| error.to_string())?
@@ -184,7 +448,7 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         other => return Err(format!("unsupported client protocol {other}")),
     };
     let provider_protocol = match provider_protocol.as_str() {
-        "openai-chat" | "chat" => "chat",
+        "openai_chat" | "openai-chat" | "chat" => "chat",
         "openai-responses" | "responses" => "responses",
         other => return Err(format!("unsupported provider protocol {other}")),
     };
@@ -205,8 +469,14 @@ pub(crate) fn wire_build(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
         ("responses", "responses") if !object.contains_key("input") => {
             return Err("Responses wire requires input".to_string());
         }
-        ("responses", "chat") => {
-            return Err("Responses-to-Chat wire projection is not registered".to_string());
+        ("responses", "chat") if object.contains_key("input") => {
+            object = project_responses_request_to_chat(&Value::Object(object))?
+                .as_object()
+                .cloned()
+                .ok_or_else(|| "Responses-to-Chat projection must return object".to_string())?;
+        }
+        ("responses", "chat") if !object.contains_key("messages") => {
+            return Err("Responses-to-Chat wire requires input or messages".to_string());
         }
         _ => {}
     }

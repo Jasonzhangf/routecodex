@@ -105,6 +105,16 @@ pub fn format_chat_process_payload_with_stream(
     payload: &serde_json::Value,
     stream_override: Option<bool>,
 ) -> Result<String, String> {
+    if direction == "response"
+        && payload
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty)
+    {
+        return Ok(colorize(
+            ANSI_GREEN,
+            "✅ [resp] terminal frame=[DONE]".to_string(),
+        ));
+    }
     let object = payload
         .as_object()
         .ok_or_else(|| "Chat Process payload must be an object".to_string())?;

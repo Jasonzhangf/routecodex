@@ -74,10 +74,12 @@ fn normalize_openai_response(body: &Value) -> Result<Value, String> {
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
-        .ok_or_else(|| "provider_json_shape: OpenAI Chat response choices must be non-empty".to_string())?;
-    let message = choice
-        .get("message")
-        .ok_or_else(|| "provider_json_shape: OpenAI Chat response message is missing".to_string())?;
+        .ok_or_else(|| {
+            "provider_json_shape: OpenAI Chat response choices must be non-empty".to_string()
+        })?;
+    let message = choice.get("message").ok_or_else(|| {
+        "provider_json_shape: OpenAI Chat response message is missing".to_string()
+    })?;
     let mut output = Vec::new();
     if let Some(content) = message.get("content") {
         if !content.is_null() {
@@ -89,9 +91,9 @@ fn normalize_openai_response(body: &Value) -> Result<Value, String> {
     }
     if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
         for tool in tool_calls {
-            let function = tool
-                .get("function")
-                .ok_or_else(|| "provider_json_shape: OpenAI tool call function is missing".to_string())?;
+            let function = tool.get("function").ok_or_else(|| {
+                "provider_json_shape: OpenAI tool call function is missing".to_string()
+            })?;
             output.push(json!({
                 "type": "function_call",
                 "call_id": tool.get("id").cloned().unwrap_or(Value::Null),
@@ -117,13 +119,15 @@ fn normalize_openai_response(body: &Value) -> Result<Value, String> {
 }
 
 fn normalize_anthropic_response(body: &Value) -> Result<Value, String> {
-    let object = body
-        .as_object()
-        .ok_or_else(|| "provider_json_shape: Anthropic Messages response must be an object".to_string())?;
+    let object = body.as_object().ok_or_else(|| {
+        "provider_json_shape: Anthropic Messages response must be an object".to_string()
+    })?;
     let content = object
         .get("content")
         .and_then(Value::as_array)
-        .ok_or_else(|| "provider_json_shape: Anthropic Messages content must be an array".to_string())?;
+        .ok_or_else(|| {
+            "provider_json_shape: Anthropic Messages content must be an array".to_string()
+        })?;
     let mut output = Vec::new();
     for item in content {
         match item.get("type").and_then(Value::as_str) {
@@ -155,7 +159,11 @@ fn normalize_anthropic_response(body: &Value) -> Result<Value, String> {
         let total_tokens = usage
             .get("total_tokens")
             .and_then(Value::as_u64)
-            .or_else(|| input_tokens.zip(output_tokens).map(|(input, output)| input + output));
+            .or_else(|| {
+                input_tokens
+                    .zip(output_tokens)
+                    .map(|(input, output)| input + output)
+            });
         normalized["usage"] = json!({
             "input_tokens": input_tokens.map(Value::from).unwrap_or(Value::Null),
             "output_tokens": output_tokens.map(Value::from).unwrap_or(Value::Null),
@@ -172,7 +180,9 @@ pub fn normalize_provider_response(protocol: &str, body: &Value) -> Result<Value
         "responses" => normalize_responses_response(body, None, false),
         "openai" | "chat" => normalize_openai_response(body),
         "anthropic" => normalize_anthropic_response(body),
-        other => Err(format!("provider_protocol_unsupported: provider protocol {other} has no response normalizer")),
+        other => Err(format!(
+            "provider_protocol_unsupported: provider protocol {other} has no response normalizer"
+        )),
     }
 }
 
@@ -188,19 +198,170 @@ pub fn normalize_provider_response_for_relay(
     }
 }
 
-fn normalize_openai_sse_event(value: &Value) -> Option<Value> {
-    let choice = value.get("choices")?.as_array()?.first()?;
-    let delta = choice.get("delta")?;
-    if let Some(content) = delta.get("content").and_then(Value::as_str) {
-        return Some(json!({"type":"response.output_text.delta","delta":content}));
+fn normalize_chat_usage(value: &Value) -> Option<Value> {
+    let usage = value.get("usage")?.as_object()?;
+    let mut projected = serde_json::Map::new();
+    for (source, target) in [
+        ("prompt_tokens", "input_tokens"),
+        ("completion_tokens", "output_tokens"),
+        ("total_tokens", "total_tokens"),
+    ] {
+        if let Some(value) = usage.get(source) {
+            projected.insert(target.to_string(), value.clone());
+        }
     }
-    if choice
-        .get("finish_reason")
-        .is_some_and(|reason| !reason.is_null())
-    {
-        return Some(json!({"type":"response.completed","response":{"status":"completed"}}));
+    (!projected.is_empty()).then_some(Value::Object(projected))
+}
+
+fn normalize_openai_sse_event(value: &Value) -> Result<Vec<Value>, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "OpenAI Chat SSE chunk must be an object".to_string())?;
+    let choices = object
+        .get("choices")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "OpenAI Chat SSE choices must be an array".to_string())?;
+    let response_id = object
+        .get("id")
+        .cloned()
+        .unwrap_or_else(|| Value::String("response_unknown".to_string()));
+    let response_model = object.get("model").cloned().unwrap_or(Value::Null);
+    let usage = normalize_chat_usage(value);
+    let mut events = Vec::new();
+
+    if choices.is_empty() {
+        if let Some(usage) = usage {
+            events.push(json!({
+                "type": "response.in_progress",
+                "response": {
+                    "id": response_id,
+                    "model": response_model,
+                    "usage": usage
+                }
+            }));
+        }
+        return Ok(events);
     }
-    None
+
+    for choice in choices {
+        let choice = choice
+            .as_object()
+            .ok_or_else(|| "OpenAI Chat SSE choice must be an object".to_string())?;
+        let output_index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let delta = choice
+            .get("delta")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "OpenAI Chat SSE delta must be an object".to_string())?;
+        let before_delta = events.len();
+
+        if let Some(content) = delta.get("content").and_then(Value::as_str) {
+            if !content.is_empty() {
+                events.push(json!({
+                    "type": "response.output_text.delta",
+                    "output_index": output_index,
+                    "content_index": 0,
+                    "delta": content
+                }));
+            }
+        }
+        if let Some(reasoning) = delta
+            .get("reasoning_content")
+            .or_else(|| delta.get("reasoning"))
+            .and_then(Value::as_str)
+        {
+            if !reasoning.is_empty() {
+                events.push(json!({
+                    "type": "response.reasoning_summary_text.delta",
+                    "output_index": output_index,
+                    "summary_index": 0,
+                    "delta": reasoning
+                }));
+            }
+        }
+        if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+            for tool in tool_calls {
+                let tool = tool
+                    .as_object()
+                    .ok_or_else(|| "OpenAI Chat SSE tool call must be an object".to_string())?;
+                let tool_index = tool
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(output_index);
+                let call_id = tool.get("id").cloned();
+                let function = tool.get("function").and_then(Value::as_object);
+                let name = function.and_then(|function| function.get("name")).cloned();
+                let arguments = function
+                    .and_then(|function| function.get("arguments"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if call_id.is_some() || name.is_some() {
+                    events.push(json!({
+                        "type": "response.output_item.added",
+                        "output_index": tool_index,
+                        "item": {
+                            "type": "function_call",
+                            "call_id": call_id.unwrap_or(Value::Null),
+                            "name": name.unwrap_or(Value::Null),
+                            "arguments": arguments
+                        }
+                    }));
+                } else if !arguments.is_empty() {
+                    events.push(json!({
+                        "type": "response.function_call_arguments.delta",
+                        "output_index": tool_index,
+                        "delta": arguments
+                    }));
+                }
+            }
+        }
+
+        if let Some(finish_reason) = choice
+            .get("finish_reason")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+        {
+            let (status, incomplete_reason) = match finish_reason {
+                "stop" | "tool_calls" | "function_call" => {
+                    ("completed", None)
+                }
+                "length" => (
+                    "incomplete",
+                    Some("max_output_tokens"),
+                ),
+                "content_filter" => ("incomplete", Some("content_filter")),
+                other => {
+                    return Err(format!(
+                        "OpenAI Chat SSE finish_reason is unsupported: {other}"
+                    ))
+                }
+            };
+            let mut response = json!({
+                "id": response_id,
+                "model": response_model,
+                "status": status,
+                "output": []
+            });
+            if let Some(reason) = incomplete_reason {
+                response["incomplete_details"] = json!({"reason": reason});
+            }
+            if let Some(usage) = usage.clone() {
+                response["usage"] = usage;
+            }
+            events.push(json!({"type": "response.in_progress", "response": response}));
+        } else if events.len() == before_delta && delta.contains_key("role") {
+            events.push(json!({
+                "type": "response.in_progress",
+                "response": {
+                    "id": response_id,
+                    "model": response_model,
+                    "status": "in_progress",
+                    "output": []
+                }
+            }));
+        }
+    }
+    Ok(events)
 }
 
 fn normalize_anthropic_sse_event(value: &Value) -> Option<Value> {
@@ -220,10 +381,7 @@ fn normalize_anthropic_sse_event(value: &Value) -> Option<Value> {
 
 /// Normalize one complete provider SSE frame. Framing/buffering remains the
 /// transport owner; this hook only parses data events and projects semantics.
-pub fn normalize_provider_sse_frame(
-    protocol: &str,
-    frame: &[u8],
-) -> Result<Vec<u8>, String> {
+pub fn normalize_provider_sse_frame(protocol: &str, frame: &[u8]) -> Result<Vec<u8>, String> {
     normalize_provider_sse_frame_with_lane(protocol, frame, false)
 }
 
@@ -239,8 +397,7 @@ fn normalize_provider_sse_frame_with_lane(
     frame: &[u8],
     allow_relay_instructions: bool,
 ) -> Result<Vec<u8>, String> {
-    let text = std::str::from_utf8(frame)
-        .map_err(|error| format!("provider_sse_utf8: {error}"))?;
+    let text = std::str::from_utf8(frame).map_err(|error| format!("provider_sse_utf8: {error}"))?;
     let mut output = Vec::new();
     let mut current_event: Option<String> = None;
     for line in text.lines() {
@@ -258,27 +415,41 @@ fn normalize_provider_sse_frame_with_lane(
         };
         let data = data.trim();
         if data == "[DONE]" {
-            output.extend_from_slice(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n");
+            output.extend_from_slice(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+            );
             continue;
         }
         let value: Value = serde_json::from_str(data)
             .map_err(|error| format!("provider_sse_malformed: {error}"))?;
-        let mut event = match protocol {
-            "openai" | "chat" => normalize_openai_sse_event(&value),
-            "anthropic" => normalize_anthropic_sse_event(&value),
-            "responses" => Some(normalize_responses_response(&value, None, allow_relay_instructions)?),
-            other => return Err(format!("provider_protocol_unsupported: provider protocol {other} has no SSE normalizer")),
+        let mut events = match protocol {
+            "openai" | "chat" => normalize_openai_sse_event(&value)?,
+            "anthropic" => normalize_anthropic_sse_event(&value).into_iter().collect(),
+            "responses" => vec![normalize_responses_response(
+                &value,
+                None,
+                allow_relay_instructions,
+            )?],
+            other => return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            )),
         };
         if protocol == "responses" {
-            if let Some(event_object) = event.as_mut().and_then(Value::as_object_mut) {
+            for event in &mut events {
+                let Some(event_object) = event.as_object_mut() else {
+                    continue;
+                };
                 if !event_object.contains_key("type") {
-                    if let Some(event_name) = current_event.as_ref().filter(|name| !name.trim().is_empty()) {
+                    if let Some(event_name) = current_event
+                        .as_ref()
+                        .filter(|name| !name.trim().is_empty())
+                    {
                         event_object.insert("type".to_string(), Value::String(event_name.clone()));
                     }
                 }
             }
         }
-        if let Some(event) = event {
+        for event in events {
             let event_type = event
                 .get("type")
                 .and_then(Value::as_str)

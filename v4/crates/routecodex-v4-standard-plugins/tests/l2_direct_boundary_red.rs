@@ -123,3 +123,80 @@ fn negative_direct_response_client_validate_rejects_protocol_mismatch() {
         NodeContainerError::Bridge(routecodex_v4_cordis_bridge::BridgeError::HandleError { .. })
     ));
 }
+
+#[test]
+fn positive_direct_chat_terminal_emits_done_without_fake_semantic_object() {
+    let output = execute(
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
+        "direct_response",
+        3,
+        "v4.std.direct.response.client_validate",
+        json!({}),
+        json!({
+            "client_protocol": "openai-chat",
+            "provider_protocol": "openai-chat",
+            "entry_protocol": "chat",
+            "stream_terminal": true
+        }),
+    )
+    .expect("direct Chat [DONE] must encode without a semantic object");
+    assert_eq!(output.data, json!({}));
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|fact| fact.kind == "client_sse_frame"
+                && fact.message == "data: [DONE]\n\n"),
+        "direct Chat terminal must emit the protocol DONE frame"
+    );
+}
+
+#[test]
+fn direct_chat_non_terminal_empty_object_does_not_emit_done() {
+    let output = execute(
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
+        "direct_response",
+        3,
+        "v4.std.direct.response.client_validate",
+        json!({}),
+        json!({
+            "client_protocol": "openai-chat",
+            "provider_protocol": "openai-chat",
+            "entry_protocol": "chat",
+            "stream_terminal": false
+        }),
+    )
+    .expect("non-terminal empty Chat payload remains an ordinary chunk");
+    let frame = output
+        .diagnostics
+        .iter()
+        .find(|fact| fact.kind == "client_sse_frame")
+        .expect("client frame is emitted");
+    assert_eq!(frame.message, "data: {}\n\n");
+    assert!(!frame.message.contains("[DONE]"));
+}
+
+#[test]
+fn negative_direct_responses_terminal_null_still_fails_fast() {
+    let error = execute(
+        "V4DirectResp03ClientProtocol",
+        "response_outbound",
+        "direct_response",
+        3,
+        "v4.std.direct.response.client_validate",
+        json!({}),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-responses",
+            "entry_protocol": "responses",
+            "stream_terminal": true
+        }),
+    )
+    .expect_err("Responses terminal still requires a semantic event object");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(routecodex_v4_cordis_bridge::BridgeError::HandleError { .. })
+    ));
+}

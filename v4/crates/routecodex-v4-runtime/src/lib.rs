@@ -1739,6 +1739,7 @@ impl ResponseStreamProcessor {
         };
         let provider_protocol = match canonical_protocol_information(provider_protocol)? {
             "openai-responses" => "responses",
+            "openai-chat" => "chat",
             other => {
                 return Err(RuntimeFault::new(
                     "provider_sse_protocol_unsupported",
