@@ -346,7 +346,11 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
     let mut stop_after_terminal = false;
 
     while let Some(chunk) = provider.next().await {
-        let chunk = chunk?;
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) if terminal_seen => break,
+            Err(error) => return Err(error.into()),
+        };
         let frames = decoder
             .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
             .map_err(|error| {
