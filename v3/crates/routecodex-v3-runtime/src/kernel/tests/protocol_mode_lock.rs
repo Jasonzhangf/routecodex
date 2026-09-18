@@ -5,6 +5,14 @@ struct DirectOnlyFailureTransport {
     sends: AtomicUsize,
 }
 
+struct DirectProviderFamilyFailureTransport {
+    sends: AtomicUsize,
+}
+
+struct DirectProviderCompatTerminalTransport {
+    sends: AtomicUsize,
+}
+
 #[async_trait]
 impl ResponsesTransport for DirectOnlyFailureTransport {
     async fn send(
@@ -19,6 +27,185 @@ impl ResponsesTransport for DirectOnlyFailureTransport {
             reason: "first failed before relay-only candidate".to_string(),
         })
     }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectProviderFamilyFailureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert_eq!(request.provider_id(), "first");
+        if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    status: 400,
+                    headers: Vec::new(),
+                    body: br#"{"error":{"type":"invalid_request_error","message":"prompt is too long"}}"#.to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        assert_eq!(request.body()["model"], "wire-sibling");
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_sibling","status":"completed","output_text":"ok"}"#.to_vec(),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectProviderCompatTerminalTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                status: 400,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"invalid_request_error","message":"prompt is too long"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        })
+    }
+}
+
+#[tokio::test]
+async fn direct_generic_provider_http_400_exhausts_provider_family() {
+    let routing_group = "direct_provider_compat_sibling";
+    let manifest = scoped_test_manifest(provider_compat_sibling_manifest(), routing_group);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:direct-provider-compat".to_string()),
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: "req-direct-provider-compat".to_string(),
+        execution_id: "exec-direct-provider-compat".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let transport = DirectProviderFamilyFailureTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("protocol plan");
+    assert_eq!(
+        plan.decision.target.candidate.provider_id,
+        "first"
+    );
+    assert_eq!(plan.decision.target.candidate.model_id, "test");
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "generic provider HTTP 400 must not retry a same-provider sibling: {output:?}"
+    );
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "generic provider HTTP 400 must exhaust the provider family: {output:?}"
+    );
+    assert!(
+        output.error_chain.is_some(),
+        "provider-family exhaustion must project a client error: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait() {
+    let routing_group = "direct_provider_compat_terminal";
+    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:direct-provider-compat-terminal".to_string()),
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: "req-direct-provider-compat-terminal".to_string(),
+        execution_id: "exec-direct-provider-compat-terminal".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let transport = DirectProviderCompatTerminalTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("protocol plan");
+    assert_eq!(plan.decision.target.candidate.provider_id, "first");
+    assert_eq!(plan.decision.target.candidate.model_id, "test");
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "generic provider HTTP 400 must not retry the same candidate: {output:?}"
+    );
+    assert!(
+        output.node_trace.contains(&"V3Error06ClientProjected"),
+        "generic provider HTTP 400 exhaustion must project terminal: {output:?}"
+    );
+    assert!(
+        output.error_chain.is_some(),
+        "generic provider HTTP 400 exhaustion must produce a client error: {output:?}"
+    );
+    let observation = output
+        .observability
+        .expect("generic provider failure must publish observability");
+    let failure = observation
+        .provider_failure_events
+        .first()
+        .expect("generic provider failure event");
+    assert_eq!(failure.error_type.as_deref(), Some("provider_http_400"));
+    assert_eq!(failure.health_state, "healthy");
+    assert_eq!(failure.failure_count, 1);
+    assert_eq!(failure.wait_ms, Some(1000));
+    assert!(
+        !observation
+            .unavailable_candidates
+            .contains(&"first:key:test".to_string()),
+        "generic provider HTTP 400 must retain normal health semantics"
+    );
 }
 
 #[tokio::test]

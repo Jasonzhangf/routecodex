@@ -150,6 +150,35 @@ fn direct_responses_projection_normalizes_non_assistant_text_parts() {
 }
 
 #[test]
+fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input() {
+    let mut policy = direct_policy_with_models(
+        "client-route-alias",
+        "canonical-provider-model",
+        "provider-wire-model",
+    );
+    policy.request_body = json!({
+        "model": "provider-wire-model",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{
+            "type": "function",
+            "name": "mcp__mcpx__workspace",
+            "description": "List workspaces",
+            "parameters": {"type": "object"}
+        }]
+    });
+
+    let wire = responses_direct_request_projection_hook(&policy)
+        .expect("Responses provider must not receive Chat messages on /v1/responses");
+    let body = wire.body();
+    assert!(
+        body.get("messages").is_none(),
+        "Chat messages leaked: {body}"
+    );
+    assert_eq!(body["input"][0]["role"], "user");
+    assert_eq!(body["input"][0]["content"][0]["text"], "hello");
+}
+
+#[test]
 fn direct_hook_registry_mounts_request_key_catalog_at_runtime() {
     let mut policy = direct_policy_with_models(
         "client-route-alias",

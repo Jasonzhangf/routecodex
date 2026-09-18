@@ -281,6 +281,13 @@ impl V3TargetInterpreter {
         let mut route_pool_tiers = BTreeMap::<String, BTreeSet<i32>>::new();
         for candidate in &candidates {
             for pool_id in &candidate.pool_ids {
+                // Synthetic pools (for example `implicit:<capability>` and
+                // `direct`) have no declared route-pool tier list. They keep
+                // their intrinsic candidate priority and are outside the
+                // provider-priority schedule contract.
+                if !group.pools.contains_key(pool_id) {
+                    continue;
+                }
                 route_pool_tiers
                     .entry(pool_id.clone())
                     .or_default()

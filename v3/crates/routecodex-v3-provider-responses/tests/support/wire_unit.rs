@@ -341,6 +341,110 @@ mod tests {
     }
 
     #[test]
+    fn wire_deduplicates_identical_flattened_provider_tool_declarations() {
+        let body = json!({
+            "model": "upstream-model", "input": "hello", "tools": [
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "function", "name": "workspace", "description": "List workspaces", "parameters": {"type": "object"}}
+                ]},
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "function", "name": "workspace", "description": "List workspaces", "parameters": {"type": "object"}}
+                ]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-identical-provider-tools",
+            target(),
+            body,
+        )
+        .expect("identical provider declarations must collapse to one wire tool");
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1, "duplicate provider tools must be removed: {tools:?}");
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
+    fn wire_deduplicates_identical_flat_responses_provider_tool_declarations() {
+        let body = json!({
+            "model": "upstream-model", "input": "hello", "tools": [
+                {"type": "function", "name": "mcp__mcpx__workspace", "description": "List workspaces", "parameters": {"type": "object"}},
+                {"type": "function", "name": "mcp__mcpx__workspace", "description": "List workspaces", "parameters": {"type": "object"}}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-identical-flat-provider-tools",
+            target(),
+            body,
+        )
+        .expect("identical flat Responses provider declarations must collapse to one wire tool");
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1, "duplicate flat provider tools must be removed: {tools:?}");
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
+    fn wire_rejects_conflicting_flat_responses_provider_tool_declarations() {
+        let body = json!({
+            "model": "upstream-model", "input": "hello", "tools": [
+                {"type": "function", "name": "mcp__mcpx__workspace", "description": "first", "parameters": {"type": "object"}},
+                {"type": "function", "name": "mcp__mcpx__workspace", "description": "second", "parameters": {"type": "object", "properties": {"scope": {"type": "string"}}}}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-conflicting-flat-provider-tools",
+            target(),
+            body,
+        )
+        .expect_err("conflicting flat provider declarations must fail explicitly");
+        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
+        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+    }
+
+    #[test]
+    fn wire_rejects_conflicting_flattened_provider_tool_declarations() {
+        let body = json!({
+            "model": "upstream-model", "input": "hello", "tools": [
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "function", "name": "workspace", "description": "first", "parameters": {"type": "object"}}
+                ]},
+                {"type": "namespace", "name": "mcp__mcpx", "tools": [
+                    {"type": "function", "name": "workspace", "description": "second", "parameters": {"type": "object", "properties": {"scope": {"type": "string"}}}}
+                ]}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-conflicting-provider-tools",
+            target(),
+            body,
+        )
+        .expect_err("conflicting provider declarations must fail explicitly");
+        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
+        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+    }
+
+    #[test]
+    fn wire_deduplicates_openai_chat_tools_after_provider_normalization() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model", "input": "hello", "tools": [
+                {"type": "function", "name": "mcp__mcpx__workspace", "description": "List workspaces", "parameters": {"type": "object"}},
+                {"type": "function", "function": {"name": "mcp__mcpx__workspace", "description": "List workspaces", "parameters": {"type": "object"}}}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-openai-chat-normalized-dedup",
+            chat_target,
+            body,
+        )
+        .expect("Chat normalization must not leave duplicate provider tool names");
+        let tools = wire.body()["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1, "normalized provider tools must be unique: {tools:?}");
+        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+        assert_eq!(tools[0]["function"]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
     fn wire_namespace_tool_empty_children_fails_explicitly() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [

@@ -298,6 +298,79 @@ fn provider_priority_schedule_honors_timezone_and_cross_midnight_window() {
 }
 
 #[test]
+fn provider_priority_schedule_excludes_synthetic_implicit_pools() {
+    let mut manifest = manifest();
+    manifest
+        .providers
+        .get_mut("a")
+        .unwrap()
+        .models
+        .get_mut("m")
+        .unwrap()
+        .capabilities
+        .push("web_search".into());
+    manifest
+        .servers
+        .get_mut("s")
+        .unwrap()
+        .provider_priority_schedule
+        .providers = vec![
+        routecodex_v3_config::V3ProviderPriorityScheduleEntryAuthoringConfig {
+            provider: "a".into(),
+            peak_tier: 2,
+            off_peak_tier: 1,
+        },
+    ];
+
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["web_search".into()]),
+                input_tokens: 10,
+                route_classification: test_route("web_search", &["web_search", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert!(
+        hit.target_plan
+            .iter()
+            .any(|entry| entry.pool_id == "implicit:web_search"),
+        "test requires a synthetic implicit capability pool"
+    );
+
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    assert!(
+        !expanded
+            .route_pool_tier_priorities
+            .contains_key("implicit:web_search"),
+        "synthetic implicit pools must not receive declared route-pool tiers"
+    );
+    let candidate = expanded
+        .candidates
+        .iter()
+        .find(|candidate| candidate.provider_id == "a")
+        .expect("provider a must be expanded from the implicit pool");
+    assert_eq!(
+        target.provider_priority_schedule_priority(&expanded, candidate, 1_767_229_200_000),
+        candidate.priority,
+        "schedule must not alter an implicit-pool candidate"
+    );
+}
+
+#[test]
 fn weighted_forwarder_advances_to_lower_priority_only_after_higher_tier_exhausts() {
     let manifest = weighted_priority_forwarder_manifest();
     let target = V3TargetInterpreter::default();

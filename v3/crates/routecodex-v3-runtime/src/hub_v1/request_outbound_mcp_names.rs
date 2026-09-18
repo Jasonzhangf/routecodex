@@ -1,4 +1,6 @@
-use provider_compat_core::namespace_tools::flatten_namespace_tool_for_provider;
+use provider_compat_core::namespace_tools::{
+    flatten_namespace_tool_for_provider, provider_function_tool_name,
+};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -196,14 +198,6 @@ fn has_responses_item_id(tool_call: &Map<String, Value>) -> bool {
         .and_then(|extension| extension.get("responses_item_id"))
         .and_then(Value::as_str)
         .is_some_and(|value| !value.trim().is_empty())
-}
-
-fn provider_function_tool_name(tool: &Value) -> Option<&str> {
-    tool.get("function")
-        .and_then(Value::as_object)
-        .and_then(|function| function.get("name"))
-        .and_then(Value::as_str)
-        .or_else(|| tool.get("name").and_then(Value::as_str))
 }
 
 fn insert_provider_mcp_name(map: &mut HashMap<String, Option<String>>, name: &str) {

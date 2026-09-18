@@ -174,6 +174,32 @@ fn provider_priority_schedule_rejects_unknown_provider_in_native_config() {
 }
 
 #[test]
+fn provider_priority_schedule_rejects_tier_missing_from_native_route_pool() {
+    let invalid = FULL_CONFIG.replace(
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]",
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]\n[servers.primary.provider_priority_schedule]\n[[servers.primary.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 2\noff_peak_tier = 1",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("provider cc peak tier 2 exceeds route pool search tier count 1"),
+        "{error}"
+    );
+}
+
+#[test]
+fn provider_priority_schedule_accepts_tiers_present_in_every_native_route_pool() {
+    let valid = FULL_CONFIG.replace(
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]",
+        "routing_group = \"primary\"\nendpoints = [\"responses\"]\n[servers.primary.provider_priority_schedule]\n[[servers.primary.provider_priority_schedule.providers]]\nprovider = \"cc\"\npeak_tier = 1\noff_peak_tier = 1",
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&valid).unwrap())
+        .expect("tiers present in every route pool containing cc must compile");
+}
+
+#[test]
 fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
     let invalid = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",

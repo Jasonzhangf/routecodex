@@ -2,6 +2,7 @@ use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use provider_compat_core::namespace_tools::{
     flatten_namespace_tool_for_provider, namespace_tool_name_map,
+    push_unique_provider_function_tool,
 };
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
@@ -646,9 +647,6 @@ fn expand_namespace_tools_in_responses_wire_body(
     if !has_namespace {
         rewrite_namespace_qualified_call_names_from_convention(&mut body);
     }
-    if !has_namespace && provider_type != "openai_chat" {
-        return Ok(body);
-    }
     let protocol = match provider_type {
         "openai_chat" => "openai-chat",
         _ => RESPONSES_WIRE_PROTOCOL_NAME,
@@ -678,10 +676,21 @@ fn expand_namespace_tools_in_responses_wire_body(
     if provider_type == "openai_chat" {
         expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
     }
-    if has_namespace {
-        reject_conflicting_expanded_tool_names(request_id, &expanded)?;
+    let mut expanded_tool_indexes = HashMap::new();
+    let mut unique_expanded = Vec::with_capacity(expanded.len());
+    for tool in expanded {
+        push_unique_provider_function_tool(
+            &mut unique_expanded,
+            &mut expanded_tool_indexes,
+            tool,
+            protocol,
+        )
+        .map_err(|detail| V3ProviderError::NamespaceToolFlattenFailed {
+            request_id: request_id.to_string(),
+            detail,
+        })?;
     }
-    body["tools"] = Value::Array(expanded);
+    body["tools"] = Value::Array(unique_expanded);
     rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
     // Historical inputs may carry an MCP-qualified call even when the current
     // tool declaration is incomplete or omitted its child. Apply the same
@@ -689,37 +698,6 @@ fn expand_namespace_tools_in_responses_wire_body(
     // never receive a dotted function name.
     rewrite_namespace_qualified_call_names_from_convention(&mut body);
     Ok(body)
-}
-
-fn reject_conflicting_expanded_tool_names(
-    request_id: &str,
-    tools: &[Value],
-) -> Result<(), V3ProviderError> {
-    let mut seen: Vec<(String, usize)> = Vec::new();
-    for (index, tool) in tools.iter().enumerate() {
-        let name = tool.get("name").and_then(Value::as_str).or_else(|| {
-            tool.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str)
-        });
-        let Some(name) = name else {
-            continue;
-        };
-        if let Some((_, previous_index)) = seen.iter().find(|(existing, _)| existing == name) {
-            if tools[*previous_index] != *tool {
-                return Err(V3ProviderError::NamespaceToolFlattenFailed {
-                    request_id: request_id.to_string(),
-                    detail: format!(
-                        "ConflictingOutboundFields duplicate provider tool name `{name}` must have identical provider declaration"
-                    ),
-                });
-            }
-            continue;
-        }
-        seen.push((name.to_string(), index));
-    }
-    Ok(())
 }
 
 fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {

@@ -971,8 +971,11 @@ features:
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
-  - A request-local failed provider excludes every auth-key/model candidate of that
-    provider for the current request; persistent provider health cooldown remains
+  - Request/provider compatibility failures are candidate-scoped across
+    providerId+authAlias+modelId and remain health-neutral, so sibling models in
+    the same provider remain selectable; transport and provider-health failures
+    are provider-scoped across every auth-key/model candidate of that provider
+    for the current request, while persistent provider health cooldown remains
     keyed by providerId+authAlias+modelId.
   - A Server-preplanned Target10 is revalidated from its captured Target09 candidate
     set at Direct kernel entry, so a provider cooled between planning and transport
