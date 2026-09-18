@@ -646,7 +646,7 @@ assertRustTest(
 assertRustTest(
   text.protocolModeLockTests,
   files.protocolModeLockTests,
-  'direct_provider_compat_terminal_exhaustion_skips_provider_action_wait',
+  'direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait',
 );
 requireText(
   text.directHelpers,

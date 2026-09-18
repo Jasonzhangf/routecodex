@@ -171,7 +171,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     let request_local_scope =
         crate::provider_failure_runtime_policy::request_local_provider_failure_scope(
             source.source_stage,
-            observed_status,
             source
                 .external_error
                 .as_ref()

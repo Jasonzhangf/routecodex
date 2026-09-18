@@ -1284,8 +1284,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target -- --nocapture
   - 'cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime nodes::tests:': -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_provider_compat_failure_keeps_same_provider_sibling -- --nocapture
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_provider_compat_terminal_exhaustion_skips_provider_action_wait -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_exhausts_provider_family -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime transport_error_switches_provider_family -- --nocapture
   - npm run test:v3-p5-server-blackbox
   - npm run verify:v3-module-boundaries

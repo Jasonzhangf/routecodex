@@ -1,7 +1,5 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-use tokio::time::timeout;
 
 struct DirectOnlyFailureTransport {
     sends: AtomicUsize,
@@ -85,7 +83,7 @@ impl ResponsesTransport for DirectProviderCompatTerminalTransport {
 }
 
 #[tokio::test]
-async fn direct_provider_compat_failure_keeps_same_provider_sibling() {
+async fn direct_generic_provider_http_400_exhausts_provider_family() {
     let routing_group = "direct_provider_compat_sibling";
     let manifest = scoped_test_manifest(provider_compat_sibling_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
@@ -126,22 +124,22 @@ async fn direct_provider_compat_failure_keeps_same_provider_sibling() {
     .await;
 
     assert!(
-        output.node_trace.contains(&"V3TargetLocalReselected"),
-        "compat failure must reselect a sibling model: {output:?}"
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "generic provider HTTP 400 must not retry a same-provider sibling: {output:?}"
     );
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        2,
-        "Direct compat failure must retry only the same-provider sibling: {output:?}"
+        1,
+        "generic provider HTTP 400 must exhaust the provider family: {output:?}"
     );
     assert!(
-        output.error_chain.is_none(),
-        "same-provider sibling success must not project a client error: {output:?}"
+        output.error_chain.is_some(),
+        "provider-family exhaustion must project a client error: {output:?}"
     );
 }
 
 #[tokio::test]
-async fn direct_provider_compat_terminal_exhaustion_skips_provider_action_wait() {
+async fn direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait() {
     let routing_group = "direct_provider_compat_terminal";
     let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
     let raw = V3Server03HttpRequestRaw {
@@ -169,31 +167,44 @@ async fn direct_provider_compat_terminal_exhaustion_skips_provider_action_wait()
     assert_eq!(plan.decision.target.candidate.provider_id, "first");
     assert_eq!(plan.decision.target.candidate.model_id, "test");
 
-    let output = timeout(
-        Duration::from_millis(600),
-        execute_v3_responses_direct_runtime_kernel_core(
-            V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
-            &manifest,
-            raw,
-            crate::register_responses_direct_hooks(),
-            &transport,
-        ),
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
     )
-    .await
-    .expect("candidate-scoped terminal compatibility failure must not enter provider action gate wait");
+    .await;
 
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
         1,
-        "single-candidate compat failure must not retry: {output:?}"
+        "generic provider HTTP 400 must not retry the same candidate: {output:?}"
     );
     assert!(
         output.node_trace.contains(&"V3Error06ClientProjected"),
-        "single-candidate compat failure must project terminal: {output:?}"
+        "generic provider HTTP 400 exhaustion must project terminal: {output:?}"
     );
     assert!(
         output.error_chain.is_some(),
-        "single-candidate compat failure must produce a client error: {output:?}"
+        "generic provider HTTP 400 exhaustion must produce a client error: {output:?}"
+    );
+    let observation = output
+        .observability
+        .expect("generic provider failure must publish observability");
+    let failure = observation
+        .provider_failure_events
+        .first()
+        .expect("generic provider failure event");
+    assert_eq!(failure.error_type.as_deref(), Some("provider_http_400"));
+    assert_eq!(failure.health_state, "healthy");
+    assert_eq!(failure.failure_count, 1);
+    assert_eq!(failure.wait_ms, Some(1000));
+    assert!(
+        !observation
+            .unavailable_candidates
+            .contains(&"first:key:test".to_string()),
+        "generic provider HTTP 400 must retain normal health semantics"
     );
 }
 

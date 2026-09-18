@@ -152,7 +152,6 @@ pub(crate) enum V3RequestLocalProviderFailureScope {
 
 pub(crate) fn request_local_provider_failure_scope(
     source_stage: &str,
-    status: u16,
     error_type: Option<&str>,
 ) -> V3RequestLocalProviderFailureScope {
     let request_local_compat = source_stage == "ProviderReqCompat06ProviderCompat"
@@ -160,10 +159,7 @@ pub(crate) fn request_local_provider_failure_scope(
         // Provider semantic invalid-request responses describe this request,
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
-        || error_type == Some("invalid_request_error")
-        // HTTP 400 is a request/provider-compatibility rejection (for example
-        // context-window or wire-shape limits), not an account-health signal.
-        || status == 400;
+        || error_type == Some("invalid_request_error");
     if request_local_compat {
         V3RequestLocalProviderFailureScope::Candidate
     } else {
@@ -1130,7 +1126,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
     });
     let reason = (!message.trim().is_empty()).then_some(message.as_str());
     let request_local_scope =
-        request_local_provider_failure_scope(source_stage, status, error_type.as_deref());
+        request_local_provider_failure_scope(source_stage, error_type.as_deref());
     let is_request_local_compat_failure =
         request_local_scope == V3RequestLocalProviderFailureScope::Candidate;
     // SSE/transport failures are provider-health events as well. The

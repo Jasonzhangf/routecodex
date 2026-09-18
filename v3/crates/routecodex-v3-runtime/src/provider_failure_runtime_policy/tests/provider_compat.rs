@@ -196,6 +196,74 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
 }
 
 #[tokio::test]
+async fn relay_generic_provider_http_400_excludes_provider_family_and_records_health() {
+    let scope = "relay_generic_provider_http_400";
+    let manifest = provider_compat_sibling_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the first model"),
+    };
+    let target = V3TargetInterpreter::default();
+    let captured_target_09 = target
+        .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
+        .expect("capture Target09 before execution");
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&captured_target_09),
+        failure_session_scope: test_provider_failure_scope(
+            scope,
+            scope,
+            "session-generic-provider-http-400",
+        )
+        .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderReqOutbound09TransportRequest",
+        400,
+        Some("provider_http_error".to_string()),
+        "upstream rejected request".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("generic provider HTTP 400 must follow provider-scoped health handling");
+
+    assert_eq!(
+        failed_candidates,
+        BTreeSet::from([
+            "first:key:test".to_string(),
+            "first:key:sibling".to_string(),
+        ]),
+        "generic provider HTTP 400 must exclude every candidate in the provider family"
+    );
+    assert_ne!(
+        result.event.health_record.state,
+        "request_local_provider_compat"
+    );
+    assert_eq!(result.event.health_record.failure_count, 1);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
+    assert!(result.retry_selected.is_none());
+    assert!(result.terminal_projection.is_some());
+    assert!(same_candidate_retries.is_empty());
+    assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+}
+
+#[tokio::test]
 async fn relay_provider_failure_projects_target_expansion_error() {
     let scope = "relay_provider_expansion_failure";
     let mut manifest = global_pool_alive_manifest(scope);
