@@ -276,6 +276,79 @@ fn relay_request_projects_responses_to_openai_chat_without_dropping_tools() {
 }
 
 #[test]
+fn relay_request_projects_responses_sampling_tool_choice_and_format_fields() {
+    let semantic = execute_with_information(
+        "V4HubReqOutbound06ProviderSemantic",
+        "request_outbound",
+        6,
+        "v4.hook.relay.request",
+        json!({
+            "model": "gpt-5.5",
+            "input": "hello",
+            "max_output_tokens": 512,
+            "tool_choice": {"type":"function","name":"lookup"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {"type":"object","properties":{"answer":{"type":"string"}}},
+                    "strict": true
+                }
+            }
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("Responses sampling, tool choice, and format fields must project");
+
+    assert_eq!(semantic["max_completion_tokens"], json!(512));
+    assert!(semantic.get("max_tokens").is_none());
+    assert_eq!(semantic["tool_choice"]["type"], json!("function"));
+    assert_eq!(semantic["tool_choice"]["function"]["name"], json!("lookup"));
+    assert_eq!(
+        semantic["response_format"]["json_schema"]["name"],
+        json!("answer")
+    );
+}
+
+#[test]
+fn relay_request_rejects_malformed_responses_tool_choice_and_response_format() {
+    for (field, value, expected) in [
+        (
+            "tool_choice",
+            json!({"type":"function"}),
+            "tool_choice",
+        ),
+        (
+            "response_format",
+            json!({"type":"json_schema","json_schema":{"schema":{"type":"object"}}}),
+            "response_format",
+        ),
+    ] {
+        let mut request = json!({"model":"gpt-5.5","input":"hello"});
+        request[field] = value;
+        let error = execute_with_information(
+            "V4HubReqOutbound06ProviderSemantic",
+            "request_outbound",
+            6,
+            "v4.hook.relay.request",
+            request,
+            json!({
+                "client_protocol": "openai-responses",
+                "provider_protocol": "openai-chat"
+            }),
+        )
+        .expect_err("malformed cross-protocol fields must fail");
+        assert!(
+            format!("{error}").contains(expected),
+            "failure must identify {expected}: {error}"
+        );
+    }
+}
+
+#[test]
 fn relay_request_preserves_responses_tool_history_for_openai_chat() {
     let semantic = execute_with_information(
         "V4HubReqOutbound06ProviderSemantic",

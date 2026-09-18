@@ -86,6 +86,7 @@ pub fn project_responses_request_to_chat(body: &Value) -> Result<Value, String> 
                 | "temperature"
                 | "top_p"
                 | "max_output_tokens"
+                | "response_format"
                 | "stream"
                 | "stop"
                 | "user"
@@ -153,7 +154,16 @@ pub fn project_responses_request_to_chat(body: &Value) -> Result<Value, String> 
     }
     object.insert("messages".to_string(), Value::Array(messages));
     if let Some(max_output_tokens) = object.remove("max_output_tokens") {
-        object.insert("max_tokens".to_string(), max_output_tokens);
+        object.insert("max_completion_tokens".to_string(), max_output_tokens);
+    }
+    if let Some(tool_choice) = object.remove("tool_choice") {
+        object.insert(
+            "tool_choice".to_string(),
+            project_responses_tool_choice_to_chat(tool_choice)?,
+        );
+    }
+    if let Some(response_format) = object.get("response_format") {
+        validate_chat_response_format(response_format)?;
     }
     if let Some(tools) = object.get("tools").and_then(Value::as_array) {
         let projected_tools = tools
@@ -190,6 +200,79 @@ pub fn project_responses_request_to_chat(body: &Value) -> Result<Value, String> 
     }
     object.remove("protocol");
     Ok(Value::Object(object))
+}
+
+fn project_responses_tool_choice_to_chat(tool_choice: Value) -> Result<Value, String> {
+    match tool_choice {
+        Value::String(policy) => match policy.as_str() {
+            "auto" | "none" | "required" => Ok(Value::String(policy)),
+            other => Err(format!(
+                "Responses-to-Chat wire projection does not support tool_choice {other}"
+            )),
+        },
+        Value::Object(object) => {
+            let choice_type = object
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Responses tool_choice requires type".to_string())?;
+            if choice_type != "function" {
+                return Err(format!(
+                    "Responses-to-Chat wire projection does not support tool_choice type {choice_type}"
+                ));
+            }
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Responses function tool_choice requires name".to_string())?;
+            Ok(json!({
+                "type": "function",
+                "function": {"name": name}
+            }))
+        }
+        _ => Err("Responses tool_choice must be a string or object".to_string()),
+    }
+}
+
+fn validate_chat_response_format(response_format: &Value) -> Result<(), String> {
+    let object = response_format
+        .as_object()
+        .ok_or_else(|| "Chat response_format must be an object".to_string())?;
+    let format_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Chat response_format requires type".to_string())?;
+    match format_type {
+        "text" | "json_object" => {
+            if object.len() != 1 {
+                return Err(format!(
+                    "Chat response_format type {format_type} only supports the type field"
+                ));
+            }
+            Ok(())
+        }
+        "json_schema" => {
+            let json_schema = object
+                .get("json_schema")
+                .and_then(Value::as_object)
+                .ok_or_else(|| "Chat response_format json_schema requires object".to_string())?;
+            if object.len() != 2
+                || json_schema
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_none_or(|value| value.trim().is_empty())
+                || !json_schema.get("schema").is_some_and(Value::is_object)
+            {
+                return Err(
+                    "Chat response_format json_schema requires name and object schema".to_string(),
+                );
+            }
+            Ok(())
+        }
+        other => Err(format!(
+            "Responses-to-Chat wire projection does not support response_format type {other}"
+        )),
+    }
 }
 
 fn project_responses_message_to_chat(item: &Map<String, Value>) -> Result<Value, String> {
