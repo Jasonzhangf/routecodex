@@ -327,7 +327,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         )
         .expect("failure session scope");
         for attempt in 0..threshold {
-            health
+            let record = health
                 .record_provider_failure_record_with_policy(
                     None,
                     &manifest,
@@ -344,6 +344,16 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                     10_000 + attempt as u64,
                 )
                 .expect("runtime provider failure policy should record");
+            assert_eq!(record.failure_count, attempt + 1);
+            assert_eq!(
+                record.state,
+                if attempt + 1 == threshold {
+                    "cooldown"
+                } else {
+                    "healthy"
+                },
+                "status {status} event state must match global key health"
+            );
         }
         assert!(
             !health

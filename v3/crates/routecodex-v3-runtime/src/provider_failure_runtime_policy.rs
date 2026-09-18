@@ -18,8 +18,8 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderRecoveryKind,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderKeyHealthProjection,
+    V3ProviderRecoveryKind, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
     V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
@@ -451,7 +451,7 @@ impl V3ProviderFailureRuntimeHealth {
         model_id: Option<&str>,
         action: &V3ProviderFailureAction,
         now_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
         let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
             if action.recovery != V3ProviderRecoveryKind::NotProviderHealth {
                 return Err(format!(
@@ -459,11 +459,11 @@ impl V3ProviderFailureRuntimeHealth {
                     action.class_code
                 ));
             }
-            return Ok(());
+            return Ok(None);
         };
         self.store
             .record_provider_failure_action(provider_id, auth_alias, model_id, action, now_ms)
-            .map(|_| ())
+            .map(Some)
     }
 
     pub async fn run_due_provider_health_probes<F, Fut>(
@@ -741,21 +741,41 @@ impl V3ProviderFailureRuntimeHealth {
             status,
             error_type.unwrap_or("provider_failure"),
         );
-        self.record_provider_key_failure_action(
+        let projection = self.record_provider_key_failure_action(
             provider_id,
             auth_alias,
             model_id,
             &action,
             now_ms,
         )?;
-        self.record_provider_failure_in_session_without_health_cooldown(
+        let session_record = self.record_provider_failure_in_session_without_health_cooldown(
             failure_session_scope,
             provider_id,
             auth_alias,
             model_id,
             reason,
             now_ms,
-        )
+        )?;
+        let Some(projection) = projection else {
+            return Ok(session_record);
+        };
+        let provider_key = v3_relay_provider_candidate_key_parts(
+            &projection.provider_id,
+            Some(&projection.auth_alias),
+            Some(&projection.model_id),
+        );
+        Ok(V3ProviderFailureRecord {
+            scope_label: session_record.scope_label,
+            provider_key,
+            state: if projection.cooldown {
+                "cooldown".to_string()
+            } else {
+                "healthy".to_string()
+            },
+            failure_count: projection.failure_streak,
+            cooldown_until_ms: projection.cooldown_until_ms,
+            reason: session_record.reason,
+        })
     }
 
     pub(crate) fn record_provider_success_in_failure_scope(
