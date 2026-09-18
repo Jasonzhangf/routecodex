@@ -15,6 +15,8 @@ const prompt = `Use exec_command to run exactly: printf ${marker}. Then reply wi
 const codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
 const sessionsRoot = path.join(codexHome, 'sessions');
 const requestRecordsPath = path.join(os.homedir(), '.rcc/logs/server-v4-10000.request-records.jsonl');
+const expectedVersion = process.env.RCCV4_EXPECTED_VERSION;
+const expectedManifestDigest = process.env.RCCV4_EXPECTED_MANIFEST_DIGEST;
 const timeoutMs = Number(process.env.RCCV4_CODEX_TOOL_ROUND_TRIP_TIMEOUT_MS ?? 180000);
 const pollMs = 1000;
 const expectedCwd = process.cwd();
@@ -125,8 +127,9 @@ function readJsonLines(file, allowIncompleteTail = false) {
   return records;
 }
 
-function hasListenerReceipt(records, startedAtMs) {
-  return records.some((record) => {
+function listenerReceipt(records, startedAtMs, turnId) {
+  if (typeof turnId !== 'string' || turnId.length === 0) return null;
+  return records.find((record) => {
     const row = record?.row;
     const meta = row?.meta;
     return row?.event_type === 'request.completed'
@@ -134,9 +137,14 @@ function hasListenerReceipt(records, startedAtMs) {
       && row?.scope?.port === 10000
       && meta?.endpoint === '/v1/responses'
       && meta?.provider_status === 200
+      && meta?.turn_id === turnId
       && Number.isInteger(row?.started_epoch_ms)
       && row.started_epoch_ms >= startedAtMs;
-  });
+  }) ?? null;
+}
+
+function hasListenerReceipt(records, startedAtMs, turnId) {
+  return listenerReceipt(records, startedAtMs, turnId) !== null;
 }
 
 function validateLongProfile() {
@@ -155,21 +163,47 @@ function validateLongProfile() {
   }
 }
 
-async function validateManagedListener() {
-  const response = await fetch(`${expectedEndpoint}/health`);
-  if (!response.ok) {
-    throw new Error(`rccv4 health failed: ${response.status}`);
-  }
-  const health = await response.json();
+function validateHealthIdentity(health, expected, digest, requireBinding) {
   if (health?.id !== expectedRuntimeId
       || typeof health?.version !== 'string'
       || typeof health?.manifest_digest !== 'string') {
     throw new Error(`unexpected rccv4 health identity: ${JSON.stringify(health)}`);
   }
+  if (requireBinding) {
+    if (!expected || !digest) {
+      throw new Error(
+        'deployed admission requires RCCV4_EXPECTED_VERSION and RCCV4_EXPECTED_MANIFEST_DIGEST',
+      );
+    }
+    if (health.version !== expected) {
+      throw new Error(
+        `deployed rccv4 version mismatch: expected=${expected} actual=${health.version}`,
+      );
+    }
+    if (health.manifest_digest !== digest) {
+      throw new Error(
+        'deployed rccv4 manifest mismatch: '
+        + `expected=${digest} actual=${health.manifest_digest}`,
+      );
+    }
+  }
   return health;
 }
 
-function hasRoundTripEvidence(records) {
+async function validateManagedListener() {
+  const response = await fetch(`${expectedEndpoint}/health`);
+  if (!response.ok) {
+    throw new Error(`rccv4 health failed: ${response.status}`);
+  }
+  return validateHealthIdentity(
+    await response.json(),
+    expectedVersion,
+    expectedManifestDigest,
+    !contractOnly,
+  );
+}
+
+function roundTripEvidence(records) {
   const promptRecord = records.find((record) => {
     const payload = record?.payload;
     return record?.type === 'response_item'
@@ -178,6 +212,7 @@ function hasRoundTripEvidence(records) {
       && Array.isArray(payload?.content)
       && payload.content.some((part) => part?.type === 'input_text' && part?.text === prompt);
   });
+  const turnId = promptRecord?.internal_chat_message_metadata_passthrough?.turn_id;
   const toolCall = records.find((record) => {
     const payload = record?.payload;
     return record?.type === 'response_item'
@@ -210,7 +245,22 @@ function hasRoundTripEvidence(records) {
       && payload?.type === 'task_complete'
       && payload?.last_agent_message === marker;
   });
-  return Boolean(promptRecord && toolCall && toolOutput && finalAnswer && taskCompleted);
+  if (
+    !promptRecord
+    || typeof turnId !== 'string'
+    || turnId.length === 0
+    || !toolCall
+    || !toolOutput
+    || !finalAnswer
+    || !taskCompleted
+  ) {
+    return null;
+  }
+  return { turnId, callId: toolCall.payload.call_id };
+}
+
+function hasRoundTripEvidence(records) {
+  return roundTripEvidence(records) !== null;
 }
 
 if (contractOnly) {
@@ -218,6 +268,7 @@ if (contractOnly) {
     {
       type: 'response_item',
       payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] },
+      internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
     },
     {
       type: 'response_item',
@@ -241,6 +292,9 @@ if (contractOnly) {
     ['wrong prompt correlation', records.map((record, index) => (
       index === 0 ? { ...record, payload: { ...record.payload, content: [{ type: 'input_text', text: 'other prompt' }] } } : record
     ))],
+    ['missing turn correlation', records.map((record, index) => (
+      index === 0 ? { ...record, internal_chat_message_metadata_passthrough: {} } : record
+    ))],
     ['call/output mismatch', records.map((record, index) => (
       index === 2 ? { ...record, payload: { ...record.payload, call_id: 'other-call' } } : record
     ))],
@@ -251,15 +305,71 @@ if (contractOnly) {
       result: 'success',
       scope: { port: 10000 },
       started_epoch_ms: Date.now(),
-      meta: { endpoint: '/v1/responses', provider_status: 200 },
+      meta: {
+        endpoint: '/v1/responses',
+        provider_status: 200,
+        turn_id: 'turn-1',
+        request_id: 'request-1',
+      },
     },
   };
-  if (!hasRoundTripEvidence(records)
-      || !hasListenerReceipt([receipt], Date.now() - 1000)
-      || negativeCases.some(([, value]) => hasRoundTripEvidence(value))
-      || hasListenerReceipt([], Date.now() - 1000)
-      || hasListenerReceipt([receipt], Date.now() + 1000)) {
-    throw new Error('codex TUI tool round-trip contract self-test failed');
+  const now = Date.now();
+  const evidence = roundTripEvidence(records);
+  const negativeReceipts = [
+    [],
+    [receipt].map((value) => ({
+      ...value,
+      row: { ...value.row, meta: { ...value.row.meta, turn_id: 'other-turn' } },
+    })),
+    [receipt].map((value) => ({
+      ...value,
+      row: { ...value.row, meta: { ...value.row.meta, turn_id: undefined } },
+    })),
+    [receipt].map((value) => ({
+      ...value,
+      row: { ...value.row, meta: { ...value.row.meta, provider_status: 500 } },
+    })),
+    [receipt].map((value) => ({
+      ...value,
+      row: { ...value.row, started_epoch_ms: now - 2000 },
+    })),
+  ];
+  if (!evidence) {
+    throw new Error('codex TUI tool round-trip contract self-test failed: positive rollout');
+  }
+  if (!hasListenerReceipt([receipt], now - 1000, evidence.turnId)) {
+    throw new Error('codex TUI tool round-trip contract self-test failed: positive listener');
+  }
+  for (const [name, value] of negativeCases) {
+    if (hasRoundTripEvidence(value)) {
+      throw new Error(`codex TUI tool round-trip contract self-test failed: ${name}`);
+    }
+  }
+  if (negativeReceipts.some((value) => hasListenerReceipt(value, now - 1000, 'turn-1'))) {
+    throw new Error('codex TUI tool round-trip contract self-test failed: negative listener');
+  }
+  const health = {
+    id: expectedRuntimeId,
+    version: 'v-test',
+    manifest_digest: 'sha256:test',
+  };
+  validateHealthIdentity(health, 'v-test', 'sha256:test', true);
+  const invalidHealth = [
+    ['missing version binding', health, undefined, 'sha256:test'],
+    ['missing digest binding', health, 'v-test', undefined],
+    ['version drift', health, 'v-other', 'sha256:test'],
+    ['digest drift', health, 'v-test', 'sha256:other'],
+  ];
+  for (const [name, value, version, digest] of invalidHealth) {
+    let failed = false;
+    try {
+      validateHealthIdentity(value, version, digest, true);
+    } catch {
+      failed = true;
+    }
+    if (!failed) {
+      throw new Error(`codex TUI tool round-trip contract self-test failed: ${name}`);
+    }
   }
   console.log(`[v4_codex_tui_tool_round_trip] CONTRACT SELF-TEST OK marker=${marker}`);
   process.exit(0);
@@ -331,11 +441,16 @@ try {
     const listenerRecords = fs.existsSync(requestRecordsPath)
       ? readJsonLines(requestRecordsPath, true)
       : [];
-    if (hasRoundTripEvidence(readRolloutRecords(rollout, true))
-        && hasListenerReceipt(listenerRecords, startedAtMs)) {
+    const evidence = roundTripEvidence(readRolloutRecords(rollout, true));
+    const receipt = evidence
+      ? listenerReceipt(listenerRecords, startedAtMs, evidence.turnId)
+      : null;
+    if (receipt) {
       readRolloutRecords(rollout);
       console.log(
         `[v4_codex_tui_tool_round_trip] OK session=${sessionName} rollout=${rollout} `
+        + `turn_id=${evidence.turnId} request_id=${receipt.meta.request_id} `
+        + `call_id=${evidence.callId} `
         + `runtime=${listenerHealth.id} version=${listenerHealth.version} `
         + `manifest=${listenerHealth.manifest_digest}`,
       );
