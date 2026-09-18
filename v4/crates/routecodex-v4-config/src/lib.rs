@@ -1637,9 +1637,15 @@ fn validate_product_error_path(
         return Err(RuntimeConfigError::ProductPolicyInvalid);
     }
     let mut project_count = 0;
+    let mut wait_retry_count = 0;
+    let mut cooldown_count = 0;
     for (index, action) in actions.iter().enumerate() {
         match action.step.as_str() {
             "wait_retry" => {
+                wait_retry_count += 1;
+                if wait_retry_count > 1 {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
                 if action.retry_mode.as_deref().is_some_and(|mode| {
                     !matches!(
                         mode,
@@ -1662,6 +1668,10 @@ fn validate_product_error_path(
                 }
             }
             "cooldown" => {
+                cooldown_count += 1;
+                if cooldown_count > 1 {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
                 if !matches!(
                     action.scope.as_deref(),
                     Some("provider_instance" | "auth_key" | "provider_model")

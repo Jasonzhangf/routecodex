@@ -534,3 +534,34 @@ fn product_config_rejects_invalid_error_path_shapes() {
     .expect_err("empty project reason must fail closed");
     assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
 }
+
+#[test]
+fn product_config_rejects_duplicate_execution_steps() {
+    let baseline = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile baseline product");
+
+    let mut invalid = baseline.clone();
+    invalid
+        .default_error_path
+        .insert(1, invalid.default_error_path[0].clone());
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize duplicate wait_retry"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("duplicate wait_retry must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline;
+    invalid
+        .default_error_path
+        .insert(2, invalid.default_error_path[1].clone());
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize duplicate cooldown"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("duplicate cooldown must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+}
