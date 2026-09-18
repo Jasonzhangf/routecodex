@@ -1,11 +1,11 @@
 use routecodex_v4_config::{
-    compile_product_config, RuntimeProductConfig, RuntimeProductErrorPolicy, RuntimeProductModel,
-    RuntimeProductPolicyAction, RuntimeProductPool, RuntimeProductProvider,
-    RuntimeProductRouteGroup, RuntimeProductTarget, RuntimeProviderCandidate, RuntimeRoute,
+    compile_product_config, RuntimeProductConfig, RuntimeProductModel, RuntimeProductPool,
+    RuntimeProductProvider, RuntimeProductRouteGroup, RuntimeProductTarget, RuntimeProviderCandidate,
+    RuntimeRoute,
 };
 use routecodex_v4_router::{
-    apply_product_error_policy, select_product_target, select_product_target_with_unavailable,
-    select_target, TargetSelectionError,
+    select_product_target, select_product_target_with_unavailable, select_target,
+    TargetSelectionError,
 };
 
 fn providers() -> Vec<RuntimeProviderCandidate> {
@@ -205,69 +205,4 @@ fn product_pool_capability_is_not_inferred_from_missing_request_facts() {
         ),
         Err(TargetSelectionError::ProductPoolUnavailable(group)) if group == "responses"
     ));
-}
-
-#[test]
-fn product_error_policy_produces_typed_retry_cooldown_projection_facts() {
-    let mut product = product_config();
-    product.error_policies.push(RuntimeProductErrorPolicy {
-        policy_id: "account-401".to_string(),
-        scope_provider_id: Some("product-provider".to_string()),
-        match_status: Some(401),
-        match_content_contains_any: Vec::new(),
-        reason_code: Some("provider_account_http_401".to_string()),
-        actions: vec![
-            RuntimeProductPolicyAction {
-                step: "wait_retry".to_string(),
-                retry_mode: Some("reselect_before_client_projection".to_string()),
-                max_attempts: Some(2),
-                backoff_ms: Some(1000),
-                scope: None,
-                duration_ms: None,
-                provider_global_failure: None,
-                status: None,
-                reason_code: None,
-                public_code: None,
-                message_mode: None,
-            },
-            RuntimeProductPolicyAction {
-                step: "cooldown".to_string(),
-                retry_mode: None,
-                max_attempts: None,
-                backoff_ms: None,
-                scope: Some("auth_key".to_string()),
-                duration_ms: Some(3600000),
-                provider_global_failure: None,
-                status: None,
-                reason_code: None,
-                public_code: None,
-                message_mode: None,
-            },
-            RuntimeProductPolicyAction {
-                step: "project".to_string(),
-                retry_mode: None,
-                max_attempts: None,
-                backoff_ms: None,
-                scope: None,
-                duration_ms: None,
-                provider_global_failure: None,
-                status: Some(502),
-                reason_code: None,
-                public_code: None,
-                message_mode: Some("code_only".to_string()),
-            },
-        ],
-    });
-    let decision = apply_product_error_policy(&product, "product-provider", 401, "unauthorized")
-        .expect("401 policy");
-    assert_eq!(decision.policy_id, "account-401");
-    assert!(decision.retry);
-    assert!(decision.cooldown);
-    assert_eq!(decision.project_status, Some(502));
-    assert_eq!(
-        decision.reason_code.as_deref(),
-        Some("provider_account_http_401")
-    );
-    assert!(apply_product_error_policy(&product, "product-provider", 200, "completed").is_none());
-    assert!(apply_product_error_policy(&product, "other", 500, "failed").is_none());
 }

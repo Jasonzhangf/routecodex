@@ -55,7 +55,9 @@ pub use node_service::{
     ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
     NodeServiceRegistry, ServiceError, ServiceLifecycle,
 };
-pub use production_sse::{NativeProviderSseSource, ProviderSseSource, SseTransportDriver};
+pub use production_sse::{
+    BufferedProviderSseSource, NativeProviderSseSource, ProviderSseSource, SseTransportDriver,
+};
 // Single source of truth: `PluginKind` is owned by routecodex-v4-plugin-contract
 // (v4/contracts/node-plugin.contract.json kinds). The runtime never defines a
 // second plugin-kind taxonomy; it only re-exports the contract type.

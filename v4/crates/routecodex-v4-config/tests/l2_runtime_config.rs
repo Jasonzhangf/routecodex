@@ -221,6 +221,7 @@ backoff_ms = 1000
 [[product.error_policies.actions]]
 step = "project"
 status = 502
+reason_code = "provider_account_http_401"
 {extra}
 "#
     )
@@ -411,4 +412,125 @@ fn live_authoring_consumes_product_config_path_into_manifest() {
         .iter()
         .all(|provider| Path::new(&provider.config_path).is_absolute()));
     assert!(manifest.verify().is_ok());
+}
+
+#[test]
+fn product_config_rejects_unknown_wait_retry_mode() {
+    let product = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile baseline product");
+    let mut invalid = product;
+    invalid.default_error_path[0].retry_mode = Some("unknown_mode".to_string());
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("unknown retry mode must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+}
+
+#[test]
+fn product_config_rejects_wait_retry_values_outside_v3_bounds() {
+    for (max_attempts, backoff_ms) in [
+        (Some(0), Some(0)),
+        (Some(11), Some(0)),
+        (Some(1), Some(60_001)),
+    ] {
+        let product = compile_product_config(
+            include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+            Some(Path::new("/tmp/v4")),
+        )
+        .expect("compile baseline product");
+        let mut invalid = product;
+        invalid.default_error_path[0].max_attempts = max_attempts;
+        invalid.default_error_path[0].backoff_ms = backoff_ms;
+        let error = compile_product_config(
+            &toml::to_string(&invalid).expect("serialize invalid product"),
+            Some(Path::new("/tmp/v4")),
+        )
+        .expect_err("out-of-range wait_retry values must fail closed");
+        assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+    }
+}
+
+#[test]
+fn product_config_preserves_declared_error_path_order() {
+    let product = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile baseline product");
+    assert_eq!(
+        product
+            .default_error_path
+            .iter()
+            .map(|action| action.step.as_str())
+            .collect::<Vec<_>>(),
+        vec!["wait_retry", "cooldown", "project"]
+    );
+}
+
+#[test]
+fn product_config_rejects_invalid_error_path_shapes() {
+    let baseline = compile_product_config(
+        include_str!("../../../tests/resources/config/v4-4444-product.toml"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect("compile baseline product");
+
+    let mut invalid = baseline.clone();
+    invalid.default_error_path[0].step = "unknown".to_string();
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("unknown error path step must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline.clone();
+    invalid.default_error_path[1].scope = Some("invalid_scope".to_string());
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("invalid cooldown scope must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline.clone();
+    invalid.default_error_path[1].duration_ms = Some(0);
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("zero cooldown duration must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline.clone();
+    invalid.default_error_path[2].status = Some(399);
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("success project status must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline.clone();
+    invalid.default_error_path[2].status = None;
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("omitted project status must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
+
+    let mut invalid = baseline;
+    invalid.default_error_path[2].reason_code = Some(" ".to_string());
+    let error = compile_product_config(
+        &toml::to_string(&invalid).expect("serialize invalid product"),
+        Some(Path::new("/tmp/v4")),
+    )
+    .expect_err("empty project reason must fail closed");
+    assert_eq!(error, RuntimeConfigError::ProductPolicyInvalid);
 }

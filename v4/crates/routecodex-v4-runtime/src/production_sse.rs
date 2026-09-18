@@ -15,6 +15,7 @@ use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin, SseTransportError,
     SseTransportFrame,
 };
+use routecodex_v4_standard_plugins::protocol::provider_response::normalize_provider_sse_frame_for_relay;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +41,17 @@ pub struct NativeProviderSseSource {
     cancellation: CancellationToken,
     runtime: tokio::runtime::Handle,
     pending: Vec<u8>,
+}
+
+pub struct BufferedProviderSseSource {
+    bytes: Vec<u8>,
+    offset: usize,
+}
+
+impl BufferedProviderSseSource {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self { bytes, offset: 0 }
+    }
 }
 
 impl NativeProviderSseSource {
@@ -69,6 +81,67 @@ impl NativeProviderSseSource {
             .block_on(self.stream.read_error_body())
             .map_err(|error| error.to_string())
     }
+
+    /// Materialize one provider attempt up to its protocol terminal so the
+    /// product error policy can inspect complete bytes before any client
+    /// egress. Sealing at the terminal (not TCP EOF) preserves the declared
+    /// full-attempt boundary without waiting for transport close.
+    pub fn read_attempt_until_terminal(&mut self, protocol: &str) -> Result<Vec<u8>, String> {
+        let protocol = match protocol {
+            "openai_chat" | "openai-chat" | "openai" => "chat",
+            "openai-responses" | "openai_responses" => "responses",
+            other => other,
+        };
+        let (mut ingress, _) = production_transport_pair(std::time::Instant::now())
+            .map_err(|error| format!("{error:?}"))?;
+        let mut attempt = Vec::new();
+        loop {
+            let bytes = self
+                .runtime
+                .block_on(self.stream.next_chunk())
+                .map_err(|error| error.to_string())?;
+            let Some(bytes) = bytes else {
+                return Ok(attempt);
+            };
+            extend_bounded_attempt(&mut attempt, &bytes)?;
+            attempt.extend_from_slice(&bytes);
+            let frames = ingress
+                .push_chunk(&bytes, std::time::Instant::now())
+                .map_err(|error| format!("{error:?}"))?;
+            for frame in frames {
+                if provider_sse_frame_is_terminal(protocol, frame.as_bytes())? {
+                    return Ok(attempt);
+                }
+            }
+        }
+    }
+}
+
+fn extend_bounded_attempt(attempt: &mut Vec<u8>, bytes: &[u8]) -> Result<(), String> {
+    if attempt.len().saturating_add(bytes.len()) > MAX_PROVIDER_ATTEMPT_BYTES {
+        Err("provider SSE attempt exceeded bounded staging".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// True when a complete provider SSE frame carries the protocol terminal
+/// event. Provider semantics come from the protocol owner's normalizer; the
+/// runtime only asks whether the attempt may be sealed before transport close.
+fn provider_sse_frame_is_terminal(protocol: &str, frame: &[u8]) -> Result<bool, String> {
+    let normalized = normalize_provider_sse_frame_for_relay(protocol, frame)
+        .map_err(|error| error.to_string())?;
+    let text = std::str::from_utf8(&normalized).map_err(|error| error.to_string())?;
+    Ok(text.lines().any(|line| {
+        line.strip_prefix("event:")
+            .map(str::trim)
+            .is_some_and(|event| {
+                matches!(
+                    event,
+                    "response.completed" | "response.incomplete" | "response.failed"
+                )
+            })
+    }))
 }
 
 impl ProviderSseSource for NativeProviderSseSource {
@@ -99,6 +172,30 @@ impl ProviderSseSource for NativeProviderSseSource {
             return Err("provider stream cancelled".to_string());
         }
         Ok(())
+    }
+}
+
+impl ProviderSseSource for BufferedProviderSseSource {
+    fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
+        let available = self.bytes.len() - self.offset;
+        let count = available.min(chunk.len());
+        chunk[..count].copy_from_slice(&self.bytes[self.offset..self.offset + count]);
+        self.offset += count;
+        Ok(count)
+    }
+
+    fn wait(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl ProviderSseSource for Box<dyn ProviderSseSource> {
+    fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
+        (**self).read_chunk(chunk)
+    }
+
+    fn wait(&mut self) -> Result<(), String> {
+        (**self).wait()
     }
 }
 
@@ -316,5 +413,18 @@ impl<S: ProviderSseSource> ResponseStream for SseTransportDriver<S> {
             return Ok(false);
         }
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extend_bounded_attempt, MAX_PROVIDER_ATTEMPT_BYTES};
+
+    #[test]
+    fn bounded_attempt_rejects_growth_past_limit() {
+        let mut attempt = vec![0u8; MAX_PROVIDER_ATTEMPT_BYTES];
+        extend_bounded_attempt(&mut attempt, &[]).expect("exact limit is allowed");
+        let error = extend_bounded_attempt(&mut attempt, &[0]).expect_err("one byte past limit fails");
+        assert_eq!(error, "provider SSE attempt exceeded bounded staging");
     }
 }
