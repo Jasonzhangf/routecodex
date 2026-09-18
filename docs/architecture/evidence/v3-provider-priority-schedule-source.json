@@ -1,9 +1,9 @@
 {
   "evidence_id": "v3-provider-priority-schedule-source-20260918",
   "feature_id": "v3.virtual_router_target_interpreter",
-  "candidate_commit": "dcc3b75d0087fe4b3284481da363487fd9a5f82f",
-  "candidate_tree": "5d3de2c011c1cf8f3c83cc03bd5382a387af15ca",
-  "captured_at": "2026-09-18T00:21:52-07:00",
+  "candidate_commit": "2881549843931f1bee881f78ca5b45ef91534c9b",
+  "candidate_tree": "0fa8f25a34e7e145eb66ab298e484fe9697cd490",
+  "captured_at": "2026-09-18T01:29:46-07:00",
   "execution_surface": "installed_runtime",
   "source_unchanged": true,
   "gates": [
@@ -20,7 +20,7 @@
     {
       "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-target provider_priority_schedule -- --nocapture",
       "result": "pass",
-      "tests": "2 passed; 0 failed"
+      "tests": "3 passed; 0 failed"
     },
     {
       "command": "npm run verify:v3-architecture-ci",
@@ -39,7 +39,7 @@
     {
       "command": "ROUTECODEX_INSTALL_VERIFY_CONFIG=/Volumes/extension/.rcc/config.toml npm run install:release",
       "result": "pass",
-      "tests": "installed rccv3 sha256=8843c44295b51a5b7803bfc02371efd8b1ea0c0b36896dc18ed62e4505c8e449; managed restart state=running; health 4444 and 7777 version=0.90.4798"
+      "tests": "installed rccv3 sha256=390f9b1c78b0cc7efa089a6e078d968ebc035dfb27c105299ba107f88ff44a9a; managed restart state=running; health 4444 and 7777 version=0.90.4798"
     },
     {
       "command": "curl -fsS http://127.0.0.1:4444/health && curl -fsS http://127.0.0.1:7777/health",
@@ -47,9 +47,9 @@
       "tests": "both listeners status=ok manifest_version=3 build_version=0.90.4798"
     },
     {
-      "command": "curl -sS -X POST http://127.0.0.1:4444/v1/responses -H 'x-routecodex-dry-run: provider-request' ...",
+      "command": "curl -sS -X POST http://127.0.0.1:4444/v1/responses -H 'x-routecodex-dry-run: provider-request' -H 'content-type: application/json' --data '{\"model\":\"gpt-5.5\",\"input\":\"provider priority schedule dry-run r3\"}'",
       "result": "pass",
-      "tests": "HTTP 200; providerId=kdns-freesail; url=https://api.freesail.tech/v1/chat/completions; providerNetworkSend=false; stoppedBeforeProviderSend=true"
+      "tests": "HTTP 200; providerId=kdns-freesail; model=deepseek-v4.1-flash; url=https://api.freesail.tech/v1/chat/completions; providerNetworkSend=false; stoppedBeforeProviderSend=true"
     }
   ]
 }
