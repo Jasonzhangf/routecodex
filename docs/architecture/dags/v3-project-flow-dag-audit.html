@@ -1,0 +1,2069 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RouteCodex V3 Feature / Project Flow DAG Audit</title>
+  <style>
+    :root {
+      --bg: #f7f8f6;
+      --paper: #ffffff;
+      --ink: #18201d;
+      --muted: #66736d;
+      --line: #d5dcd8;
+      --soft: #edf1ee;
+      --req: #0b7285;
+      --constraint: #7a5c00;
+      --design: #5f3dc4;
+      --impl: #1971c2;
+      --integration: #2b8a3e;
+      --verify: #9c36b5;
+      --evidence: #0f766e;
+      --accept: #b45309;
+      --delivery: #c92a2a;
+      --missing: #c92a2a;
+      --warn: #b45309;
+      --ok: #2b8a3e;
+      --shadow: 0 1px 2px rgba(24, 32, 29, .06);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: .92em;
+    }
+
+    .wrap {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 32px 22px 80px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    .subhead {
+      margin: 0;
+      color: var(--muted);
+      max-width: 920px;
+      font-size: 14px;
+    }
+
+    .stamp {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .verdict {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 26px;
+    }
+
+    .metric {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .metric .value {
+      font-size: 20px;
+      font-weight: 720;
+      line-height: 1.1;
+    }
+
+    .metric .note {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 5px;
+    }
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px 0;
+      margin-bottom: 18px;
+      background: rgba(247, 248, 246, .94);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .nav a {
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 10px;
+      text-decoration: none;
+      font-size: 12px;
+    }
+
+    .nav a:hover {
+      border-color: var(--impl);
+      color: var(--impl);
+    }
+
+    section {
+      margin: 0 0 28px;
+      padding: 24px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      color: var(--muted);
+      max-width: 920px;
+      font-size: 13px;
+      margin: 5px 0 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: #fbfcfb;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .badge.ok {
+      color: #1f6f32;
+      border-color: #a7d7b1;
+      background: #f0faf2;
+    }
+
+    .badge.warn {
+      color: #8a4100;
+      border-color: #e8bc87;
+      background: #fff7ec;
+    }
+
+    .badge.fail {
+      color: #a61e2a;
+      border-color: #e9a5ad;
+      background: #fff2f3;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .swatch {
+      width: 13px;
+      height: 13px;
+      border-radius: 3px;
+      border: 1px solid currentColor;
+      background: #fff;
+    }
+
+    .swatch.req { color: var(--req); background: #e8f7fa; }
+    .swatch.constraint { color: var(--constraint); background: #fff8df; }
+    .swatch.design { color: var(--design); background: #f3f0ff; }
+    .swatch.impl { color: var(--impl); background: #eaf4ff; }
+    .swatch.integration { color: var(--integration); background: #edf9ef; }
+    .swatch.verify { color: var(--verify); background: #fbf0ff; }
+    .swatch.evidence { color: var(--evidence); background: #e8f7f5; }
+    .swatch.accept { color: var(--accept); background: #fff5e8; }
+    .swatch.delivery { color: var(--delivery); background: #fff1f1; }
+
+    .dag-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .lane {
+      min-width: 0;
+    }
+
+    .lane-title {
+      position: sticky;
+      top: 48px;
+      z-index: 10;
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      color: #fff;
+      background: #26332e;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .lane-title span {
+      display: block;
+      margin-top: 2px;
+      color: #cbd5d0;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .node {
+      position: relative;
+      margin-bottom: 30px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -25px;
+      width: 1px;
+      height: 20px;
+      background: var(--line);
+      transform: translateX(-50%);
+    }
+
+    .node:last-child {
+      margin-bottom: 0;
+    }
+
+    .node:last-child::after {
+      display: none;
+    }
+
+    .node.req { border-left-color: var(--req); }
+    .node.constraint { border-left-color: var(--constraint); }
+    .node.design { border-left-color: var(--design); }
+    .node.impl { border-left-color: var(--impl); }
+    .node.integration { border-left-color: var(--integration); }
+    .node.verify { border-left-color: var(--verify); }
+    .node.evidence { border-left-color: var(--evidence); }
+    .node.accept { border-left-color: var(--accept); }
+    .node.delivery { border-left-color: var(--delivery); }
+    .node.missing {
+      border-left-color: var(--missing);
+      background: #fff6f6;
+    }
+
+    .node summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 13px;
+    }
+
+    .node summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .node .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: start;
+      margin-bottom: 4px;
+    }
+
+    .node .id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    .node .type {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .node .name {
+      font-size: 13px;
+      font-weight: 680;
+      line-height: 1.25;
+    }
+
+    .node .purpose {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 5px;
+    }
+
+    .node .body {
+      padding: 0 13px 13px;
+      border-top: 1px solid var(--soft);
+    }
+
+    .node dl {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 5px 8px;
+      margin: 10px 0 0;
+      font-size: 11px;
+    }
+
+    .node dt {
+      color: var(--muted);
+    }
+
+    .node dd {
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .edge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: -18px 0 12px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .edge::before {
+      content: "";
+      width: 1px;
+      height: 18px;
+      background: var(--line);
+    }
+
+    .edge.gap {
+      color: var(--missing);
+    }
+
+    .edge.gap::before {
+      border-left: 1px dashed var(--missing);
+      background: transparent;
+    }
+
+    .missing-node {
+      border: 1px dashed var(--missing);
+      border-left: 4px solid var(--missing);
+      border-radius: 8px;
+      background: #fff5f5;
+      padding: 12px 13px;
+      color: #9b1c28;
+      font-size: 12px;
+    }
+
+    .missing-node strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .to-be {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) 300px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .spine {
+      position: relative;
+      display: grid;
+      gap: 18px;
+    }
+
+    .spine::before {
+      content: "";
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 50%;
+      width: 2px;
+      background: #c9d6d0;
+      transform: translateX(-50%);
+    }
+
+    .tb-node {
+      position: relative;
+      z-index: 1;
+      width: min(100%, 620px);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--impl);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 12px 13px;
+      box-shadow: 0 2px 8px rgba(24, 32, 29, .05);
+    }
+
+    .tb-node.req { border-left-color: var(--req); }
+    .tb-node.constraint { border-left-color: var(--constraint); }
+    .tb-node.design { border-left-color: var(--design); }
+    .tb-node.impl { border-left-color: var(--impl); }
+    .tb-node.verify { border-left-color: var(--verify); }
+    .tb-node.integration { border-left-color: var(--integration); }
+    .tb-node.delivery { border-left-color: var(--delivery); }
+    .tb-node.accept { border-left-color: var(--accept); }
+
+    .tb-node .head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .tb-node .id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+    }
+
+    .tb-node .name {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .tb-node .desc {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    .branch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      width: min(100%, 720px);
+      margin: 0 auto;
+    }
+
+    .branch.release {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      width: min(100%, 980px);
+    }
+
+    .branch .tb-node {
+      width: 100%;
+    }
+
+    .side-note {
+      position: sticky;
+      top: 58px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfb;
+      padding: 14px;
+      font-size: 12px;
+    }
+
+    .side-note h3 {
+      margin-bottom: 8px;
+    }
+
+    .side-note ul,
+    .plain-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .side-note li,
+    .plain-list li {
+      margin-bottom: 7px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th,
+    td {
+      padding: 10px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      background: #f7f9f8;
+      font-weight: 650;
+    }
+
+    td code {
+      overflow-wrap: anywhere;
+    }
+
+    .callout {
+      border-left: 4px solid var(--warn);
+      background: #fff8ed;
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+
+    .callout.fail {
+      border-left-color: var(--missing);
+      background: #fff4f4;
+    }
+
+    .callout.ok {
+      border-left-color: var(--ok);
+      background: #f2faf4;
+    }
+
+    .status {
+      font-weight: 650;
+    }
+
+    .status.evidenced { color: var(--ok); }
+    .status.partial { color: var(--warn); }
+    .status.missing { color: var(--missing); }
+    .status.unknown { color: var(--muted); }
+
+    .evidence-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .evidence-item {
+      border-left: 3px solid var(--evidence);
+      background: #f5fbfa;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+
+    .snapshot {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfb;
+      padding: 14px;
+    }
+
+    .snapshot summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .snapshot .snapshot-body {
+      margin-top: 12px;
+    }
+
+    .snapshot pre {
+      margin: 10px 0 0;
+      padding: 12px;
+      overflow-x: auto;
+      border-radius: 6px;
+      background: #1e2824;
+      color: #e9f0ed;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .mono-block {
+      margin: 12px 0 0;
+      padding: 12px;
+      background: #1e2824;
+      color: #e9f0ed;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    @media (max-width: 1180px) {
+      .dag-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .to-be {
+        grid-template-columns: 1fr;
+      }
+
+      .side-note {
+        position: static;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .wrap {
+        padding: 22px 12px 56px;
+      }
+
+      header {
+        grid-template-columns: 1fr;
+      }
+
+      .stamp {
+        text-align: left;
+      }
+
+      .verdict,
+      .dag-grid,
+      .two-col,
+      .branch,
+      .branch.release {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 16px;
+      }
+
+      .nav {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+      }
+
+      .lane-title {
+        position: static;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>RouteCodex V3 Feature / Project Flow DAG Audit</h1>
+        <p class="subhead">先从 issue、maps、workflows、commits、PR、bug receipts和运行证据反推 As-Is；再给出最小闭环 To-Be。这里审计的是工程流，不是运行时请求链。</p>
+      </div>
+      <div class="stamp">
+        审计时间：2026-09-18<br>
+        HEAD：<code>7ea636f0</code><br>
+        origin/main：<code>b08dc3b4</code>
+      </div>
+    </header>
+
+    <div class="verdict">
+      <div class="metric">
+        <div class="label">核心判断</div>
+        <div class="value">四条流程，不是一条统一 DAG</div>
+        <div class="note">Bugfix、Feature、CI/Gate、Release 各自可运行，但汇合点未统一绑定。</div>
+      </div>
+      <div class="metric">
+        <div class="label">闭环状态</div>
+        <div class="value">局部成立，系统级不成立</div>
+        <div class="note">强 issue receipt 能闭环；大量 runtime feature 停在 merge。</div>
+      </div>
+      <div class="metric">
+        <div class="label">结构缺口</div>
+        <div class="value">Binding / Acceptance / Conditional Delivery</div>
+        <div class="note">不是缺代码能力，而是缺可机器追溯的连接。</div>
+      </div>
+      <div class="metric">
+        <div class="label">循环依赖</div>
+        <div class="value">未发现证据支持</div>
+        <div class="note">As-Is 有分叉、并行和人工汇合，未观察到合法 DAG 外的 cycle。</div>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Audit sections">
+      <a href="#basis">证据基线</a>
+      <a href="#asis">1. AS-IS DAG</a>
+      <a href="#tobe">2. TO-BE DAG</a>
+      <a href="#diff">3. DAG DIFF</a>
+      <a href="#violations">4. Closure Violations</a>
+      <a href="#migration">5. Minimal Migration</a>
+      <a href="#risks">6. Remaining Risks</a>
+      <a href="#criteria">7. Final Closure Criteria</a>
+    </nav>
+
+    <section id="basis">
+      <div class="section-head">
+        <div>
+          <h2>证据基线与边界</h2>
+          <p>结论只从当前工作区可读证据反推。当前工作区是 detached 且 dirty，因此这是“当前工作树证据”，不是对 exact origin/main 的不可变审计快照。</p>
+        </div>
+        <span class="badge warn">CURRENT WORKTREE</span>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h3>实际读取的真源</h3>
+          <ul class="plain-list">
+            <li><code>AGENTS.md:74-90</code>：声明 source/test/build/install/restart/health/replay/review/merge/remote 分层证据。</li>
+            <li><code>docs/agent-routing/05-foundation-contract.md:23-45</code>：声明默认闭环顺序和证据门槛。</li>
+            <li><code>.appsdk/docs/design/fix-lifecycle-v2.md:3-92</code>：已定义 Goal、Worktree、Reproduction、Candidate、PreReview、Review、Effectiveness、Merge、MainlineReceipt、Promotion、Freeze 等记录图。</li>
+            <li><code>.appsdk/project.json:47-67</code>：项目已启用这些 record contracts；治理没有缺模型，缺的是所有实际路径的一致绑定。</li>
+            <li><code>docs/architecture/v3-function-map.yml</code>、<code>v3-verification-map.yml</code>、<code>v3-mainline-call-map.yml</code>：feature、verification、caller edge绑定。</li>
+            <li><code>.github/workflows/test.yml</code>：scope、repo sanity、V3 gates、build、install、host tests。</li>
+            <li><code>.github/workflows/release.yml</code>：手动 release、pack、GitHub release、可选 npm publish。</li>
+            <li>最近30个 merged PR、main push run、187个 bug records，其中两个 closed P0 有强闭环 receipt。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>量化快照</h3>
+          <table>
+            <thead>
+              <tr><th>项目</th><th>数值</th><th>含义</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Function / Verification</td><td>84 / 85</td><td>2个 function 无 verification，3个 verification 无 function owner。</td></tr>
+              <tr><td>Mainline edges</td><td>442</td><td>429 anchored，13 binding_pending。</td></tr>
+              <tr><td>Recent merged PRs</td><td>30</td><td>body 中 evidence 14、review 20、verification 23、replay 6、install/restart/health 12。</td></tr>
+              <tr><td>Bug tracker</td><td>187</td><td>121 closed；66 open，其中12个 P0、28个 P1。</td></tr>
+              <tr><td>Release workflow</td><td>手动</td><td><code>workflow_dispatch</code>，不是 merge 自动终态。</td></tr>
+            </tbody>
+          </table>
+          <div class="callout fail">
+            <strong>边界：</strong>PR body 缺字段只能证明“可审计绑定缺失”，不能单独证明底层测试或 review 从未发生。报告按证据真实性区分“没有证据”和“没有证据绑定”。
+          </div>
+        </div>
+      </div>
+
+      <details class="snapshot" open>
+        <summary>可复现证据快照（查询时间 2026-09-18 America/Los_Angeles）</summary>
+        <div class="snapshot-body">
+          <p>以下数量不是“正常软件项目应该有”的推断。每条都由固定命令和外部记录 ID 支撑；外部记录不是 checked-in workspace，因此单独标注来源。</p>
+
+          <table>
+            <thead>
+              <tr><th>证据</th><th>命令 / 来源</th><th>结果</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>最近30个 merged PR</td>
+                <td><code>gh pr list --state merged --limit 30 --json number,body,...</code></td>
+                <td>PR #197, #196, #195, #194, #193, #192, #191, #188, #187, #185, #184, #183, #182, #181, #180, #179, #178, #177, #176, #174, #172, #169, #168, #165, #162, #154, #153, #149, #146, #145；完整 SHA 见下方 JSON 摘要。</td>
+              </tr>
+              <tr>
+                <td>PR body 字段统计</td>
+                <td>同一查询的 <code>body</code> 正则分类</td>
+                <td>evidence 14、review 20、verification 23、replay 6、install/restart/health 12。</td>
+              </tr>
+              <tr>
+                <td>main / PR runs</td>
+                <td><code>gh run list --limit 20 --json databaseId,event,headBranch,headSha,conclusion</code></td>
+                <td>#197 main push run <code>35330273922</code> success；#196 main push run <code>35329911552</code> cancelled；#193 main push run <code>35278067397</code> cancelled。</td>
+              </tr>
+              <tr>
+                <td>Bug tracker</td>
+                <td><code>appsdk bug list --json</code></td>
+                <td>187 total、121 closed、66 open、12 open P0、28 open P1、19 closed P0；强 receipt 样本 <code>85f4b1a</code>、<code>acdd3cd</code>。</td>
+              </tr>
+              <tr>
+                <td>Map 结构</td>
+                <td>YAML 解析：function / verification / mainline-call maps</td>
+                <td>84 functions、85 verifications、2 orphan functions、3 orphan verifications、76 chains、442 edges、429 anchored、13 binding_pending。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p><strong>输入文件 hash</strong></p>
+          <pre>9baa45caab8b61d843012b91ae3bfba4efff45d782b499c16c70a7e453962f16  docs/architecture/v3-function-map.yml
+5d4febf1a021ed058bd7b6f4644c1b24756a8b61f20c1f21975bd193624e434f  docs/architecture/v3-verification-map.yml
+d78bd799f08b4e42666d26d66064e043a645f61d1de78c511f1c3f01b1782d59  docs/architecture/v3-mainline-call-map.yml
+88097e376c53ddf27a970e47c9facb4884c7f8eaba7f7c91bdbf0140c3a02d7b  .github/workflows/test.yml
+a0ae5bca3d9597bd159fc5cc15f1842545bbfa7b7910cbfe4629644cad69f751  .github/workflows/release.yml
+b52be06c41f91812e6b6cb1dfdb803e8632c29f1a322ab48a0b0340c3ae05ed6  AGENTS.md
+af8b4ee97f694e0250b51808a461245b940e87e4222651cabd4e35720f45e465  .appsdk/project.json</pre>
+
+          <p><strong>PR 查询结果摘要</strong></p>
+          <pre>#197 merge=b08dc3b476f876a1814304de7a6b53ad1ccc123a evidence=yes review=yes verification=yes replay=yes install=yes
+#196 merge=4fd7ee72abf9ff2c7eccf17ef60e2c5d846d48ca evidence=no  review=yes verification=yes replay=no  install=no
+#195 merge=18aac1052914a940c13d200801df13ffa8ed7707 evidence=no  review=yes verification=yes replay=no  install=no
+#194 merge=3cd6b36525945252589b7470b2069f6749f690ed evidence=yes review=yes verification=yes replay=yes install=yes
+#193 merge=ba03d3c1129041e7a2c2a07bdd460dce32b2bb00 evidence=no  review=no  verification=no  replay=no  install=no
+#192 merge=48d7d433fdb2f3f83b1f90a534705523675e5187 evidence=no  review=no  verification=no  replay=no  install=no
+#191 merge=e9f7f3a999c2bb58769afdd985080821916db92b evidence=yes review=yes verification=no  replay=no  install=yes
+#188 merge=f4e2561f9774cae6850f8a509911c2e0061158fb evidence=yes review=yes verification=yes replay=no  install=yes
+#187 merge=480f4057143946ec497be1e5cd7d7464eecf5b7b evidence=no  review=yes verification=yes replay=yes install=no
+#185 merge=094f1fe1af42ac9deb39ef8c0fed88034d4d6662 evidence=no  review=yes verification=yes replay=no  install=yes
+#184 merge=29d7433cfa69404e47eee637bd7bcc45852fb290 evidence=yes review=no  verification=yes replay=no  install=yes
+#183 merge=06899275dbade7c2b0e0dfb36c344c312a63c768 evidence=no  review=no  verification=yes replay=no  install=no
+#182 merge=c1d973426f618d26d343c9db300293cc4e44fde6 evidence=no  review=yes verification=yes replay=no  install=yes
+#181 merge=7ea636f0eac6ef5dfe1bcb65d5288bc6754080d8 evidence=no  review=no  verification=no  replay=no  install=no
+#180 merge=dcc8082c3364fb098c2bd270db79c4d7cf290cd5 evidence=no  review=yes verification=yes replay=no  install=no
+#179 merge=d6923774abf871db02b5731017bcce121732bcf2 evidence=no  review=no  verification=yes replay=yes install=yes
+#178 merge=86f4b46e002213516789c36b19a64fc747795f46 evidence=yes review=yes verification=yes replay=no  install=no
+#177 merge=c61ea5e535e7ef033bada3db37648a7e824464ef evidence=yes review=yes verification=yes replay=no  install=no
+#176 merge=122468781d04a90f8220bc366c48367d2c8bed2d evidence=yes review=yes verification=yes replay=no  install=no
+#174 merge=8380a9688ef67fec63ea6e0132f13f25d8e1ac40 evidence=no  review=no  verification=no  replay=no  install=no
+#172 merge=c09de9db068f73f69b72665dfba9300acf124cc8 evidence=no  review=yes verification=yes replay=no  install=no
+#169 merge=99235e77f5c85ea1bdb8c6ee42eed0fbabafcd6f evidence=no  review=no  verification=no  replay=no  install=no
+#168 merge=63501e973033dbb7f0beee79151eae77284ebe63 evidence=yes review=yes verification=yes replay=no  install=yes
+#165 merge=3f50848b3d12b9353c5f4c7788901adbd1305596 evidence=yes review=no  verification=yes replay=no  install=no
+#162 merge=3fe9790007f7d2abfe044dd7a466c258847c53f4 evidence=yes review=yes verification=yes replay=no  install=no
+#154 merge=c37a3946ae90641239fcfbef8ae7b118445a81ee evidence=no  review=yes verification=yes replay=no  install=yes
+#153 merge=b43e73e1c13b74764af711b18bbfccd287b66b83 evidence=yes review=yes verification=yes replay=no  install=yes
+#149 merge=7818243a8bdcf8160554353b167ab1fa70ebfefb evidence=yes review=yes verification=yes replay=yes install=no
+#146 merge=6608b4911410fb6eef1af6eaf34c7447cc559152 evidence=yes review=yes verification=yes replay=yes install=yes
+#145 merge=1f69f0614ae57f69df59d93472818befd0735540 evidence=no  review=no  verification=no  replay=no  install=no</pre>
+
+          <p><strong>Run 查询结果摘要</strong></p>
+          <pre>35330273922 main b08dc3b476f876a1814304de7a6b53ad1ccc123a success
+35329911552 main 4fd7ee72abf9ff2c7eccf17ef60e2c5d846d48ca cancelled
+35322856544 main 18aac1052914a940c13d200801df13ffa8ed7707 success
+35311893260 main 3cd6b36525945252589b7470b2069f6749f690ed success
+35278067397 main ba03d3c1129041e7a2c2a07bdd460dce32b2bb00 cancelled</pre>
+        </div>
+      </details>
+    </section>
+
+    <section id="asis">
+      <div class="section-head">
+        <div>
+          <h2>1. AS-IS DAG</h2>
+          <p>实际存在四条可辨认流程。每条节点都列 inputs、outputs、dependencies、implementation/verification binding、evidence、status；红色虚线边表示当前只有人工约定或条件关系，没有强制可追溯绑定。</p>
+        </div>
+        <span class="badge fail">4 PATHS / 12 STRUCTURAL DIFF TYPES</span>
+      </div>
+
+      <div class="legend">
+        <span class="legend-item"><span class="swatch req"></span>Requirement</span>
+        <span class="legend-item"><span class="swatch constraint"></span>Constraint</span>
+        <span class="legend-item"><span class="swatch design"></span>Design</span>
+        <span class="legend-item"><span class="swatch impl"></span>Implementation</span>
+        <span class="legend-item"><span class="swatch integration"></span>Integration</span>
+        <span class="legend-item"><span class="swatch verify"></span>Verification</span>
+        <span class="legend-item"><span class="swatch evidence"></span>Evidence</span>
+        <span class="legend-item"><span class="swatch accept"></span>Acceptance</span>
+        <span class="legend-item"><span class="swatch delivery"></span>Delivery</span>
+      </div>
+
+      <div class="dag-grid">
+        <div class="lane">
+          <div class="lane-title">A. Bugfix 实际路径<span>最接近完整闭环，但仍依赖 issue comments 和人工 receipt</span></div>
+
+          <details class="node req" open>
+            <summary>
+              <div class="topline"><span class="id">A01</span><span class="type">Requirement</span></div>
+              <div class="name">Bug record / 原始失败</div>
+              <div class="purpose">保留可复现现象、影响、优先级和 scope。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>用户报告或运行异常</dd>
+                <dt>outputs</dt><dd>bug id、title、labels、comments</dd>
+                <dt>dependencies</dt><dd>无</dd>
+                <dt>impl binding</dt><dd><code>appsdk bug</code> record</dd>
+                <dt>verify binding</dt><dd>MISSING：未强制绑定 acceptance criteria record</dd>
+                <dt>evidence</dt><dd>187 total；例如 <code>85f4b1a</code>、<code>acdd3cd</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">A01 → A02：语义上存在；Goal/Acceptance 未统一成 record</div>
+
+          <details class="node constraint">
+            <summary>
+              <div class="topline"><span class="id">A02</span><span class="type">Constraint</span></div>
+              <div class="name">Triage / owner / scope</div>
+              <div class="purpose">先锁定根因候选、唯一 owner、允许/禁止路径和优先级。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A01 bug record、maps、现有证据</dd>
+                <dt>outputs</dt><dd>owner、scope、priority、diagnosis constraints</dd>
+                <dt>dependencies</dt><dd>A01</dd>
+                <dt>impl binding</dt><dd>function map / module map / issue comments</dd>
+                <dt>verify binding</dt><dd>mapped gates，但绑定强度随 issue 写作而变</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> comment #1-#3 记录 owner 与 first divergence</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A02 → A03：有实际依赖</div>
+
+          <details class="node design">
+            <summary>
+              <div class="topline"><span class="id">A03</span><span class="type">Design</span></div>
+              <div class="name">Clean worktree + baseline reproduction</div>
+              <div class="purpose">在隔离边界重放失败，记录 first divergence，而不是直接 patch。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A02 owner/scope、原始样本</dd>
+                <dt>outputs</dt><dd>red reproduction、first divergence、candidate worktree</dd>
+                <dt>dependencies</dt><dd>A02</dd>
+                <dt>impl binding</dt><dd>clean worktree + issue/run notes</dd>
+                <dt>verify binding</dt><dd>red test / failing sample</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> first divergence 和 playground worktree；<code>acdd3cd</code> 保留 request ids 与错误链</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A03 → A04：有实际依赖</div>
+
+          <details class="node impl">
+            <summary>
+              <div class="topline"><span class="id">A04</span><span class="type">Implementation</span></div>
+              <div class="name">Candidate + regression test</div>
+              <div class="purpose">只在唯一 owner 修根因，并增加针对当前契约的回归覆盖。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A03 first divergence</dd>
+                <dt>outputs</dt><dd>candidate SHA/tree、regression tests</dd>
+                <dt>dependencies</dt><dd>A03</dd>
+                <dt>impl binding</dt><dd>candidate commit、allowed paths</dd>
+                <dt>verify binding</dt><dd>focused tests</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> candidate <code>b01004af</code>；<code>acdd3cd</code> 候选与最终 main 路径分离记录</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A04 → A05：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">A05</span><span class="type">Verification</span></div>
+              <div class="name">Focused gates + architecture CI</div>
+              <div class="purpose">证明候选满足 feature contract、边界和回归门禁。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A04 candidate</dd>
+                <dt>outputs</dt><dd>test/gate result</dd>
+                <dt>dependencies</dt><dd>A04</dd>
+                <dt>impl binding</dt><dd>candidate SHA/tree</dd>
+                <dt>verify binding</dt><dd><code>verify:ci</code>、mapped focused tests</dd>
+                <dt>evidence</dt><dd>closed P0 receipt 记录 tests、resource-map、module-boundaries、fmt；CI 也运行 scope gates、<code>verify:ci</code>、build/install</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A05 → A06：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">A06</span><span class="type">Verification</span></div>
+              <div class="name">Independent review</div>
+              <div class="purpose">按相同 candidate 检查正确性、owner、fallback、错层修复和证据边界。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A04 candidate、A05 evidence</dd>
+                <dt>outputs</dt><dd>review verdict</dd>
+                <dt>dependencies</dt><dd>A05</dd>
+                <dt>impl binding</dt><dd>reviewed SHA</dd>
+                <dt>verify binding</dt><dd>ReviewRecord contract 已存在</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> 第4轮 review PASS；PR #197 明确 review PASS</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">A06 → A07：review 结果常只存在 PR/评论，未形成统一 record graph</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">A07</span><span class="type">Integration</span></div>
+              <div class="name">Commit / PR / CI</div>
+              <div class="purpose">提交 reviewed candidate，通过 hooks、PR checks 和 scoped CI。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A04-A06</dd>
+                <dt>outputs</dt><dd>commit、PR、check runs</dd>
+                <dt>dependencies</dt><dd>A06</dd>
+                <dt>impl binding</dt><dd>candidate SHA</dd>
+                <dt>verify binding</dt><dd><code>.github/workflows/test.yml</code></dd>
+                <dt>evidence</dt><dd>PR #197、#196、#195、#194 等均经历 PR checks</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A07 → A08：有实际依赖</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">A08</span><span class="type">Integration</span></div>
+              <div class="name">Merge to main</div>
+              <div class="purpose">将 reviewed commit 合入 integration base，并保留 merge SHA。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A07 PR checks</dd>
+                <dt>outputs</dt><dd>merge commit、main tree</dd>
+                <dt>dependencies</dt><dd>A07</dd>
+                <dt>impl binding</dt><dd>merge SHA</dd>
+                <dt>verify binding</dt><dd>main push workflow 理论存在</dd>
+                <dt>evidence</dt><dd>例如 #197 merge <code>b08dc3b4</code>；但部分 main push runs 被后续 merge 取消</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">A08 ⇢ A09：是否进入 runtime delivery 没有统一 delivery-class gate</div>
+
+          <details class="node delivery">
+            <summary>
+              <div class="topline"><span class="id">A09</span><span class="type">Delivery</span></div>
+              <div class="name">Conditional build / install / restart / health / replay</div>
+              <div class="purpose">对受影响 runtime 交付 exact artifact，并从真实入口重放原样本。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A08 merged main、原始失败样本</dd>
+                <dt>outputs</dt><dd>artifact、install、restart、health、same-entry replay</dd>
+                <dt>dependencies</dt><dd>A08</dd>
+                <dt>impl binding</dt><dd>main SHA → artifact hash</dd>
+                <dt>verify binding</dt><dd>runtime receipts</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> 有 4444/7777/10000 health 与 4444 replay；大量普通 PR 没有这条边</dd>
+                <dt>status</dt><dd><span class="status partial">CONDITIONAL / PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">A09 → A10：强 receipt 路径存在</div>
+
+          <details class="node accept">
+            <summary>
+              <div class="topline"><span class="id">A10</span><span class="type">Acceptance</span></div>
+              <div class="name">Bug close receipt</div>
+              <div class="purpose">引用 solution、review、main、runtime和replay证据，正式关闭问题。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>A01-A09</dd>
+                <dt>outputs</dt><dd>closed bug + resolution receipt</dd>
+                <dt>dependencies</dt><dd>A09 或显式的不适用结论</dd>
+                <dt>impl binding</dt><dd>bug id</dd>
+                <dt>verify binding</dt><dd>receipt id / issue comments</dd>
+                <dt>evidence</dt><dd><code>85f4b1a</code> 和 <code>acdd3cd</code> 有闭环文本；不是所有 closed bugs 都达到同等强度</dd>
+                <dt>status</dt><dd><span class="status partial">EVIDENCED LOCALLY</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="missing-node">
+            <strong>As-Is 缺口</strong>
+            A01 的原始 requirement 没有强制反指到 A10。闭环存在，但主要靠 issue comments、人工 review 和 close message 维持。
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">B. Feature / Plan 实际路径<span>merge 是常见终点；runtime acceptance 依赖人工继续推进</span></div>
+
+          <details class="node req" open>
+            <summary>
+              <div class="topline"><span class="id">B01</span><span class="type">Requirement</span></div>
+              <div class="name">User request / goal</div>
+              <div class="purpose">提出 feature 目标、约束、优先级和期望行为。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>用户请求、现有缺陷或产品目标</dd>
+                <dt>outputs</dt><dd>goal text、planning request</dd>
+                <dt>dependencies</dt><dd>无</dd>
+                <dt>impl binding</dt><dd>docs/goals、issue 或 session request</dd>
+                <dt>verify binding</dt><dd>MISSING：不保证有独立 acceptance criteria record</dd>
+                <dt>evidence</dt><dd><code>docs/goals/*</code> 和 GitHub PR titles 可见</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">B01 → B02：design 有文档，但 requirement → design → delivery 未统一 ID 绑定</div>
+
+          <details class="node design">
+            <summary>
+              <div class="topline"><span class="id">B02</span><span class="type">Design</span></div>
+              <div class="name">Design / plan / maps</div>
+              <div class="purpose">确定 owner、边界、map 绑定、实现步骤和 required gates。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B01 goal</dd>
+                <dt>outputs</dt><dd>design/plan、function/verification/mainline bindings</dd>
+                <dt>dependencies</dt><dd>B01</dd>
+                <dt>impl binding</dt><dd><code>docs/design</code>、<code>docs/goals</code>、three maps</dd>
+                <dt>verify binding</dt><dd>required_gates</dd>
+                <dt>evidence</dt><dd>maps 已覆盖 84 functions / 85 verifications，但有 orphan 与 13 pending edges</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">B02 → B03：有实际依赖</div>
+
+          <details class="node impl">
+            <summary>
+              <div class="topline"><span class="id">B03</span><span class="type">Implementation</span></div>
+              <div class="name">Clean worktree implementation</div>
+              <div class="purpose">在独立 worktree 按 owner/scope 实现 feature。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B02 design/maps</dd>
+                <dt>outputs</dt><dd>candidate commit/tree</dd>
+                <dt>dependencies</dt><dd>B02</dd>
+                <dt>impl binding</dt><dd>candidate SHA、worktree</dd>
+                <dt>verify binding</dt><dd>focused tests</dd>
+                <dt>evidence</dt><dd>merged PR 和 commit 可追溯；worktree record 不总是存在</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">B03 → B04：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">B04</span><span class="type">Verification</span></div>
+              <div class="name">Focused tests + gates</div>
+              <div class="purpose">验证 feature 的 positive、negative 和 architecture contract。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B03 candidate</dd>
+                <dt>outputs</dt><dd>test and gate results</dd>
+                <dt>dependencies</dt><dd>B03</dd>
+                <dt>impl binding</dt><dd>candidate SHA</dd>
+                <dt>verify binding</dt><dd>function/verification map</dd>
+                <dt>evidence</dt><dd>PR #194 有完整测试清单；#193/#192 等只有 summary，缺少可审计绑定</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">B04 → B05：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">B05</span><span class="type">Verification</span></div>
+              <div class="name">Review</div>
+              <div class="purpose">对 feature candidate 做独立架构/质量 review。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B03 candidate、B04 evidence</dd>
+                <dt>outputs</dt><dd>review verdict</dd>
+                <dt>dependencies</dt><dd>B04</dd>
+                <dt>impl binding</dt><dd>reviewed SHA</dd>
+                <dt>verify binding</dt><dd>ReviewRecord / review skill</dd>
+                <dt>evidence</dt><dd>30个最近 merged PR 中20个 body 出现 review/PASS；其余无法从 PR body 建立绑定</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">B05 → B06：有实际依赖</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">B06</span><span class="type">Integration</span></div>
+              <div class="name">PR / CI</div>
+              <div class="purpose">运行 changed-scope gates、architecture CI、build/install 测试。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B03-B05</dd>
+                <dt>outputs</dt><dd>PR check results</dd>
+                <dt>dependencies</dt><dd>B05</dd>
+                <dt>impl binding</dt><dd>PR head SHA</dd>
+                <dt>verify binding</dt><dd><code>.github/workflows/test.yml</code></dd>
+                <dt>evidence</dt><dd>scope、repo-sanity、V3 gates、build/install、host tests</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">B06 → B07：有实际依赖</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">B07</span><span class="type">Integration</span></div>
+              <div class="name">Merge main</div>
+              <div class="purpose">完成 source integration，得到 merge SHA。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B06 checks</dd>
+                <dt>outputs</dt><dd>main merge commit</dd>
+                <dt>dependencies</dt><dd>B06</dd>
+                <dt>impl binding</dt><dd>merge SHA</dd>
+                <dt>verify binding</dt><dd>main push workflow</dd>
+                <dt>evidence</dt><dd>近期 main push runs 中多个被取消；PR green 不等于 post-merge main 已完整验证</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">B07 ⇢ B08：runtime 是否适用、要交什么 artifact 没有统一 decision</div>
+
+          <details class="node delivery">
+            <summary>
+              <div class="topline"><span class="id">B08</span><span class="type">Delivery</span></div>
+              <div class="name">Conditional release / install / replay</div>
+              <div class="purpose">把 merged feature 送到真实运行入口，并验证用户可观察行为。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>B07 main SHA</dd>
+                <dt>outputs</dt><dd>artifact、runtime receipts 或 release</dd>
+                <dt>dependencies</dt><dd>B07</dd>
+                <dt>impl binding</dt><dd>artifact hash / release tag</dd>
+                <dt>verify binding</dt><dd>install/restart/health/replay gates</dd>
+                <dt>evidence</dt><dd>PR #197 有 replay；#196 无 replay/install/evidence；30个 PR 中只有6个出现 replay</dd>
+                <dt>status</dt><dd><span class="status partial">CONDITIONAL / PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">B08 → B09：预期边；当前多数 feature 在此停止</div>
+
+          <div class="missing-node">
+            <strong>B09 · MISSING ACCEPTANCE</strong>
+            没有统一节点证明“用户原始目标已满足”。测试和 merge 能证明 candidate，不能单独证明 runtime feature 已被用户接受。
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">C. CI / Gate 实际路径<span>source/CI 变更的有效终态可以停在 merge，但必须显式声明</span></div>
+
+          <details class="node req" open>
+            <summary>
+              <div class="topline"><span class="id">C01</span><span class="type">Requirement</span></div>
+              <div class="name">Change request</div>
+              <div class="purpose">定义 source、docs、CI 或 gate 变更目标。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>PR/commit intent</dd>
+                <dt>outputs</dt><dd>changed paths</dd>
+                <dt>dependencies</dt><dd>无</dd>
+                <dt>impl binding</dt><dd>PR title/body</dd>
+                <dt>verify binding</dt><dd>scope classifier</dd>
+                <dt>evidence</dt><dd>PR #184 明确 source/commit/push only，无 install/restart</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">C01 → C02：有实际依赖</div>
+
+          <details class="node impl">
+            <summary>
+              <div class="topline"><span class="id">C02</span><span class="type">Implementation</span></div>
+              <div class="name">Candidate change</div>
+              <div class="purpose">生成可分类的 changed-path candidate。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C01 request</dd>
+                <dt>outputs</dt><dd>candidate diff/SHA</dd>
+                <dt>dependencies</dt><dd>C01</dd>
+                <dt>impl binding</dt><dd>commit SHA</dd>
+                <dt>verify binding</dt><dd>scope classifier</dd>
+                <dt>evidence</dt><dd>test workflow outputs v3/v4 scopes</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">C02 → C03：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">C03</span><span class="type">Verification</span></div>
+              <div class="name"><code>verify:fast</code> / scope classification</div>
+              <div class="purpose">区分 changed、v3、architecture、build、provider、session、debug、router、tool、v4。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C02 diff base/head</dd>
+                <dt>outputs</dt><dd>scope outputs</dd>
+                <dt>dependencies</dt><dd>C02</dd>
+                <dt>impl binding</dt><dd><code>scripts/ci</code> / gate scripts</dd>
+                <dt>verify binding</dt><dd>scope regression</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/test.yml:41-54</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">C03 → C04：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">C04</span><span class="type">Verification</span></div>
+              <div class="name">Scoped V3 gates + <code>verify:ci</code></div>
+              <div class="purpose">按 changed scope 运行 required gates 和 architecture stack。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C03 scope</dd>
+                <dt>outputs</dt><dd>gate results</dd>
+                <dt>dependencies</dt><dd>C03</dd>
+                <dt>impl binding</dt><dd>gate scripts</dd>
+                <dt>verify binding</dt><dd>architecture gate suite</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/test.yml:95-139</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">C04 → C05：有实际依赖</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">C05</span><span class="type">Integration</span></div>
+              <div class="name">CI build/install + host tests</div>
+              <div class="purpose">在 runner 上构建、安装 CLI 并跑 host tests；这不是生产 runtime 安装。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C04 gates</dd>
+                <dt>outputs</dt><dd>CI build/install results</dd>
+                <dt>dependencies</dt><dd>C04</dd>
+                <dt>impl binding</dt><dd>runner artifact only</dd>
+                <dt>verify binding</dt><dd>host tests</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/test.yml:140-154</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">C05 → C06：有实际依赖</div>
+
+          <details class="node evidence">
+            <summary>
+              <div class="topline"><span class="id">C06</span><span class="type">Evidence</span></div>
+              <div class="name">PR checks</div>
+              <div class="purpose">把 scoped gates 结果绑定到 PR head SHA。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C05 runner results</dd>
+                <dt>outputs</dt><dd>GitHub check runs</dd>
+                <dt>dependencies</dt><dd>C05</dd>
+                <dt>impl binding</dt><dd>PR head SHA</dd>
+                <dt>verify binding</dt><dd>workflow run</dd>
+                <dt>evidence</dt><dd>PR runs 可见，例如 #197 success</dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">C06 → C07：main push verification 存在，但 concurrency 会取消旧 run</div>
+
+          <details class="node integration">
+            <summary>
+              <div class="topline"><span class="id">C07</span><span class="type">Integration</span></div>
+              <div class="name">Merge main / CI-only terminal</div>
+              <div class="purpose">对 source/CI 变更，merge 可以是合法 terminal，但必须显式声明 delivery 不适用。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>C06 checks</dd>
+                <dt>outputs</dt><dd>merge SHA</dd>
+                <dt>dependencies</dt><dd>C06</dd>
+                <dt>impl binding</dt><dd>merge SHA</dd>
+                <dt>verify binding</dt><dd>post-merge main run 或显式等价 receipt</dd>
+                <dt>evidence</dt><dd>PR #184 显式写 source/commit/push only；部分 main runs cancelled</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="missing-node">
+            <strong>As-Is 缺口</strong>
+            没有统一的 <code>delivery_class</code> 节点区分 CI-only、runtime、release。当前由 PR 作者文字说明决定，容易被 merge 掩盖。
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">D. Release 实际路径<span>独立人工入口；不自动继承 merge 或 runtime replay</span></div>
+
+          <details class="node constraint" open>
+            <summary>
+              <div class="topline"><span class="id">D01</span><span class="type">Constraint</span></div>
+              <div class="name">Manual <code>workflow_dispatch</code></div>
+              <div class="purpose">人工选择 tag、npm publish 和 dist-tag，启动 release。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>tag / npm flags</dd>
+                <dt>outputs</dt><dd>workflow dispatch</dd>
+                <dt>dependencies</dt><dd>人工决定</dd>
+                <dt>impl binding</dt><dd><code>.github/workflows/release.yml:3-19</code></dd>
+                <dt>verify binding</dt><dd>MISSING：未强制 dispatch ref == verified origin/main SHA</dd>
+                <dt>evidence</dt><dd>workflow 只支持手动触发</dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">D01 ⇢ D02：release 接受 workflow ref，未强制绑定 origin/main merge receipt</div>
+
+          <details class="node impl">
+            <summary>
+              <div class="topline"><span class="id">D02</span><span class="type">Implementation</span></div>
+              <div class="name">Checkout release SHA</div>
+              <div class="purpose">在 release runner 上 checkout workflow SHA 并安装依赖。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>D01 dispatch ref</dd>
+                <dt>outputs</dt><dd>release source tree</dd>
+                <dt>dependencies</dt><dd>D01</dd>
+                <dt>impl binding</dt><dd><code>github.sha</code></dd>
+                <dt>verify binding</dt><dd>fetch origin/main，但未比较 equality</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/release.yml:29-46</code></dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">D02 → D03：有实际依赖</div>
+
+          <details class="node verify">
+            <summary>
+              <div class="topline"><span class="id">D03</span><span class="type">Verification</span></div>
+              <div class="name">Release gates</div>
+              <div class="purpose">运行 repo sanity、admission snapshot、<code>verify:ci</code>、line limit、Rust-only boundary。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>D02 source tree</dd>
+                <dt>outputs</dt><dd>release gate results</dd>
+                <dt>dependencies</dt><dd>D02</dd>
+                <dt>impl binding</dt><dd>release workflow scripts</dd>
+                <dt>verify binding</dt><dd>CI gates</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/release.yml:48-63</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">D03 → D04：有实际依赖</div>
+
+          <details class="node delivery">
+            <summary>
+              <div class="topline"><span class="id">D04</span><span class="type">Delivery</span></div>
+              <div class="name">Pack V3 npm tarball</div>
+              <div class="purpose">生成可发布 artifact，并检查 tarball 存在。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>D03 gates、source version</dd>
+                <dt>outputs</dt><dd><code>routecodex-v3-&lt;version&gt;.tgz</code></dd>
+                <dt>dependencies</dt><dd>D03</dd>
+                <dt>impl binding</dt><dd>pack:npm</dd>
+                <dt>verify binding</dt><dd>file existence；无独立 hash receipt</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/release.yml:65-87</code></dd>
+                <dt>status</dt><dd><span class="status partial">PARTIAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">D04 → D05：有实际依赖</div>
+
+          <details class="node delivery">
+            <summary>
+              <div class="topline"><span class="id">D05</span><span class="type">Delivery</span></div>
+              <div class="name">GitHub release / tag</div>
+              <div class="purpose">创建 tag 和 GitHub Release，上传 tarball。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>D04 tarball</dd>
+                <dt>outputs</dt><dd>tag、GitHub release asset</dd>
+                <dt>dependencies</dt><dd>D04</dd>
+                <dt>impl binding</dt><dd><code>target_commitish: github.sha</code></dd>
+                <dt>verify binding</dt><dd>拒绝重复 tag/release；无发布后 replay</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/release.yml:89-115</code></dd>
+                <dt>status</dt><dd><span class="status evidenced">EVIDENCED</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge">D05 → D06：条件边</div>
+
+          <details class="node delivery">
+            <summary>
+              <div class="topline"><span class="id">D06</span><span class="type">Delivery</span></div>
+              <div class="name">Optional npm publish</div>
+              <div class="purpose">在显式启用时发布 tarball 到 npm dist-tag。</div>
+            </summary>
+            <div class="body">
+              <dl>
+                <dt>inputs</dt><dd>D04 tarball、NPM_TOKEN</dd>
+                <dt>outputs</dt><dd>npm package version</dd>
+                <dt>dependencies</dt><dd>D05</dd>
+                <dt>impl binding</dt><dd>npm publish</dd>
+                <dt>verify binding</dt><dd>发布成功；无安装/用户入口 replay</dd>
+                <dt>evidence</dt><dd><code>.github/workflows/release.yml:117-128</code></dd>
+                <dt>status</dt><dd><span class="status partial">CONDITIONAL</span></dd>
+              </dl>
+            </div>
+          </details>
+          <div class="edge gap">D06 → D07：缺失边</div>
+
+          <div class="missing-node">
+            <strong>D07 · MISSING ACCEPTANCE</strong>
+            发布完成后没有统一节点验证用户从 release artifact 安装并运行的真实入口，也没有把 release 回指到原始 requirement。
+          </div>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>As-Is 总判断：</strong>项目不是“没有 DAG”，而是有四条彼此可运行但汇合规则不同的 DAG。Bugfix 的强路径能闭环；Feature 和 Release 的常见路径在 merge 或 artifact 发布处停止。由于没有统一 binding，流程是否完成主要取决于执行者是否额外补 issue comments、PR body、runtime replay 和 close receipt。
+      </div>
+    </section>
+
+    <section id="tobe">
+      <div class="section-head">
+        <div>
+          <h2>2. TO-BE DAG：最小但完整</h2>
+          <p>从项目真实目标出发，只保留让 correctness、traceability、verifiability、acceptance、delivery 成立所必需的节点。优先复用现有 AppSDK lifecycle records 和 RouteCodex maps，不新增平行治理框架。</p>
+        </div>
+        <span class="badge ok">ONE CONDITIONAL SPINE</span>
+      </div>
+
+      <div class="to-be">
+        <div class="side-note">
+          <h3>路径规则</h3>
+          <ul>
+            <li><strong>Bug：</strong>进入 TB04 reproduction/root cause。</li>
+            <li><strong>Feature：</strong>可跳过 TB04，但必须保留 acceptance 和 owner/map。</li>
+            <li><strong>Docs / CI-only：</strong>在 TB09 声明不适用后，可走 TB10 acceptance、TB11 close。</li>
+            <li><strong>Runtime：</strong>必须走 TB09A-D。</li>
+            <li><strong>Release：</strong>走 TB09R1-R3，把 publish/tag/package receipt 回指 acceptance。</li>
+          </ul>
+        </div>
+
+        <div class="spine">
+          <div class="tb-node req">
+            <div class="head"><span class="id">TB01</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Requirement / Bug intake</div>
+            <div class="desc">原始请求、失败样本、issue id、优先级。没有它，后续验证无法证明满足原目标。</div>
+          </div>
+
+          <div class="tb-node constraint">
+            <div class="head"><span class="id">TB02</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Acceptance + Constraints + Delivery Class</div>
+            <div class="desc">一句话验收条件、非目标、硬约束，以及 <code>docs/ci</code>、<code>runtime</code>、<code>release</code> 分类。这是当前最关键的缺失节点。</div>
+          </div>
+
+          <div class="tb-node design">
+            <div class="head"><span class="id">TB03</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Owner / Scope / Map binding</div>
+            <div class="desc">唯一 owner、允许/禁止路径、function/verification/mainline edge。删除它会破坏 traceability 和 correctness。</div>
+          </div>
+
+          <div class="branch">
+            <div class="tb-node design">
+              <div class="head"><span class="id">TB04</span><span class="badge warn">BUG ONLY</span></div>
+              <div class="name">Reproduction / first divergence / root cause</div>
+              <div class="desc">bugfix 的独立分支；删除会让“症状修复”重新变得不可排除。</div>
+            </div>
+            <div class="tb-node impl">
+              <div class="head"><span class="id">TB05</span><span class="badge">REQUIRED</span></div>
+              <div class="name">Candidate implementation + regression test</div>
+              <div class="desc">绑定 exact SHA/tree；删除会失去 implementation identity。</div>
+            </div>
+          </div>
+
+          <div class="tb-node verify">
+            <div class="head"><span class="id">TB06</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Focused verification + architecture gates</div>
+            <div class="desc">验证 positive、negative、边界与 map。删除会破坏 verifiability。</div>
+          </div>
+
+          <div class="tb-node verify">
+            <div class="head"><span class="id">TB07</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Independent review on exact candidate</div>
+            <div class="desc">审查 reviewed commit/tree 与 evidence IDs；删除会失去独立质量判断。</div>
+          </div>
+
+          <div class="tb-node integration">
+            <div class="head"><span class="id">TB08</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Merge receipt on main</div>
+            <div class="desc">绑定 candidate → merge SHA → completed main verification。删除会让交付来源不可追溯。</div>
+          </div>
+
+          <div class="tb-node delivery">
+            <div class="head"><span class="id">TB09</span><span class="badge">CONDITIONAL</span></div>
+            <div class="name">Delivery applicability decision</div>
+            <div class="desc">显式记录 runtime/release 不适用，或进入下面的 delivery branch。删除会重新产生“merge 是否算完成”的歧义。</div>
+          </div>
+
+          <div class="branch">
+            <div class="tb-node delivery">
+              <div class="head"><span class="id">TB09A</span><span class="badge fail">RUNTIME / RELEASE</span></div>
+              <div class="name">Build exact artifact</div>
+              <div class="desc">从 merged main 重建，记录 artifact hash/version。</div>
+            </div>
+            <div class="tb-node delivery">
+              <div class="head"><span class="id">TB09B</span><span class="badge fail">RUNTIME</span></div>
+              <div class="name">Install + restart + health + replay</div>
+              <div class="desc">安装 exact artifact，证明 runtime 已加载，检查 listener，并从真实入口重放原样本。</div>
+            </div>
+          </div>
+
+          <div class="branch release">
+            <div class="tb-node delivery">
+              <div class="head"><span class="id">TB09R1</span><span class="badge fail">RELEASE</span></div>
+              <div class="name">Release gates on verified main SHA</div>
+              <div class="desc">release source SHA 必须等于 verified merged main，否则 fail closed。</div>
+            </div>
+            <div class="tb-node delivery">
+              <div class="head"><span class="id">TB09R2</span><span class="badge fail">RELEASE</span></div>
+              <div class="name">Publish tag / package</div>
+              <div class="desc">从 TB09A exact artifact 发布 tag、tarball 或 npm package，并记录 immutable receipt。</div>
+            </div>
+            <div class="tb-node delivery">
+              <div class="head"><span class="id">TB09R3</span><span class="badge fail">RELEASE</span></div>
+              <div class="name">Release receipt → Acceptance</div>
+              <div class="desc">receipt 绑定 main SHA、artifact hash、tag/package 和发布结果；它是 TB10 的 release 输入。</div>
+            </div>
+          </div>
+
+          <div class="tb-node accept">
+            <div class="head"><span class="id">TB10</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Acceptance against original requirement</div>
+            <div class="desc">把 TB02 的验收条件和 TB06/TB09 receipts 对照。测试通过不等于用户目标满足。</div>
+          </div>
+
+          <div class="tb-node accept">
+            <div class="head"><span class="id">TB11</span><span class="badge">REQUIRED</span></div>
+            <div class="name">Close receipt + cleanup</div>
+            <div class="desc">引用 requirement、candidate、review、merge、delivery、acceptance，并记录 cleanup disposition。</div>
+          </div>
+        </div>
+
+        <div class="side-note">
+          <h3>删除必要性</h3>
+          <table>
+            <thead><tr><th>节点</th><th>删除后破坏</th></tr></thead>
+            <tbody>
+              <tr><td>TB02</td><td>acceptance + delivery classification</td></tr>
+              <tr><td>TB03</td><td>traceability + correctness</td></tr>
+              <tr><td>TB04</td><td>bugfix root-cause correctness</td></tr>
+              <tr><td>TB05</td><td>implementation identity</td></tr>
+              <tr><td>TB06</td><td>verifiability</td></tr>
+              <tr><td>TB07</td><td>independent quality judgment</td></tr>
+              <tr><td>TB08</td><td>source provenance</td></tr>
+              <tr><td>TB09</td><td>delivery applicability clarity</td></tr>
+              <tr><td>TB09A-B</td><td>runtime delivery + real acceptance</td></tr>
+              <tr><td>TB09R1-R3</td><td>release provenance + package acceptance</td></tr>
+              <tr><td>TB10</td><td>requirement closure</td></tr>
+              <tr><td>TB11</td><td>auditability + cleanup</td></tr>
+            </tbody>
+          </table>
+          <div class="callout ok">
+            这个 DAG 没有新增“治理阶段”。TB02、TB03、TB06-TB11 都能落到项目已经声明的 GoalClarificationRecord、EvidenceRecord、ReviewRecord、MergeRecord、PreReviewValidationRecord、PromotionRecord和close receipt上。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="diff">
+      <div class="section-head">
+        <div>
+          <h2>3. DAG DIFF：AS-IS vs TO-BE</h2>
+          <p>只列结构性差异。命名不同不算差异；“节点已经存在但缺少连接或证据”优先标为 binding/evidence gap，而不是要求重写代码。</p>
+        </div>
+        <span class="badge fail">STRUCTURAL</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>类型</th><th>As-Is</th><th>To-Be</th><th>最小补齐</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>MISSING_NODE</strong></td>
+            <td>Feature 路径没有统一 Goal/Acceptance + Delivery Class 节点；Release 没有 post-release acceptance 节点。</td>
+            <td>TB02、TB09、TB10。</td>
+            <td>复用现有 GoalClarificationRecord，增加 delivery class 字段；不建第二套 plan。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_BINDING</strong></td>
+            <td>Requirement → candidate → review → merge → delivery → close 主要靠 issue comments、PR body 和人工记忆。</td>
+            <td>每个边引用同一组 record IDs 和 exact hashes。</td>
+            <td>补 references，不改已工作的 runtime code。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_VERIFICATION</strong></td>
+            <td>2个 function feature 没有 verification owner：<code>v3.provider_key_health_scoring</code>、<code>v3.admin_observability_aggregation</code>。</td>
+            <td>每个 implementation feature 至少有一个明确 verification binding。</td>
+            <td>补 verification entry 或明确该 feature 的 terminal verification；不新增测试层。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_BINDING</strong></td>
+            <td>3个 verification feature 没有 function owner：<code>v3.config_management</code>、<code>v3.responses_direct_h2_equivalence_harness</code>、<code>v3.execution_control_payload_architecture</code>。</td>
+            <td>每个 verification 反指一个 requirement/implementation owner。</td>
+            <td>补 owner edge 或删除真正 dead verification；先核对历史，不直接删。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_EVIDENCE</strong></td>
+            <td>30个最近 merged PR 中，body 只有14个出现 evidence、6个出现 replay；多数证据不可机器查询。</td>
+            <td>PR summary 可保留，但 truth 必须引用 machine records。</td>
+            <td>把现有 tests/replay 文件登记为 EvidenceRecord；PR 只引用 ID。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_EVIDENCE</strong></td>
+            <td>13条 mainline edges 为 <code>binding_pending</code>。</td>
+            <td>anchored 或明确删除/延期为独立债务。</td>
+            <td>逐条补 caller/callee/owner binding；不阻塞不相关 feature 的交付。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_ACCEPTANCE</strong></td>
+            <td>Feature 常在 merge 结束；runtime replay 不总与原始 requirement 对照。</td>
+            <td>TB10 acceptance 必须引用 TB02 和实际 delivery receipts。</td>
+            <td>close/merge 前补一条 acceptance projection；docs/CI-only 可显式写不适用。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_EDGE</strong></td>
+            <td>merge → delivery 是否适用没有统一判定。</td>
+            <td>TB09 显式判定，runtime/release 强制下游边。</td>
+            <td>在现有 PR/issue receipt 加 delivery class，不另建 workflow。</td>
+          </tr>
+          <tr>
+            <td><strong>MISSING_EVIDENCE</strong></td>
+            <td>main push run 会被后续 merge 取消，不能由 PR green 推断 post-merge main 已验证。</td>
+            <td>Merge receipt 必须绑定 completed main verification 或显式等价 receipt。</td>
+            <td>取消后重跑受影响 main run；将 run id 写入 merge receipt。</td>
+          </tr>
+          <tr>
+            <td><strong>WRONG_DEPENDENCY</strong></td>
+            <td>Release workflow 使用 <code>workflow_dispatch</code> ref 的 <code>github.sha</code>；只 fetch origin/main，未验证 equality。</td>
+            <td>Release 只能从 verified merged main SHA 出发。</td>
+            <td>加一个 SHA equality gate，保留现有 release 流程。</td>
+          </tr>
+          <tr>
+            <td><strong>REDUNDANT_NODE</strong></td>
+            <td>证据真值分散在 PR body、issue comments、docs/evidence、AppSDK records、workflow logs。</td>
+            <td>一个 record graph 引用原始证据；摘要节点只展示。</td>
+            <td>不删除已有历史证据，只指定唯一引用 owner。</td>
+          </tr>
+          <tr>
+            <td><strong>INVALID_CYCLE</strong></td>
+            <td>未发现证据支持的 cycle。</td>
+            <td>保持无环。</td>
+            <td>不制造“必须循环审批”的伪闭环。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="violations">
+      <div class="section-head">
+        <div>
+          <h2>4. Closure Violations</h2>
+          <p>按 A-J 逐项判断。这里把“没有证据”与“没有证据绑定”分开：前者不能宣称完成，后者是当前最可修的流程缺陷。</p>
+        </div>
+        <span class="badge warn">PATH-SPECIFIC</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>检查</th><th>判定</th><th>证据与影响</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>A. Orphan Requirement</td>
+            <td><span class="status partial">部分成立</span></td>
+            <td>Feature request 可以落到 docs/goals 和 PR，但没有统一 requirement record 强制下游 candidate/merge/delivery 反指，故路径可能断在 merge。</td>
+          </tr>
+          <tr>
+            <td>B. Orphan Implementation</td>
+            <td><span class="status missing">成立</span></td>
+            <td>2个 function features 没有对应 verification feature，无法从 implementation 走到验证终端。</td>
+          </tr>
+          <tr>
+            <td>C. Unverified Implementation</td>
+            <td><span class="status missing">成立</span></td>
+            <td>上述两个 function 是明确的 map-level unverified implementation；此外部分 runtime feature 只有 source/test，无 live replay。</td>
+          </tr>
+          <tr>
+            <td>D. Unbound Verification</td>
+            <td><span class="status missing">成立</span></td>
+            <td>3个 verification features 没有 function owner，测试存在但无法知道它服务哪个 requirement/implementation。</td>
+          </tr>
+          <tr>
+            <td>E. Missing Acceptance</td>
+            <td><span class="status missing">成立</span></td>
+            <td>Feature 路径缺统一 acceptance node；merge、CI 或 unit tests 不能替代用户目标满足。</td>
+          </tr>
+          <tr>
+            <td>F. Missing Evidence</td>
+            <td><span class="status partial">系统性成立</span></td>
+            <td>PR body 证据字段不一致；30个 PR 中仅14个有 evidence、6个有 replay。部分是文字缺失，部分是实际交付证据缺失，需 receipt 区分。</td>
+          </tr>
+          <tr>
+            <td>G. Dependency Gap</td>
+            <td><span class="status missing">成立</span></td>
+            <td>merge → delivery applicability 未统一；release SHA 未强制等于 verified main；13条 mainline edges pending。</td>
+          </tr>
+          <tr>
+            <td>H. Dead Node</td>
+            <td><span class="status unknown">未证明</span></td>
+            <td>没有足够证据判定某个节点删除后完全不影响 requirement/implementation/verification/delivery。不要把 orphan 直接等同 dead。</td>
+          </tr>
+          <tr>
+            <td>I. Cycle</td>
+            <td><span class="status evidenced">未发现</span></td>
+            <td>当前观察到的边均可拓扑排序；问题在缺边和弱绑定，不是循环依赖。</td>
+          </tr>
+          <tr>
+            <td>J. Premature Closure</td>
+            <td><span class="status partial">路径级成立</span></td>
+            <td>两个 closed P0 有强 receipt；若把只有 merge/test 证据的 runtime PR 视为已交付，则属于 premature closure。不能把所有 closed item 一律判错。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout fail">
+        <strong>最危险的不是 open bug 数量。</strong>66 open、12 P0 是 backlog 风险；DAG 风险是某些 feature 已经 merge，但没有统一机制强制证明它是否还需要 runtime install、replay 和 user acceptance。
+      </div>
+    </section>
+
+    <section id="migration">
+      <div class="section-head">
+        <div>
+          <h2>5. Minimal Migration Plan</h2>
+          <p>顺序严格按“补 binding → 补 verification → 补 evidence → 补 edge → 补必要 node → 最后才考虑架构重构”。不改已经正确工作的 runtime 代码。</p>
+        </div>
+        <span class="badge ok">NO REWRITE</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>顺序</th><th>动作</th><th>为什么最小</th><th>完成证据</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>把现有 issue/goal、candidate、review、merge、delivery、close 串成一条 record graph。</td>
+            <td>已有 AppSDK records，只是实际路径没有一致使用。</td>
+            <td>每个 id 可解析；candidate/reviewed/merge hashes 一致。</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>在现有 Goal/PR receipt 增加 <code>delivery_class</code>：<code>docs_ci</code>、<code>runtime</code>、<code>release</code>。</td>
+            <td>用一个枚举消除 merge 后是否继续交付的歧义。</td>
+            <td>分类缺失或 runtime/release 无下游 receipt 时 close gate 失败。</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>补 runtime/release 条件门：artifact SHA + install + restart + health + same-entry replay。</td>
+            <td>复用现有 verification map、lifecycle records 和 release workflow。</td>
+            <td>receipt 全部引用同一 main SHA/artifact hash；replay 引用原 requirement。</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>修 2个 orphan function 和3个 orphan verification。</td>
+            <td>只补缺失边或明确 terminal；不新增测试框架。</td>
+            <td>function → verification 双向可解析，或删除项有证据依据。</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>Merge receipt 绑定 completed main verification run；取消时重跑。</td>
+            <td>避免用 PR green 代替 post-merge tree 验证。</td>
+            <td>merge SHA == run SHA，run conclusion == success。</td>
+          </tr>
+          <tr>
+            <td>6</td>
+            <td>Release workflow 加 verified origin/main equality gate。</td>
+            <td>现有 release 结构保留，只加一个依赖检查。</td>
+            <td>release source SHA == verified main SHA，否则 fail closed。</td>
+          </tr>
+          <tr>
+            <td>7</td>
+            <td>逐条清理13条 <code>binding_pending</code>。</td>
+            <td>作为独立 map debt，不阻塞其他已完成 feature。</td>
+            <td>每条 anchored，或有明确 deferred owner/risk。</td>
+          </tr>
+          <tr>
+            <td>8</td>
+            <td>PR summary 保留，但 truth 指向 records。</td>
+            <td>不删除历史证据，不要求人工维护两套真值。</td>
+            <td>PR body 不再承担唯一 evidence carrier。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout ok">
+        <strong>不做什么：</strong>不重写正确 runtime；不为每个 feature 建一套新状态机；不把所有 docs/CI 变更强制跑 install/replay；不删除历史 issue comments 和已有 evidence。
+      </div>
+    </section>
+
+    <section id="risks">
+      <div class="section-head">
+        <div>
+          <h2>6. Remaining Risks</h2>
+          <p>这些风险在补齐最小 DAG 后仍需单独管理；它们不是靠“多一个 review”就能消除。</p>
+        </div>
+        <span class="badge warn">RESIDUAL</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>风险</th><th>当前证据</th><th>后果</th><th>处理</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>审计基线不是 exact origin/main</td>
+            <td>当前 detached HEAD <code>7ea636f0</code>，origin/main <code>b08dc3b4</code>，工作树有已有改动。</td>
+            <td>map 计数和部分文档可能包含工作树 overlay，不是不可变 main snapshot。</td>
+            <td>审批设计后在 clean worktree 对 merge base 重跑一次只读统计。</td>
+          </tr>
+          <tr>
+            <td>PR body 不是机器真源</td>
+            <td>30个 merged PR 的 evidence/review/replay 字段不一致。</td>
+            <td>人工写作会造成假缺证据或假闭环。</td>
+            <td>只让 records 做 gate，PR body 做可读摘要。</td>
+          </tr>
+          <tr>
+            <td>main push run 被取消</td>
+            <td><code>test.yml</code> 的 concurrency cancel-in-progress；近期多个 main runs cancelled。</td>
+            <td>不能从 PR checks 推断 post-merge main tree 已验证。</td>
+            <td>merge receipt 绑定 completed run，或重跑受影响 main SHA。</td>
+          </tr>
+          <tr>
+            <td>Release 与 runtime acceptance 分离</td>
+            <td>release 是手动 workflow；没有 post-release install/replay receipt。</td>
+            <td>tag/package 存在不等于用户入口可用。</td>
+            <td>release class 强制发布后入口验收。</td>
+          </tr>
+          <tr>
+            <td>Runtime feature 的 delivery applicability 不清</td>
+            <td>PR #197 有 replay，#196 无 evidence/replay/install；30个 PR 中 replay 只有6个。</td>
+            <td>merge 可能被误当成 runtime delivery。</td>
+            <td>Goal 阶段就固定 delivery class，close 阶段按 class 验证。</td>
+          </tr>
+          <tr>
+            <td>Map 债务</td>
+            <td>2 orphan functions、3 orphan verifications、13 pending edges。</td>
+            <td>无法从所有 implementation 走到 verification 终端。</td>
+            <td>按 owner 逐条补 binding，不阻塞主线交付。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="criteria">
+      <div class="section-head">
+        <div>
+          <h2>7. Final Closure Criteria</h2>
+          <p>一个 Feature / Bug 只有在适用的终态证据全部存在时才算闭合。条件节点按 delivery class 启用，不能用“不适用”掩盖真实 runtime 风险。</p>
+        </div>
+        <span class="badge ok">ACCEPTANCE GATE</span>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h3>通用必要条件</h3>
+          <ol class="plain-list">
+            <li>Requirement 和 acceptance criteria 已记录并确认。</li>
+            <li>Owner、scope、allowed/forbidden paths 和 map bindings 已锁定。</li>
+            <li>Candidate exact SHA/tree 可追溯。</li>
+            <li>Focused verification 和 architecture gates 对 exact candidate 通过。</li>
+            <li>Independent review 对同一 candidate/tree 给出 PASS。</li>
+            <li>Merge receipt 绑定 main SHA 和 completed main verification。</li>
+            <li>Delivery class 已声明为 <code>docs_ci</code>、<code>runtime</code> 或 <code>release</code>。</li>
+            <li>Acceptance 对照原始 requirement，而不是只看测试绿。</li>
+            <li>Close receipt 能反向解析全部上游 records。</li>
+            <li>Cleanup 只移除本轮资源，并留下 disposition。</li>
+          </ol>
+        </div>
+        <div>
+          <h3>按 delivery class 的 terminal</h3>
+          <table>
+            <thead>
+              <tr><th>Class</th><th>合法 terminal</th><th>必须证据</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>docs_ci</code></td>
+                <td>Merge + acceptance receipt</td>
+                <td>scoped gates、review、merge SHA；install/replay 明确不适用。</td>
+              </tr>
+              <tr>
+                <td><code>runtime</code></td>
+                <td>Acceptance replay + close receipt</td>
+                <td>artifact hash、install、restart、health、same-entry replay，全部绑定 main SHA。</td>
+              </tr>
+              <tr>
+                <td><code>release</code></td>
+                <td>Published release + acceptance receipt</td>
+                <td>verified main SHA、release gates、tarball hash、tag、install/replay 或等价用户入口证据。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout fail">
+            <strong>FAIL closed：</strong>任何 requirement 路径如果只能到达 merge、PR green 或 artifact upload，就不能宣称 Feature/Bug 完整交付。
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:18px">审批判断</h3>
+      <div class="callout">
+        当前项目的主线工程能力已经存在，缺陷集中在“实际执行过的 DAG 没有被同一套 record graph 完整描述和验证”。最小改造应只补连接、条件门和 receipt；审批后先提交这份设计，再进入 gap 修复计划。
+      </div>
+    </section>
+  </div>
+</body>
+</html>
