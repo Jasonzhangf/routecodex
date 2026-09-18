@@ -105,6 +105,7 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
     if !value.is_object() {
         return Err("direct_response_passthrough requires object payload".to_string());
     }
+    let value = super::protocol::provider_response::consume_responses_sse_extra_fields(&value)?;
     // Transport already supplies the raw provider body as the data-plane
     // object. Direct response hooks validate protocol identity only; they do
     // not unwrap a second synthetic HTTP envelope.

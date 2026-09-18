@@ -107,6 +107,56 @@ fn positive_direct_response_client_validate_preserves_payload_and_emits_fact() {
 }
 
 #[test]
+fn direct_response_container_consumes_known_provider_diagnostics() {
+    let output = execute(
+        "V4DirectResp02RelayContainer",
+        "response_outbound",
+        "direct_response",
+        2,
+        "v4.hook.direct.response",
+        json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp-1",
+                "extra_fields": {"provider": "openai", "latency": 4}
+            }
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-responses"
+        }),
+    )
+    .expect("known provider diagnostics are consumed at the client payload boundary");
+    assert!(output.data.get("extra_fields").is_none());
+    assert!(output.data["response"].get("extra_fields").is_none());
+}
+
+#[test]
+fn direct_response_container_rejects_unknown_provider_control_fields() {
+    let error = execute(
+        "V4DirectResp02RelayContainer",
+        "response_outbound",
+        "direct_response",
+        2,
+        "v4.hook.direct.response",
+        json!({
+            "type": "response.output_text.delta",
+            "delta": "hi",
+            "extra_fields": {"unregistered_control": true}
+        }),
+        json!({
+            "client_protocol": "openai-responses",
+            "provider_protocol": "openai-responses"
+        }),
+    )
+    .expect_err("unknown provider control fields must not reach the client payload");
+    assert!(matches!(
+        error,
+        NodeContainerError::Bridge(routecodex_v4_cordis_bridge::BridgeError::HandleError { .. })
+    ));
+}
+
+#[test]
 fn negative_direct_response_client_validate_rejects_protocol_mismatch() {
     let error = execute(
         "V4DirectResp03ClientProtocol",

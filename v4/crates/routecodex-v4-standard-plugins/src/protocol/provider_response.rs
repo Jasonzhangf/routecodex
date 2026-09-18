@@ -40,18 +40,6 @@ fn consume_responses_extra_fields(
     Ok(())
 }
 
-pub(crate) fn consume_responses_sse_extra_fields(event: &Value) -> Result<Value, String> {
-    let mut object = event
-        .as_object()
-        .cloned()
-        .ok_or_else(|| "provider Responses SSE event must be an object".to_string())?;
-    consume_responses_extra_fields(&mut object, "event")?;
-    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
-        consume_responses_extra_fields(response, "response")?;
-    }
-    Ok(Value::Object(object))
-}
-
 fn normalize_responses_response(
     body: &Value,
     expected_instructions: Option<&str>,
@@ -397,6 +385,18 @@ pub fn normalize_provider_sse_frame(protocol: &str, frame: &[u8]) -> Result<Vec<
     normalize_provider_sse_frame_with_lane(protocol, frame, false)
 }
 
+pub(crate) fn consume_responses_sse_extra_fields(event: &Value) -> Result<Value, String> {
+    let mut object = event
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "provider Responses SSE event must be an object".to_string())?;
+    consume_responses_extra_fields(&mut object, "event")?;
+    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        consume_responses_extra_fields(response, "response")?;
+    }
+    Ok(Value::Object(object))
+}
+
 pub fn normalize_provider_sse_frame_for_relay(
     protocol: &str,
     frame: &[u8],
@@ -438,7 +438,7 @@ fn normalize_provider_sse_frame_with_lane(
             "openai" | "chat" => normalize_openai_sse_event(&value)?,
             "anthropic" => normalize_anthropic_sse_event(&value).into_iter().collect(),
             "responses" => vec![normalize_responses_response(
-                &value,
+                &consume_responses_sse_extra_fields(&value)?,
                 None,
                 allow_relay_instructions,
             )?],

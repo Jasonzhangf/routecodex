@@ -287,6 +287,7 @@ resources:
   allowed_writers:
   - V4Runtime01MainlineKernel
   allowed_readers:
+  - V4DirectResp01ProviderRaw
   - V4DirectReq02RelayContainer
   - V4DirectResp02RelayContainer
   - V4DirectResp03ClientProtocol
@@ -382,6 +383,7 @@ resources:
   - V4ProviderRespInbound01Raw
   - V4DirectResp01ProviderRaw
   allowed_readers:
+  - V4DirectResp01ProviderRaw
   - V4DirectResp03ClientProtocol
   - V4ServerRespOutbound06ClientFrame
   forbidden_writers:

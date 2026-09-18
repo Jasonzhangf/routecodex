@@ -108,7 +108,11 @@ const NODE_PERMISSIONS = new Map([
     reads: ['v4.direct.request.provider_wire'], writes: [],
   }],
   ['V4DirectResp01ProviderRaw', {
-    reads: ['v4.direct.response.provider_raw'],
+    reads: [
+      'v4.direct.response.provider_raw',
+      'v4.information.provider_protocol',
+      'v4.control.stream_terminal',
+    ],
     writes: ['v4.direct.response.provider_raw', 'v4.control.stream_terminal'],
   }],
   ['V4DirectReq02RelayContainer', {

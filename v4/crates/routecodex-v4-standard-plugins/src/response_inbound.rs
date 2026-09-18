@@ -581,14 +581,11 @@ pub fn decode_direct_provider_sse_frame(
             disposition: ProviderSseEventDisposition::Completed,
         });
     }
-    let mut semantic: Value = serde_json::from_str(&raw)
+    let semantic: Value = serde_json::from_str(&raw)
         .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
     semantic
         .as_object()
         .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
-    if provider_protocol == "responses" {
-        semantic = provider_response::consume_responses_sse_extra_fields(&semantic)?;
-    }
     let disposition = match provider_protocol {
         "chat" => ProviderSseEventDisposition::Continue,
         "responses" => match semantic.get("type").and_then(Value::as_str) {

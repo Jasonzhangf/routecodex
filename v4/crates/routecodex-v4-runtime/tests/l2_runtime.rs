@@ -1347,6 +1347,59 @@ fn sse_transport_seals_terminal_without_consuming_trailing_provider_frame() {
 }
 
 #[test]
+fn direct_sse_transport_consumes_provider_diagnostics_before_direct_raw() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-direct-sse-extra-fields",
+        ScriptedProviderSource::new(vec![
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\",\"latency\":4}}\n\n".to_vec(),
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"output\":[]}}\n\n".to_vec(),
+        ]),
+        timing,
+    );
+
+    let mut client_bytes = Vec::new();
+    let mut chunk = Vec::new();
+    while driver.next_chunk(&mut chunk).expect("direct stream chunk") {
+        client_bytes.extend_from_slice(&chunk);
+        chunk.clear();
+    }
+    let text = String::from_utf8_lossy(&client_bytes);
+    assert!(text.contains("response.output_text.delta"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
+    assert!(!text.contains("extra_fields"), "{text}");
+}
+
+#[test]
+fn direct_sse_transport_rejects_unknown_provider_control_fields() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-direct-sse-unknown-extra-fields",
+        ScriptedProviderSource::new(vec![
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"unregistered_control\":true}}\n\n".to_vec(),
+        ]),
+        timing,
+    );
+
+    let mut chunk = Vec::new();
+    assert!(
+        driver.next_chunk(&mut chunk).expect("failure frame is committed"),
+        "failure must project one client frame"
+    );
+    let text = String::from_utf8_lossy(&chunk);
+    assert!(text.contains("provider_response_control_envelope"), "{text}");
+    assert!(!text.contains("response.completed"), "{text}");
+}
+
+#[test]
 fn sse_transport_records_non_overlapping_provider_phase_timing() {
     let runtime = active_runtime();
     let timing = V4RuntimeTimingSummary::new();
