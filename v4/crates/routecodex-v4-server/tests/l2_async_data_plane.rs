@@ -62,6 +62,21 @@ async fn request(address: String, path: &str) -> String {
     String::from_utf8(response).expect("UTF-8 response")
 }
 
+async fn request_with_headers(address: String, path: &str, headers: &[(&str, &str)]) -> String {
+    let mut client = TcpStream::connect(address).await.expect("connect");
+    let extra = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}\r\n"))
+        .collect::<String>();
+    client
+        .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n{extra}\r\n").as_bytes())
+        .await
+        .expect("request");
+    let mut response = Vec::new();
+    client.read_to_end(&mut response).await.expect("response");
+    String::from_utf8(response).expect("UTF-8 response")
+}
+
 #[tokio::test]
 async fn async_admission_assigns_real_request_identity_scope() {
     let server = AsyncHttpServer::bind("127.0.0.1:0").await.expect("bind");
@@ -132,6 +147,46 @@ async fn async_admission_persists_request_record_after_response() {
         .join(format!("server-v4-{port}.request-records.jsonl"));
     let records = std::fs::read_to_string(path).expect("async request record");
     assert!(records.contains("/persist"));
+    stop.cancel();
+    task.await.expect("join").expect("clean stop");
+}
+
+#[tokio::test]
+async fn async_request_record_correlates_codex_turn_id_from_header() {
+    let server = AsyncHttpServer::bind("127.0.0.1:0").await.expect("bind");
+    let address = server.local_address().expect("address");
+    let port = address
+        .rsplit(':')
+        .next()
+        .expect("port")
+        .parse::<u16>()
+        .expect("port");
+    let stop = CancellationToken::new();
+    let task = tokio::spawn(server.run_until(Arc::new(Handler), stop.clone()));
+    let endpoint = format!(
+        "/turn-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let response = request_with_headers(
+        address,
+        &endpoint,
+        &[(
+            "x-codex-turn-metadata",
+            r#"{"session_id":"session-1","turn_id":"turn-1"}"#,
+        )],
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200"));
+    let rows = request_record_rows(port);
+    let row = rows
+        .iter()
+        .find(|row| row["row"]["meta"]["endpoint"] == endpoint)
+        .expect("turn-correlated row");
+    assert_eq!(row["row"]["meta"]["turn_id"], "turn-1");
     stop.cancel();
     task.await.expect("join").expect("clean stop");
 }

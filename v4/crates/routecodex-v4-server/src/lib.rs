@@ -124,11 +124,63 @@ pub fn persist_request_record(request: &HttpRequest, status: u16) -> Result<(), 
         &request.server_id,
         request.port,
         &request.path,
+        request_turn_id(&request.headers).as_deref(),
         status,
         0,
         unix_epoch_ms()?,
         None,
     )
+}
+
+fn request_turn_id(headers: &[(String, String)]) -> Option<String> {
+    let value = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-metadata"))
+        .map(|(_, value)| value.as_str())?;
+    let metadata = serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .or_else(|| {
+            percent_decode(value).and_then(|decoded| serde_json::from_str(&decoded).ok())
+        })?;
+    metadata
+        .get("turn_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|turn_id| !turn_id.is_empty())
+        .map(str::to_string)
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    if !value.as_bytes().contains(&b'%') {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'%' {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if index + 2 >= bytes.len() {
+            return None;
+        }
+        let high = decode_hex(bytes[index + 1])?;
+        let low = decode_hex(bytes[index + 2])?;
+        decoded.push((high << 4) | low);
+        index += 3;
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn decode_hex(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn unix_epoch_ms() -> Result<u64, String> {
@@ -143,6 +195,7 @@ fn persist_request_record_fields_with_duration(
     server_id: &str,
     port: u16,
     endpoint: &str,
+    turn_id: Option<&str>,
     status: u16,
     duration_ms: u64,
     started_epoch_ms: u64,
@@ -174,6 +227,7 @@ fn persist_request_record_fields_with_duration(
         "meta": {
             "request_id": request_id,
             "endpoint": endpoint,
+            "turn_id": turn_id,
             "response_status": if result == "success" { "completed" } else { "error" },
             "provider_status": status,
             "finish_reason": if result == "success" { "stop" } else { "error" }
@@ -393,6 +447,7 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
     let record_server_id = request.server_id.clone();
     let record_endpoint = request.path.clone();
     let record_port = request.port;
+    let record_turn_id = request_turn_id(&request.headers);
     let cancellation = server_stop.child_token();
     let response = handler.handle_async(request, cancellation.clone()).await;
     let timing = response.timing.clone();
@@ -465,6 +520,7 @@ async fn serve_async_connection<H: AsyncHttpHandler>(
         &record_server_id,
         record_port,
         &record_endpoint,
+        record_turn_id.as_deref(),
         response.status,
         started_at.elapsed().as_millis() as u64,
         started_epoch_ms,
@@ -632,6 +688,7 @@ fn serve_connection<H: HttpHandler>(
         port,
         ..request
     };
+    let turn_id = request_turn_id(&request.headers);
     let response = handler.handle(request.clone());
     let status = response.status;
     let timing = response.timing.clone();
@@ -641,6 +698,7 @@ fn serve_connection<H: HttpHandler>(
         &request.server_id,
         request.port,
         &request.path,
+        turn_id.as_deref(),
         status,
         started_at.elapsed().as_millis() as u64,
         started_epoch_ms,
