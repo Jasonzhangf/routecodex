@@ -145,6 +145,29 @@ Runtime gates:
 - Run Codex review only after runtime evidence. Any subsequent code/test/build/runtime-config change
   invalidates the review and requires affected verification plus review again.
 
+## Execution Evidence
+
+The current provider-scope-family candidate records this writable-runner receipt for the generic
+provider HTTP 400 scope change:
+
+```text
+worktree: /Users/fanzhang/Documents/github/routecodex/playground/provider-scope-family-0917
+source candidate: 495eecd45
+
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_exhausts_provider_family -- --nocapture
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait -- --nocapture
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime relay_generic_provider_http_400_excludes_provider_family_and_records_health -- --nocapture
+npm run verify:v3-provider-action-gate
+npm run verify:v3-architecture-ci
+npm run test:v3-provider-action-gate-red-fixtures
+```
+
+All commands exited `0`. The three focused runtime tests each passed `1/1`; the provider-action
+gate passed with 48 machine edges and synchronized symbols/callers/map-manifest endpoints; the
+architecture CI passed `39/39` sub-gates; and the provider-action red-fixture gate rejected all 54
+forbidden mutations. This is an independently captured writable-runner execution receipt, not a
+review decision or installed-runtime evidence.
+
 ## Known Gaps At Design Time
 
 - Current `V3ProviderHealthStore` failure maps are provider-global.
