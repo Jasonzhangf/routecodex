@@ -966,6 +966,7 @@ fn dispatch_request(
                         policy.failure_threshold,
                     )?;
                     if !policy.retry {
+                        let _ = request_timing.finish_external_if_active();
                         return Err(project_upstream_fault(
                             request,
                             RuntimeFault::new(
@@ -982,6 +983,7 @@ fn dispatch_request(
                     if policy.backoff_ms > 0 {
                         std::thread::sleep(std::time::Duration::from_millis(policy.backoff_ms));
                     }
+                    let _ = request_timing.finish_external_if_active();
                     let (candidate, retry_body) = next_attempt(
                         &target,
                         &policy,
@@ -989,6 +991,8 @@ fn dispatch_request(
                         &response_body,
                         true,
                     )?;
+                    buffered_provider_body = None;
+                    response_body.clear();
                     target = candidate;
                     stream = match execute_transport(&target, &retry_body, true).map_err(|error| {
                         project_upstream_fault(
@@ -1055,6 +1059,12 @@ fn dispatch_request(
                         }
                     };
                     continue;
+                }
+            } else {
+                buffered_provider_body = None;
+                response_body.clear();
+                if stream.status() >= 400 {
+                    let _ = request_timing.finish_external_if_active();
                 }
             }
             break;
@@ -1969,6 +1979,150 @@ wire_name = "mock-model"
         );
         provider_thread.join().expect("provider thread");
         std::fs::remove_file(provider_config).ok();
+    }
+
+    #[test]
+    fn streaming_policy_retry_does_not_reuse_buffered_provider_body() {
+        let first_provider = TcpListener::bind("127.0.0.1:0").expect("first provider listener");
+        let first_address = first_provider.local_addr().expect("first provider address");
+        let first_thread = std::thread::spawn(move || {
+            for attempt in 0..2 {
+                let (mut stream, _) = first_provider.accept().expect("first provider accepts");
+                let mut request = [0u8; 8192];
+                let _ = stream.read(&mut request);
+                let body = if attempt == 0 {
+                    concat!(
+                        "event: response.failed\n",
+                        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"Type invalid, should be set\"}}}\n\n"
+                    )
+                } else {
+                    concat!(
+                        "event: response.completed\n",
+                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+                    )
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                )
+                .expect("first provider headers");
+                stream
+                    .write_all(body.as_bytes())
+                    .expect("first provider body");
+            }
+        });
+        let first_config = std::env::temp_dir().join(format!(
+            "v4-provider-stale-buffer-first-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &first_config,
+            format!(
+                r#"
+providerId = "first"
+
+[provider]
+baseURL = "http://{first_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let mut manifest = runtime_manifest_with_provider_config(
+            first_config.to_str().expect("first provider config path"),
+        );
+        let product = manifest.product.as_mut().expect("product config");
+        product.error_policies = vec![routecodex_v4_config::RuntimeProductErrorPolicy {
+            policy_id: "first_attempt_semantic_error".to_string(),
+            scope_provider_id: Some("mock".to_string()),
+            match_status: Some(200),
+            match_content_contains_any: vec!["Type invalid, should be set".to_string()],
+            reason_code: Some("provider_invalid_field_type".to_string()),
+            actions: vec![
+                routecodex_v4_config::RuntimeProductPolicyAction {
+                    step: "wait_retry".to_string(),
+                    retry_mode: Some("retry_same".to_string()),
+                    max_attempts: Some(2),
+                    backoff_ms: Some(0),
+                    scope: None,
+                    duration_ms: None,
+                    status: None,
+                    reason_code: None,
+                    public_code: None,
+                    message_mode: None,
+                    provider_global_failure: None,
+                },
+                routecodex_v4_config::RuntimeProductPolicyAction {
+                    step: "project".to_string(),
+                    retry_mode: None,
+                    max_attempts: None,
+                    backoff_ms: None,
+                    scope: None,
+                    duration_ms: None,
+                    status: Some(503),
+                    reason_code: Some("provider_failure".to_string()),
+                    public_code: None,
+                    message_mode: Some("code_only".to_string()),
+                    provider_global_failure: None,
+                },
+            ],
+        }];
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","stream":true}"#.to_vec(),
+            request_id: "production-stale-buffer".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let provider_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let mut response = match dispatch_with_request_cancellation(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+            None,
+            None,
+            Some(provider_runtime.handle().clone()),
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "retry dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
+        let mut stream = response.stream.take().expect("retry success stream");
+        let mut chunk = Vec::new();
+        assert!(stream.next_chunk(&mut chunk).expect("retry client SSE chunk"));
+        let body = String::from_utf8_lossy(&chunk);
+        assert!(body.contains("resp_retry"), "{body}");
+        assert!(!body.contains("resp_failed"), "{body}");
+        first_thread.join().expect("first provider thread");
+        std::fs::remove_file(first_config).ok();
     }
 
     #[test]
