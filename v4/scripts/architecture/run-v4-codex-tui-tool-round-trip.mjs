@@ -77,9 +77,12 @@ function findRollout(startedAtMs) {
   return null;
 }
 
-function readRolloutRecords(file) {
+function readRolloutRecords(file, allowIncompleteTail = false) {
+  const text = fs.readFileSync(file, 'utf8');
+  const lines = text.split('\n');
+  if (allowIncompleteTail && !text.endsWith('\n')) lines.pop();
   const records = [];
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+  for (const line of lines) {
     if (!line.trim()) continue;
     try {
       records.push(JSON.parse(line));
@@ -90,8 +93,8 @@ function readRolloutRecords(file) {
   return records;
 }
 
-function observeRoundTrip(file) {
-  const records = readRolloutRecords(file);
+function observeRoundTrip(file, allowIncompleteTail = false) {
+  const records = readRolloutRecords(file, allowIncompleteTail);
   const toolCall = records.find((record) => {
     const payload = record?.payload;
     return record?.type === 'response_item'
@@ -118,7 +121,18 @@ function observeRoundTrip(file) {
       && Array.isArray(payload?.content)
       && payload.content.some((part) => part?.type === 'output_text' && part?.text === marker);
   });
-  return { toolCall: Boolean(toolCall), toolOutput: Boolean(toolOutput), finalAnswer };
+  const taskCompleted = records.some((record) => {
+    const payload = record?.payload;
+    return record?.type === 'event_msg'
+      && payload?.type === 'task_complete'
+      && payload?.last_agent_message === marker;
+  });
+  return {
+    toolCall: Boolean(toolCall),
+    toolOutput: Boolean(toolOutput),
+    finalAnswer,
+    taskCompleted,
+  };
 }
 
 if (run('tmux', ['-V']).status !== 0) {
@@ -180,8 +194,14 @@ try {
     if (!sent) continue;
     rollout = findRollout(startedAtMs);
     if (!rollout) continue;
-    const observed = observeRoundTrip(rollout);
-    if (observed.toolCall && observed.toolOutput && observed.finalAnswer) {
+    const observed = observeRoundTrip(rollout, true);
+    if (
+      observed.toolCall
+      && observed.toolOutput
+      && observed.finalAnswer
+      && observed.taskCompleted
+    ) {
+      readRolloutRecords(rollout);
       console.log(
         `[v4_codex_tui_tool_round_trip] OK session=${sessionName} rollout=${rollout}`,
       );
@@ -190,6 +210,7 @@ try {
     }
   }
   if (process.exitCode !== 0) {
+    if (rollout) readRolloutRecords(rollout);
     const pane = run('tmux', ['capture-pane', '-p', '-t', sessionName, '-S', '-120']).stdout;
     throw new Error(
       `Codex TUI tool round-trip timed out after ${timeoutMs}ms; rollout=${rollout ?? 'none'}; pane=${pane.slice(-2000)}`,

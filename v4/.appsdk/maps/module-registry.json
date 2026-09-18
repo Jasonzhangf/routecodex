@@ -609,6 +609,7 @@
         "~/.local/bin/**"
       ],
       "verification_gates": [
+        "v4_codex_tui_tool_round_trip",
         "v4_real_runtime_admission_red",
         "v4_real_runtime_compiled_manifest",
         "v4_real_runtime_v3_isolation",

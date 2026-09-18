@@ -2798,6 +2798,31 @@
       ]
     },
     {
+      "gate_id": "v4_codex_tui_tool_round_trip",
+      "status": "active",
+      "owner_module_id": "routecodex-v4-runtime-bin",
+      "feature_ids": [
+        "v4.cordis.production_admission"
+      ],
+      "command": "node scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs",
+      "argv": [
+        "node",
+        "scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs"
+      ],
+      "producer": {
+        "adapter": "node",
+        "identity": "v4_codex_tui_tool_round_trip"
+      },
+      "evidence_role": "positive_and_negative",
+      "input_paths": [
+        "crates/routecodex-v4-runtime-bin/src/main.rs",
+        "scripts/architecture/run-v4-codex-tui-tool-round-trip.mjs"
+      ],
+      "required_for": [
+        "v4.cordis.production_admission:deployed_blackbox"
+      ]
+    },
+    {
       "gate_id": "v4_runtime_lifecycle_event_bus",
       "status": "active",
       "owner_module_id": "routecodex-v4-runtime",
