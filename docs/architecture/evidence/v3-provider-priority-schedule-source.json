@@ -1,0 +1,35 @@
+{
+  "evidence_id": "v3-provider-priority-schedule-source-20260917",
+  "feature_id": "v3.virtual_router_target_interpreter",
+  "candidate_commit": "b8e6a73cfd060ec1bb64e0bf145398a41beea017",
+  "candidate_tree": "a4c941227de2221029620fb557eac2a046efc739",
+  "captured_at": "2026-09-17T23:05:00-07:00",
+  "execution_surface": "development_whitebox",
+  "source_unchanged": true,
+  "gates": [
+    {
+      "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test user_config_contract provider_priority_schedule -- --nocapture",
+      "result": "pass",
+      "tests": "2 passed; 0 failed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract provider_priority_schedule -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-target provider_priority_schedule -- --nocapture",
+      "result": "pass",
+      "tests": "2 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "cargo +stable fmt --manifest-path v3/Cargo.toml --all -- --check",
+      "result": "pass"
+    }
+  ]
+}

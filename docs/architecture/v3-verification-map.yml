@@ -1301,6 +1301,8 @@ features:
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   - npm run build:v3-cli
+  source_evidence:
+  - docs/architecture/evidence/v3-provider-priority-schedule-source.json
   completion_rule:
     source: Router/Target focused tests, source/compile gates, P3/P4 regressions, fmt, clippy, workspace tests, and CLI build pass.
     runtime: Actual V3 CLI multi-listener HTTP probes show one Router hit, Target expansion/selection or full six-node exhaustion, Debug evidence, no network send, exact Ctrl-C, and closed ports.
