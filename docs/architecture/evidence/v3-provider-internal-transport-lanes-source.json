@@ -88,6 +88,16 @@
       "command": "npm run verify:v3-architecture-ci",
       "result": "pass",
       "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "npm run verify:v3-clippy",
+      "result": "baseline_failure_not_touched",
+      "exit_code": 101,
+      "tests": "routecodex-v3-route-classifier/src/active_turn.rs, routecodex-v3-route-classifier/src/tests.rs, routecodex-v3-agent-memory/src/lib.rs"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-workspace",
+      "result": "pass"
     }
   ]
 }
