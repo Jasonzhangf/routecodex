@@ -115,6 +115,10 @@ impl PluginHandle for TargetSelectionHandle {
         request.required_capabilities = required_capabilities;
         request.input_tokens = input_tokens;
         request.unavailable_provider_ids = unavailable_provider_ids;
+        request.has_previous_response_id = facts
+            .get("has_previous_response_id")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let selected = TargetSelectionPort::select(&self.product, &request)
             .map_err(|error| error.to_string())?;
         if let Some(prebound) = ctx
@@ -251,6 +255,7 @@ pub struct TargetSelectionRequest {
     pub required_capabilities: Vec<String>,
     pub input_tokens: u64,
     pub unavailable_provider_ids: Vec<String>,
+    pub has_previous_response_id: bool,
 }
 
 impl TargetSelectionRequest {
@@ -268,6 +273,7 @@ impl TargetSelectionRequest {
             required_capabilities: Vec::new(),
             input_tokens: 0,
             unavailable_provider_ids: Vec::new(),
+            has_previous_response_id: false,
         }
     }
 
@@ -302,6 +308,7 @@ impl TargetSelectionRequest {
             "required_capabilities": self.required_capabilities,
             "input_tokens": self.input_tokens,
             "unavailable_provider_ids": self.unavailable_provider_ids,
+            "has_previous_response_id": self.has_previous_response_id,
         })
     }
 }
@@ -347,6 +354,7 @@ impl TargetSelectionPort {
             &required_capabilities,
             request.input_tokens,
             &unavailable_provider_ids,
+            request.has_previous_response_id,
         )
     }
 }
@@ -410,6 +418,7 @@ pub fn select_product_target(
         required_capabilities,
         input_tokens,
         &[],
+        false,
     )
 }
 
@@ -421,6 +430,7 @@ pub fn select_product_target_with_unavailable(
     required_capabilities: &[&str],
     input_tokens: u64,
     unavailable_provider_ids: &[&str],
+    has_previous_response_id: bool,
 ) -> Result<SelectedTarget, TargetSelectionError> {
     let group = product
         .route_groups
@@ -460,12 +470,22 @@ pub fn select_product_target_with_unavailable(
         .into_iter()
         .next()
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(route_group_id.to_string()))?;
-    let requested_model_filter = if product
+    let requested_model_filter = if pool.models.iter().any(|model| model == requested_model) {
+        None
+    } else if product
         .builtin_catalog_models
         .iter()
         .any(|model| model.trim() == requested_model)
-        || pool.models.iter().any(|model| model == requested_model)
     {
+        if !pool
+            .targets
+            .iter()
+            .any(|target| product_target_matches_model(product, target, requested_model))
+        {
+            return Err(TargetSelectionError::ModelUnavailable(
+                requested_model.to_string(),
+            ));
+        }
         None
     } else if pool
         .targets
@@ -487,6 +507,11 @@ pub fn select_product_target_with_unavailable(
             !unavailable_provider_ids
                 .iter()
                 .any(|provider| *provider == target.provider_id)
+        })
+        .filter(|target| {
+            !has_previous_response_id
+                || product_target_execution_lane(product, target, entry_protocol)
+                    .is_some_and(|lane| lane == "direct")
         })
         .filter(|target| product_target_can_execute(product, target, entry_protocol))
         .max_by_key(|target| target.priority)
@@ -522,6 +547,24 @@ fn product_target_can_execute(
         ("responses" | "openai-responses", Some("chat" | "openai_chat" | "openai-chat")) => true,
         ("chat" | "openai-chat", Some("responses" | "openai-responses")) => true,
         _ => false,
+    }
+}
+
+fn product_target_execution_lane<'a>(
+    product: &'a RuntimeProductConfig,
+    target: &RuntimeProductTarget,
+    entry_protocol: &str,
+) -> Option<&'a str> {
+    let provider_protocol = product
+        .providers
+        .iter()
+        .find(|provider| provider.provider_id == target.provider_id)
+        .map(|provider| provider.protocol.as_str())?;
+    match (entry_protocol, provider_protocol) {
+        ("responses" | "openai-responses", "responses" | "openai-responses") => Some("direct"),
+        ("responses" | "openai-responses", "chat" | "openai_chat" | "openai-chat") => Some("relay"),
+        ("chat" | "openai-chat", "responses" | "openai-responses") => Some("relay"),
+        _ => None,
     }
 }
 
@@ -566,6 +609,7 @@ pub fn select_product_target_excluding(
         required_capabilities,
         input_tokens,
         unavailable_provider_ids,
+        false,
     )
 }
 

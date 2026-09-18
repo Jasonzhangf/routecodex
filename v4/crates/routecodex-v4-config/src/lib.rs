@@ -912,7 +912,7 @@ pub struct RuntimeRoute {
 #[serde(deny_unknown_fields)]
 pub struct RuntimeProductConfig {
     pub source: String,
-    #[serde(default = "default_builtin_catalog_models")]
+    #[serde(default)]
     pub builtin_catalog_models: Vec<String>,
     pub providers: Vec<RuntimeProductProvider>,
     pub route_groups: Vec<RuntimeProductRouteGroup>,
@@ -920,10 +920,6 @@ pub struct RuntimeProductConfig {
     pub default_error_path: Vec<RuntimeProductPolicyAction>,
     #[serde(default)]
     pub error_policies: Vec<RuntimeProductErrorPolicy>,
-}
-
-fn default_builtin_catalog_models() -> Vec<String> {
-    vec!["gpt-5.5".to_string()]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

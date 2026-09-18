@@ -155,6 +155,7 @@ fn unavailable_direct_provider_pin_fails_without_pool_fallback() {
         required_capabilities: vec!["thinking".to_string()],
         input_tokens: 0,
         unavailable_provider_ids: vec!["product-provider".to_string()],
+        has_previous_response_id: false,
     };
     assert!(matches!(
         routecodex_v4_router::TargetSelectionPort::select(&product, &request),
@@ -211,11 +212,73 @@ fn builtin_catalog_model_reselects_within_captured_pool() {
         &["thinking"],
         0,
         &["product-provider"],
+        false,
     )
     .expect("builtin catalog request keeps the captured pool candidates");
 
     assert_eq!(selected.provider_id, "fallback-provider");
     assert_eq!(selected.wire_model, "fallback-wire");
+}
+
+#[test]
+fn builtin_catalog_model_without_reachable_target_fails_without_unrelated_selection() {
+    let mut product = product_config();
+    product.builtin_catalog_models = vec!["gpt-5.5".to_string()];
+    product.providers[0].models[0].aliases = vec!["gpt-5.5".to_string()];
+    product.route_groups[0].pools[0].targets.clear();
+
+    assert!(matches!(
+        select_product_target(
+            &product,
+            "responses",
+            "gpt-5.5",
+            "responses",
+            &["thinking"],
+            0,
+        ),
+        Err(TargetSelectionError::ModelUnavailable(model)) if model == "gpt-5.5"
+    ));
+}
+
+#[test]
+fn responses_continuation_skips_higher_priority_relay_target() {
+    let mut product = product_config();
+    product.providers.push(RuntimeProductProvider {
+        provider_id: "chat-provider".to_string(),
+        protocol: "openai_chat".to_string(),
+        config_path: "/tmp/chat.toml".to_string(),
+        models: vec![RuntimeProductModel {
+            model_id: "client-model".to_string(),
+            wire_name: "chat-wire".to_string(),
+            capabilities: vec!["thinking".to_string()],
+            aliases: Vec::new(),
+        }],
+        auth_handles: Vec::new(),
+    });
+    product.route_groups[0].pools[0]
+        .targets
+        .push(RuntimeProductTarget {
+            provider_id: "chat-provider".to_string(),
+            model_id: "client-model".to_string(),
+            priority: 100,
+            weight: None,
+        });
+    let request = routecodex_v4_router::TargetSelectionRequest {
+        route_group_id: Some("responses".to_string()),
+        requested_model: "client-model".to_string(),
+        entry_protocol: "responses".to_string(),
+        execution_lane: "direct".to_string(),
+        required_capabilities: vec!["thinking".to_string()],
+        input_tokens: 0,
+        unavailable_provider_ids: Vec::new(),
+        has_previous_response_id: true,
+    };
+
+    let selected =
+        routecodex_v4_router::TargetSelectionPort::select(&product, &request).expect("direct target");
+
+    assert_eq!(selected.provider_id, "product-provider");
+    assert_eq!(selected.protocol, "responses");
 }
 
 #[test]
@@ -323,6 +386,7 @@ fn unavailable_provider_is_excluded_before_reselect() {
         &["thinking"],
         0,
         &["product-provider"],
+        false,
     );
     assert!(matches!(
         selected,
