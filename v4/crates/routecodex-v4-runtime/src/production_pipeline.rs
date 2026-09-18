@@ -552,6 +552,7 @@ fn dispatch_request(
                              wire_body: &Value,
                              stream: bool|
      -> Result<ProviderTransportResult, ProviderTransportError> {
+        let transport_open_started = std::time::Instant::now();
         let request = ProviderTransportRequest::new(
             &target.protocol,
             &target.config_path,
@@ -567,6 +568,12 @@ fn dispatch_request(
                 message,
                 status: None,
             })?;
+        let record_transport_open = || {
+            request_timing.state().record_phase(
+                "provider_transport_open",
+                transport_open_started.elapsed().as_micros(),
+            );
+        };
         if stream {
             let cancellation = request_cancellation
                 .clone()
@@ -583,13 +590,18 @@ fn dispatch_request(
             let runtime = match runtime {
                 Ok(runtime) => runtime,
                 Err(error) => {
+                    record_transport_open();
                     let _ = request_timing.finish_external();
                     return Err(error);
                 }
             };
             return match ProviderTransportPort::execute_streaming(request, cancellation, &runtime) {
-                Ok(result) => Ok(result),
+                Ok(result) => {
+                    record_transport_open();
+                    Ok(result)
+                }
                 Err(error) => {
+                    record_transport_open();
                     let _ = request_timing.finish_external();
                     Err(error)
                 }

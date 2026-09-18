@@ -371,6 +371,10 @@ async fn async_request_record_uses_typed_timing_side_channel() {
     assert!(external_ms >= 20, "{row}");
     assert!(external_ms <= duration_ms);
     assert!(internal_ms <= duration_ms);
+    assert_eq!(
+        row["row"]["timing_phases_ms"]["provider_transport_open"], 0,
+        "{row}"
+    );
     assert_eq!(row["row"]["timing_phases_ms"]["provider_read"], 0, "{row}");
     assert_eq!(
         row["row"]["timing_phases_ms"]["provider_sse_framing"], 0,

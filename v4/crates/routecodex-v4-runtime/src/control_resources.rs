@@ -430,6 +430,9 @@ impl V4RuntimeTimingState {
             internal_ms: internal.as_millis().try_into().unwrap_or(u64::MAX),
             external_ms: external.as_millis().try_into().unwrap_or(u64::MAX),
             phases_ms: routecodex_v4_server::RequestTimingPhases {
+                provider_transport_open_ms: micros_to_ms(
+                    self.total_micros("provider_transport_open"),
+                ),
                 provider_read_ms: micros_to_ms(self.total_micros("provider_read")),
                 provider_sse_framing_ms: micros_to_ms(
                     self.total_micros("provider_sse_framing"),

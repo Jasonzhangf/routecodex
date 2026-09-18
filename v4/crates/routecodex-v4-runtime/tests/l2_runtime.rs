@@ -2222,14 +2222,36 @@ fn runtime_timing_freezes_provider_phase_projection() {
     let timing = V4RuntimeTimingSummary::new();
     timing.start_request();
     timing.begin_external().expect("external attempt starts");
+    timing
+        .state()
+        .record_phase("provider_transport_open", 1_500);
     timing.state().record_phase("provider_read", 1_500);
     timing.state().record_phase("provider_sse_framing", 2_500);
     timing.state().record_phase("response_processing", 4_500);
     timing.finish_external().expect("external attempt closes");
     let snapshot = timing.finish_runtime().expect("runtime timing freezes");
+    assert_eq!(snapshot.phases_ms.provider_transport_open_ms, 1);
     assert_eq!(snapshot.phases_ms.provider_read_ms, 1);
     assert_eq!(snapshot.phases_ms.provider_sse_framing_ms, 2);
     assert_eq!(snapshot.phases_ms.response_processing_ms, 4);
+}
+
+#[test]
+fn runtime_timing_does_not_mislabel_blocking_transport_body_read_as_open() {
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    timing.finish_external().expect("external attempt closes");
+    let snapshot = timing.finish_runtime().expect("runtime timing freezes");
+    assert!(
+        snapshot.external_ms >= 15,
+        "blocking transport duration stays external: {snapshot:?}"
+    );
+    assert_eq!(
+        snapshot.phases_ms.provider_transport_open_ms, 0,
+        "blocking transport body reads must not be mislabeled as response-header open"
+    );
 }
 
 #[test]

@@ -65,6 +65,7 @@ pub struct RequestTimingSnapshot {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RequestTimingPhases {
+    pub provider_transport_open_ms: u64,
     pub provider_read_ms: u64,
     pub provider_sse_framing_ms: u64,
     pub response_processing_ms: u64,
@@ -249,6 +250,7 @@ fn persist_request_record_fields_with_duration(
         "timing_internal_ms": timing.map(|timing| timing.internal_ms),
         "timing_external_ms": timing.map(|timing| timing.external_ms),
         "timing_phases_ms": timing.map(|timing| serde_json::json!({
+            "provider_transport_open": timing.phases_ms.provider_transport_open_ms,
             "provider_read": timing.phases_ms.provider_read_ms,
             "provider_sse_framing": timing.phases_ms.provider_sse_framing_ms,
             "response_processing": timing.phases_ms.response_processing_ms,
