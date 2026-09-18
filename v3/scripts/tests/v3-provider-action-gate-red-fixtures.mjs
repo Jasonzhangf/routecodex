@@ -27,6 +27,7 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/tests/protocol_mode_lock.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs',
