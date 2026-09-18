@@ -1,11 +1,14 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:391d99fa6fa2d74e850b5b102dbdace7896a34319b2efe163e7c432c55b25281",
-  "bundle_manifest_digest": "sha256:28ef0950599c04eb9e045b2ee30d3e878d09ff07faef6dc1b287c47ea377b1f0",
+  "bundle_digest": "sha256:8f3d202010e8070ff784d0bb58a8297b21c3ff5d9b7ec73bd77e9e8a3a884d5c",
+  "bundle_manifest_digest": "sha256:6c1bd9fcb25126f845c3ef54444fda86425794ba5203cf805d230f6b2f7883bf",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
       "contracts/project.schema.json",
+      "contracts/communication/communication-request.schema.json",
+      "contracts/communication/communication-event.schema.json",
+      "contracts/communication/communication-capabilities.schema.json",
       "contracts/development-scenarios.manifest.json",
       "contracts/guidance/guidance-manifest.schema.json",
       "contracts/guidance/tour-review.schema.json",
@@ -46,13 +49,15 @@
     ],
     "docs": [
       "docs/design/appsdk-project-integration.md",
+      "docs/design/apps-sdk-communication.md",
       "docs/design/fix-lifecycle-v2.md",
       "docs/design/development-scenarios.md",
       "docs/design/appsdk-guidance-framework.md",
       "docs/test-design/appsdk-guidance-framework.md",
       "docs/architecture/development-process-control-harness.md",
       "docs/architecture/appsdk-governance-architecture.md",
-      "docs/design/project-memory.md"
+      "docs/design/project-memory.md",
+      "docs/design/appsdk-global-registry.md"
     ],
     "rules": [
       "skills/appsdk-project-governance/SKILL.md"
@@ -62,11 +67,16 @@
       "skills/appsdk-project-governance/agents/openai.yaml",
       "skills/appsdk-project-governance/appsdk-guidance.json",
       "skills/appsdk-project-governance/references/bootstrap-migration.md",
+      "skills/appsdk-project-governance/references/command-surface.md",
       "skills/appsdk-project-governance/references/contracts-and-failures.md",
       "skills/appsdk-project-governance/references/development-debug.md",
       "skills/appsdk-project-governance/references/goal-prompt.md",
+      "skills/appsdk-project-governance/references/init-prompts.md",
       "skills/appsdk-project-governance/references/process-control-harness.md",
       "skills/appsdk-project-governance/references/review-delivery.md",
+      "skills/appsdk-project-governance/references/state-paths.md",
+      "skills/appsdk-project-governance/references/subagents-config.md",
+      "skills/appsdk-migration/SKILL.md",
       "skills/project-memory/SKILL.md"
     ]
   },
