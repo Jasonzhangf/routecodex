@@ -383,6 +383,7 @@ Provider SSE 的兼容修复只能修复传输语法和格式，不得根据响�
 
 ## 相关规则
 - RouteCodex V3 Rust Responses direct MVP：`references/94-v3-rust-responses-direct-mvp.md`
+- Selected provider model binding：`references/96-v3-selected-provider-model-binding-sop.md`
 - Provider-request dry-run 与请求错误定位：`references/98-provider-request-dryrun-and-request-error-debug.md`
 - note.md append-only：顶部 consolidation index，正文不删 raw
 - MEMORY.md append-only：只追加 dated correction
