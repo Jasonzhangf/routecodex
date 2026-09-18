@@ -1,5 +1,6 @@
 use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use crate::memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
+use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -518,6 +519,11 @@ pub struct V3ServerAuthoringConfig {
     /// 对外 /v1/models 暴露白名单（visible_id）；空 = 全量暴露（兼容现有）。
     #[serde(default)]
     pub expose_models: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "V3ProviderPriorityScheduleAuthoringConfig::is_default"
+    )]
+    pub provider_priority_schedule: V3ProviderPriorityScheduleAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1148,6 +1154,7 @@ pub struct V3ServerManifest {
     pub http_sse_keepalive_ms: u64,
     /// 对外 /v1/models 暴露白名单（visible_id）；空 = 全量暴露。
     pub expose_models: Vec<String>,
+    pub provider_priority_schedule: V3ProviderPriorityScheduleAuthoringConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

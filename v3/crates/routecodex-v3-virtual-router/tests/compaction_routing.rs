@@ -33,6 +33,7 @@ fn manifest() -> V3Config05ManifestPublished {
                 execution: None,
                 http_sse_keepalive_ms: 3_000,
                 expose_models: Vec::new(),
+                provider_priority_schedule: Default::default(),
             },
         )]),
         providers: BTreeMap::from([(

@@ -211,6 +211,26 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.config.provider_priority_schedule
+    resource_kind: config_schedule
+    lifecycle: v3.config.compile
+    owner_feature_id: v3.virtual_router_target_interpreter
+    owner_crate: routecodex-v3-config
+    owner_node: V3ServerManifest
+    identity: [serverId, timezone, peakPeriods, providerEntries]
+    semantic_contract:
+      default_timezone: Asia/Shanghai
+      tier_semantics: one_based_with_one_as_highest_priority
+      window_semantics: start_inclusive_end_exclusive_with_cross_midnight_support
+      selection_scope: provider_priority_only_inside_the_selected_route_pool
+      boundary: never_enters_request_provider_or_client_payload
+      health_boundary: does_not_mutate_or_bypass_provider_availability_or_cooldown
+    allowed_writers: [V3ServerAuthoringConfig, project_v3_user_config_03_authoring, compile_servers]
+    allowed_readers: [V3Config05ManifestPublished, V3TargetInterpreter::expand_candidates]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.config.provider_sse_first_frame_timeout
     resource_kind: config_transport_interval
     lifecycle: v3.config.compile
@@ -364,6 +384,7 @@ resources:
     identity: [requestId, targetId, candidateIds, requestInputTokens]
     semantic_contract:
       context_admission: Target09 carries the typed request input token count as side-channel route evidence; Target10 compares it with each candidate max_context_tokens before availability or transport and records context_window_exceeded for candidates that cannot admit the request.
+      priority_schedule: Target09 captures the server-scoped schedule and Target10 applies the local-time provider tier only as an effective-priority adjustment inside the selected route pool.
       payload_boundary: requestInputTokens and max_context_tokens are control-side admission facts and must not enter provider wire payload or client response payload.
     allowed_writers: [V3Target09CandidateSetExpanded]
     allowed_readers: [V3Target10ConcreteProviderSelected, V3Error03TargetLocalAction]

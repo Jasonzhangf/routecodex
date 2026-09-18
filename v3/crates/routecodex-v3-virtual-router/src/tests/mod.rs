@@ -31,6 +31,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
                 execution: None,
                 http_sse_keepalive_ms: 3_000,
                 expose_models: Vec::new(),
+                provider_priority_schedule: Default::default(),
             },
         )]),
         providers: BTreeMap::new(),
@@ -875,6 +876,7 @@ fn weighted_and_round_robin_are_deterministic_and_listener_scoped() {
             execution: None,
             http_sse_keepalive_ms: 3_000,
             expose_models: Vec::new(),
+            provider_priority_schedule: Default::default(),
         },
     );
     let plan = |server_id: &str| {

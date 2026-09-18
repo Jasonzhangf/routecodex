@@ -409,6 +409,7 @@ pub async fn spawn_v3_server_aggregate_with_admin(
                 execution: None,
                 http_sse_keepalive_ms: 0,
                 expose_models: Vec::new(),
+                provider_priority_schedule: Default::default(),
             },
             listener,
             bound_addr,

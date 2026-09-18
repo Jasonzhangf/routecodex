@@ -1187,6 +1187,7 @@ chains:
       consumes:
       - v3.route.opaque_target
       - v3.config.published_manifest
+      - v3.config.provider_priority_schedule
       produces:
       - v3.target.candidate_set
       side_channel_reads:
@@ -1214,6 +1215,7 @@ chains:
     semantic_contract:
       - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport.
       - context_window_exceeded is emitted in Target10 selection evidence; no request or response payload is rewritten.
+      - Target10 applies the captured server-scoped provider priority schedule only after health availability projection and only within the selected route pool.
   - step_id: v3-rd-09
     from_node: V3Target10ConcreteProviderSelected
     to_node: V3Execution11ProtocolDecision

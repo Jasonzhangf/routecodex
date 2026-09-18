@@ -4,6 +4,7 @@ mod entry_protocol_validation;
 mod memory_raw_capture;
 mod provider_config;
 mod provider_directory;
+mod provider_priority_schedule;
 mod store;
 mod types;
 mod user_config;
@@ -12,6 +13,10 @@ pub use provider_config::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
     V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
+};
+pub use provider_priority_schedule::{
+    default_provider_priority_timezone, V3DailyTimeWindowAuthoringConfig,
+    V3ProviderPriorityScheduleAuthoringConfig, V3ProviderPriorityScheduleEntryAuthoringConfig,
 };
 mod validate;
 #[cfg(test)]

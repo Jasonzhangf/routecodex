@@ -55,6 +55,8 @@ pub struct V3TargetCandidate {
 pub struct V3Target09CandidateSetExpanded {
     pub route: V3Router07OpaqueTargetHitOnce,
     pub candidates: Vec<V3TargetCandidate>,
+    pub provider_priority_schedule: routecodex_v3_config::V3ProviderPriorityScheduleAuthoringConfig,
+    pub route_pool_tier_priorities: BTreeMap<String, Vec<i32>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,9 +273,40 @@ impl V3TargetInterpreter {
         if candidates.is_empty() {
             return Err(last_error.unwrap_or(V3TargetError::CandidateSetEmpty));
         }
+        let provider_priority_schedule = manifest
+            .servers
+            .get(&classified.route.server_id)
+            .map(|server| server.provider_priority_schedule.clone())
+            .unwrap_or_default();
+        let mut route_pool_tiers = BTreeMap::<String, BTreeSet<i32>>::new();
+        for candidate in &candidates {
+            for pool_id in &candidate.pool_ids {
+                // Synthetic pools (for example `implicit:<capability>` and
+                // `direct`) have no declared route-pool tier list. They keep
+                // their intrinsic candidate priority and are outside the
+                // provider-priority schedule contract.
+                if !group.pools.contains_key(pool_id) {
+                    continue;
+                }
+                route_pool_tiers
+                    .entry(pool_id.clone())
+                    .or_default()
+                    .insert(candidate.priority);
+            }
+        }
+        let route_pool_tier_priorities = route_pool_tiers
+            .into_iter()
+            .map(|(pool_id, tiers)| {
+                let mut priorities = tiers.into_iter().collect::<Vec<_>>();
+                priorities.sort_unstable_by(|left, right| right.cmp(left));
+                (pool_id, priorities)
+            })
+            .collect();
         Ok(V3Target09CandidateSetExpanded {
             route: classified.route,
             candidates,
+            provider_priority_schedule,
+            route_pool_tier_priorities,
         })
     }
 
@@ -325,6 +358,11 @@ impl V3TargetInterpreter {
                 candidate.weight,
                 now_ms,
             );
+            let scheduled_priority =
+                self.provider_priority_schedule_priority(&expanded, candidate, now_ms);
+            projection.effective_priority = projection
+                .effective_priority
+                .saturating_add(scheduled_priority.saturating_sub(candidate.priority));
             projection.effective_priority =
                 route_priority.saturating_add(projection.effective_priority);
             if projection.available {
@@ -411,6 +449,32 @@ impl V3TargetInterpreter {
             })
             .min()
             .unwrap_or(usize::MAX)
+    }
+
+    fn provider_priority_schedule_priority(
+        &self,
+        expanded: &V3Target09CandidateSetExpanded,
+        candidate: &V3TargetCandidate,
+        now_ms: u64,
+    ) -> i32 {
+        let Some(pool_id) = candidate.pool_ids.iter().find(|pool_id| {
+            expanded
+                .route
+                .target_plan
+                .iter()
+                .any(|entry| &entry.pool_id == *pool_id)
+        }) else {
+            return candidate.priority;
+        };
+        let Some(tier_priorities) = expanded.route_pool_tier_priorities.get(pool_id) else {
+            return candidate.priority;
+        };
+        expanded.provider_priority_schedule.priority_for_provider(
+            &candidate.provider_id,
+            candidate.priority,
+            tier_priorities,
+            now_ms,
+        )
     }
 
     pub fn select_available<R: V3ProviderAvailabilityReader>(

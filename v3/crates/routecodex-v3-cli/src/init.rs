@@ -200,6 +200,7 @@ fn minimal_user_config(
                 features: BTreeMap::new(),
                 execution: None,
                 expose_models: Vec::new(),
+                provider_priority_schedule: Default::default(),
                 routes: BTreeMap::from([(
                     "default".to_string(),
                     V3UserRoutePool {

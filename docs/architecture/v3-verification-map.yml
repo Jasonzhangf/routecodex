@@ -1264,6 +1264,7 @@ features:
   test_design:
   - docs/goals/v3-virtual-router-target-interpreter-plan.md
   - docs/goals/v3-target-priority-context-heuristic-test-design.md
+  - docs/design/v3-provider-priority-schedule.md
   required_contract:
   - Virtual Router resolves one explicit default pool and returns one opaque target only
   - Target expands nested forwarders and performs all internal availability reselection
@@ -1279,6 +1280,8 @@ features:
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
   - Target dedupe retains optional/default provenance; the default floor is only a last-resort context-admission fallback and never overrides health cooldown or request-local provider-failure exclusion
   - Within a captured route plan, route-tier order is applied before candidate priority; candidate priority/weight/health select only among candidates in the same eligible route tier, so the default floor cannot overtake a matched semantic tier by numeric priority alone
+  - Server-scoped provider schedules default to Asia/Shanghai, accept a configured IANA timezone and cross-midnight daily windows, and use one-based tiers where one is highest priority
+  - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
   required_gates:
   - npm run test:v3-p5-router-target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target context_admission_filters_over_limit_candidates -- --nocapture
@@ -1288,12 +1291,18 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime transport_error_switches_provider_family -- --nocapture
   - npm run test:v3-p5-server-blackbox
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config --test user_config_contract --locked
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-target --lib --locked
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-architecture-docs
   - npm run verify:v3-module-boundaries
   - npm run test:v3-compile-fail
   - npm run verify:v3-cargo-fmt
   - npm run verify:v3-clippy
   - npm run test:v3-workspace
   - npm run build:v3-cli
+  source_evidence:
+  - docs/architecture/evidence/v3-provider-priority-schedule-source.json
   completion_rule:
     source: Router/Target focused tests, source/compile gates, P3/P4 regressions, fmt, clippy, workspace tests, and CLI build pass.
     runtime: Actual V3 CLI multi-listener HTTP probes show one Router hit, Target expansion/selection or full six-node exhaustion, Debug evidence, no network send, exact Ctrl-C, and closed ports.
