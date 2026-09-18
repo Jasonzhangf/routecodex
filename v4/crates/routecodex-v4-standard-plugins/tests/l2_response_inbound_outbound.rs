@@ -9,7 +9,8 @@ use routecodex_v4_standard_plugins::protocol::provider_response::{
     normalize_provider_response, normalize_provider_sse_frame,
 };
 use routecodex_v4_standard_plugins::response_inbound::{
-    decode_provider_sse_frame, ProviderSseEventDisposition, ProviderSseReducer,
+    decode_direct_provider_sse_frame, decode_provider_sse_frame, ProviderSseEventDisposition,
+    ProviderSseReducer,
 };
 use routecodex_v4_standard_plugins::response_outbound::{
     encode_client_error_sse_frame, encode_client_sse_frame,
@@ -354,6 +355,30 @@ fn direct_chat_sse_preserves_provider_wire_shape() {
     assert!(carrier.shares_storage_with(&SharedTransportCarrier::from_shared_bytes(bytes)));
     container.drain().unwrap();
     container.dispose().unwrap();
+}
+
+#[test]
+fn direct_chat_sse_finish_and_usage_remain_non_terminal_until_done() {
+    let finish = decode_direct_provider_sse_frame(
+        "openai-chat",
+        b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+    )
+    .expect("finish_reason frame decodes");
+    assert_eq!(finish.disposition, ProviderSseEventDisposition::Continue);
+    assert_eq!(finish.semantic["choices"][0]["finish_reason"], "stop");
+
+    let usage = decode_direct_provider_sse_frame(
+        "openai-chat",
+        b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+    )
+    .expect("usage-only frame decodes");
+    assert_eq!(usage.disposition, ProviderSseEventDisposition::Continue);
+    assert_eq!(usage.semantic["usage"]["total_tokens"], 10);
+
+    let done = decode_direct_provider_sse_frame("openai-chat", b"data: [DONE]\n\n")
+        .expect("[DONE] decodes as the direct Chat terminal");
+    assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
+    assert_eq!(done.semantic, Value::Null);
 }
 
 #[test]

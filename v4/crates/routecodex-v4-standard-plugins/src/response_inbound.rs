@@ -553,7 +553,7 @@ impl ProviderSseReducer {
     }
 }
 
-fn decode_direct_provider_sse_frame(
+pub fn decode_direct_provider_sse_frame(
     provider_protocol: &str,
     frame: &[u8],
 ) -> Result<DecodedProviderSseFrame, String> {
@@ -575,32 +575,19 @@ fn decode_direct_provider_sse_frame(
         }
     }
     let raw = data.join("\n");
-    let semantic: Value = if raw.trim() == "[DONE]" {
-        json!({"type": "response.completed", "response": {}})
-    } else {
-        serde_json::from_str(&raw)
-            .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?
-    };
+    if provider_protocol == "chat" && raw.trim() == "[DONE]" {
+        return Ok(DecodedProviderSseFrame {
+            semantic: Value::Null,
+            disposition: ProviderSseEventDisposition::Completed,
+        });
+    }
+    let semantic: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("provider SSE data is invalid JSON: {error}"))?;
     semantic
         .as_object()
         .ok_or_else(|| "provider SSE semantic object must be an object".to_string())?;
     let disposition = match provider_protocol {
-        "chat" => {
-            let choices = semantic
-                .get("choices")
-                .and_then(Value::as_array)
-                .ok_or_else(|| "OpenAI Chat SSE choices must be an array".to_string())?;
-            if choices.iter().any(|choice| {
-                choice
-                    .get("finish_reason")
-                    .and_then(Value::as_str)
-                    .is_some_and(|reason| !reason.trim().is_empty())
-            }) {
-                ProviderSseEventDisposition::Completed
-            } else {
-                ProviderSseEventDisposition::Continue
-            }
-        }
+        "chat" => ProviderSseEventDisposition::Continue,
         "responses" => match semantic.get("type").and_then(Value::as_str) {
             Some("response.completed" | "response.incomplete") => {
                 ProviderSseEventDisposition::Completed
