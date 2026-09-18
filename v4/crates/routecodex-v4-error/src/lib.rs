@@ -72,10 +72,8 @@ pub struct RetryPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionAction {
-    RetrySame,
     Retry,
     Cooldown,
-    Reselect,
     Reroute,
     Terminal,
 }

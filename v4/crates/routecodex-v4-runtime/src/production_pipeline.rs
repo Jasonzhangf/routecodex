@@ -172,8 +172,8 @@ fn mark_provider_success_for_route(
 
 fn provider_policy_decision_action(action: ProductErrorExecutionAction) -> DecisionAction {
     match action {
-        ProductErrorExecutionAction::RetrySame => DecisionAction::RetrySame,
-        ProductErrorExecutionAction::Reselect => DecisionAction::Reselect,
+        ProductErrorExecutionAction::RetrySame => DecisionAction::Retry,
+        ProductErrorExecutionAction::Reselect => DecisionAction::Reroute,
         ProductErrorExecutionAction::Cooldown => DecisionAction::Cooldown,
         ProductErrorExecutionAction::Terminal => DecisionAction::Terminal,
     }
@@ -1627,7 +1627,7 @@ mod tests {
                 "provider_http_500",
             )
             .action,
-            DecisionAction::RetrySame
+            DecisionAction::Retry
         );
         assert_eq!(
             provider_policy_execution_decision(
@@ -1635,7 +1635,7 @@ mod tests {
                 "provider_http_503",
             )
             .action,
-            DecisionAction::Reselect
+            DecisionAction::Reroute
         );
     }
 
