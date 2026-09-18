@@ -718,6 +718,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 provider_id,
                 ..
             }
+            | V3ProviderError::InternalTransport {
+                request_id,
+                provider_id,
+                ..
+            }
             | V3ProviderError::WebSocketTransport {
                 request_id,
                 provider_id,

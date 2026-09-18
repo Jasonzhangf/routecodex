@@ -1,0 +1,103 @@
+{
+  "evidence_id": "v3-provider-internal-transport-lanes-source-20260918",
+  "feature_id": "v3.responses_provider_runtime",
+  "candidate_commit": "585ee3d5ce60f27bb600db351274307a7c587b5f",
+  "candidate_tree": "d10175b04880704becc60dc08a2de59bbc72dd24",
+  "base_commit": "b08dc3b476f876a1814304de7a6b53ad1ccc123a",
+  "captured_at": "2026-09-18T05:35:00-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "v3.responses_provider_runtime",
+    "paths": [
+      "v3/crates/routecodex-v3-provider-responses/src/error.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/lib.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/transport.rs",
+      "v3/crates/routecodex-v3-runtime/src/hooks.rs",
+      "v3/crates/routecodex-v3-runtime/src/hooks_tests.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_failures.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs",
+      "v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs",
+      "v3/crates/routecodex-v3-runtime/src/shared.rs",
+      "v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_internal_transport_ --lib -- --nocapture",
+      "result": "pass",
+      "tests": "6 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-provider-responses",
+      "result": "pass",
+      "tests": "6 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-provider-adaptive-concurrency",
+      "result": "pass",
+      "tests": "11 passed; 0 failed"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-responses-direct-blackbox",
+      "result": "pass",
+      "tests": "58 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-health-contract",
+      "result": "pass",
+      "tests": "13 + 27 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:v3-source-gate-red-fixtures",
+      "result": "pass",
+      "tests": "32 forbidden mutations rejected"
+    },
+    {
+      "command": "npm run test:v3-compile-fail",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-rust-only",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-static-hook-registry",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-cargo-fmt",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "npm run verify:v3-clippy",
+      "result": "baseline_failure_not_touched",
+      "exit_code": 101,
+      "tests": "routecodex-v3-route-classifier/src/active_turn.rs, routecodex-v3-route-classifier/src/tests.rs, routecodex-v3-agent-memory/src/lib.rs"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-workspace",
+      "result": "pass"
+    }
+  ]
+}

@@ -65,10 +65,10 @@ impl V3ProviderFailureRuntimeHealth {
                 };
                 let result = match target {
                     Ok(Some(target)) => probe_v3_provider_global_target(target).await,
-                    Ok(None) => Err(format!(
+                    Ok(None) => Err(V3ProviderHealthProbeFailure::Internal(format!(
                         "provider cooldown rescue probe target missing for {provider_id}:{auth_alias}"
-                    )),
-                    Err(error) => Err(error),
+                    ))),
+                    Err(error) => Err(V3ProviderHealthProbeFailure::Internal(error)),
                 };
                 let completion = match result {
                     Ok(()) => health

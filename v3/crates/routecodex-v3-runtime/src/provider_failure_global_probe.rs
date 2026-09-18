@@ -9,8 +9,10 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
 };
+
+use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
 
 pub fn build_v3_provider_global_probe_target(
     manifest: &V3Config05ManifestPublished,
@@ -132,28 +134,48 @@ impl V3ProviderFailureRuntimeHealth {
 
 pub(crate) async fn probe_v3_provider_global_target_impl(
     target: V3ResponsesProviderTarget,
-) -> Result<(), String> {
+) -> Result<(), V3ProviderHealthProbeFailure> {
     let provider_id = target.provider_id.clone();
     let provider_type = target.provider_type.clone();
     let request = build_v3_provider_global_probe_request(
         target,
         format!("provider-global-probe-{provider_id}"),
-    )?;
+    )
+    .map_err(V3ProviderHealthProbeFailure::Internal)?;
     let response = ReqwestResponsesTransport::default()
         .send(request)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(provider_probe_error)?;
     if !(200..=299).contains(&response.status()) {
-        return Err(format!(
+        return Err(V3ProviderHealthProbeFailure::Provider(format!(
             "provider global probe returned {}",
             response.status()
-        ));
+        )));
     }
-    let json = response
-        .json_body()
-        .ok_or_else(|| format!("provider global probe returned non-JSON body for {provider_id}"))?;
-    validate_v3_provider_probe_json(&provider_id, &provider_type, json)?;
+    let json = response.json_body().ok_or_else(|| {
+        V3ProviderHealthProbeFailure::Provider(format!(
+            "provider global probe returned non-JSON body for {provider_id}"
+        ))
+    })?;
+    validate_v3_provider_probe_json(&provider_id, &provider_type, json)
+        .map_err(V3ProviderHealthProbeFailure::Provider)?;
     Ok(())
+}
+
+fn provider_probe_error(error: V3ProviderError) -> V3ProviderHealthProbeFailure {
+    match error {
+        V3ProviderError::HttpStatus { .. }
+        | V3ProviderError::Transport { .. }
+        | V3ProviderError::WebSocketTransport { .. }
+        | V3ProviderError::WebSocketProtocol { .. }
+        | V3ProviderError::WebSocketProviderEvent { .. }
+        | V3ProviderError::UnexpectedContentType { .. }
+        | V3ProviderError::ResponseBody { .. }
+        | V3ProviderError::MalformedSse { .. } => {
+            V3ProviderHealthProbeFailure::Provider(error.to_string())
+        }
+        _ => V3ProviderHealthProbeFailure::Internal(error.to_string()),
+    }
 }
 
 fn validate_v3_provider_probe_json(
@@ -216,7 +238,51 @@ fn validate_v3_provider_probe_json(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_v3_provider_probe_json;
+    use super::{provider_probe_error, validate_v3_provider_probe_json};
+    use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
+    use routecodex_v3_provider_responses::V3ProviderError;
+
+    #[test]
+    fn internal_transport_errors_remain_internal_probe_failures() {
+        let error = provider_probe_error(V3ProviderError::InternalTransport {
+            request_id: "probe-request".to_string(),
+            provider_id: "provider-a".to_string(),
+            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+            reason: "invalid concurrency budget".to_string(),
+        });
+        assert!(matches!(
+            error,
+            V3ProviderHealthProbeFailure::Internal(message)
+                if message.contains("invalid concurrency budget")
+        ));
+    }
+
+    #[test]
+    fn websocket_provider_errors_are_provider_probe_failures() {
+        let protocol = provider_probe_error(V3ProviderError::WebSocketProtocol {
+            request_id: "probe-request".to_string(),
+            provider_id: "provider-a".to_string(),
+            reason: "provider protocol error".to_string(),
+        });
+        assert!(matches!(
+            protocol,
+            V3ProviderHealthProbeFailure::Provider(message)
+                if message.contains("provider protocol error")
+        ));
+
+        let event = provider_probe_error(V3ProviderError::WebSocketProviderEvent {
+            request_id: "probe-request".to_string(),
+            provider_id: "provider-a".to_string(),
+            status: Some(503),
+            code: Some("server_error".to_string()),
+            message: "provider unavailable".to_string(),
+        });
+        assert!(matches!(
+            event,
+            V3ProviderHealthProbeFailure::Provider(message)
+                if message.contains("provider unavailable")
+        ));
+    }
 
     #[test]
     fn http_200_error_payload_is_probe_failure() {

@@ -1,5 +1,11 @@
 use crate::raw_response::V3ProviderResponseHeader;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V3ProviderInternalTransportLane {
+    Request,
+    Response,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderHttpFailure {
     pub request_id: String,
@@ -67,6 +73,15 @@ pub enum V3ProviderError {
     Transport {
         request_id: String,
         provider_id: String,
+        reason: String,
+    },
+    #[error(
+        "internal provider transport failure for request {request_id} and provider {provider_id}: {reason}"
+    )]
+    InternalTransport {
+        request_id: String,
+        provider_id: String,
+        lane: V3ProviderInternalTransportLane,
         reason: String,
     },
     #[error(

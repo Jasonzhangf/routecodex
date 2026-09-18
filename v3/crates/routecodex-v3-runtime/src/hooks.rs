@@ -848,6 +848,23 @@ pub(crate) fn build_v3_provider_error_source(
             message,
             internal_error_code_for_stage(stage),
         ),
+        V3ProviderError::InternalTransport { lane, .. } => {
+            let stage = match lane {
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
+                    "V3Transport13ResponsesHttpRequest"
+                }
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
+                    "V3ProviderResp14Raw"
+                }
+            };
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                stage,
+                "provider_internal_transport_error",
+                message,
+                internal_error_code_for_stage(stage),
+            )
+        }
         V3ProviderError::ClientDisconnect { .. } => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ClientDisconnect,
             stage,
@@ -891,6 +908,7 @@ fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InternalTransport { .. }
         | V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }
@@ -1011,6 +1029,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InternalTransport { .. }
         | V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }

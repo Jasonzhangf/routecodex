@@ -738,6 +738,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+                    drop(provider_action_permit.take());
+                    return error_output(source, trace, &hook_registry);
+                }
                 // 挂起由错误处理中心按「transport 阶段 + 专属 code」判定为瞬态
                 // （health-neutral 重试 3 次），不在构造处打标记。
                 let source = if hang {

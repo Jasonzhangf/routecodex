@@ -937,6 +937,138 @@ async fn provider_failure_reselects_without_router_reentry() {
     );
 }
 
+#[tokio::test]
+async fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct InternalRequestFailureTransport {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for InternalRequestFailureTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Err(V3ProviderError::InternalTransport {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "internal request transition failed".to_string(),
+            })
+        }
+    }
+
+    let transport = InternalRequestFailureTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "provider_internal_request_failure";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-internal-request",
+        "exec-internal-request",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 598, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    if let Some(observability) = output.observability.as_ref() {
+        assert_eq!(observability.provider_failure_events.len(), 0);
+    }
+}
+
+#[tokio::test]
+async fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct InternalResponseFailureTransport {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for InternalResponseFailureTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter([
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_internal\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_vec(),
+                    ),
+                    Err(V3ProviderError::InternalTransport {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                        reason: "internal response transition failed".to_string(),
+                    }),
+                ])),
+            ))
+        }
+    }
+
+    let transport = InternalResponseFailureTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "provider_internal_response_failure";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-internal-response",
+        "exec-internal-response",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 599, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    if let Some(observability) = output.observability.as_ref() {
+        assert_eq!(observability.provider_failure_events.len(), 0);
+    }
+    match output.client_payload.body {
+        V3ClientBody::Json(_) => {}
+        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
+            panic!("internal response failure must terminate before client SSE commit")
+        }
+    }
+}
+
 #[test]
 fn responses_provider_process_chat_forces_hub_relay() {
     let routing_group = "responses_process_chat";

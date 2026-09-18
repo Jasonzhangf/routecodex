@@ -491,6 +491,14 @@ where
                 }
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);
+                if source.source_kind != V3ErrorSourceKind::ProviderFailure {
+                    drop(provider_action_permit.take());
+                    return error_output(
+                        source,
+                        trace,
+                        &crate::hooks::register_responses_direct_hooks(),
+                    );
+                }
                 drop(provider_action_permit.take());
                 let policy_result = match run_v3_direct_provider_failure_policy(
                     &V3DirectProviderFailurePolicyContext {

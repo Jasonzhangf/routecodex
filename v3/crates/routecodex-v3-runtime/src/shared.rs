@@ -1224,7 +1224,8 @@ fn observe_sse_usage_frame(
 }
 
 fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
-    match &error {
+    let message = error.to_string();
+    match error {
         V3ProviderError::ClientDisconnect { provider_id, .. } => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ClientDisconnect,
             "V3ProviderResp14Raw",
@@ -1239,7 +1240,7 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_body_error",
-            error.to_string(),
+            message,
             V3ExternalErrorLink {
                 kind: V3ExternalErrorKind::Provider,
                 status: None,
@@ -1257,7 +1258,7 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_malformed_sse",
-            error.to_string(),
+            message,
             V3ExternalErrorLink {
                 kind: V3ExternalErrorKind::Provider,
                 status: None,
@@ -1267,11 +1268,35 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
                 message: Some(reason.clone()),
             },
         ),
+        V3ProviderError::InternalTransport {
+            request_id,
+            provider_id,
+            lane,
+            reason,
+        } => {
+            let stage = match lane {
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
+                    "V3Transport13ResponsesHttpRequest"
+                }
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
+                    "V3ProviderResp14Raw"
+                }
+            };
+            crate::hooks::build_v3_provider_error_source(
+                stage,
+                V3ProviderError::InternalTransport {
+                    request_id,
+                    provider_id,
+                    lane,
+                    reason,
+                },
+            )
+        }
         _ => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_body_error",
-            error.to_string(),
+            message,
         ),
     }
 }

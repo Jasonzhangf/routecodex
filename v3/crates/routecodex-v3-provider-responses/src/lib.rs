@@ -13,7 +13,7 @@ pub mod transport;
 pub mod transport_handoff;
 pub mod wire;
 
-pub use error::{V3ProviderError, V3ProviderHttpFailure};
+pub use error::{V3ProviderError, V3ProviderHttpFailure, V3ProviderInternalTransportLane};
 pub use global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
     V3ProviderCooldownObservation, V3ProviderCooldownProbePermit,
