@@ -912,6 +912,8 @@ pub struct RuntimeRoute {
 #[serde(deny_unknown_fields)]
 pub struct RuntimeProductConfig {
     pub source: String,
+    #[serde(default)]
+    pub builtin_catalog_models: Vec<String>,
     pub providers: Vec<RuntimeProductProvider>,
     pub route_groups: Vec<RuntimeProductRouteGroup>,
     #[serde(default)]

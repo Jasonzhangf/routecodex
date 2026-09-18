@@ -299,7 +299,7 @@ fn dispatch_request(
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    let continuation_owner = continuation_owner.to_string();
+    let mut continuation_owner = continuation_owner.to_string();
     let request_id = request.request_id.clone();
     let request_lease = {
         let runtime_guard = runtime.lock().map_err(|_| {
@@ -415,6 +415,7 @@ fn dispatch_request(
             .collect::<Vec<_>>()
     };
     selection_request.unavailable_provider_ids = unavailable_provider_ids.clone();
+    selection_request.has_previous_response_id = admission.has_previous_response_id;
     let mut target = {
         let runtime_guard = runtime.lock().map_err(|_| {
             project_fault(
@@ -450,6 +451,21 @@ fn dispatch_request(
             status,
         )
     })?;
+    continuation_owner =
+        crate::select_execution_lane(entry_protocol, &target.protocol)
+            .map_err(|fault| project_fault(request, fault, 400))?
+            .to_string();
+    if admission.has_previous_response_id && continuation_owner == "relay" {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "continuation_unsupported",
+                "local or relay continuation is not supported; use provider-owned Direct continuation",
+            ),
+            400,
+        ));
+    }
+    selection_request.execution_lane = continuation_owner.clone();
     let route_facts = selection_request.to_route_facts_value();
     let target_selection = target.to_control_value(&selection_request.execution_lane);
     let request_report = {
@@ -1759,6 +1775,155 @@ wire_name = "mock-model"
             .snapshot()
             .expect("timing is frozen before response returns");
         assert!(timing.external_ms <= timing.internal_ms + timing.external_ms);
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(provider_config).ok();
+    }
+
+    #[test]
+    fn responses_continuation_dispatches_to_lower_priority_direct_target() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let provider_address = provider.local_addr().expect("provider address");
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = br#"{"id":"resp_continuation","object":"response","model":"mock-model","output":[]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("provider headers");
+            stream.write_all(body).expect("provider body");
+        });
+        let provider_config = std::env::temp_dir().join(format!(
+            "v4-provider-continuation-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &provider_config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{provider_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let manifest = compile_runtime_config(
+            &format!(
+                r#"
+version = 4
+
+[runtime]
+id = "rccv4"
+
+[[listeners]]
+id = "primary"
+address = "127.0.0.1:5520"
+
+[[providers]]
+provider_id = "mock"
+config_path = "{}"
+protocol = "responses"
+wire_model = "mock-model"
+priority = 1
+entry_models = ["mock-model"]
+
+[[routes]]
+id = "default"
+models = ["mock-model"]
+targets = ["mock"]
+
+[product]
+source = "continuation-direct-selection"
+
+[[product.providers]]
+provider_id = "mock"
+protocol = "responses"
+config_path = "{}"
+
+[[product.providers.models]]
+model_id = "mock-model"
+wire_name = "mock-model"
+
+[[product.providers]]
+provider_id = "chat"
+protocol = "openai_chat"
+config_path = "{}"
+
+[[product.providers.models]]
+model_id = "mock-model"
+wire_name = "chat-wire"
+
+[[product.route_groups]]
+route_group_id = "default"
+
+[[product.route_groups.pools]]
+pool_id = "default"
+selection = "priority"
+
+[[product.route_groups.pools.targets]]
+provider_id = "chat"
+model_id = "mock-model"
+priority = 100
+
+[[product.route_groups.pools.targets]]
+provider_id = "mock"
+model_id = "mock-model"
+priority = 1
+"#,
+                provider_config.to_str().expect("provider config path"),
+                provider_config.to_str().expect("provider config path"),
+                provider_config.to_str().expect("provider config path"),
+            ),
+            None,
+        )
+        .expect("continuation selection runtime config compiles");
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","previous_response_id":"resp_1"}"#
+                .to_vec(),
+            request_id: "production-continuation-direct".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+
+        let response = match dispatch(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "continuation dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
         provider_thread.join().expect("provider thread");
         std::fs::remove_file(provider_config).ok();
     }

@@ -1,8 +1,7 @@
 //! routecodex-v4-provider L2 regression: session-scoped availability.
 
 use routecodex_v4_provider::{
-    load_profile,
-    validate_auth_alias, verify_profile_auth, AvailabilityRecord, AvailabilityState,
+    load_profile, validate_auth_alias, verify_profile_auth, AvailabilityRecord, AvailabilityState,
     ProviderBoundRawEvidenceBindingError, ProviderBoundRawEvidenceOwnerContract,
     V4Availability01SessionScoped, PROVIDER_BOUND_RAW_EVIDENCE_OWNER,
 };
@@ -142,6 +141,22 @@ fn secret_file_without_secret_key_fails_fast() {
     .expect("profile");
     let error = load_profile(profile_path.to_str().expect("utf8 path")).expect_err("must fail");
     assert_eq!(error.code, "provider_auth_handle_invalid");
+}
+
+#[test]
+fn auth_entry_inline_api_key_resolves_with_alias() {
+    let root = std::env::temp_dir().join(format!("rccv4-provider-inline-{}", std::process::id()));
+    fs::create_dir_all(&root).expect("temp root");
+    let profile_path = root.join("provider.toml");
+    fs::write(
+        &profile_path,
+        "providerId = \"real\"\n[provider]\nbaseURL = \"https://example.invalid/v1\"\ndefaultModel = \"wire\"\ntype = \"openai_chat\"\n[provider.models.wire]\nwireName = \"wire\"\n[provider.auth]\nentries = [{ alias = \"key1\", apiKey = \"inline-secret\" }]\n",
+    )
+    .expect("profile");
+    let path = profile_path.to_str().expect("utf8 path");
+    let loaded = load_profile(path).expect("inline auth entry loads");
+    verify_profile_auth(&loaded).expect("inline auth entry resolves");
+    validate_auth_alias(path, Some("key1")).expect("compiled alias matches");
 }
 
 #[test]

@@ -80,6 +80,8 @@ struct AuthSection {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct AuthEntry {
     alias: Option<String>,
+    #[serde(rename = "apiKey")]
+    api_key: Option<String>,
     #[serde(rename = "tokenFile")]
     token_file: Option<String>,
     #[serde(rename = "secretFile")]
@@ -116,6 +118,10 @@ enum ProviderAuthHandle {
     },
     SecretFile {
         path: String,
+        key: String,
+        alias: Option<String>,
+    },
+    Inline {
         key: String,
         alias: Option<String>,
     },
@@ -569,26 +575,34 @@ pub fn load_profile(path: &str) -> Result<ProviderProfile, ProviderTransportErro
         status: None,
     })?;
     let auth = if let Some(entry) = file.provider.auth.entries.first() {
-        match (&entry.token_file, &entry.secret_file, &entry.secret_key) {
-            (Some(path), None, None) => ProviderAuthHandle::TokenFile {
+        match (
+            &entry.token_file,
+            &entry.secret_file,
+            &entry.secret_key,
+            &entry.api_key,
+        ) {
+            (Some(path), None, None, None) => ProviderAuthHandle::TokenFile {
                 path: path.clone(),
                 alias: entry.alias.clone(),
             },
-            (None, Some(path), Some(key)) if !key.trim().is_empty() => {
+            (None, Some(path), Some(key), None) if !key.trim().is_empty() => {
                 ProviderAuthHandle::SecretFile {
                     path: path.clone(),
                     key: key.clone(),
                     alias: entry.alias.clone(),
                 }
             }
-            _ => {
-                return Err(ProviderTransportError {
-                    code: "provider_auth_handle_invalid".to_string(),
-                    message: "auth entry requires exactly tokenFile, or secretFile plus secretKey"
+            (None, None, None, Some(key)) if !key.trim().is_empty() => ProviderAuthHandle::Inline {
+                key: key.clone(),
+                alias: entry.alias.clone(),
+            },
+            _ => return Err(ProviderTransportError {
+                code: "provider_auth_handle_invalid".to_string(),
+                message:
+                    "auth entry requires exactly tokenFile, secretFile plus secretKey, or apiKey"
                         .to_string(),
-                    status: None,
-                })
-            }
+                status: None,
+            }),
         }
     } else if let Some(path) = &file.provider.auth.secret_file {
         ProviderAuthHandle::SecretFile {
@@ -658,7 +672,8 @@ pub fn validate_auth_alias(
     let profile = load_profile(profile_path)?;
     let actual_alias = match &profile.auth {
         ProviderAuthHandle::TokenFile { alias, .. }
-        | ProviderAuthHandle::SecretFile { alias, .. } => alias.as_deref(),
+        | ProviderAuthHandle::SecretFile { alias, .. }
+        | ProviderAuthHandle::Inline { alias, .. } => alias.as_deref(),
         ProviderAuthHandle::Env { .. } | ProviderAuthHandle::ConfigInline { .. } => None,
     };
     if expected_alias.is_some() && actual_alias != expected_alias {
@@ -1092,6 +1107,20 @@ fn materialize_auth(handle: &ProviderAuthHandle) -> Result<String, ProviderTrans
                 status: None,
             })
         }
+        ProviderAuthHandle::Inline { key, alias } => {
+            let key = key.trim().to_string();
+            if key.is_empty() {
+                return Err(ProviderTransportError {
+                    code: "provider_auth_empty".to_string(),
+                    message: format!(
+                        "auth handle {} resolved to an empty secret",
+                        alias.as_deref().unwrap_or("default")
+                    ),
+                    status: None,
+                });
+            }
+            Ok(key)
+        }
         ProviderAuthHandle::ConfigInline { config_path } => {
             let raw =
                 std::fs::read_to_string(config_path).map_err(|error| ProviderTransportError {
@@ -1177,6 +1206,7 @@ pub fn write_provider_profile(
             None,
             vec![AuthEntry {
                 alias: Some("primary".to_string()),
+                api_key: None,
                 token_file: Some(path.clone()),
                 secret_file: None,
                 secret_key: None,

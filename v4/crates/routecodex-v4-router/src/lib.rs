@@ -30,7 +30,9 @@ pub struct TargetSelectionHandle {
 
 impl TargetSelectionHandle {
     pub fn new(product: RuntimeProductConfig) -> Self {
-        Self { product: Arc::new(product) }
+        Self {
+            product: Arc::new(product),
+        }
     }
 }
 
@@ -55,7 +57,9 @@ impl PluginHandle for TargetSelectionHandle {
             Value::String(encoded) => {
                 decoded_facts = serde_json::from_str::<Value>(encoded)
                     .map_err(|error| format!("route facts encoding: {error}"))?;
-                decoded_facts.as_object().ok_or_else(|| format!("route facts object: {encoded}"))?
+                decoded_facts
+                    .as_object()
+                    .ok_or_else(|| format!("route facts object: {encoded}"))?
             }
             other => return Err(format!("route facts object: {other}")),
         };
@@ -95,7 +99,13 @@ impl PluginHandle for TargetSelectionHandle {
         let required_capabilities = facts
             .get("required_capabilities")
             .and_then(Value::as_array)
-            .map(|values| values.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
             .unwrap_or_default();
         let input_tokens = facts
             .get("input_tokens")
@@ -105,8 +115,12 @@ impl PluginHandle for TargetSelectionHandle {
         request.required_capabilities = required_capabilities;
         request.input_tokens = input_tokens;
         request.unavailable_provider_ids = unavailable_provider_ids;
+        request.has_previous_response_id = facts
+            .get("has_previous_response_id")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let selected = TargetSelectionPort::select(&self.product, &request)
-        .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?;
         if let Some(prebound) = ctx
             .read_control_resource("v4.control.target_selection")
             .map_err(|error| error.to_string())?
@@ -211,7 +225,10 @@ impl std::fmt::Display for TargetSelectionError {
                 write!(f, "compiled product route group is missing: {group}")
             }
             Self::ProductRouteGroupRequired => {
-                write!(f, "route group is required when multiple product route groups are configured")
+                write!(
+                    f,
+                    "route group is required when multiple product route groups are configured"
+                )
             }
             Self::ProductPoolUnavailable(group) => {
                 write!(f, "no product route pool serves request in group {group}")
@@ -238,6 +255,7 @@ pub struct TargetSelectionRequest {
     pub required_capabilities: Vec<String>,
     pub input_tokens: u64,
     pub unavailable_provider_ids: Vec<String>,
+    pub has_previous_response_id: bool,
 }
 
 impl TargetSelectionRequest {
@@ -255,6 +273,7 @@ impl TargetSelectionRequest {
             required_capabilities: Vec::new(),
             input_tokens: 0,
             unavailable_provider_ids: Vec::new(),
+            has_previous_response_id: false,
         }
     }
 
@@ -263,16 +282,14 @@ impl TargetSelectionRequest {
         product: &'a RuntimeProductConfig,
     ) -> Result<&'a str, TargetSelectionError> {
         match self.route_group_id.as_deref() {
-            Some(route_group_id) => {
-                product
-                    .route_groups
-                    .iter()
-                    .find(|group| group.route_group_id == route_group_id)
-                    .map(|group| group.route_group_id.as_str())
-                    .ok_or_else(|| {
-                        TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string())
-                    })
-            }
+            Some(route_group_id) => product
+                .route_groups
+                .iter()
+                .find(|group| group.route_group_id == route_group_id)
+                .map(|group| group.route_group_id.as_str())
+                .ok_or_else(|| {
+                    TargetSelectionError::ProductRouteGroupMissing(route_group_id.to_string())
+                }),
             None if product.route_groups.len() == 1 => {
                 Ok(product.route_groups[0].route_group_id.as_str())
             }
@@ -291,6 +308,7 @@ impl TargetSelectionRequest {
             "required_capabilities": self.required_capabilities,
             "input_tokens": self.input_tokens,
             "unavailable_provider_ids": self.unavailable_provider_ids,
+            "has_previous_response_id": self.has_previous_response_id,
         })
     }
 }
@@ -305,6 +323,18 @@ impl TargetSelectionPort {
         product: &RuntimeProductConfig,
         request: &TargetSelectionRequest,
     ) -> Result<SelectedTarget, TargetSelectionError> {
+        if let Some(selected) = resolve_direct_provider_model(product, &request.requested_model)? {
+            if request
+                .unavailable_provider_ids
+                .iter()
+                .any(|provider| provider == &selected.provider_id)
+            {
+                return Err(TargetSelectionError::ProductPoolUnavailable(
+                    selected.provider_id,
+                ));
+            }
+            return Ok(selected);
+        }
         let route_group_id = request.resolved_route_group_id(product)?;
         let required_capabilities = request
             .required_capabilities
@@ -324,8 +354,49 @@ impl TargetSelectionPort {
             &required_capabilities,
             request.input_tokens,
             &unavailable_provider_ids,
+            request.has_previous_response_id,
         )
     }
+}
+
+/// Resolve a `provider.model` client pin against the compiled product
+/// provider/model catalog. Unknown provider prefixes retain normal routing;
+/// a known provider with an unknown model fails without pool fallback.
+pub fn resolve_direct_provider_model(
+    product: &RuntimeProductConfig,
+    requested_model: &str,
+) -> Result<Option<SelectedTarget>, TargetSelectionError> {
+    let requested = requested_model.trim();
+    let Some((provider_id, model_part)) = requested.split_once('.') else {
+        return Ok(None);
+    };
+    if provider_id.is_empty() || model_part.is_empty() {
+        return Ok(None);
+    }
+    let Some(provider) = product
+        .providers
+        .iter()
+        .find(|provider| provider.provider_id == provider_id)
+    else {
+        return Ok(None);
+    };
+    let model = provider
+        .models
+        .iter()
+        .find(|model| {
+            model.model_id == model_part || model.aliases.iter().any(|alias| alias == model_part)
+        })
+        .ok_or_else(|| TargetSelectionError::ModelUnavailable(requested.to_string()))?;
+    Ok(Some(SelectedTarget {
+        provider_id: provider.provider_id.clone(),
+        config_path: provider.config_path.clone(),
+        protocol: provider.protocol.clone(),
+        wire_model: model.wire_name.clone(),
+        auth_alias: provider
+            .auth_handles
+            .first()
+            .map(|handle| handle.alias.clone()),
+    }))
 }
 
 /// Selects a target from the typed product manifest.  Pool eligibility is
@@ -347,6 +418,7 @@ pub fn select_product_target(
         required_capabilities,
         input_tokens,
         &[],
+        false,
     )
 }
 
@@ -358,6 +430,7 @@ pub fn select_product_target_with_unavailable(
     required_capabilities: &[&str],
     input_tokens: u64,
     unavailable_provider_ids: &[&str],
+    has_previous_response_id: bool,
 ) -> Result<SelectedTarget, TargetSelectionError> {
     let group = product
         .route_groups
@@ -369,11 +442,6 @@ pub fn select_product_target_with_unavailable(
     let mut pools = group
         .pools
         .iter()
-        .filter(|pool| {
-            pool.entry_protocol
-                .as_deref()
-                .map_or(true, |protocol| protocol == entry_protocol)
-        })
         .filter(|pool| {
             pool.models.is_empty() || pool.models.iter().any(|model| model == requested_model)
         })
@@ -402,22 +470,38 @@ pub fn select_product_target_with_unavailable(
         .into_iter()
         .next()
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(route_group_id.to_string()))?;
+    let requested_model_filter = if pool.models.iter().any(|model| model == requested_model) {
+        None
+    } else if product
+        .builtin_catalog_models
+        .iter()
+        .any(|model| model.trim() == requested_model)
+    {
+        if !pool
+            .targets
+            .iter()
+            .any(|target| product_target_matches_model(product, target, requested_model))
+        {
+            return Err(TargetSelectionError::ModelUnavailable(
+                requested_model.to_string(),
+            ));
+        }
+        None
+    } else if pool
+        .targets
+        .iter()
+        .any(|target| product_target_matches_model(product, target, requested_model))
+    {
+        Some(requested_model)
+    } else {
+        None
+    };
     let target = pool
         .targets
         .iter()
         .filter(|target| {
-            target.model_id == requested_model
-                || product
-                    .providers
-                    .iter()
-                    .find(|provider| provider.provider_id == target.provider_id)
-                    .and_then(|provider| {
-                        provider.models.iter().find(|model| {
-                            model.model_id == target.model_id
-                                && model.aliases.iter().any(|alias| alias == requested_model)
-                        })
-                    })
-                    .is_some()
+            requested_model_filter
+                .is_none_or(|requested| product_target_matches_model(product, target, requested))
         })
         .filter(|target| {
             !unavailable_provider_ids
@@ -425,21 +509,12 @@ pub fn select_product_target_with_unavailable(
                 .any(|provider| *provider == target.provider_id)
         })
         .filter(|target| {
-            let provider_protocol = product
-                .providers
-                .iter()
-                .find(|provider| provider.provider_id == target.provider_id)
-                .map(|provider| provider.protocol.as_str());
-            match (entry_protocol, provider_protocol) {
-                // Direct Responses preserves the protocol; only a Responses
-                // provider can satisfy this lane without a semantic bypass.
-                ("responses" | "openai-responses", Some("responses" | "openai-responses")) => true,
-                // Relay currently has one registered projection: Chat -> Responses.
-                ("chat" | "openai-chat", Some("responses" | "openai-responses")) => true,
-                _ => false,
-            }
+            !has_previous_response_id
+                || product_target_execution_lane(product, target, entry_protocol)
+                    .is_some_and(|lane| lane == "direct")
         })
-        .min_by_key(|target| target.priority)
+        .filter(|target| product_target_can_execute(product, target, entry_protocol))
+        .max_by_key(|target| target.priority)
         .ok_or_else(|| TargetSelectionError::ProductPoolUnavailable(pool.pool_id.clone()))?;
     let provider = product
         .providers
@@ -452,6 +527,67 @@ pub fn select_product_target_with_unavailable(
             .find(|model| model.model_id == target.model_id)
     });
     product_target_to_selected(provider, model, target)
+}
+
+fn product_target_can_execute(
+    product: &RuntimeProductConfig,
+    target: &RuntimeProductTarget,
+    entry_protocol: &str,
+) -> bool {
+    let provider_protocol = product
+        .providers
+        .iter()
+        .find(|provider| provider.provider_id == target.provider_id)
+        .map(|provider| provider.protocol.as_str());
+    match (entry_protocol, provider_protocol) {
+        // Same-protocol Responses preserves the Direct wire contract.
+        ("responses" | "openai-responses", Some("responses" | "openai-responses")) => true,
+        // Cross-protocol targets are eligible only for registered Relay
+        // projections. The selected pair decides the lane after selection.
+        ("responses" | "openai-responses", Some("chat" | "openai_chat" | "openai-chat")) => true,
+        ("chat" | "openai-chat", Some("responses" | "openai-responses")) => true,
+        _ => false,
+    }
+}
+
+fn product_target_execution_lane<'a>(
+    product: &'a RuntimeProductConfig,
+    target: &RuntimeProductTarget,
+    entry_protocol: &str,
+) -> Option<&'a str> {
+    let provider_protocol = product
+        .providers
+        .iter()
+        .find(|provider| provider.provider_id == target.provider_id)
+        .map(|provider| provider.protocol.as_str())?;
+    match (entry_protocol, provider_protocol) {
+        ("responses" | "openai-responses", "responses" | "openai-responses") => Some("direct"),
+        ("responses" | "openai-responses", "chat" | "openai_chat" | "openai-chat") => Some("relay"),
+        ("chat" | "openai-chat", "responses" | "openai-responses") => Some("relay"),
+        _ => None,
+    }
+}
+
+fn product_target_matches_model(
+    product: &RuntimeProductConfig,
+    target: &RuntimeProductTarget,
+    requested_model: &str,
+) -> bool {
+    target.model_id == requested_model
+        || product
+            .providers
+            .iter()
+            .find(|provider| provider.provider_id == target.provider_id)
+            .and_then(|provider| {
+                provider
+                    .models
+                    .iter()
+                    .find(|model| model.model_id == target.model_id)
+            })
+            .is_some_and(|model| {
+                model.wire_name == requested_model
+                    || model.aliases.iter().any(|alias| alias == requested_model)
+            })
 }
 
 /// Production callers use this owner-scoped name for retry selection.  The
@@ -473,6 +609,7 @@ pub fn select_product_target_excluding(
         required_capabilities,
         input_tokens,
         unavailable_provider_ids,
+        false,
     )
 }
 

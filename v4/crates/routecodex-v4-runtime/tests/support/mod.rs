@@ -56,6 +56,7 @@ fn test_product() -> RuntimeProductConfig {
         "mock-model",
         "responses-model",
         "admission-model",
+        "deepseek-v4.1-flash",
     ]
     .into_iter()
     .map(|model| RuntimeProductModel {
@@ -73,16 +74,37 @@ fn test_product() -> RuntimeProductConfig {
             priority: 1,
             weight: None,
         })
+        .chain(std::iter::once(RuntimeProductTarget {
+            provider_id: "mock-chat".to_string(),
+            model_id: "deepseek-v4.1-flash".to_string(),
+            priority: 100,
+            weight: None,
+        }))
         .collect::<Vec<_>>();
     RuntimeProductConfig {
         source: "v4-runtime-test-product".to_string(),
-        providers: vec![RuntimeProductProvider {
-            provider_id: "mock".to_string(),
-            protocol: "responses".to_string(),
-            config_path: "mock-provider.toml".to_string(),
-            models,
-            auth_handles: Vec::new(),
-        }],
+        builtin_catalog_models: vec!["gpt-5.5".to_string()],
+        providers: vec![
+            RuntimeProductProvider {
+                provider_id: "mock".to_string(),
+                protocol: "responses".to_string(),
+                config_path: "mock-provider.toml".to_string(),
+                models,
+                auth_handles: Vec::new(),
+            },
+            RuntimeProductProvider {
+                provider_id: "mock-chat".to_string(),
+                protocol: "openai_chat".to_string(),
+                config_path: "mock-chat.toml".to_string(),
+                models: vec![RuntimeProductModel {
+                    model_id: "deepseek-v4.1-flash".to_string(),
+                    wire_name: "deepseek-v4.1-flash".to_string(),
+                    capabilities: Vec::new(),
+                    aliases: Vec::new(),
+                }],
+                auth_handles: Vec::new(),
+            },
+        ],
         route_groups: vec![RuntimeProductRouteGroup {
             route_group_id: "default".to_string(),
             pools: vec![RuntimeProductPool {
