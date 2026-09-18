@@ -72,11 +72,11 @@ impl PluginHandle for TargetSelectionHandle {
                 .ok_or_else(|| "router target producer requires entry protocol".to_string())?
                 .to_string()
         };
-        let model = ctx
-            .read_information_resource("v4.information.model")
-            .map_err(|error| error.to_string())?
+        let model = facts
+            .get("requested_model")
             .and_then(Value::as_str)
-            .ok_or_else(|| "router target producer requires model".to_string())?
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "router target producer requires requested model".to_string())?
             .to_string();
         let lane = facts
             .get("execution_lane")
@@ -303,6 +303,7 @@ impl TargetSelectionRequest {
     pub fn to_route_facts_value(&self) -> Value {
         serde_json::json!({
             "route_group_id": self.route_group_id,
+            "requested_model": self.requested_model,
             "entry_protocol": self.entry_protocol,
             "execution_lane": self.execution_lane,
             "required_capabilities": self.required_capabilities,
