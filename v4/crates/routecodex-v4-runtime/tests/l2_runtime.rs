@@ -1251,6 +1251,7 @@ struct ScriptedProviderSource {
     chunks: Vec<Vec<u8>>,
     next: usize,
     reads: usize,
+    read_delay: Option<std::time::Duration>,
 }
 
 impl ScriptedProviderSource {
@@ -1259,7 +1260,13 @@ impl ScriptedProviderSource {
             chunks,
             next: 0,
             reads: 0,
+            read_delay: None,
         }
+    }
+
+    fn with_read_delay(mut self, delay: std::time::Duration) -> Self {
+        self.read_delay = Some(delay);
+        self
     }
 }
 
@@ -1269,6 +1276,9 @@ impl ProviderSseSource for ScriptedProviderSource {
         let Some(next) = self.chunks.get(self.next) else {
             return Ok(0);
         };
+        if let Some(delay) = self.read_delay {
+            std::thread::sleep(delay);
+        }
         self.next += 1;
         assert!(
             next.len() <= chunk.len(),
@@ -1334,6 +1344,32 @@ fn sse_transport_seals_terminal_without_consuming_trailing_provider_frame() {
         timing.request_snapshot().is_some(),
         "terminal timing closes"
     );
+}
+
+#[test]
+fn sse_transport_records_non_overlapping_provider_phase_timing() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-sse-phase-timing",
+        ScriptedProviderSource::new(vec![
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"m\",\"output\":[]}}\n\n".to_vec(),
+        ])
+        .with_read_delay(std::time::Duration::from_millis(20)),
+        timing.clone(),
+    );
+    let mut chunk = Vec::new();
+    assert!(driver.next_chunk(&mut chunk).expect("terminal chunk"));
+    let snapshot = timing.request_snapshot().expect("terminal timing snapshot");
+    assert!(
+        snapshot.phases_ms.provider_read_ms >= 15,
+        "{snapshot:?}"
+    );
+    assert_eq!(snapshot.phases_ms.provider_sse_framing_ms, 0, "{snapshot:?}");
+    assert_eq!(snapshot.phases_ms.response_processing_ms, 0, "{snapshot:?}");
 }
 
 #[test]
@@ -2179,6 +2215,43 @@ fn control_resources_lifecycle_positive_and_red() {
     let timing = V4RuntimeTimingSummary::new();
     timing.state().record_phase("resp_chatprocess", 42);
     assert_eq!(timing.total_micros("resp_chatprocess"), 42);
+}
+
+#[test]
+fn runtime_timing_freezes_provider_phase_projection() {
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    timing
+        .state()
+        .record_phase("provider_transport_open", 1_500);
+    timing.state().record_phase("provider_read", 1_500);
+    timing.state().record_phase("provider_sse_framing", 2_500);
+    timing.state().record_phase("response_processing", 4_500);
+    timing.finish_external().expect("external attempt closes");
+    let snapshot = timing.finish_runtime().expect("runtime timing freezes");
+    assert_eq!(snapshot.phases_ms.provider_transport_open_ms, 1);
+    assert_eq!(snapshot.phases_ms.provider_read_ms, 1);
+    assert_eq!(snapshot.phases_ms.provider_sse_framing_ms, 2);
+    assert_eq!(snapshot.phases_ms.response_processing_ms, 4);
+}
+
+#[test]
+fn runtime_timing_does_not_mislabel_blocking_transport_body_read_as_open() {
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    timing.finish_external().expect("external attempt closes");
+    let snapshot = timing.finish_runtime().expect("runtime timing freezes");
+    assert!(
+        snapshot.external_ms >= 15,
+        "blocking transport duration stays external: {snapshot:?}"
+    );
+    assert_eq!(
+        snapshot.phases_ms.provider_transport_open_ms, 0,
+        "blocking transport body reads must not be mislabeled as response-header open"
+    );
 }
 
 #[test]

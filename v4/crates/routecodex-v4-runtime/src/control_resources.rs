@@ -429,10 +429,27 @@ impl V4RuntimeTimingState {
         let summary = routecodex_v4_server::RequestTimingSnapshot {
             internal_ms: internal.as_millis().try_into().unwrap_or(u64::MAX),
             external_ms: external.as_millis().try_into().unwrap_or(u64::MAX),
+            phases_ms: routecodex_v4_server::RequestTimingPhases {
+                provider_transport_open_ms: micros_to_ms(
+                    self.total_micros("provider_transport_open"),
+                ),
+                provider_read_ms: micros_to_ms(self.total_micros("provider_read")),
+                provider_sse_framing_ms: micros_to_ms(
+                    self.total_micros("provider_sse_framing"),
+                ),
+                response_processing_ms: micros_to_ms(self.total_micros("response_processing")),
+            },
         };
         self.summary = Some(summary);
         Ok(summary)
     }
+}
+
+fn micros_to_ms(micros: u128) -> u64 {
+    micros
+        .checked_div(1_000)
+        .and_then(|millis| millis.try_into().ok())
+        .unwrap_or(u64::MAX)
 }
 
 /// Runtime timing summary projection handle (diagnostic side-channel only).
