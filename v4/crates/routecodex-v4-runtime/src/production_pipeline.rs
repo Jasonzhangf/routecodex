@@ -1508,7 +1508,7 @@ mod tests {
     use routecodex_v4_standard_plugins::StandardHandleRegistry;
     use std::io::{self, Read, Write};
     use std::net::TcpListener;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
@@ -1985,8 +1985,11 @@ wire_name = "mock-model"
     fn streaming_policy_retry_does_not_reuse_buffered_provider_body() {
         let first_provider = TcpListener::bind("127.0.0.1:0").expect("first provider listener");
         let first_address = first_provider.local_addr().expect("first provider address");
+        let attempts_seen = Arc::new(AtomicUsize::new(0));
+        let attempts_seen_by_provider = Arc::clone(&attempts_seen);
         let first_thread = std::thread::spawn(move || {
             for attempt in 0..2 {
+                attempts_seen_by_provider.fetch_add(1, Ordering::SeqCst);
                 let (mut stream, _) = first_provider.accept().expect("first provider accepts");
                 let mut request = [0u8; 8192];
                 let _ = stream.read(&mut request);
@@ -2024,7 +2027,7 @@ wire_name = "mock-model"
             &first_config,
             format!(
                 r#"
-providerId = "first"
+providerId = "mock"
 
 [provider]
 baseURL = "http://{first_address}"
@@ -2115,6 +2118,11 @@ wire_name = "mock-model"
             ),
         };
         assert_eq!(response.status, 200);
+        assert_eq!(
+            attempts_seen.load(Ordering::SeqCst),
+            2,
+            "semantic policy must execute a second provider attempt"
+        );
         let mut stream = response.stream.take().expect("retry success stream");
         let mut chunk = Vec::new();
         assert!(stream.next_chunk(&mut chunk).expect("retry client SSE chunk"));
