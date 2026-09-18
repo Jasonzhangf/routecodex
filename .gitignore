@@ -64,12 +64,6 @@ scripts/demo-*.mjs
 .claude/
 .iflow/
 
-# Beads (bd) task tracking
-# Track only `.beads/issues.jsonl` (single source of truth); everything else in `.beads/*` is local runtime state.
-.beads/**
-!.beads/issues.jsonl
-src/utils/daemon-stop-intent.ts
-
 # Local memsearch notes
 memory/
 !sharedmodule/llmswitch-core/src/servertool/handlers/memory/
@@ -131,7 +125,14 @@ sharedmodule/llmswitch-core-migrated/
 # Local git worktrees used for scratch/experiment branches
 .worktrees/
 # V3 generated architecture admission/build contract surfaces
-v3/build-contracts/
+v3/build-contracts
+v3/build-control
+
+# Retired root runtime build metadata
+/src/build-info.ts
+
+# AppSDK preparation records belong at the workspace root
+/v3/.appsdk-prepare.json
 # E2E / stress test scratch artifacts (random-size files, never source-of-truth)
 *.bin
 zterm-e2e-download-*.bin
