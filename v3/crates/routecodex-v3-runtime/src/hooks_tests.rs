@@ -563,6 +563,51 @@ fn provider_transport_source_is_external_transport_identity_without_internal_cod
 }
 
 #[test]
+fn provider_internal_transport_source_is_internal_runtime_identity() {
+    let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
+        V3ProviderError::InternalTransport {
+            request_id: "req".to_string(),
+            provider_id: "asxs-grok".to_string(),
+            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+            reason: "provider frame sequence mismatch".to_string(),
+        },
+    );
+
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    assert!(source.external_error.is_none());
+    let internal = source.internal_error.expect("internal transport code");
+    assert_eq!(internal.internal_code, "500-160");
+    assert_eq!(internal.node_id, "V3Transport13ResponsesHttpRequest");
+}
+
+#[test]
+fn provider_internal_transport_response_lane_projects_599() {
+    let source = provider_error_source("V3ProviderResp14Raw")(V3ProviderError::InternalTransport {
+        request_id: "req".to_string(),
+        provider_id: "asxs-grok".to_string(),
+        lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+        reason: "provider frame sequence mismatch".to_string(),
+    });
+
+    assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+    let internal = source
+        .internal_error
+        .as_ref()
+        .expect("internal response lane code");
+    assert_eq!(internal.internal_code, "500-200");
+    assert_eq!(internal.node_id, "V3ProviderResp14Raw");
+    let projected = routecodex_v3_error::V3ErrorHandlingCenter::handle(
+        routecodex_v3_error::V3ErrorHandlingCenterInput {
+            source,
+            action_scope: routecodex_v3_error::V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: None,
+        },
+    );
+    assert_eq!(projected.status, 599);
+}
+
+#[test]
 fn provider_local_auth_secret_failure_is_internal_runtime_identity() {
     let source = provider_error_source("V3Transport13ResponsesHttpRequest")(
         V3ProviderError::MissingAuthSecret {

@@ -247,6 +247,7 @@ mod tests {
         let error = provider_probe_error(V3ProviderError::InternalTransport {
             request_id: "probe-request".to_string(),
             provider_id: "provider-a".to_string(),
+            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
             reason: "invalid concurrency budget".to_string(),
         });
         assert!(matches!(

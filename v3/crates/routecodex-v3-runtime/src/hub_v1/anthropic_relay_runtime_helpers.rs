@@ -223,6 +223,44 @@ fn provider_request_failure(
 }
 
 fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3RelayProviderFailure {
+    if let V3ProviderError::InternalTransport { lane, .. } = &error {
+        let source_stage = match lane {
+            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
+                "V3ProviderReqOutbound09TransportRequest"
+            }
+            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
+                "V3ProviderRespInbound01Raw"
+            }
+        };
+        let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
+        let projected = V3ErrorHandlingCenter::project_terminal(
+            V3ErrorHandlingCenter::decide_provider(
+                V3ErrorHandlingCenterInput {
+                    source,
+                    action_scope: V3ErrorActionScope::None,
+                    candidates_remaining: 0,
+                    source_status: None,
+                },
+                false,
+                false,
+                None,
+            ),
+        );
+        return V3RelayProviderFailure {
+            status: projected.status,
+            client_response: json!({
+                "type": "error",
+                "error": {
+                    "type": "provider_internal_transport_error",
+                    "message": projected.error_detail
+                }
+            }),
+            source_stage,
+            terminal_projection: Some(projected),
+            error_type_fn: extract_error_type_style,
+            error_message_fn: extract_message_type_style,
+        };
+    }
     let terminal_projection =
         matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
             project_v3_client_disconnect(

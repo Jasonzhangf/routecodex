@@ -298,6 +298,42 @@ pub fn provider_runtime_failure(
     error: V3ProviderError,
     provider_id: &str,
 ) -> V3RelayProviderFailure {
+    if let V3ProviderError::InternalTransport { lane, .. } = &error {
+        let source_stage = match lane {
+            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
+                "V3ProviderReqOutbound09TransportRequest"
+            }
+            routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
+                "V3ProviderRespInbound01Raw"
+            }
+        };
+        let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
+        let projected =
+            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
+                V3ErrorHandlingCenterInput {
+                    source,
+                    action_scope: V3ErrorActionScope::None,
+                    candidates_remaining: 0,
+                    source_status: None,
+                },
+                false,
+                false,
+                None,
+            ));
+        return V3RelayProviderFailure {
+            status: projected.status,
+            client_response: json!({
+                "error": {
+                    "code": "provider_internal_transport_error",
+                    "message": projected.error_detail
+                }
+            }),
+            source_stage,
+            terminal_projection: Some(projected),
+            error_type_fn: extract_error_code_style,
+            error_message_fn: extract_message_code_style,
+        };
+    }
     let error_code = match &error {
         // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
         // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
