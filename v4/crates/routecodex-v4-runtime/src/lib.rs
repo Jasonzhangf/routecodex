@@ -313,6 +313,25 @@ pub enum RelayOperator {
     Direct,
 }
 
+/// Select the request execution lane from the typed entry/provider protocol
+/// pair after the router has selected a concrete target. Same-protocol
+/// traffic uses Direct; a registered cross-protocol projection uses Relay.
+pub fn select_execution_lane(
+    entry_protocol: &str,
+    provider_protocol: &str,
+) -> Result<&'static str, RuntimeFault> {
+    let entry_protocol = canonical_protocol_information(entry_protocol)?;
+    let provider_protocol = canonical_protocol_information(provider_protocol)?;
+    match (entry_protocol, provider_protocol) {
+        (entry, provider) if entry == provider => Ok("direct"),
+        ("openai-responses", "openai-chat") | ("openai-chat", "openai-responses") => Ok("relay"),
+        (entry, provider) => Err(RuntimeFault::new(
+            "execution_lane_select",
+            format!("no registered execution lane for {entry} -> {provider}"),
+        )),
+    }
+}
+
 /// Select the relay/direct operator from typed facts only. Same-protocol
 /// responses + direct owner selects Direct; an explicit relay owner selects
 /// Relay for supported entries, including V4-local Responses materialization.
@@ -839,7 +858,7 @@ pub struct InformationView {
 fn canonical_protocol_information(protocol: &str) -> Result<&'static str, RuntimeFault> {
     match protocol {
         "responses" | "openai-responses" => Ok("openai-responses"),
-        "chat" | "openai-chat" => Ok("openai-chat"),
+        "chat" | "openai_chat" | "openai-chat" => Ok("openai-chat"),
         "anthropic" => Ok("anthropic"),
         other => Err(RuntimeFault::new(
             "protocol_information_invalid",

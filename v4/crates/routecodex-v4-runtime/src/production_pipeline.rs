@@ -299,7 +299,7 @@ fn dispatch_request(
     let conversation_scope = request
         .header("x-rccv4-conversation-id")
         .unwrap_or(session_scope);
-    let continuation_owner = continuation_owner.to_string();
+    let mut continuation_owner = continuation_owner.to_string();
     let request_id = request.request_id.clone();
     let request_lease = {
         let runtime_guard = runtime.lock().map_err(|_| {
@@ -450,6 +450,21 @@ fn dispatch_request(
             status,
         )
     })?;
+    continuation_owner =
+        crate::select_execution_lane(entry_protocol, &target.protocol)
+            .map_err(|fault| project_fault(request, fault, 400))?
+            .to_string();
+    if admission.has_previous_response_id && continuation_owner == "relay" {
+        return Err(project_fault(
+            request,
+            RuntimeFault::new(
+                "continuation_unsupported",
+                "local or relay continuation is not supported; use provider-owned Direct continuation",
+            ),
+            400,
+        ));
+    }
+    selection_request.execution_lane = continuation_owner.clone();
     let route_facts = selection_request.to_route_facts_value();
     let target_selection = target.to_control_value(&selection_request.execution_lane);
     let request_report = {
