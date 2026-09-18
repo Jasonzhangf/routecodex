@@ -950,7 +950,6 @@ fn dispatch_request(
                         ));
                     }
                 };
-                let _ = request_timing.finish_external();
                 response_body = String::from_utf8_lossy(&bytes).into_owned();
                 buffered_provider_body = Some(bytes);
                 if let Some(policy) = manifest.product.as_ref().and_then(|product| {
@@ -1862,6 +1861,112 @@ wire_name = "mock-model"
         assert_eq!(response.status, 400);
         let body = String::from_utf8(response.body).expect("error body is utf8");
         assert!(!body.contains("response.completed"), "{body}");
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(provider_config).ok();
+    }
+
+    #[test]
+    fn streaming_200_policy_prefetch_preserves_nonmatching_success_timing() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let provider_address = provider.local_addr().expect("provider address");
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("provider body");
+        });
+        let provider_config = std::env::temp_dir().join(format!(
+            "v4-provider-streaming-200-nonmatch-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &provider_config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{provider_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let manifest = runtime_manifest_with_provider_config_and_200_project(
+            provider_config.to_str().expect("provider config path"),
+        );
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","stream":true}"#.to_vec(),
+            request_id: "production-streaming-200-nonmatch".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let provider_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let mut response = match dispatch_with_request_cancellation(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+            None,
+            None,
+            Some(provider_runtime.handle().clone()),
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "non-matching 200 policy unexpectedly failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
+        let mut stream = response.stream.take().expect("success response stream");
+        let mut chunk = Vec::new();
+        assert!(stream.next_chunk(&mut chunk).expect("client SSE chunk"));
+        assert!(String::from_utf8_lossy(&chunk).contains("response.completed"));
+        assert!(
+            response
+                .timing
+                .as_ref()
+                .expect("success response timing")
+                .snapshot()
+                .is_some(),
+            "policy prefetch must leave timing closeout to the transport driver"
+        );
         provider_thread.join().expect("provider thread");
         std::fs::remove_file(provider_config).ok();
     }
