@@ -378,7 +378,7 @@ fn direct_chat_sse_finish_and_usage_remain_non_terminal_until_done() {
     let done = decode_direct_provider_sse_frame("openai-chat", b"data: [DONE]\n\n")
         .expect("[DONE] decodes as the direct Chat terminal");
     assert_eq!(done.disposition, ProviderSseEventDisposition::Completed);
-    assert_eq!(done.semantic, Value::Null);
+    assert_eq!(done.semantic, json!({}));
 }
 
 #[test]

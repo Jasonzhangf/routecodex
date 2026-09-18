@@ -1282,6 +1282,58 @@ fn response_failed_projects_one_error_without_success_closeout() {
 }
 
 #[test]
+fn direct_chat_sse_finish_usage_and_done_reach_client_frame() {
+    let runtime = active_runtime();
+    let mut processor =
+        response_stream_processor(&runtime, "r-direct-chat-done", "chat", "chat", "direct");
+
+    for (provider_frame, expected_client_fragment) in [
+        (
+            b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n"
+                .as_slice(),
+            "\"content\":\"hi\"",
+        ),
+        (
+            b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                .as_slice(),
+            "\"finish_reason\":\"stop\"",
+        ),
+        (
+            b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n"
+                .as_slice(),
+            "\"total_tokens\":10",
+        ),
+    ] {
+        let disposition = processor
+            .process_frame(&runtime, transport_frame(provider_frame))
+            .expect("direct Chat non-terminal frame must project");
+        let ResponseStreamDisposition::Continue { frame } = disposition else {
+            panic!("Chat finish/usage must remain non-terminal until [DONE]");
+        };
+        let client = String::from_utf8_lossy(frame.as_bytes());
+        assert!(client.contains(expected_client_fragment), "{client}");
+        assert!(!client.contains("[DONE]"), "{client}");
+    }
+
+    let disposition = processor
+        .process_frame(
+            &runtime,
+            transport_frame(b"data: [DONE]\n\n"),
+        )
+        .expect("direct Chat [DONE] must close through the registered client path");
+    let ResponseStreamDisposition::Terminal { frame } = disposition else {
+        panic!("[DONE] must be terminal");
+    };
+    assert_eq!(
+        String::from_utf8_lossy(frame.as_bytes()),
+        "data: [DONE]\n\n"
+    );
+    processor
+        .finish()
+        .expect("direct Chat stream is complete after [DONE]");
+}
+
+#[test]
 fn response_stream_eof_before_terminal_fails_fast() {
     let runtime = active_runtime();
     let mut processor =

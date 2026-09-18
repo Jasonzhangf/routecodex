@@ -577,7 +577,7 @@ pub fn decode_direct_provider_sse_frame(
     let raw = data.join("\n");
     if provider_protocol == "chat" && raw.trim() == "[DONE]" {
         return Ok(DecodedProviderSseFrame {
-            semantic: Value::Null,
+            semantic: json!({}),
             disposition: ProviderSseEventDisposition::Completed,
         });
     }

@@ -425,6 +425,7 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
         "V4DirectResp01ProviderRaw" => vec![
             "v4.direct.response.provider_raw".to_string(),
             "v4.information.provider_protocol".to_string(),
+            "v4.control.stream_terminal".to_string(),
         ],
         "V4DirectResp03ClientProtocol" => vec![
             "v4.direct.response.client_payload".to_string(),
@@ -719,7 +720,10 @@ pub fn standard_plugins() -> Vec<StandardPlugin> {
             PluginEffect::DiagnosticOnly,
             PluginPhase::Observation,
             903,
-            vec!["v4.direct.response.provider_raw"],
+            vec![
+                "v4.direct.response.provider_raw",
+                "v4.control.stream_terminal",
+            ],
             vec![],
         ),
         plugin(
@@ -1148,6 +1152,21 @@ fn response_payload_console(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
 }
 
 fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Result<(), String> {
+    if direction == "response"
+        && ctx
+            .read_data()
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty)
+    {
+        let terminal = ctx
+            .read_control_resource("v4.control.stream_terminal")
+            .map_err(|error| error.to_string())?
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if !terminal {
+            return Err("empty response payload requires terminal stream truth".to_string());
+        }
+    }
     let payload_stream = ctx
         .read_data()
         .get("stream")

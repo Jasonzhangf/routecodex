@@ -94,7 +94,6 @@ pub(crate) fn relay_model_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String
 }
 
 pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let value = object(ctx, "direct_response_passthrough")?;
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     if client_protocol != provider_protocol {
@@ -102,10 +101,14 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
             "Direct protocol mismatch: client={client_protocol} provider={provider_protocol}"
         ));
     }
+    let value = ctx.read_data().clone();
+    if !value.is_object() {
+        return Err("direct_response_passthrough requires object payload".to_string());
+    }
     // Transport already supplies the raw provider body as the data-plane
     // object. Direct response hooks validate protocol identity only; they do
     // not unwrap a second synthetic HTTP envelope.
-    ctx.write_data(Value::Object(value))
+    ctx.write_data(value)
         .map_err(|error| error.to_string())
 }
 
@@ -124,8 +127,6 @@ pub(crate) fn direct_request_wire_validate(ctx: &mut ExecCtx<'_>) -> Result<(), 
 }
 
 pub(crate) fn direct_response_client_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
-    let value = object(ctx, "direct_response_client_validate")?;
-    let _ = value;
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
     let provider_protocol = information_string(ctx, "v4.information.provider_protocol")?;
     if client_protocol != provider_protocol {
@@ -141,17 +142,18 @@ pub(crate) fn direct_response_client_validate(ctx: &mut ExecCtx<'_>) -> Result<(
             .read_information_resource("v4.information.stream_terminal")
             .map_err(|error| error.to_string())?
             .and_then(Value::as_bool));
+    let value = ctx.read_data().clone();
+    if !value.is_object() {
+        return Err("direct_response_client_validate requires object payload".to_string());
+    }
     if let Some(terminal) = stream_terminal {
         let entry_protocol = ctx
             .read_information_resource("v4.information.entry_protocol")
             .map_err(|error| error.to_string())?
             .and_then(Value::as_str)
             .unwrap_or("responses");
-        let encoded = super::response_outbound::encode_client_sse_frame(
-            entry_protocol,
-            &Value::Object(value.clone()),
-            terminal,
-        )?;
+        let encoded =
+            super::response_outbound::encode_client_sse_frame(entry_protocol, &value, terminal)?;
         ctx.emit(
             "client_sse_frame",
             String::from_utf8(encoded).map_err(|error| error.to_string())?,
