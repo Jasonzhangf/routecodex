@@ -308,6 +308,55 @@ fn provider_sse_uses_arc_transport_carrier_and_typed_terminal_control() {
 }
 
 #[test]
+fn direct_chat_sse_preserves_provider_wire_shape() {
+    let frame = b"data: {\"id\":\"chatcmpl_direct\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}]}\n\n";
+    let bytes: Arc<[u8]> = Arc::from(frame.as_slice());
+    let carrier = SharedTransportCarrier::from_shared_bytes(Arc::clone(&bytes));
+    let plan = compile_standard_plan(
+        "V4DirectResp01ProviderRaw",
+        "response_inbound",
+        "direct_response",
+        1,
+        &["v4.std.direct.response.sse_frame_boundary"],
+    )
+    .expect("direct provider SSE boundary plan compiles");
+    let hash = plan.plan_hash();
+    let bindings = PlanBindings {
+        graph_hash: hash.clone(),
+        manifest_hash: hash.clone(),
+        loaded_plan_hash: hash,
+    };
+    let mut container = NodeContainer::declare("V4DirectResp01ProviderRaw", plan, bindings)
+        .expect("binding passes");
+    container.context_created().unwrap();
+    container.plugins_mounted().unwrap();
+    container.publish().unwrap();
+    let output = container
+        .execute(
+            NodeExecutionInput {
+                data: json!({}),
+                control: json!({}),
+                information: json!({
+                    "provider_protocol": "openai-chat",
+                    "client_protocol": "openai-chat",
+                    "execution_lane": "direct"
+                }),
+                transport: Some(carrier.clone()),
+            },
+            &StandardHandleRegistry::new(),
+        )
+        .expect("direct Chat provider frame must be consumed");
+    assert_eq!(output.data["id"], "chatcmpl_direct");
+    assert_eq!(output.data["object"], "chat.completion.chunk");
+    assert_eq!(output.data["choices"][0]["delta"]["content"], "hi");
+    assert!(output.data.get("type").is_none());
+    assert_eq!(output.control["stream_terminal"], false);
+    assert!(carrier.shares_storage_with(&SharedTransportCarrier::from_shared_bytes(bytes)));
+    container.drain().unwrap();
+    container.dispose().unwrap();
+}
+
+#[test]
 fn direct_response_hook_consumes_raw_provider_body() {
     let response = json!({
         "id": "resp-direct-1",
@@ -699,6 +748,11 @@ fn provider_sse_reducer_consumes_chat_usage_closeout_before_done() {
     assert_eq!(terminal["response"]["usage"]["input_tokens"], 7);
     assert_eq!(terminal["response"]["usage"]["output_tokens"], 3);
     assert_eq!(terminal["response"]["usage"]["total_tokens"], 10);
+    assert_eq!(terminal["response"]["output"][0]["type"], "message");
+    assert_eq!(
+        terminal["response"]["output"][0]["content"][0]["text"],
+        "hi"
+    );
 }
 
 #[test]
