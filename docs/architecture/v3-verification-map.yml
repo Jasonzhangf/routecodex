@@ -99,9 +99,11 @@ features:
   required_positive:
   - persisted cooldown remains unavailable after restart until startup probe succeeds
   - due probe failure preserves cooldown and success removes it
+  - provider startup or cooldown probe HTTP/transport failure is recorded as provider-local degraded health and never escapes as a listener or managed-lifecycle startup failure
   required_negative:
   - cooldown state never enters provider or client payload
   - lock and persistence failures are not converted into availability success
+  - non-provider probe target or internal health failures remain observable
   required_gates:
   - npm run test:v3-provider-global-cooldown-persistence
   - npm run verify:v3-resource-map
