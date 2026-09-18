@@ -3,6 +3,12 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+use crate::types::{
+    V3ForwarderManifest, V3ForwarderTargetManifest, V3RouteGroupManifest,
+    V3RoutePoolTargetManifest, V3RouteTargetKind,
+};
+use crate::{validation, V3ConfigError};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderPriorityScheduleAuthoringConfig {
@@ -151,6 +157,138 @@ impl V3ProviderPriorityScheduleAuthoringConfig {
             }
         })
     }
+}
+
+pub(crate) fn validate_provider_priority_schedule_tiers(
+    server_id: &str,
+    route_group: &V3RouteGroupManifest,
+    forwarders: &std::collections::BTreeMap<String, V3ForwarderManifest>,
+    schedule: &V3ProviderPriorityScheduleAuthoringConfig,
+) -> Result<(), V3ConfigError> {
+    for entry in &schedule.providers {
+        for pool in route_group.pools.values() {
+            let mut priorities = BTreeSet::new();
+            let mut contains_provider = false;
+            let mut visited_forwarders = BTreeSet::new();
+            for target in &pool.targets {
+                collect_route_target_provider_priorities(
+                    target,
+                    &entry.provider,
+                    forwarders,
+                    &mut visited_forwarders,
+                    &mut contains_provider,
+                    &mut priorities,
+                )?;
+            }
+            if !contains_provider {
+                continue;
+            }
+            let tier_count = priorities.len();
+            if entry.peak_tier > tier_count {
+                return Err(validation(format!(
+                    "server {server_id}.provider_priority_schedule provider {} peak tier {} exceeds route pool {} tier count {}",
+                    entry.provider, entry.peak_tier, pool.id, tier_count
+                )));
+            }
+            if entry.off_peak_tier > tier_count {
+                return Err(validation(format!(
+                    "server {server_id}.provider_priority_schedule provider {} off-peak tier {} exceeds route pool {} tier count {}",
+                    entry.provider, entry.off_peak_tier, pool.id, tier_count
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_route_target_provider_priorities(
+    target: &V3RoutePoolTargetManifest,
+    scheduled_provider: &str,
+    forwarders: &std::collections::BTreeMap<String, V3ForwarderManifest>,
+    visited_forwarders: &mut BTreeSet<String>,
+    contains_provider: &mut bool,
+    priorities: &mut BTreeSet<i32>,
+) -> Result<(), V3ConfigError> {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            if target.provider.as_deref() == Some(scheduled_provider) {
+                *contains_provider = true;
+            }
+            priorities.insert(target.priority.unwrap_or(0));
+        }
+        V3RouteTargetKind::Forwarder => {
+            let forwarder_id = target
+                .id
+                .as_deref()
+                .ok_or_else(|| validation("route pool forwarder target missing id"))?;
+            if !visited_forwarders.insert(forwarder_id.to_string()) {
+                return Ok(());
+            }
+            let Some(forwarder) = forwarders
+                .get(forwarder_id)
+                .filter(|forwarder| forwarder.enabled)
+            else {
+                return Ok(());
+            };
+            for nested in &forwarder.targets {
+                collect_forwarder_target_provider_priorities(
+                    nested,
+                    scheduled_provider,
+                    forwarders,
+                    visited_forwarders,
+                    contains_provider,
+                    priorities,
+                )?;
+            }
+            visited_forwarders.remove(forwarder_id);
+        }
+    }
+    Ok(())
+}
+
+fn collect_forwarder_target_provider_priorities(
+    target: &V3ForwarderTargetManifest,
+    scheduled_provider: &str,
+    forwarders: &std::collections::BTreeMap<String, V3ForwarderManifest>,
+    visited_forwarders: &mut BTreeSet<String>,
+    contains_provider: &mut bool,
+    priorities: &mut BTreeSet<i32>,
+) -> Result<(), V3ConfigError> {
+    match target.kind {
+        V3RouteTargetKind::ProviderModel => {
+            if target.provider.as_deref() == Some(scheduled_provider) {
+                *contains_provider = true;
+            }
+            priorities.insert(target.priority.unwrap_or(0));
+        }
+        V3RouteTargetKind::Forwarder => {
+            let forwarder_id = target
+                .id
+                .as_deref()
+                .ok_or_else(|| validation("forwarder target missing id"))?;
+            if !visited_forwarders.insert(forwarder_id.to_string()) {
+                return Ok(());
+            }
+            let Some(forwarder) = forwarders
+                .get(forwarder_id)
+                .filter(|forwarder| forwarder.enabled)
+            else {
+                return Ok(());
+            };
+            for nested in &forwarder.targets {
+                collect_forwarder_target_provider_priorities(
+                    nested,
+                    scheduled_provider,
+                    forwarders,
+                    visited_forwarders,
+                    contains_provider,
+                    priorities,
+                )?;
+            }
+            visited_forwarders.remove(forwarder_id);
+        }
+    }
+    Ok(())
 }
 
 pub fn default_provider_priority_timezone() -> String {

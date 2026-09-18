@@ -45,6 +45,7 @@ pub(crate) fn build_resource_registry(
     let servers = compile_servers(
         authoring.servers,
         &route_groups,
+        &forwarders,
         hub_v1.is_some(),
         http_sse_keepalive_ms,
         &providers,
@@ -456,6 +457,7 @@ fn trim_optional(value: Option<String>) -> Option<String> {
 fn compile_servers(
     authoring: BTreeMap<String, V3ServerAuthoringConfig>,
     route_groups: &BTreeMap<String, V3RouteGroupManifest>,
+    forwarders: &BTreeMap<String, V3ForwarderManifest>,
     hub_v1_enabled: bool,
     http_sse_keepalive_ms: u64,
     providers: &BTreeMap<String, V3ProviderManifest>,
@@ -504,6 +506,15 @@ fn compile_servers(
                     )));
                 }
             }
+            let route_group = route_groups
+                .get(&server.routing_group)
+                .expect("routing group existence checked above");
+            crate::provider_priority_schedule::validate_provider_priority_schedule_tiers(
+                &id,
+                route_group,
+                forwarders,
+                &server.provider_priority_schedule,
+            )?;
             let execution = match server.execution {
                 Some(execution) => Some(compile_server_execution(&id, execution)?),
                 None if hub_v1_enabled => Some(compile_server_execution(
