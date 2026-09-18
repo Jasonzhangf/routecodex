@@ -738,7 +738,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                         request.transport_kind(),
                         scope,
                     )
-                    .map_err(|reason| V3ProviderError::Transport {
+                    .map_err(|reason| V3ProviderError::InternalTransport {
                         request_id: request_id.clone(),
                         provider_id: provider_id.clone(),
                         reason,
@@ -755,7 +755,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
                 );
             }
-            return Err(V3ProviderError::Transport {
+            return Err(V3ProviderError::InternalTransport {
                 request_id: request_id.clone(),
                 provider_id: provider_id.clone(),
                 reason,
@@ -851,7 +851,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 attempt_key,
                                 crate::transport_handoff::V3ProviderTransportAttemptState::Streaming,
                             )
-                            .map_err(|reason| V3ProviderError::Transport {
+                            .map_err(|reason| V3ProviderError::InternalTransport {
                                 request_id: raw.request_id().to_string(),
                                 provider_id: raw.provider_id().to_string(),
                                 reason,
@@ -875,7 +875,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 attempt_key,
                                 crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
                             )
-                            .map_err(|reason| V3ProviderError::Transport {
+                            .map_err(|reason| V3ProviderError::InternalTransport {
                                 request_id: raw.request_id().to_string(),
                                 provider_id: raw.provider_id().to_string(),
                                 reason,
@@ -899,7 +899,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             attempt_key,
                             crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
                         )
-                        .map_err(|reason| V3ProviderError::Transport {
+                        .map_err(|reason| V3ProviderError::InternalTransport {
                             request_id: request_id.clone(),
                             provider_id: provider_id.clone(),
                             reason,
@@ -914,7 +914,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     } else {
                         controller
                             .observe_rate_limit(&provider_key, now_ms)
-                            .map_err(|reason| V3ProviderError::Transport {
+                            .map_err(|reason| V3ProviderError::InternalTransport {
                                 request_id: request_id.clone(),
                                 provider_id: provider_id.clone(),
                                 reason,
@@ -962,7 +962,7 @@ fn hold_sse_lease(
                                 (stream, guard, provider_sequence.saturating_add(1)),
                             )),
                             Ok(false) | Err(_) => Some((
-                                Err(V3ProviderError::Transport {
+                                Err(V3ProviderError::InternalTransport {
                                     request_id: attempt_key
                                         .as_ref()
                                         .map(|key| key.request_id.clone())

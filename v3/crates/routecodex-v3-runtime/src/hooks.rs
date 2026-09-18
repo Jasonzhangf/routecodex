@@ -891,6 +891,7 @@ fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InternalTransport { .. }
         | V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }
@@ -1011,6 +1012,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
         | V3ProviderError::ControlFieldInWireBody { .. }
         | V3ProviderError::InvalidStreamIntent { .. }
         | V3ProviderError::InvalidDataImage { .. }
+        | V3ProviderError::InternalTransport { .. }
         | V3ProviderError::InvalidBaseUrl { .. }
         | V3ProviderError::MissingAuthSecret { .. }
         | V3ProviderError::AuthSecretRead { .. }

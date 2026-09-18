@@ -70,6 +70,14 @@ pub enum V3ProviderError {
         reason: String,
     },
     #[error(
+        "internal provider transport failure for request {request_id} and provider {provider_id}: {reason}"
+    )]
+    InternalTransport {
+        request_id: String,
+        provider_id: String,
+        reason: String,
+    },
+    #[error(
         "provider {provider_id} WebSocket transport failed for request {request_id}: {reason}"
     )]
     WebSocketTransport {
