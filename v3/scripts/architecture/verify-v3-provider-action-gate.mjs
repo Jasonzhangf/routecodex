@@ -14,6 +14,7 @@ const files = {
   direct: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   directUnitTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
+  protocolModeLockTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/protocol_mode_lock.rs',
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
   providerSseJsonCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
@@ -641,6 +642,11 @@ assertRustTest(
   text.directUnitTests,
   files.directUnitTests,
   'normal_direct_request_does_not_consume_unrelated_provider_failure_gate',
+);
+assertRustTest(
+  text.protocolModeLockTests,
+  files.protocolModeLockTests,
+  'direct_provider_compat_terminal_exhaustion_skips_provider_action_wait',
 );
 requireText(
   text.directHelpers,

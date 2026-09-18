@@ -1,11 +1,17 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+use tokio::time::timeout;
 
 struct DirectOnlyFailureTransport {
     sends: AtomicUsize,
 }
 
 struct DirectProviderFamilyFailureTransport {
+    sends: AtomicUsize,
+}
+
+struct DirectProviderCompatTerminalTransport {
     sends: AtomicUsize,
 }
 
@@ -55,6 +61,26 @@ impl ResponsesTransport for DirectProviderFamilyFailureTransport {
             }],
             br#"{"id":"resp_sibling","status":"completed","output_text":"ok"}"#.to_vec(),
         ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectProviderCompatTerminalTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                status: 400,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"invalid_request_error","message":"prompt is too long"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        })
     }
 }
 
@@ -111,6 +137,63 @@ async fn direct_provider_compat_failure_keeps_same_provider_sibling() {
     assert!(
         output.error_chain.is_none(),
         "same-provider sibling success must not project a client error: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn direct_provider_compat_terminal_exhaustion_skips_provider_action_wait() {
+    let routing_group = "direct_provider_compat_terminal";
+    let manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:direct-provider-compat-terminal".to_string()),
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: "req-direct-provider-compat-terminal".to_string(),
+        execution_id: "exec-direct-provider-compat-terminal".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({"model":"client-model","input":"hello"}),
+    };
+    let transport = DirectProviderCompatTerminalTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("protocol plan");
+    assert_eq!(plan.decision.target.candidate.provider_id, "first");
+    assert_eq!(plan.decision.target.candidate.model_id, "test");
+
+    let output = timeout(
+        Duration::from_millis(600),
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(&plan),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            &transport,
+        ),
+    )
+    .await
+    .expect("candidate-scoped terminal compatibility failure must not enter provider action gate wait");
+
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "single-candidate compat failure must not retry: {output:?}"
+    );
+    assert!(
+        output.node_trace.contains(&"V3Error06ClientProjected"),
+        "single-candidate compat failure must project terminal: {output:?}"
+    );
+    assert!(
+        output.error_chain.is_some(),
+        "single-candidate compat failure must produce a client error: {output:?}"
     );
 }
 

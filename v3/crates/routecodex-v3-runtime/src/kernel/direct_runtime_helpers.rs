@@ -398,17 +398,25 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?;
         drop(admission.take_permit());
     }
-    let admission = context
-        .provider_health
-        .wait_for_terminal_provider_projection_in_scope(
-            context.failure_session_scope,
-            &selected.candidate.provider_id,
-            Some(&selected.candidate.auth_alias),
-            Some(&selected.candidate.model_id),
-            &source.code,
+    let admission = if request_local_scope
+        == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate
+    {
+        None
+    } else {
+        Some(
+            context
+                .provider_health
+                .wait_for_terminal_provider_projection_in_scope(
+                    context.failure_session_scope,
+                    &selected.candidate.provider_id,
+                    Some(&selected.candidate.auth_alias),
+                    Some(&selected.candidate.model_id),
+                    &source.code,
+                )
+                .await
+                .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?,
         )
-        .await
-        .map_err(|error| runtime_source("V3ProviderActionGateAdmission", error))?;
+    };
     state.trace.push("V3Error06ClientProjected");
     Ok(V3DirectProviderFailurePolicyResult {
         decision,
@@ -420,7 +428,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             &health_record,
             "terminal_default_floor_exhausted",
             None,
-            Some(admission.minimum_delay_ms),
+            admission.as_ref().map(|admission| admission.minimum_delay_ms),
         )),
         retryable_transient: false,
     })
