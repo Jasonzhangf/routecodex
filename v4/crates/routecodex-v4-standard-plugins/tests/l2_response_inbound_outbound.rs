@@ -969,6 +969,30 @@ fn provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
 }
 
 #[test]
+fn direct_provider_sse_codec_projects_control_extra_fields_out_of_client_payload() {
+    let decoded = decode_direct_provider_sse_frame(
+        "responses",
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"provider\":\"openai\"}}\n\n",
+    )
+    .expect("diagnostic extra_fields are consumed by direct provider normalization");
+    assert_eq!(decoded.semantic["delta"], "hi");
+    assert!(decoded.semantic.get("extra_fields").is_none());
+}
+
+#[test]
+fn direct_provider_sse_codec_rejects_unknown_control_extra_fields() {
+    let error = decode_direct_provider_sse_frame(
+        "responses",
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\",\"extra_fields\":{\"unregistered_control\":true}}\n\n",
+    )
+    .expect_err("unknown direct provider control fields must fail closed");
+    assert!(
+        error.contains("provider_response_control_envelope"),
+        "{error}"
+    );
+}
+
+#[test]
 fn provider_sse_codec_rejects_malformed_function_arguments_delta() {
     for frame in [
         b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{}\"}\n\n".as_slice(),

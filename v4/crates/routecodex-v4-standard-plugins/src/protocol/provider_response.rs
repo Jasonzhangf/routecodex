@@ -6,21 +6,57 @@
 
 use serde_json::{json, Value};
 
+const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
+    "chunk_index",
+    "dropped_compat_plugin_params",
+    "latency",
+    "original_model_requested",
+    "provider",
+    "provider_response_headers",
+    "request_type",
+    "resolved_model_used",
+];
+
+fn consume_responses_extra_fields(
+    object: &mut serde_json::Map<String, Value>,
+    envelope: &str,
+) -> Result<(), String> {
+    let Some(extra_fields) = object.remove("extra_fields") else {
+        return Ok(());
+    };
+    let Some(extra_fields) = extra_fields.as_object() else {
+        return Err(format!(
+            "provider_response_control_envelope: {envelope} extra_fields envelope must be an object"
+        ));
+    };
+    if let Some(unknown) = extra_fields
+        .keys()
+        .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
+    {
+        return Err(format!(
+            "provider_response_control_envelope: unknown Responses {envelope} extra_fields member {unknown}"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn consume_responses_sse_extra_fields(event: &Value) -> Result<Value, String> {
+    let mut object = event
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "provider Responses SSE event must be an object".to_string())?;
+    consume_responses_extra_fields(&mut object, "event")?;
+    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
+        consume_responses_extra_fields(response, "response")?;
+    }
+    Ok(Value::Object(object))
+}
+
 fn normalize_responses_response(
     body: &Value,
     expected_instructions: Option<&str>,
     allow_relay_instructions: bool,
 ) -> Result<Value, String> {
-    const KNOWN_DIAGNOSTIC_FIELDS: &[&str] = &[
-        "chunk_index",
-        "dropped_compat_plugin_params",
-        "latency",
-        "original_model_requested",
-        "provider",
-        "provider_response_headers",
-        "request_type",
-        "resolved_model_used",
-    ];
     let mut object = body
         .as_object()
         .cloned()
@@ -30,38 +66,14 @@ fn normalize_responses_response(
             return Err("provider_response_instructions_injected: provider Responses instructions must exactly match request instructions".to_string());
         }
     }
-    if let Some(extra_fields) = object.remove("extra_fields") {
-        let Some(extra_fields) = extra_fields.as_object() else {
-            return Err("provider_response_control_envelope: Responses extra_fields envelope must be an object".to_string());
-        };
-        if let Some(unknown) = extra_fields
-            .keys()
-            .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
-        {
-            return Err(format!(
-                "provider_response_control_envelope: unknown Responses extra_fields member {unknown}"
-            ));
-        }
-    }
+    consume_responses_extra_fields(&mut object, "Responses")?;
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
         if let Some(value) = response.get("instructions") {
             if !allow_relay_instructions && expected_instructions != value.as_str() {
                 return Err("provider_response_instructions_injected: provider Responses instructions must exactly match request instructions".to_string());
             }
         }
-        if let Some(extra_fields) = response.remove("extra_fields") {
-            let Some(extra_fields) = extra_fields.as_object() else {
-                return Err("provider_response_control_envelope: Responses response.extra_fields envelope must be an object".to_string());
-            };
-            if let Some(unknown) = extra_fields
-                .keys()
-                .find(|key| !KNOWN_DIAGNOSTIC_FIELDS.contains(&key.as_str()))
-            {
-                return Err(format!(
-                    "provider_response_control_envelope: unknown Responses response.extra_fields member {unknown}"
-                ));
-            }
-        }
+        consume_responses_extra_fields(response, "Responses response")?;
     }
     Ok(Value::Object(object))
 }
