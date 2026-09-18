@@ -1683,15 +1683,23 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
             observability.provider_failure_events[0].action,
             "switch_provider"
         );
-        assert_eq!(observability.provider_failure_events[0].wait_ms, None);
-        assert_eq!(observability.provider_failure_events[0].failure_count, 0);
         assert_eq!(
-            observability.provider_failure_events[0].health_state,
-            "request_local_provider_compat"
+            observability.provider_failure_events[0].wait_ms,
+            Some(1_000)
         );
-        assert!(observability.provider_failure_events[0]
-            .cooldown_until_ms
-            .is_none());
+        assert_eq!(
+            observability.provider_failure_events[0].failure_count,
+            turn + 1
+        );
+        if turn == 2 {
+            assert_eq!(
+                observability.provider_failure_events[0].health_state,
+                "cooldown"
+            );
+            assert!(observability.provider_failure_events[0]
+                .cooldown_until_ms
+                .is_some());
+        }
     }
 
     let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -1724,7 +1732,16 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         observability.provider_key.as_deref(),
         Some("minimax:key1:MiniMax-M3")
     );
-    assert_eq!(observability.attempts, Some(3));
+    assert_eq!(observability.attempts, Some(1));
+    assert!(observability
+        .unavailable_candidates
+        .iter()
+        .any(|candidate| candidate.starts_with("limited:key1:gpt-5.5:availability(")));
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "cooled provider must be skipped before network send; observed events: {:?}",
+        observability.provider_failure_events
+    );
 
     let captures = transport.captures.lock().unwrap();
     let provider_sequence: Vec<&str> = captures
@@ -1733,9 +1750,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         .collect();
     assert_eq!(
         provider_sequence,
-        vec![
-            "limited", "minimax", "limited", "minimax", "limited", "minimax", "limited", "minimax",
-        ]
+        vec!["limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"]
     );
 }
 

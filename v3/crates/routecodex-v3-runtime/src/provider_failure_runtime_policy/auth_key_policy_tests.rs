@@ -99,7 +99,11 @@ fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
                     100 + index,
                 )
                 .unwrap();
-            assert_eq!(record.state, "healthy");
+            assert_eq!(
+                record.state,
+                if index == 1 { "cooldown" } else { "healthy" }
+            );
+            assert_eq!(record.failure_count, (index + 1) as u32);
         }
         assert!(
             !health
@@ -139,7 +143,11 @@ fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
                 200 + index,
             )
             .unwrap();
-        assert_eq!(record.state, "healthy");
+        assert_eq!(
+            record.state,
+            if index == 2 { "cooldown" } else { "healthy" }
+        );
+        assert_eq!(record.failure_count, (index + 1) as u32);
     }
     assert!(
         !other_health

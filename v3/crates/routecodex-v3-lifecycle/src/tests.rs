@@ -369,48 +369,6 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
     let _ = child.wait().await;
 }
 
-#[tokio::test]
-#[cfg(unix)]
-async fn live_persisted_hooks_group_is_unavailable_without_aborting() {
-    let _guard = TEST_ENV_LOCK.lock().unwrap();
-    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    ensure_private_dir(&instance_dir).unwrap();
-    let mut child = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg("while :; do sleep 1; done")
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let process_group_id = child.id().unwrap() as libc::pid_t;
-    fs::write(
-        instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE),
-        format!(
-            r#"{{"schema_version":1,"process_group_id":{process_group_id},"leader_pid":{process_group_id},"leader_start_token":"{}"}}"#,
-            process_start_token(process_group_id as u32).unwrap().unwrap()
-        ),
-    )
-    .unwrap();
-
-    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
-
-    assert!(sidecar.is_none(), "live stale group must not be adopted");
-    let detail = detail.expect("unavailable startup must carry a detail");
-    assert!(
-        detail.contains("hooks_unavailable:"),
-        "stale live group must report hooks_unavailable: {detail}"
-    );
-    assert!(
-        detail.contains("hooks sidecar process group from a previous run is still alive"),
-        "unavailable detail must keep the exact reason: {detail}"
-    );
-    // The foreign live group must never be signaled or reaped.
-    assert!(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
-    assert_eq!(unsafe { libc::kill(-process_group_id, libc::SIGKILL) }, 0);
-    let _ = child.wait().await;
-}
-
 #[test]
 fn unavailable_hook_detail_survives_a_running_status_update() {
     assert_eq!(

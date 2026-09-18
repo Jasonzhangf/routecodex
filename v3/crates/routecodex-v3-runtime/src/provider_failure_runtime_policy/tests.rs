@@ -19,6 +19,9 @@ mod classified_global;
 #[path = "tests/cooldown_exhaustion.rs"]
 mod cooldown_exhaustion;
 
+#[path = "tests/provider_compat.rs"]
+mod provider_compat;
+
 #[path = "auth_key_policy_tests.rs"]
 mod auth_key_policy;
 
@@ -324,7 +327,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         )
         .expect("failure session scope");
         for attempt in 0..threshold {
-            health
+            let record = health
                 .record_provider_failure_record_with_policy(
                     None,
                     &manifest,
@@ -341,6 +344,16 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                     10_000 + attempt as u64,
                 )
                 .expect("runtime provider failure policy should record");
+            assert_eq!(record.failure_count, attempt + 1);
+            assert_eq!(
+                record.state,
+                if attempt + 1 == threshold {
+                    "cooldown"
+                } else {
+                    "healthy"
+                },
+                "status {status} event state must match global key health"
+            );
         }
         assert!(
             !health
@@ -773,124 +786,6 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
 }
 
 #[tokio::test]
-async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_health_mutation() {
-    let manifest = target_resolution_manifest("compat_default_floor");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected =
-        match resolve_target(&manifest, "compat_default_floor", &BTreeSet::new(), &health) {
-            V3RelayProviderTargetResolution::Selected(selected) => selected,
-            _ => panic!("valid fixture must select the default-floor provider"),
-        };
-    let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
-    let mut trace = Vec::new();
-    let context = V3RelayProviderFailurePolicyContext {
-        manifest: &manifest,
-        captured_target_09: None,
-        failure_session_scope: test_provider_failure_scope(
-            "compat_default_floor",
-            "compat_default_floor",
-            "session-compat-default-floor",
-        )
-        .expect("test failure session scope"),
-        provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-        deterministic_sample: 0,
-    };
-    let mut state = V3RelayProviderFailurePolicyState {
-        failed_candidates: &mut failed_candidates,
-        same_candidate_retries: &mut same_candidate_retries,
-        trace: &mut trace,
-    };
-
-    let result = run_v3_relay_provider_failure_policy(
-        &context,
-        selected,
-        "ProviderReqCompat06ProviderCompat",
-        502,
-        Some("provider_request_compat_error".to_string()),
-        "arguments must be valid JSON".to_string(),
-        None,
-        &mut state,
-    )
-    .await
-    .expect("request-local compat exhaustion must project without recovery wait");
-
-    assert_eq!(
-        result.event.health_record.state,
-        "request_local_provider_compat"
-    );
-    assert_eq!(result.event.health_record.failure_count, 0);
-    assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    assert_eq!(result.event.wait_ms, None);
-    assert_eq!(
-        result.event.action,
-        "terminal_request_local_provider_compat_exhausted"
-    );
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
-    assert!(state.same_candidate_retries.is_empty());
-}
-
-#[tokio::test]
-async fn provider_invalid_request_error_is_health_neutral_even_when_wrapped_as_502() {
-    let manifest = target_resolution_manifest("invalid_request_health_neutral");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected = match resolve_target(
-        &manifest,
-        "invalid_request_health_neutral",
-        &BTreeSet::new(),
-        &health,
-    ) {
-        V3RelayProviderTargetResolution::Selected(selected) => selected,
-        _ => panic!("valid fixture must select a provider"),
-    };
-    let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
-    let mut trace = Vec::new();
-    let context = V3RelayProviderFailurePolicyContext {
-        manifest: &manifest,
-        captured_target_09: None,
-        failure_session_scope: test_provider_failure_scope(
-            "invalid_request_health_neutral",
-            "invalid_request_health_neutral",
-            "session-invalid-request",
-        )
-        .expect("test failure session scope"),
-        provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-        deterministic_sample: 0,
-    };
-    let mut state = V3RelayProviderFailurePolicyState {
-        failed_candidates: &mut failed_candidates,
-        same_candidate_retries: &mut same_candidate_retries,
-        trace: &mut trace,
-    };
-
-    let result = run_v3_relay_provider_failure_policy(
-        &context,
-        selected,
-        "V3ProviderRespInbound01Raw",
-        502,
-        Some("invalid_request_error".to_string()),
-        "provider response event: prompt is too long".to_string(),
-        None,
-        &mut state,
-    )
-    .await
-    .expect("invalid request must be handled without provider health mutation");
-
-    assert_eq!(
-        result.event.health_record.state,
-        "request_local_provider_compat"
-    );
-    assert_eq!(result.event.health_record.failure_count, 0);
-    assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    assert!(result.retry_selected.is_none());
-    assert!(state.same_candidate_retries.is_empty());
-}
-
-#[tokio::test]
 async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429() {
     let mut manifest = target_resolution_manifest("resolution_policy");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -1202,15 +1097,18 @@ async fn transport_error_switches_provider_family() {
     );
     assert_eq!(
         state.failed_candidates.len(),
-        1,
-        "failure evidence must retain the exact failed provider key"
+        2,
+        "provider-scoped transport failure must exclude every candidate in the failed provider family"
     );
     assert!(state
         .failed_candidates
         .contains(&"first:key1:gpt-test".to_string()));
-    assert!(!state
+    assert!(state
         .failed_candidates
         .contains(&"first:key2:gpt-test".to_string()));
+    assert!(!state
+        .failed_candidates
+        .contains(&"second:key1:gpt-test".to_string()));
 }
 
 #[tokio::test]

@@ -14,6 +14,7 @@ const files = {
   direct: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   directHelpers: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   directUnitTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests.rs',
+  protocolModeLockTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/protocol_mode_lock.rs',
   directExactPinTests: 'v3/crates/routecodex-v3-runtime/src/kernel/tests/exact_pin.rs',
   directSse: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
   providerSseJsonCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
@@ -417,7 +418,15 @@ if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
   failures.push(`${files.directHelpers}: removed SSE stopless stream wrapper must not reappear`);
 }
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
-if (text.policy.includes('if let Ok(alternative) = resolve_v3_relay_target')) {
+const relayFailurePolicy = findFunctionBody(
+  text.policy,
+  'run_v3_relay_provider_failure_policy',
+  files.policy,
+);
+const targetResolutionFailure = relayFailurePolicy.match(
+  /Some\(Err\(source\)\)\s*=>\s*V3RelayProviderTargetResolution::Failed\(source\)\s*,/u,
+);
+if (!targetResolutionFailure) {
   failures.push(
     `${files.policy}: target-resolution source errors must not be swallowed as provider-pool exhaustion`,
   );
@@ -633,6 +642,11 @@ assertRustTest(
   text.directUnitTests,
   files.directUnitTests,
   'normal_direct_request_does_not_consume_unrelated_provider_failure_gate',
+);
+assertRustTest(
+  text.protocolModeLockTests,
+  files.protocolModeLockTests,
+  'direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait',
 );
 requireText(
   text.directHelpers,
