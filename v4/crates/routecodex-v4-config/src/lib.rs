@@ -1622,6 +1622,83 @@ fn validate_product_config(product: &RuntimeProductConfig) -> Result<(), Runtime
         if policy.policy_id.trim().is_empty() || !policy_ids.insert(policy.policy_id.as_str()) {
             return Err(RuntimeConfigError::ProductPolicyInvalid);
         }
+        validate_product_error_path(&policy.actions)?;
+    }
+    if !product.default_error_path.is_empty() {
+        validate_product_error_path(&product.default_error_path)?;
+    }
+    Ok(())
+}
+
+fn validate_product_error_path(
+    actions: &[RuntimeProductPolicyAction],
+) -> Result<(), RuntimeConfigError> {
+    if actions.is_empty() || actions.len() > 5 {
+        return Err(RuntimeConfigError::ProductPolicyInvalid);
+    }
+    let mut project_count = 0;
+    let mut wait_retry_count = 0;
+    let mut cooldown_count = 0;
+    for (index, action) in actions.iter().enumerate() {
+        match action.step.as_str() {
+            "wait_retry" => {
+                wait_retry_count += 1;
+                if wait_retry_count > 1 {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+                if action.retry_mode.as_deref().is_some_and(|mode| {
+                    !matches!(
+                        mode,
+                        "none"
+                            | "retry_same"
+                            | "reselect_before_client_projection"
+                            | "project_terminal"
+                    )
+                }) {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+                if action
+                    .max_attempts
+                    .is_some_and(|max_attempts| !(1..=10).contains(&max_attempts))
+                {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+                if action.backoff_ms.is_some_and(|backoff_ms| backoff_ms > 60_000) {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+            }
+            "cooldown" => {
+                cooldown_count += 1;
+                if cooldown_count > 1 {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+                if !matches!(
+                    action.scope.as_deref(),
+                    Some("provider_instance" | "auth_key" | "provider_model")
+                ) || action
+                    .duration_ms
+                    .is_none_or(|duration_ms| duration_ms == 0 || duration_ms > 86_400_000)
+                {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+            }
+            "project" => {
+                project_count += 1;
+                if index + 1 != actions.len()
+                    || !matches!(action.status, Some(status) if status >= 400)
+                    || action
+                        .reason_code
+                        .as_deref()
+                        .is_none_or(|reason_code| reason_code.trim().is_empty())
+                {
+                    return Err(RuntimeConfigError::ProductPolicyInvalid);
+                }
+            }
+            _ => return Err(RuntimeConfigError::ProductPolicyInvalid),
+        }
+    }
+    if project_count != 1 {
+        return Err(RuntimeConfigError::ProductPolicyInvalid);
     }
     Ok(())
 }
@@ -1664,11 +1741,6 @@ fn normalize_product_config(
     product
         .route_groups
         .sort_by(|left, right| left.route_group_id.cmp(&right.route_group_id));
-    for policy in &mut product.error_policies {
-        policy
-            .actions
-            .sort_by(|left, right| left.step.cmp(&right.step));
-    }
     product
         .error_policies
         .sort_by(|left, right| left.policy_id.cmp(&right.policy_id));

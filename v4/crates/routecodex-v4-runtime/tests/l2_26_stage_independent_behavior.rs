@@ -8,7 +8,7 @@ use serde_json::json;
 
 fn scope() -> Scope { Scope::new("req-26", "v4-pipeline", 7777, "session", "conversation") }
 fn policy() -> RetryPolicy { RetryPolicy { policy_id: "p".into(), provider_scope: "provider".into(), matcher: "timeout".into(), action_class: "retry".into(), reason_code: "timeout".into() } }
-fn decision() -> ExecutionDecision { ExecutionDecision { decision_id: "d".into(), action: DecisionAction::Retry, reason_code: "timeout".into() } }
+fn decision() -> ExecutionDecision { ExecutionDecision { decision_id: "d".into(), action: DecisionAction::RetrySame, reason_code: "timeout".into() } }
 
 #[test] fn request_inbound_normalize_behavior() { assert!(build_responses_wire_request(&json!({"input": []}), "m", false).is_ok()); assert!(build_responses_wire_request(&json!([]), "m", false).is_err()); }
 #[test] fn request_continuation_classify_behavior() { assert_eq!(select_relay_operator(&ContinuationFacts::new("responses", "responses", "direct", "direct")).unwrap(), RelayOperator::Direct); assert!(select_relay_operator(&ContinuationFacts::new("responses", "responses", "relay", "relay")).is_err()); }

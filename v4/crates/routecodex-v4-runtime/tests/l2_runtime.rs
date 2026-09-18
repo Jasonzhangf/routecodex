@@ -1519,7 +1519,7 @@ fn provider_policy_decision_enters_error_chain_without_payload_control() {
         },
         ExecutionDecision {
             decision_id: "decision.reselect".to_string(),
-            action: DecisionAction::Reroute,
+            action: DecisionAction::Reselect,
             reason_code: "provider_account_http_401".to_string(),
         },
     )

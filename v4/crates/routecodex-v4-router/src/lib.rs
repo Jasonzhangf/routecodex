@@ -477,9 +477,28 @@ pub fn select_product_target_excluding(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProductErrorRetryMode {
+    None,
+    RetrySame,
+    ReselectBeforeClientProjection,
+    ProjectTerminal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductErrorExecutionAction {
+    RetrySame,
+    Reselect,
+    Cooldown,
+    Terminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductErrorDecision {
     pub policy_id: String,
     pub retry: bool,
+    pub retry_mode: Option<ProductErrorRetryMode>,
+    pub execution_action: ProductErrorExecutionAction,
+    pub backoff_ms: u64,
     pub cooldown: bool,
     pub failure_threshold: u64,
     pub project_status: Option<u16>,
@@ -520,9 +539,6 @@ fn evaluate_product_error_policy(
     status: u16,
     response_body: &str,
 ) -> Option<ProductErrorDecision> {
-    if status < 400 {
-        return None;
-    }
     let policy = product.error_policies.iter().find(|policy| {
         policy
             .scope_provider_id
@@ -537,23 +553,71 @@ fn evaluate_product_error_policy(
                     .iter()
                     .any(|needle| response_body.contains(needle)))
     });
+    let is_error_status = status >= 400;
     let (policy_id, actions, reason_code) = match policy {
         Some(policy) => (
             policy.policy_id.clone(),
             policy.actions.as_slice(),
             policy.reason_code.clone(),
         ),
-        None if !product.default_error_path.is_empty() => (
+        None if is_error_status && !product.default_error_path.is_empty() => (
             "default".to_string(),
             product.default_error_path.as_slice(),
             None,
         ),
         None => return None,
     };
+    let retry_mode = actions
+        .iter()
+        .find(|action| action.step == "wait_retry")
+        .map(|action| match action.retry_mode.as_deref() {
+            Some("none") => ProductErrorRetryMode::None,
+            Some("retry_same") => ProductErrorRetryMode::RetrySame,
+            Some("project_terminal") => ProductErrorRetryMode::ProjectTerminal,
+            // V3 treats an omitted mode as the configured reselect behavior.
+            Some("reselect_before_client_projection") | None => {
+                ProductErrorRetryMode::ReselectBeforeClientProjection
+            }
+            Some(_) => ProductErrorRetryMode::ProjectTerminal,
+        });
+    let cooldown = has_step(actions, "cooldown");
+    let execution_action = match retry_mode {
+        // V3 keeps retry_same as the configured mode, but treats HTTP 400
+        // and 503 as request-local/availability signals that reselect
+        // immediately. The router owns this interpretation; execution and
+        // projection consume only the resulting typed action.
+        Some(ProductErrorRetryMode::RetrySame) if status != 400 && status != 503 => {
+            ProductErrorExecutionAction::RetrySame
+        }
+        Some(
+            ProductErrorRetryMode::RetrySame
+            | ProductErrorRetryMode::ReselectBeforeClientProjection,
+        ) => ProductErrorExecutionAction::Reselect,
+        Some(ProductErrorRetryMode::ProjectTerminal | ProductErrorRetryMode::None) | None => {
+            if cooldown {
+                ProductErrorExecutionAction::Cooldown
+            } else {
+                ProductErrorExecutionAction::Terminal
+            }
+        }
+    };
     Some(ProductErrorDecision {
         policy_id,
-        retry: has_step(actions, "wait_retry"),
-        cooldown: has_step(actions, "cooldown"),
+        retry: matches!(
+            retry_mode,
+            Some(
+                ProductErrorRetryMode::RetrySame
+                    | ProductErrorRetryMode::ReselectBeforeClientProjection
+            )
+        ),
+        retry_mode,
+        execution_action,
+        backoff_ms: actions
+            .iter()
+            .find(|action| action.step == "wait_retry")
+            .and_then(|action| action.backoff_ms)
+            .unwrap_or(0),
+        cooldown,
         failure_threshold: actions
             .iter()
             .find_map(|action| (action.step == "wait_retry").then_some(action.max_attempts))
