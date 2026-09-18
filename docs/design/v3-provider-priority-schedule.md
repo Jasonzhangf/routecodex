@@ -28,6 +28,11 @@ route pool containing that provider. Invalid IANA timezones, malformed times,
 duplicate provider entries, empty provider ids, and non-positive tiers are
 rejected during config projection/validation.
 
+The schedule applies only to declared route pools. Synthetic pools, including
+`implicit:<capability>` capability pools and direct-provider pools, have no
+declared tier list; they retain their intrinsic candidate priority and are not
+adjusted by this schedule.
+
 ## Ownership and boundaries
 
 - Config owns parsing, defaulting the timezone to `Asia/Shanghai`, validation,
