@@ -157,6 +157,54 @@ fn direct_response_container_rejects_unknown_provider_control_fields() {
 }
 
 #[test]
+fn direct_chat_response_preserves_provider_extra_fields() {
+    let payload = json!({
+        "choices": [{"delta": {"content": "hi"}, "index": 0}],
+        "extra_fields": {"unregistered_control": true}
+    });
+    let output = execute(
+        "V4DirectResp02RelayContainer",
+        "response_outbound",
+        "direct_response",
+        2,
+        "v4.hook.direct.response",
+        payload.clone(),
+        json!({
+            "client_protocol": "openai-chat",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("direct Chat must preserve provider extra_fields exactly");
+    assert_eq!(output.data, payload);
+}
+
+#[test]
+fn direct_chat_json_response_preserves_provider_extra_fields() {
+    let payload = json!({
+        "id": "chat-1",
+        "choices": [{
+            "message": {"role": "assistant", "content": "hi"},
+            "finish_reason": "stop"
+        }],
+        "extra_fields": {"provider": "openai", "latency": 4}
+    });
+    let output = execute(
+        "V4DirectResp02RelayContainer",
+        "response_outbound",
+        "direct_response",
+        2,
+        "v4.hook.direct.response",
+        payload.clone(),
+        json!({
+            "client_protocol": "openai-chat",
+            "provider_protocol": "openai-chat"
+        }),
+    )
+    .expect("direct Chat JSON must preserve provider extra_fields exactly");
+    assert_eq!(output.data, payload);
+}
+
+#[test]
 fn negative_direct_response_client_validate_rejects_protocol_mismatch() {
     let error = execute(
         "V4DirectResp03ClientProtocol",
