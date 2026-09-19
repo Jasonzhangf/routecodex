@@ -35,7 +35,7 @@ impl WebSearchHookScope {
                 "routingGroup",
             ));
         }
-        if self.session_id == self.conversation_id && self.session_id.starts_with("request:") {
+        if self.session_id.starts_with("request:") || self.conversation_id.starts_with("request:") {
             return Err(WebSearchHookContractError::MissingClientSessionScope);
         }
         Ok(())
@@ -282,6 +282,17 @@ mod tests {
         let mut request = request();
         request.scope.session_id = "request:req-1".to_string();
         request.scope.conversation_id = "request:req-1".to_string();
+        assert_eq!(
+            request.validate(),
+            Err(WebSearchHookContractError::MissingClientSessionScope)
+        );
+    }
+
+    #[test]
+    fn request_rejects_distinct_request_only_scope() {
+        let mut request = request();
+        request.scope.session_id = "request:req-1".to_string();
+        request.scope.conversation_id = "request:req-2".to_string();
         assert_eq!(
             request.validate(),
             Err(WebSearchHookContractError::MissingClientSessionScope)
