@@ -8,9 +8,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target,
-    execute_v3_openai_chat_relay_runtime as execute_v3_openai_chat_relay_runtime_impl,
-    execute_v3_openai_chat_relay_runtime_with_provider_health,
-    project_v3_openai_chat_relay_runtime_failure, V3OpenAiChatRelayClientBody,
+    execute_v3_openai_chat_relay_runtime_with_provider_health, V3OpenAiChatRelayClientBody,
     V3OpenAiChatRelayRuntimeError, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
     V3ResponsesRelayProviderHealthHandle,
 };
@@ -74,18 +72,6 @@ async fn serve_one_openai_chat_probe(
         .await
         .expect("provider probe response must be writable");
     String::from_utf8_lossy(&request).into_owned()
-}
-
-struct UnexpectedProviderTransport;
-
-#[async_trait]
-impl ResponsesTransport for UnexpectedProviderTransport {
-    async fn send(
-        &self,
-        _request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        panic!("provider transport must not run after a failed global probe");
-    }
 }
 
 async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
@@ -1331,7 +1317,7 @@ async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
 }
 
 #[tokio::test]
-async fn openai_chat_provider_pool_exhaustion_projects_network_error_without_provider_details() {
+async fn openai_chat_provider_pool_exhaustion_holds_until_provider_recovery() {
     let scope = "openai_chat_pool_exhausted_network_error";
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -1367,18 +1353,23 @@ async fn openai_chat_provider_pool_exhaustion_projects_network_error_without_pro
         r#"{"choices":[{"finish_reason":null}]}"#,
     ));
 
-    let runtime_result = tokio::time::timeout(
-        Duration::from_secs(3),
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let health = provider_health.runtime_health();
+    let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
+        "test-server",
+        scope,
+        "pool-exhausted-network-error",
+    )
+    .expect("test provider failure session scope");
+    let runtime = tokio::spawn(async move {
         execute_v3_openai_chat_relay_runtime_with_provider_health(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: scope.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    scope,
-                    "pool-exhausted-network-error",
-                )
-                .expect("test provider failure session scope"),
+                failure_session_scope,
                 request_id: "req-pool-exhausted-network-error".into(),
                 payload: json!({
                     "model": "chat-client-alias",
@@ -1386,67 +1377,40 @@ async fn openai_chat_provider_pool_exhaustion_projects_network_error_without_pro
                     "stream": false
                 }),
             },
-            &UnexpectedProviderTransport,
-            provider_health.runtime_health(),
-        ),
-    )
-    .await
-    .expect("provider-pool exhaustion must not hang");
-    let output = match runtime_result {
-        Ok(_) => panic!("provider-pool exhaustion must not reach provider execution"),
-        Err(V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        }) => project_v3_openai_chat_relay_runtime_failure(
-            V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-                attempted_candidates,
-            },
-        ),
-        Err(error) => panic!("unexpected runtime failure before Error06 projection: {error:?}"),
-    };
+            &transport,
+            health,
+        )
+        .await
+    });
     let request = tokio::time::timeout(Duration::from_secs(2), probe_server)
         .await
-        .expect("failed probe must reach the local provider listener")
+        .expect("last-try probe must reach the local provider listener")
         .expect("provider probe task must not panic");
     assert!(
         request.starts_with("POST /v1/chat/completions HTTP/1.1"),
-        "rescue must send the provider probe through the provider HTTP endpoint: {request:?}"
+        "last-try rescue must send the provider probe through the provider HTTP endpoint: {request:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !runtime.is_finished(),
+        "cooldown-only exhaustion must hold the request after a failed last-try probe"
     );
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain,
-        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec())
-    );
-    let body = match output.client_body {
-        V3OpenAiChatRelayClientBody::Json(body) => body,
-        V3OpenAiChatRelayClientBody::Sse(_) => {
-            panic!("provider-pool exhaustion must not produce a client SSE stream")
-        }
-    };
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
-    let body_text = body.to_string();
-    assert!(
-        !body_text.contains("provider"),
-        "provider leaked: {body_text}"
-    );
-    assert!(
-        !body_text.contains("candidate"),
-        "candidate leaked: {body_text}"
-    );
-    assert!(
-        !body_text.contains("selected_target_exhausted"),
-        "internal exhaustion code leaked: {body_text}"
-    );
-    assert!(
-        output
-            .error_detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains("selected target exhausted")),
-        "typed Error01 diagnostics must remain available outside the client body"
-    );
+    provider_health
+        .store()
+        .record_provider_key_success(scope, scope, "chat-wire-model", u64::MAX / 2 + 1)
+        .expect("provider recovery must wake the held request");
+    let output = tokio::time::timeout(Duration::from_secs(2), runtime)
+        .await
+        .expect("held request must resume after provider recovery")
+        .expect("runtime task must not panic")
+        .expect("provider recovery must resume normal execution");
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    assert!(matches!(
+        output.client_body,
+        V3OpenAiChatRelayClientBody::Json(_)
+    ));
 }
 
 #[tokio::test]
