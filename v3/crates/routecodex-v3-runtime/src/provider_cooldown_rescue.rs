@@ -160,7 +160,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
     let session_availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut rescue_attempted = false;
+    let mut exhaustion_rescue_probe_scheduled = false;
     let initial_selection = select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
@@ -254,7 +254,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                 Vec::new()
             };
             if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
-                rescue_attempted = true;
                 if let Err(error) = provider_health
                     .run_cooldown_rescue_probes_for_candidates(manifest, &rescue_candidates)
                     .await
@@ -296,39 +295,100 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
     }
-    if !rescue_attempted {
+    loop {
+        let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+            Ok(now_ms) => now_ms,
+            Err(error) => {
+                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_exhaustion_rescue_clock_failed",
+                    error,
+                ))
+            }
+        };
+        let observed_generation = provider_health.store.availability_generation();
+        let retry_availability = provider_health.session_bound_availability(failure_session_scope);
+        let exhaustion = match select_v3_target_with_session_then_global(
+            &target,
+            expanded.clone(),
+            &retry_availability,
+            provider_health,
+            request_local_excluded_candidates,
+            retry_now_ms,
+            0,
+        ) {
+            Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
+            Err(exhausted) => exhausted,
+        };
+        if provider_health.store.availability_generation() != observed_generation {
+            continue;
+        }
+        if !v3_exhaustion_is_cooldown_only(
+            &expanded,
+            request_local_excluded_candidates,
+            failure_session_scope,
+            provider_health,
+            retry_now_ms,
+        ) {
+            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
+        }
+        if !exhaustion_rescue_probe_scheduled {
+            if let Err(error) = provider_health
+                .run_exhaustion_rescue_probes(manifest, &expanded)
+                .await
+            {
+                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_exhaustion_rescue_probe_failed",
+                    error,
+                ));
+            }
+            exhaustion_rescue_probe_scheduled = true;
+            continue;
+        }
         if let Err(error) = provider_health
-            .run_exhaustion_rescue_probes(manifest, &expanded)
+            .store
+            .wait_for_availability_change(observed_generation)
             .await
         {
             return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
                 "V3ProviderCooldownRescueProbe",
-                "target_exhaustion_rescue_probe_failed",
-                error,
+                "target_exhaustion_rescue_wait_failed",
+                error.to_string(),
             ));
         }
     }
-    let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-        Ok(now_ms) => now_ms,
-        Err(error) => {
-            return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                "V3ProviderCooldownRescueProbe",
-                "target_exhaustion_rescue_clock_failed",
-                error,
-            ))
-        }
+}
+
+fn v3_exhaustion_is_cooldown_only(
+    expanded: &V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    now_ms: u64,
+) -> bool {
+    let availability = provider_health.session_bound_availability(failure_session_scope);
+    let mut nonfailed_candidates = expanded.candidates.iter().filter(|candidate| {
+        !request_local_excluded_candidates.contains(&v3_relay_provider_candidate_key(candidate))
+    });
+    let Some(first) = nonfailed_candidates.next() else {
+        return false;
     };
-    let retry_availability = provider_health.session_bound_availability(failure_session_scope);
-    match select_v3_target_with_session_then_global(
-        &target,
-        expanded,
-        &retry_availability,
-        provider_health,
-        request_local_excluded_candidates,
-        retry_now_ms,
-        0,
-    ) {
-        Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
-        Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
-    }
+    std::iter::once(first).chain(nonfailed_candidates).all(|candidate| {
+        let projection = availability.availability(
+            &candidate.provider_id,
+            Some(&candidate.auth_alias),
+            Some(&candidate.model_id),
+            now_ms,
+        );
+        v3_availability_is_cooldown_recovery_only(&projection)
+    })
+}
+
+fn v3_availability_is_cooldown_recovery_only(
+    projection: &V3ProviderAvailabilityProjection,
+) -> bool {
+    !projection.available
+        && projection.blocked_scopes.len() == 1
+        && projection.blocked_scopes[0] == "provider_cooldown_probe_pending"
 }
