@@ -315,7 +315,7 @@ async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "ready sidecar crash must degrade the running status: {detail}"
+            "ready sidecar crash must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -329,7 +329,7 @@ async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
     let stop = supervisor.stop().await;
     assert!(
         stop.is_ok(),
-        "cleanup after degraded sidecar must be bounded"
+        "cleanup after unavailable sidecar must be bounded"
     );
     std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
 }
@@ -435,7 +435,7 @@ end
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "control loss must degrade the running status: {detail}"
+            "control loss must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -537,7 +537,7 @@ end
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "an invalid health response must degrade the running status: {detail}"
+            "an invalid health response must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -608,7 +608,7 @@ sleep
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "socket loss before identity capture must degrade the running status: {detail}"
+            "socket loss before identity capture must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -742,7 +742,7 @@ end
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "a replacement control socket must degrade the running status: {detail}"
+            "a replacement control socket must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -822,7 +822,7 @@ end
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "a wrong-protocol health response must degrade the running status: {detail}"
+            "a wrong-protocol health response must publish unavailable running status: {detail}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }

@@ -977,7 +977,7 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
         }
         assert!(
             Instant::now() < deadline,
-            "ready hooksd crash was not published as degraded running status: {detail}"
+            "ready hooksd crash was not published as unavailable running status: {detail}"
         );
         sleep(Duration::from_millis(50));
     }
