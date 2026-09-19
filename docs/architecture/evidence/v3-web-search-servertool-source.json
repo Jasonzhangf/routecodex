@@ -78,8 +78,8 @@
   },
   "artifact": {
     "path": "v3/target/debug/rccv3",
-    "sha256": "756b7e3b1a5a24d73a8f2558ef4f1b90f6eec445551cd92024b54ef51f077eb1",
-    "bytes": 76753784
+    "sha256": "fc130d1a468ff490136110a772b9c5fdae10fc1b47fc28b5e27aa7c80f994005",
+    "bytes": 76852776
   },
   "gates": [
     {
@@ -169,7 +169,8 @@
     {
       "command": "npm --prefix v3 run build:v3-cli",
       "result": "pass",
-      "artifact_sha256": "cd2a8286f46dd9d1b61851a7ec3dc631db2915dcef6f450be003598520c5cc25"
+      "artifact_sha256": "fc130d1a468ff490136110a772b9c5fdae10fc1b47fc28b5e27aa7c80f994005",
+      "artifact_bytes": 76852776
     },
     {
       "command": "git diff --check",
