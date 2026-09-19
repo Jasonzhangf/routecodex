@@ -95,28 +95,21 @@ pub(crate) async fn execute_web_search_through_hooks_sidecar<
         )
     })?;
     let expected_call_id = request.call_id.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        execute_web_search_control_request(&socket_path, request)
-    })
-    .await
-    .map_err(|error| {
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(
-            "web_search hooks sidecar task failed: {error}"
-        ))
-    })?
-    .map_err(|error| match error {
-        WebSearchSidecarControlError::Message(message) => {
-            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(message)
-        }
-        WebSearchSidecarControlError::Failed(failure) => {
-            V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-                call_id: failure.call_id,
-                code: failure.error.code,
-                message: failure.error.message,
-                retryable: failure.error.retryable,
+    let result = execute_web_search_control_request(&socket_path, request)
+        .await
+        .map_err(|error| match error {
+            WebSearchSidecarControlError::Message(message) => {
+                V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(message)
             }
-        }
-    })?;
+            WebSearchSidecarControlError::Failed(failure) => {
+                V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
+                    call_id: failure.call_id,
+                    code: failure.error.code,
+                    message: failure.error.message,
+                    retryable: failure.error.retryable,
+                }
+            }
+        })?;
 
     if result.call_id != expected_call_id {
         return Err(V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
@@ -129,40 +122,62 @@ pub(crate) async fn execute_web_search_through_hooks_sidecar<
     capture_sidecar_result(state, result)
 }
 
-fn execute_web_search_control_request(
+async fn execute_web_search_control_request(
     socket_path: &Path,
     request: servertool_core::web_search_contract::WebSearchHookRequest,
 ) -> Result<WebSearchResult, WebSearchSidecarControlError> {
     let deadline = absolute_deadline(&request)?;
-    let stream = connect_unix_stream_until(socket_path, deadline)?;
-    execute_web_search_control_stream(stream, request, deadline)
+    let stream = connect_unix_stream_until(socket_path, deadline).await?;
+    tokio::task::spawn_blocking(move || {
+        execute_web_search_control_stream(stream, request, deadline)
+    })
+    .await
+    .map_err(|error| {
+        WebSearchSidecarControlError::Message(format!(
+            "web_search hooks sidecar task failed: {error}"
+        ))
+    })?
 }
 
-fn connect_unix_stream_until(
+async fn connect_unix_stream_until(
     socket_path: &Path,
     deadline: Instant,
 ) -> Result<UnixStream, WebSearchSidecarControlError> {
-    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-    let socket_path = socket_path.to_path_buf();
-    std::thread::spawn(move || {
-        let _ = sender.send(UnixStream::connect(socket_path));
-    });
-    match receiver.recv_timeout(remaining_until(deadline, "connect")?) {
-        Ok(Ok(stream)) => Ok(stream),
-        Ok(Err(error)) => Err(WebSearchSidecarControlError::Message(format!(
-            "web_search hooks sidecar socket connect failed: {error}"
-        ))),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            Err(WebSearchSidecarControlError::Message(
+    let stream =
+        connect_unix_stream_future_until(tokio::net::UnixStream::connect(socket_path), deadline)
+            .await?;
+    let stream = stream.into_std().map_err(|error| {
+        WebSearchSidecarControlError::Message(format!(
+            "web_search hooks sidecar socket conversion failed: {error}"
+        ))
+    })?;
+    stream.set_nonblocking(false).map_err(|error| {
+        WebSearchSidecarControlError::Message(format!(
+            "web_search hooks sidecar socket blocking mode setup failed: {error}"
+        ))
+    })?;
+    Ok(stream)
+}
+
+async fn connect_unix_stream_future_until<F>(
+    connect: F,
+    deadline: Instant,
+) -> Result<tokio::net::UnixStream, WebSearchSidecarControlError>
+where
+    F: std::future::Future<Output = std::io::Result<tokio::net::UnixStream>>,
+{
+    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), connect)
+        .await
+        .map_err(|_| {
+            WebSearchSidecarControlError::Message(
                 "web_search hooks sidecar connect deadline expired".to_string(),
+            )
+        })?
+        .map_err(|error| {
+            WebSearchSidecarControlError::Message(format!(
+                "web_search hooks sidecar socket connect failed: {error}"
             ))
-        }
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-            Err(WebSearchSidecarControlError::Message(
-                "web_search hooks sidecar connect task failed".to_string(),
-            ))
-        }
-    }
+        })
 }
 
 fn execute_web_search_control_stream(
@@ -375,7 +390,67 @@ mod tests {
     use servertool_core::web_search_contract::{
         WebSearchError, WebSearchFailure, WebSearchHookRequest, WebSearchSource,
     };
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::task::{Context, Poll};
     use std::thread;
+
+    #[derive(Default)]
+    struct PendingConnectState {
+        dropped: AtomicUsize,
+        polled: AtomicUsize,
+    }
+
+    struct PendingConnect {
+        state: Arc<PendingConnectState>,
+    }
+
+    impl std::future::Future for PendingConnect {
+        type Output = std::io::Result<tokio::net::UnixStream>;
+
+        fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
+            self.state.polled.fetch_add(1, Ordering::SeqCst);
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingConnect {
+        fn drop(&mut self) {
+            self.state.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg(test)]
+    async fn connect_unix_stream_future_until_for_test<F>(
+        future: F,
+        deadline: Instant,
+    ) -> Result<tokio::net::UnixStream, WebSearchSidecarControlError>
+    where
+        F: std::future::Future<Output = std::io::Result<tokio::net::UnixStream>>,
+    {
+        connect_unix_stream_future_until(future, deadline).await
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_thread_count() -> usize {
+        std::fs::read_dir("/proc/self/task")
+            .expect("read process thread directory")
+            .count()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn process_thread_count() -> usize {
+        let output = std::process::Command::new("ps")
+            .args(["-M", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("read process thread list");
+        assert!(output.status.success(), "ps failed: {:?}", output.status);
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .skip(1)
+            .count()
+    }
 
     fn execution_control() -> V3RequestExecutionControl {
         let manifest = compile_v3_config_05_manifest(
@@ -705,13 +780,54 @@ targets = [{ kind = "provider_model", provider = "test", model = "test-model", p
         assert!(error.to_string().contains("socket is not configured"));
     }
 
-    #[test]
-    fn web_search_hook_sidecar_rejects_expired_deadline() {
+    #[tokio::test]
+    async fn web_search_hook_sidecar_rejects_expired_deadline() {
         let error = execute_web_search_control_request(
             Path::new("/tmp/not-used-hooks-sidecar.sock"),
             request(1),
         )
+        .await
         .unwrap_err();
         assert!(error.to_string().contains("deadline has expired"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn web_search_hook_sidecar_pending_connect_is_cancelled_without_thread_growth() {
+        const ATTEMPTS: usize = 64;
+        const GENEROUS_BOUND: Duration = Duration::from_secs(2);
+
+        let state = Arc::new(PendingConnectState::default());
+        let threads_before = process_thread_count();
+        let started = Instant::now();
+        for _ in 0..ATTEMPTS {
+            let deadline = Instant::now() + Duration::from_millis(1);
+            let error = connect_unix_stream_future_until_for_test(
+                PendingConnect {
+                    state: Arc::clone(&state),
+                },
+                deadline,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("web_search hooks sidecar connect deadline expired"),
+                "unexpected error: {error}"
+            );
+        }
+        let elapsed = started.elapsed();
+        let threads_after = process_thread_count();
+
+        assert!(
+            elapsed < GENEROUS_BOUND,
+            "pending connect attempts exceeded {GENEROUS_BOUND:?}: {elapsed:?}"
+        );
+        assert!(state.polled.load(Ordering::SeqCst) >= ATTEMPTS);
+        assert_eq!(state.dropped.load(Ordering::SeqCst), ATTEMPTS);
+        assert!(
+            threads_after <= threads_before + 2,
+            "thread count grew from {threads_before} to {threads_after} across {ATTEMPTS} attempts"
+        );
     }
 }
