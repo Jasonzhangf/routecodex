@@ -100,6 +100,8 @@ mod provider_resp_inbound_01_raw;
 pub use provider_resp_inbound_01_raw::*;
 mod provider_resp_compat_02_provider_compat;
 pub use provider_resp_compat_02_provider_compat::*;
+mod provider_terminal_response_admission;
+pub(crate) use provider_terminal_response_admission::*;
 mod provider_sse_json_codec;
 pub(crate) use provider_sse_json_codec::*;
 #[cfg(test)]

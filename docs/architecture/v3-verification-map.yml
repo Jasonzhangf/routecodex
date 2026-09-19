@@ -658,8 +658,8 @@ features:
   owner_scope: Test-only Relay JSON/SSE/servertool copy-budget observations and mutation-backed source gates
   owner_modules:
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
-  - scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
-  - scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
+  - v3/scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
   test_design:
   - docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md
   mainline_bindings:
@@ -2998,11 +2998,13 @@ features:
   - Bounded Chat Anthropic and Responses terminal facts match once and retain exact policy identity/path through retry backoff and final projection.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - Only a non-matching successful response records provider success and reaches Resp03 client commit.
+  - Responses, OpenAI Chat, and Anthropic incomplete provider terminals enter Error01-06 and reselect before any client commit.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
   - Error05 cannot re-match a response-content policy from compressed error message.
   - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
+  - A failed incomplete attempt cannot project partial output or record provider success.
   required_gates:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate

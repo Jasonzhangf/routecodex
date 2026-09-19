@@ -72,7 +72,7 @@ struct MatrixJsonTransport {
 }
 
 #[tokio::test]
-async fn anthropic_json_and_sse_materialization_share_terminal_projection_owner() {
+async fn anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it() {
     let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_terminal_parity",
         "type":"message",
@@ -111,21 +111,25 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_response = materialize_v3_provider_sse_as_canonical_response(
+    let sse_error = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect("Anthropic SSE max_tokens must materialize through the JSON terminal owner");
+    .expect_err("provider max_tokens must not be admitted as a successful attempt");
 
-    for response in [&json_response, &sse_response] {
-        assert_eq!(response["status"], "incomplete");
-        assert_eq!(
-            response["incomplete_details"]["reason"],
-            "max_output_tokens"
-        );
-        assert_eq!(response["finish_reason"], "max_tokens");
-    }
+    assert_eq!(json_response["status"], "incomplete");
+    assert_eq!(
+        json_response["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+    assert_eq!(json_response["finish_reason"], "max_tokens");
+    assert!(
+        sse_error
+            .to_string()
+            .contains("provider response ended before completion: max_tokens"),
+        "unexpected provider materialization error: {sse_error}"
+    );
 }
 
 #[tokio::test]

@@ -43,25 +43,19 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         });
     }
 
-    // response.incomplete 是 Responses 协议的合法终态（max_output_tokens 截断 /
-    // content_filter 触发），不是 provider 流错误：分类为 Terminal，客户端按协议
-    // 接收 status=incomplete 的完整响应，网关不得 abort 流或记录 provider 失败。
-    // 缺少 incomplete_details.reason 属于畸形终帧，继续走下方失败分组显式报错。
-    if event_type == "response.incomplete" {
-        if event
-            .pointer("/response/incomplete_details/reason")
-            .or_else(|| event.pointer("/incomplete_details/reason"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .is_some_and(|value| !value.is_empty())
-        {
-            return Ok(V3ProviderResponsesJsonFrameOutcome::Terminal);
-        }
+    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
+        crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        event,
+    ) {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
+            code: failure.code,
+            message: failure.message,
+        });
     }
 
     if matches!(
         event_type,
-        "response.failed" | "response.incomplete" | "response.cancelled" | "response.canceled"
+        "response.failed" | "response.cancelled" | "response.canceled"
     ) {
         let error = event
             .pointer("/response/error")

@@ -153,7 +153,7 @@ requireText(runtime, runtimePath, 'response_hook_profile: V3HubRelayResponseHook
 // anthropic 失败策略已共享：完整语义（run_v3_relay_provider_failure_policy/Error05 action
 // /ordered SSE 失败路径）在 relay_runtime_shared；协议文件只要求调用共享 handle_provider_failure。
 requireText(runtime, runtimePath, 'handle_provider_failure(');
-requireCount(runtime, runtimePath, 'handle_provider_failure(', 8);
+requireCount(runtime, runtimePath, 'handle_provider_failure(', 9);
 requireText(runtime, runtimePath, 'fn closeout_anthropic_relay_response<F>(');
 requireCount(runtime, runtimePath, 'closeout_anthropic_relay_response(', 1);
 requireCount(runtime, runtimePath, 'let hooks = compile_v3_hub_relay_response_hooks();', 2);

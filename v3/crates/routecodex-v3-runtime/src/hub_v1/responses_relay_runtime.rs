@@ -111,7 +111,7 @@ use responses_relay_failures::{
     is_v3_responses_provider_response_failure, provider_failure_output, provider_http_failure,
     provider_request_relay_failure, provider_response_hook_failure,
     provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
-    server_routing_group,
+    provider_terminal_admission_failure, server_routing_group,
 };
 use responses_relay_json_hooks::*;
 

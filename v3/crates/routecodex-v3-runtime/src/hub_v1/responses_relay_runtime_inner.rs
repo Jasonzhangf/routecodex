@@ -512,6 +512,39 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         continue;
                     }
                 };
+                if let Some(admission) =
+                    classify_v3_provider_terminal_admission(provider_wire_protocol, &provider_value)
+                {
+                    let failure = provider_terminal_admission_failure(
+                        admission,
+                        provider_status,
+                        &selected_target_provider_id,
+                        Some(selected_observability.clone()),
+                    );
+                    drop(_provider_action_permit.take());
+                    let terminal_failure = handle_error_before_resp03!(
+                        handle_v3_responses_relay_provider_failure(
+                            &failure_context,
+                            selected,
+                            failure,
+                            &mut V3ResponsesRelayProviderRetryState {
+                                failed_candidates: &mut failed_candidates,
+                                same_candidate_retries: &mut same_candidate_retries,
+                                retry_selected: &mut retry_selected,
+                                pending_recovery: &mut pending_provider_action_recovery,
+                                provider_failure_events: &mut provider_failure_events,
+                                provider_failure_event_sink: provider_failure_event_sink.as_ref(),
+                                selected_observability: &selected_observability,
+                                trace: &mut trace,
+                            },
+                        )
+                        .await
+                    );
+                    if let Some(failure) = terminal_failure {
+                        return Ok(provider_failure_output(failure, trace, 0));
+                    }
+                    continue;
+                }
                 if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
                     if let Some(semantic_error) =
                         responses_relay_diagnostics::anthropic_cyber_refusal_error_from_payload(

@@ -123,7 +123,16 @@ for (const fixture of fixtures) {
     for (const relative of ['v3', 'docs', 'scripts', 'package.json']) {
       cpSync(resolve(repoRoot, relative), join(root, relative), {
         recursive: true,
-        filter: (source) => !source.includes('/target/'),
+        filter: (source) => {
+          const generatedRoots = [
+            resolve(repoRoot, 'v3/target'),
+            resolve(repoRoot, 'v3/build-control'),
+          ];
+          return generatedRoots.every(
+            (generatedRoot) =>
+              source !== generatedRoot && !source.startsWith(`${generatedRoot}/`),
+          );
+        },
       });
     }
     const target = join(root, fixture.file);
