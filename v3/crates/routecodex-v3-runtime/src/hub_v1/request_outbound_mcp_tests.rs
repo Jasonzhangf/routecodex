@@ -770,3 +770,194 @@ fn responses_direct_provider_projection_without_discovered_tools_keeps_tools_unc
 
     assert_eq!(request["tools"], expected);
 }
+
+#[test]
+fn responses_real_mcpx_tool_search_namespaces_and_calls_reach_provider_with_valid_names() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model": "gpt-5.5",
+                "tools": [],
+                "input": [
+                    {
+                        "type": "tool_search_call",
+                        "call_id": "call_mcpx_search",
+                        "execution": "client",
+                        "status": "completed",
+                        "arguments": {"query": "review"}
+                    },
+                    {
+                        "type": "tool_search_output",
+                        "call_id": "call_mcpx_search",
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": [
+                            {
+                                "type": "namespace",
+                                "name": "mcp__codex_review",
+                                "tools": [
+                                    {"type": "function", "name": "review_start", "description": "Start review", "parameters": {"type": "object"}},
+                                    {"type": "function", "name": "review_progress", "description": "Report review progress", "parameters": {"type": "object"}},
+                                    {"type": "function", "name": "review_result", "description": "Report review result", "parameters": {"type": "object"}},
+                                    {"type": "function", "name": "review_retry", "description": "Retry review", "parameters": {"type": "object"}}
+                                ]
+                            },
+                            {
+                                "type": "namespace",
+                                "name": "mcp__agy",
+                                "tools": [
+                                    {"type": "function", "name": "review_start", "description": "Start review", "parameters": {"type": "object"}},
+                                    {"type": "function", "name": "review_progress", "description": "Report review progress", "parameters": {"type": "object"}},
+                                    {"type": "function", "name": "review_result", "description": "Report review result", "parameters": {"type": "object"}}
+                                ]
+                            },
+                            {
+                                "type": "namespace",
+                                "name": "mcp__codex_apps__codex_with_chatgpt___v2",
+                                "tools": [
+                                    {
+                                        "type": "function",
+                                        "name": "codex_with_chatgpt_v2_execution_output",
+                                        "description": "Report execution output",
+                                        "parameters": {"type": "object"}
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_review_start",
+                        "call_id": "call_review_start",
+                        "name": "review_start",
+                        "namespace": "mcp__codex_review",
+                        "status": "completed",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_review_progress",
+                        "call_id": "call_review_progress",
+                        "name": "review_progress",
+                        "namespace": "mcp__codex_review",
+                        "status": "completed",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call",
+                        "id": "fc_review_result",
+                        "call_id": "call_review_result",
+                        "name": "review_result",
+                        "namespace": "mcp__codex_review",
+                        "status": "completed",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_review_start",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_review_progress",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_review_result",
+                        "output": "{}"
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "continue the review"}]
+                    }
+                ]
+            }),
+        )
+        .expect("the real MCPX Responses history shape must canonicalize");
+    let mut request =
+        build_v3_openai_responses_standard_request_from_chat_canonical(&canonical)
+            .expect("the real MCPX history must project to Responses standard");
+    normalize_v3_openai_responses_provider_request_payload(&mut request)
+        .expect("discovered MCPX namespaces must promote before provider wire");
+
+    let wire = routecodex_v3_provider_responses::build_v3_provider_12_responses_wire_payload(
+        "req-real-mcpx-tool-search",
+        routecodex_v3_provider_responses::V3ResponsesProviderTarget {
+            provider_id: "neutral-provider".into(),
+            provider_type: "responses".into(),
+            base_url: "http://upstream.invalid/v1".into(),
+            canonical_model_id: "gpt-5.5".into(),
+            wire_model: "gpt-5.5".into(),
+            compatibility_profile: None,
+            auth: routecodex_v3_provider_responses::V3ProviderAuthHandle {
+                alias: "primary".into(),
+                secret: routecodex_v3_provider_responses::V3ProviderAuthSecretHandle::Environment(
+                    "NEUTRAL_KEY".into(),
+                ),
+            },
+            responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+        },
+        request,
+    )
+    .expect("the real MCPX shape must reach provider wire without invalid tool names");
+
+    let tools = wire.body()["tools"]
+        .as_array()
+        .expect("provider wire tools");
+    assert_eq!(tools.len(), 8, "all discovered MCPX tools must be retained");
+    assert!(tools.iter().all(|tool| tool["type"] == "function"));
+    let tool_names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("function tool name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    for expected in [
+        "mcp__codex_review__review_start",
+        "mcp__codex_review__review_progress",
+        "mcp__codex_review__review_result",
+        "mcp__codex_review__review_retry",
+        "mcp__agy__review_start",
+        "mcp__agy__review_progress",
+        "mcp__agy__review_result",
+        "mcp__codex_apps__codex_with_chatgpt___v2__codex_with_chatgpt_v2_execution_output",
+    ] {
+        assert!(tool_names.contains(expected), "missing provider tool {expected}");
+    }
+
+    let input = wire.body()["input"]
+        .as_array()
+        .expect("provider wire input");
+    for expected in [
+        "mcp__codex_review__review_start",
+        "mcp__codex_review__review_progress",
+        "mcp__codex_review__review_result",
+    ] {
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == "function_call" && item["name"] == expected),
+            "missing qualified MCPX function call {expected}"
+        );
+    }
+    let callable_names = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("function tool name"))
+        .chain(input.iter().filter_map(|item| {
+            (item["type"] == "function_call")
+                .then(|| item["name"].as_str().expect("function call name"))
+        }));
+    assert!(
+        callable_names.into_iter().all(|name| {
+            name.chars()
+                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+        }),
+        "provider callable declarations and calls must use valid tool names: {}",
+        wire.body()
+    );
+}
