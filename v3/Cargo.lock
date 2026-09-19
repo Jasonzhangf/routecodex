@@ -1315,6 +1315,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "servertool-core",
  "thiserror 1.0.69",
 ]
 
@@ -1594,6 +1595,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

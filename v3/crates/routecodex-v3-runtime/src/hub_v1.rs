@@ -129,6 +129,7 @@ pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
+pub(crate) mod web_search_hook_request;
 pub(crate) mod web_search_hop;
 pub use responses_relay_runtime::*;
 pub(crate) use web_search_hop::{

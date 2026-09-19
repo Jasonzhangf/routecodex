@@ -36,6 +36,18 @@ impl V3ResponsesDirectServerToolScope {
         }
         !(session_id == conversation_id && session_id.starts_with("request:"))
     }
+
+    pub fn web_search_hook_scope(
+        &self,
+    ) -> servertool_core::web_search_contract::WebSearchHookScope {
+        servertool_core::web_search_contract::WebSearchHookScope {
+            entry_endpoint: self.entry_endpoint.clone(),
+            session_id: self.session_id.clone(),
+            conversation_id: self.conversation_id.clone(),
+            port: self.port,
+            routing_group: self.routing_group.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

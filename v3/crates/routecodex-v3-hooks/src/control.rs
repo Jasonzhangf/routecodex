@@ -72,6 +72,9 @@ pub enum ControlRequest {
         event: Box<HookEvent>,
         state: Box<HookState>,
     },
+    ExecuteWebSearch {
+        request: Box<servertool_core::web_search_contract::WebSearchHookRequest>,
+    },
     ScheduleUpsert {
         schedule: Box<ScheduledMessage>,
     },
@@ -197,6 +200,10 @@ pub fn handle_control_request<T: AppServerTransport>(
                 Err(error) => ControlResponse::err(error.to_string()),
             }
         }
+        ControlRequest::ExecuteWebSearch { request } => match core.execute_web_search(&request) {
+            Ok(outcome) => ControlResponse::ok(json!({ "outcome": outcome })),
+            Err(error) => ControlResponse::err(error.to_string()),
+        },
         ControlRequest::ScheduleUpsert { schedule } => match core.upsert_schedule(*schedule) {
             Ok(()) => match core.persist_state() {
                 Ok(()) => ControlResponse::ok(json!({ "scheduled": true })),

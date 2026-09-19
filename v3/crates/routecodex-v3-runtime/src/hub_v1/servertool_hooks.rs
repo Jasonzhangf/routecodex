@@ -10,119 +10,13 @@ use servertool_core::cli_contract::{
     ServertoolCliProjectionToolArgumentsInput,
 };
 use servertool_core::outcome_contract::is_client_exec_cli_projection;
+pub use servertool_core::web_search_contract::{
+    WebSearchError as V3WebSearchError, WebSearchHookContractError as V3WebSearchHookContractError,
+    WebSearchHookOutcome as V3WebSearchHookOutcome, WebSearchResult as V3WebSearchResult,
+    WebSearchResultStatus as V3WebSearchResultStatus, WebSearchSource as V3WebSearchSource,
+};
 use std::collections::BTreeSet;
 use std::sync::Arc;
-
-/// Typed WebSearch hook result. `metadata` is provider-owned usage data that
-/// the existing response projection may consume; it is not control state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3WebSearchResult {
-    pub call_id: String,
-    pub status: V3WebSearchResultStatus,
-    pub content: Option<String>,
-    pub sources: Vec<V3WebSearchSource>,
-    pub metadata: Option<Value>,
-    pub error: Option<V3WebSearchError>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3WebSearchResultStatus {
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3WebSearchSource {
-    pub ref_id: String,
-    pub url: Option<String>,
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3WebSearchError {
-    pub code: String,
-    pub message: String,
-    pub retryable: bool,
-}
-
-/// Typed return to the same Hub node. No implicit side effect or client frame
-/// write is permitted through this contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3WebSearchHookOutcome {
-    NotApplicable,
-    Completed(V3WebSearchResult),
-    Failed(V3WebSearchError),
-}
-
-impl V3WebSearchResult {
-    pub fn validate(&self) -> Result<(), V3WebSearchHookContractError> {
-        if self.call_id.trim().is_empty() {
-            return Err(V3WebSearchHookContractError::MissingCallId);
-        }
-        match self.status {
-            V3WebSearchResultStatus::Completed => {
-                if self.error.is_some() {
-                    return Err(V3WebSearchHookContractError::CompletedResultHasError);
-                }
-                if self.content.as_deref().is_none_or(str::is_empty) && self.sources.is_empty() {
-                    return Err(V3WebSearchHookContractError::CompletedResultEmpty);
-                }
-            }
-            V3WebSearchResultStatus::Failed => {
-                if self.error.is_none() {
-                    return Err(V3WebSearchHookContractError::FailedResultMissingError);
-                }
-                if self.content.is_some() || !self.sources.is_empty() {
-                    return Err(V3WebSearchHookContractError::FailedResultHasContent);
-                }
-            }
-        }
-        if self
-            .sources
-            .iter()
-            .any(|source| source.ref_id.trim().is_empty())
-        {
-            return Err(V3WebSearchHookContractError::MissingSourceRef);
-        }
-        if self
-            .metadata
-            .as_ref()
-            .is_some_and(web_search_metadata_contains_control_state)
-        {
-            return Err(V3WebSearchHookContractError::ControlStateInMetadata);
-        }
-        Ok(())
-    }
-}
-
-fn web_search_metadata_contains_control_state(value: &Value) -> bool {
-    match value {
-        Value::Object(object) => object.iter().any(|(key, value)| {
-            matches!(key.as_str(), "phase" | "scope_key" | "call_id")
-                || web_search_metadata_contains_control_state(value)
-        }),
-        Value::Array(items) => items.iter().any(web_search_metadata_contains_control_state),
-        _ => false,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum V3WebSearchHookContractError {
-    #[error("web_search hook request requires a non-empty call_id")]
-    MissingCallId,
-    #[error("completed web_search result must not carry an error")]
-    CompletedResultHasError,
-    #[error("completed web_search result requires content or sources")]
-    CompletedResultEmpty,
-    #[error("failed web_search result requires a typed error")]
-    FailedResultMissingError,
-    #[error("failed web_search result must not carry content or sources")]
-    FailedResultHasContent,
-    #[error("web_search result source requires a non-empty ref_id")]
-    MissingSourceRef,
-    #[error("web_search result metadata must not carry control state")]
-    ControlStateInMetadata,
-}
 
 pub(crate) fn web_search_hook_outcome_from_center_state(
     state: &V3WebSearchCenterState,

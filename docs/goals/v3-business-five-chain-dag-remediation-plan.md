@@ -645,6 +645,53 @@ Abort condition:
 - The sidecar requires changing the fixed Hub skeleton.
 - The adapter would duplicate an existing unique owner.
 
+### Phase 3 adapter evidence (2026-09-18)
+
+The existing hooks sidecar control boundary was reused; no new lifecycle, Hub
+skeleton node, Router, Provider, Server, or SSE owner was added.
+
+Adapter decision:
+
+```text
+ControlRequest::ExecuteWebSearch
+  -> HooksSidecarCore::execute_web_search
+  -> WebSearchAdapter::execute
+  -> CommandWebSearchAdapter
+  -> configured web-search-capable subagent command
+```
+
+The generic mounted handler/event boundary was rejected because it does not
+carry request scope/deadline or return the typed `WebSearchHookOutcome`. The
+existing `AppServerTransport` was also rejected because it owns Codex thread
+message delivery, not web-search execution. The new adapter is confined to the
+optional hooks sidecar and only invokes its configured command.
+
+The runtime-side request builder now binds the typed scope, query, call
+identity, policy, and absolute execution deadline. The sidecar adapter returns
+`Completed` or `Failed` typed outcomes; malformed JSON, `NotApplicable`, and a
+mismatched call id fail explicitly. `Failed` remains a typed business result,
+not a transport fallback.
+
+Focused source evidence:
+
+```text
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
+70 lib tests, 6 binary_handler_config tests, 1 binary_readiness test, and 11 native_delivery_replay tests passed
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
+11 passed
+cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture
+5 passed
+```
+
+Controlled subagent coverage includes completed typed result, typed failure,
+timeout, unavailable command, malformed JSON, mismatched call id, missing
+adapter, and mounted adapter through the real sidecar control socket. The
+adapter has no Router, Target, Provider transport, or client-frame call.
+
+Remaining Phase 3 gap: no production subagent command is installed or selected
+yet. Phase 4 owns old/new shadow parity; Phase 5 owns the runtime owner switch
+and removal of the request-local hop. The old re-enter edges remain open.
+
 ### Phase 4: Shadow parity against the existing hop
 
 Dependency: Phase 3.

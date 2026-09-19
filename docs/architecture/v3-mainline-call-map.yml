@@ -104,6 +104,23 @@ chains:
       produces: [v3.hooks.delivery_ledger]
       side_channel_reads: []
       side_channel_writes: []
+  - step_id: v3-hooks-sidecar-web-search-01
+    from_node: ControlServer
+    to_node: HooksSidecarCore
+    caller_symbol: handle_control_request
+    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: HooksSidecarCore::execute_web_search
+    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    status: as_is_bound
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes:
+        - v3.hooks.control_socket
+        - v3.web_search.hook_request
+      produces:
+        - v3.web_search.hook_outcome
+      side_channel_reads: []
+      side_channel_writes: []
 - chain_id: v3.provider_global_cooldown_persistence
   owner_feature_id: v3.provider_global_cooldown_persistence
   summary: Provider cooldown state is loaded before listeners bind, persisted on provider health mutation, and probed once after ready before re-admission.

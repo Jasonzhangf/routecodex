@@ -14,7 +14,18 @@ use thiserror::Error;
 #[serde(deny_unknown_fields)]
 pub struct HookHandlersConfig {
     pub schema_version: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search_adapter: Option<WebSearchAdapterConfig>,
     pub handlers: Vec<HookHandlerConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSearchAdapterConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,6 +51,8 @@ pub enum HookConfigError {
     Json(#[from] serde_json::Error),
     #[error("unsupported hooks handlers config schema version: {0}")]
     UnsupportedSchema(u16),
+    #[error("invalid web_search adapter config: {0}")]
+    InvalidWebSearchAdapter(String),
 }
 
 pub fn mount_handlers_from_config<T: AppServerTransport>(
@@ -48,6 +61,18 @@ pub fn mount_handlers_from_config<T: AppServerTransport>(
 ) -> Result<(), HookConfigError> {
     if config.schema_version != 1 {
         return Err(HookConfigError::UnsupportedSchema(config.schema_version));
+    }
+    if let Some(adapter) = &config.web_search_adapter {
+        if adapter.command.trim().is_empty() || adapter.timeout_ms == 0 {
+            return Err(HookConfigError::InvalidWebSearchAdapter(
+                "command and timeout_ms must be non-empty".to_string(),
+            ));
+        }
+        core.mount_web_search_adapter(CommandWebSearchAdapter::new(
+            adapter.command.clone(),
+            adapter.args.clone(),
+            std::time::Duration::from_millis(adapter.timeout_ms),
+        ));
     }
     for handler in &config.handlers {
         mount_configured_handler(core, handler);
@@ -189,6 +214,7 @@ mod tests {
         let mut core = HooksSidecarCore::new(DisabledTransport);
         let config = HookHandlersConfig {
             schema_version: 1,
+            web_search_adapter: None,
             handlers: vec![HookHandlerConfig {
                 handler_id: "stopless-handler".to_string(),
                 hook_kind: "stop".to_string(),

@@ -3780,6 +3780,7 @@ features:
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
+  - routecodex-v3-hooks
   - routecodex-v3-virtual-router
   - routecodex-v3-target
   owner_scope: V3 web_search two-axis route activation and ServerTool internal state-machine
@@ -3791,6 +3792,8 @@ features:
   - v3.servertool.state_machine_control
   - v3.web_search.execution_mode
   - v3.web_search.backend_binding
+  - v3.web_search.hook_request
+  - v3.web_search.hook_outcome
   - v3.request.normal_payload
   - v3.response.client_payload
   entry_symbols:
@@ -3802,6 +3805,9 @@ features:
   - V3WebSearchCenterPhase
   - V3WebSearchResult
   - V3WebSearchHookOutcome
+  - WebSearchHookRequest
+  - CommandWebSearchAdapter
+  - HooksSidecarCore::execute_web_search
   - apply_v3_web_search_request_hook_at_req04
   - apply_v3_web_search_tool_call_hook_at_resp03
   - V3WebSearchDispatcher
@@ -3815,6 +3821,7 @@ features:
   - v3-web-search-sm-06
   - v3-web-search-sm-07
   - v3-web-search-sm-08
+  - v3-hooks-sidecar-web-search-01
   allowed_paths:
   - docs/goals/v3-web-search-servertool-state-machine-proposal.md
   - docs/architecture/v3-resource-operation-map.yml
@@ -3822,6 +3829,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   - v3/crates/servertool-core
+  - v3/crates/routecodex-v3-hooks
   - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
   - v3/crates/provider-compat-core/src
   - v3/crates/routecodex-v3-config
