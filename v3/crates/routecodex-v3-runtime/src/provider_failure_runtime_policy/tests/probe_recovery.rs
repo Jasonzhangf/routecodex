@@ -4,6 +4,189 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
+#[test]
+fn one_post_commit_sse_failure_stays_retryable_until_threshold() {
+    let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_sse_single_retryable",
+        "post_commit_sse_single_retryable",
+        "single-failure-session",
+    )
+    .expect("single failure session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_response_sse_stream",
+        "Responses SSE event must be a JSON object",
+    );
+
+    health
+        .record_post_commit_provider_stream_failure_from_source(
+            &session,
+            "primary",
+            Some("key1"),
+            Some("gpt-test"),
+            &source,
+        )
+        .expect("one post-commit SSE failure must remain a recoverable observation");
+
+    let projection =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert!(
+        projection.available,
+        "one post-commit SSE failure must not enter the 15m global cooldown"
+    );
+    assert_eq!(projection.blocked_scopes, Vec::<String>::new());
+}
+
+#[test]
+fn successful_retry_clears_post_commit_sse_failure_state() {
+    let manifest = target_resolution_manifest("post_commit_sse_success_reset");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_sse_success_reset",
+        "post_commit_sse_success_reset",
+        "success-reset-session",
+    )
+    .expect("success reset session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_response_sse_stream",
+        "Responses SSE event must be a JSON object",
+    );
+
+    for _ in 0..2 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit SSE failure observation");
+    }
+    health
+        .store()
+        .record_provider_key_success(
+            "primary",
+            "key1",
+            "gpt-test",
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        )
+        .expect("successful retry must clear failure state");
+
+    let projection =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert!(projection.available);
+    assert!(
+        health
+            .store()
+            .provider_cooldown_probe_keys_due(u64::MAX)
+            .expect("provider cooldown probe query")
+            .is_empty(),
+        "a successful retry must not leave a pending cooldown probe"
+    );
+
+    for _ in 0..2 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-success failure observation");
+    }
+    let after_post_success_failures =
+        routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        );
+    assert!(
+        after_post_success_failures.available,
+        "success must reset the failure streak so two later failures remain retryable"
+    );
+}
+
+#[test]
+fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
+    let manifest = target_resolution_manifest("post_commit_sse_probe_due");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_sse_probe_due",
+        "post_commit_sse_probe_due",
+        "probe-due-session",
+    )
+    .expect("probe due session scope");
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_response_sse_stream",
+        "Responses SSE event must be a JSON object",
+    );
+    let before_failures_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
+
+    for _ in 0..3 {
+        health
+            .record_post_commit_provider_stream_failure_from_source(
+                &session,
+                "primary",
+                Some("key1"),
+                Some("gpt-test"),
+                &source,
+            )
+            .expect("post-commit SSE failure observation");
+    }
+
+    assert!(
+        health
+            .store()
+            .provider_cooldown_probe_keys_due(before_failures_ms + 4_999)
+            .expect("provider cooldown probe query")
+            .is_empty(),
+        "the recovery probe must not be due before five seconds"
+    );
+    let after_failures_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
+    let probe_keys = health
+        .store()
+        .provider_cooldown_probe_keys_due(after_failures_ms + 5_000)
+        .expect("provider cooldown probe query");
+    assert_eq!(
+        probe_keys,
+        vec![(
+            "primary".to_string(),
+            Some("key1".to_string()),
+            Some("gpt-test".to_string()),
+        )],
+        "three post-commit SSE failures must enter the 429-equivalent recovery ladder at 5s"
+    );
+}
+
 #[tokio::test]
 async fn provider_probe_failure_is_local_and_does_not_fail_the_probe_batch() {
     let manifest = global_pool_alive_manifest("probe_failure_is_local");
