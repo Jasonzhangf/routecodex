@@ -1,6 +1,6 @@
 # V3 Business Five-Chain DAG Remediation Plan
 
-Status: approved_design / plan_landed / p1_binding_candidate
+Status: approved_design / plan_landed / p1_committed / p2_contract_candidate
 
 Date: 2026-09-18
 
@@ -556,6 +556,47 @@ Abort condition:
   compat.
 - The contract requires a new lifecycle, a second state machine, or a second
   response exit.
+
+### Phase 2 contract evidence (2026-09-18)
+
+The typed contract is bound in the existing runtime owner:
+
+```text
+v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+  V3WebSearchResult
+  V3WebSearchHookOutcome
+  web_search_hook_outcome_from_center_state
+```
+
+The Resp03 hook now emits a typed `V3WebSearchHookOutcome` alongside its
+existing compatibility state. The request-local WebSearch hop is intentionally
+unchanged; Phase 3 owns adapter reuse and Phase 4 owns shadow parity.
+
+Focused contract evidence:
+
+```text
+cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
+9 passed; 0 failed
+```
+
+Positive coverage: a completed result can carry typed sources plus provider
+usage metadata.
+
+Negative coverage: a completed result without call identity is rejected;
+completed results cannot carry errors; failed results cannot carry content or
+sources; control-state keys cannot appear in result metadata at any nesting
+depth. Center-state conversion maps only an explicit `usage` object and does
+not duplicate normalized query/result content into provider metadata.
+
+The `V3WebSearchHookRequest` DTO was intentionally not added in this phase:
+the current Req04 path has no typed scope or deadline source. Phase 3 must bind
+those values from the existing execution control and ServerTool scope before a
+request contract is declared. This is a `MISSING_BINDING`, not a completed
+contract.
+
+Remaining Phase 2 work: none for the result/outcome contract itself. Phase 3
+must prove whether the existing hooks sidecar can carry this contract and bind
+the request fields without changing unrelated semantics.
 
 ### Phase 3: Reuse or add the subagent adapter
 

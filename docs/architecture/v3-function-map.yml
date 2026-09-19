@@ -3800,6 +3800,8 @@ features:
   - V3ServerToolName
   - V3WebSearchCenterState
   - V3WebSearchCenterPhase
+  - V3WebSearchResult
+  - V3WebSearchHookOutcome
   - apply_v3_web_search_request_hook_at_req04
   - apply_v3_web_search_tool_call_hook_at_resp03
   - V3WebSearchDispatcher

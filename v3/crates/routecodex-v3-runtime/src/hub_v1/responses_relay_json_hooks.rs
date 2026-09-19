@@ -81,7 +81,8 @@ pub(crate) fn run_json_response_hooks(
     };
     let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, response_web_search_state) = resp03.into_parts();
+    let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
+        resp03.into_parts();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");

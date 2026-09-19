@@ -69,7 +69,7 @@ where
     .map_err(V3AnthropicRelayRuntimeError::Target)?;
     let resp03 = hooks.govern(resp02, response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, web_search_transition) = resp03.into_parts();
+    let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();
     let servertool_followup_required =
         resp03.servertool_action() == V3HubServertoolResponseAction::FollowupRequired;
     // Mode B 拦截：websearch call 已由 Resp03 剥离（web_search_transition 存在）。

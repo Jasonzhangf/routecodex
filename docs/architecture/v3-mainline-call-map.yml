@@ -4990,7 +4990,7 @@ chains:
     callee_symbol: apply_v3_web_search_request_hook_at_req04
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     binding_kind: typed_runtime_node
-    behavior_gap: As-Is hook activates the local web_search surface from the current request; the typed WebSearchHookRequest/Result contract is still missing.
+    behavior_gap: As-Is hook activates the local web_search surface from the current request; a typed WebSearchHookRequest cannot be constructed from current scope/deadline sources until the Phase 3 adapter binds those fields.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5026,10 +5026,10 @@ chains:
     to_node: V3ServerToolState01ControlScope
     caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    callee_symbol: V3ServerToolCenter::store
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/common.rs
+    callee_symbol: web_search_hook_outcome_from_center_state
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     binding_kind: typed_runtime_node
-    behavior_gap: Resp03 observes the local call and transitions typed state; persistence is only bound in the response runtime paths that commit effects.
+    behavior_gap: Resp03 observes the local call, transitions typed state, and emits a typed HookOutcome; persistence is only bound in the response runtime paths that commit effects.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5091,7 +5091,7 @@ chains:
     callee_symbol: intercept_local_web_search_call
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     binding_kind: typed_runtime_node
-    behavior_gap: Hosted text is captured when present; otherwise the state remains observed until the local hop or a later typed adapter supplies the result.
+    behavior_gap: Hosted text is captured when present and converted into a typed WebSearchResult/HookOutcome; otherwise the state remains observed until the local hop or a later typed adapter supplies the result.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5112,7 +5112,7 @@ chains:
     callee_symbol: project_web_search_result_into_finalized
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
     binding_kind: obsolete_reenter_transition
-    behavior_gap: Result projection is currently coupled to the request-local hop path; P5 must bind the same projection to the typed subagent result and preserve call-id pairing.
+    behavior_gap: Result projection is currently coupled to the request-local hop path; P5 must bind the same projection to the typed WebSearchResult and preserve call-id pairing.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5131,7 +5131,7 @@ chains:
     callee_symbol: apply_v3_responses_relay_web_search_control_completion
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
     binding_kind: typed_runtime_node
-    behavior_gap: Completion currently verifies the paired function_call_output; typed injection into the same governed request remains a P2/P5 target binding.
+    behavior_gap: Completion currently verifies the paired function_call_output; typed injection into the same governed request remains a P5 target binding.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
