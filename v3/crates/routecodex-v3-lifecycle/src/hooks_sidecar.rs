@@ -199,14 +199,38 @@ async fn run_managed_hooks_sidecar(
     mut supervisor_stop_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), V3LifecycleError> {
     match start_managed_hooks_sidecar_cancelable(&instance_dir, Some(&mut startup_stop_rx)).await {
-        Ok((Some(sidecar), detail)) => {
+        Ok((Some(mut sidecar), detail)) => {
             if let Err(status_error) =
                 write_hooks_running_status(&instance_dir, &instance_id, detail)
             {
                 return stop_sidecar_after_primary_error(sidecar, status_error).await;
             }
-            wait_for_sidecar_stop(&mut supervisor_stop_rx).await;
-            sidecar.stop().await
+            tokio::select! {
+                _ = wait_for_sidecar_stop(&mut supervisor_stop_rx) => sidecar.stop().await,
+                status = sidecar.child.wait() => {
+                    if *supervisor_stop_rx.borrow() {
+                        return sidecar.stop().await;
+                    }
+                    let exit = status.map_err(V3LifecycleError::Io)?;
+                    let detail = Some(format!(
+                        "hooks sidecar unavailable: {}: hooks sidecar exited after readiness: {exit}",
+                        hooks_unavailable(HooksUnavailableReason::Crashed)
+                    ));
+                    let cleanup_result = sidecar.stop().await;
+                    let status_result =
+                        write_hooks_running_status(&instance_dir, &instance_id, detail);
+                    match (status_result, cleanup_result) {
+                        (Ok(()), Ok(())) => Ok(()),
+                        (Err(status_error), Ok(())) => Err(status_error),
+                        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+                        (Err(status_error), Err(cleanup_error)) => Err(
+                            V3LifecycleError::Validation(format!(
+                                "{status_error}; hooks sidecar cleanup failed: {cleanup_error}"
+                            )),
+                        ),
+                    }
+                }
+            }
         }
         Ok((None, detail)) => {
             if detail.is_some() && !*supervisor_stop_rx.borrow() {
