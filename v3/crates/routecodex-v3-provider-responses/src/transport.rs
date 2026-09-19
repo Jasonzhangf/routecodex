@@ -4,6 +4,8 @@ use crate::adaptive_concurrency::{
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
 use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
+pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
+use crate::transport_admission::{acquire_provider_admission, V3ProviderAdmissionError};
 use crate::wire::{
     V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
     V3ResponsesStreamIntent,
@@ -32,17 +34,14 @@ use tokio_tungstenite::{
     },
     MaybeTlsStream, WebSocketStream,
 };
-
 type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
-
 mod cancellation;
 mod websocket;
 pub use cancellation::V3ProviderCancellation;
 use websocket::{
     websocket_protocol_error, websocket_server_event_error, websocket_transport_error,
 };
-
 const OPENAI_BETA_HEADER: &str = "openai-beta";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-cli/2.1.220 (external, sdk-cli)";
@@ -68,9 +67,8 @@ const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
 const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =
     "V3ProviderResponsesWebSocketSession -> V3ProviderResp14Raw";
-
 #[derive(Debug)]
-enum V3Transport13ResponsesRequestKind {
+pub(crate) enum V3Transport13ResponsesRequestKind {
     Http {
         request_id: String,
         provider_id: String,
@@ -100,7 +98,6 @@ enum V3Transport13ResponsesRequestKind {
         compatibility_profile: Option<String>,
     },
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderRequestHeader {
     name: String,
@@ -241,19 +238,6 @@ impl V3Transport13ResponsesRequest {
                 initial_concurrency_budget,
                 ..
             } => *initial_concurrency_budget,
-        }
-    }
-
-    fn concurrency_acquire_timeout_ms(&self) -> u64 {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                concurrency_acquire_timeout_ms,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                concurrency_acquire_timeout_ms,
-                ..
-            } => *concurrency_acquire_timeout_ms,
         }
     }
 
@@ -422,7 +406,7 @@ fn default_anthropic_messages_compat_headers() -> Vec<V3ProviderRequestHeader> {
     ]
 }
 
-fn v3_transport_13_request(
+pub(crate) fn v3_transport_13_request(
     kind: V3Transport13ResponsesRequestKind,
 ) -> V3Transport13ResponsesRequest {
     V3Transport13ResponsesRequest {
@@ -642,47 +626,6 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     )
 }
 
-/// Build a provider HTTP request with both the request deadline and the
-/// provider admission deadline carried from the typed target.
-pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-    request_id: impl Into<String>,
-    provider_id: impl Into<String>,
-    url_text: impl AsRef<str>,
-    auth: V3ProviderAuthHandle,
-    stream_intent: V3ResponsesStreamIntent,
-    body: Value,
-    provider_headers: Vec<V3ProviderRequestHeader>,
-    timeout: Option<Duration>,
-    concurrency_acquire_timeout_ms: u64,
-) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
-    let request_id = request_id.into();
-    let provider_id = provider_id.into();
-    let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
-        V3ProviderError::InvalidBaseUrl {
-            request_id: request_id.clone(),
-            provider_id: provider_id.clone(),
-            reason: error.to_string(),
-        }
-    })?;
-    Ok(v3_transport_13_request(
-        V3Transport13ResponsesRequestKind::Http {
-            request_id,
-            provider_id,
-            url,
-            auth,
-            stream_intent,
-            body,
-            provider_headers,
-            timeout,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms,
-            sse_first_frame_timeout_ms: None,
-            cancellation: None,
-            compatibility_profile: None,
-        },
-    ))
-}
-
 pub fn build_v3_transport_13_responses_http_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
@@ -814,71 +757,46 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 reason,
             });
         }
-        let acquire_timeout = Duration::from_millis(request.concurrency_acquire_timeout_ms());
-        let lease = if let Some(cancellation) = cancellation.clone() {
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => {
-                    if let Some(attempt_key) = &attempt_key {
-                        let _ = self.handoff.transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                        );
-                    }
-                    return Err(V3ProviderError::ClientDisconnect {
-                        request_id: request.request_id().to_string(),
-                        provider_id: request.provider_id().to_string(),
-                    });
-                }
-                result = tokio::time::timeout(
-                    acquire_timeout,
-                    controller.acquire_with_clock(provider_key.clone(), current_epoch_ms),
-                ) => match result {
-                    Ok(lease) => lease,
-                    Err(_) => {
-                        if let Some(attempt_key) = &attempt_key {
-                            let _ = self.handoff.transition(
-                                attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                            );
-                        }
-                        return Err(V3ProviderError::Transport {
-                            request_id: request.request_id().to_string(),
-                            provider_id: request.provider_id().to_string(),
-                            reason: format!(
-                                "provider concurrency admission timed out after {}ms",
-                                request.concurrency_acquire_timeout_ms()
-                            ),
-                        });
-                    }
+        let acquire_timeout_ms = match &request.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                concurrency_acquire_timeout_ms,
+                ..
+            }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 {
+                concurrency_acquire_timeout_ms,
+                ..
+            } => *concurrency_acquire_timeout_ms,
+        };
+        let lease = acquire_provider_admission(
+            controller.clone(),
+            provider_key.clone(),
+            current_epoch_ms(),
+            Duration::from_millis(acquire_timeout_ms),
+            cancellation,
+        )
+        .await
+        .map_err(|error| {
+            if let Some(attempt_key) = &attempt_key {
+                let _ = self.handoff.transition(
+                    attempt_key,
+                    crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                );
+            }
+            match error {
+                V3ProviderAdmissionError::ClientDisconnect => V3ProviderError::ClientDisconnect {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                },
+                V3ProviderAdmissionError::Timeout => V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: format!(
+                        "provider concurrency admission timed out after {}ms",
+                        acquire_timeout_ms
+                    ),
                 },
             }
-        } else {
-            match tokio::time::timeout(
-                acquire_timeout,
-                controller.acquire_with_clock(provider_key.clone(), current_epoch_ms),
-            )
-            .await
-            {
-                Ok(lease) => lease,
-                Err(_) => {
-                    if let Some(attempt_key) = &attempt_key {
-                        let _ = self.handoff.transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                        );
-                    }
-                    return Err(V3ProviderError::Transport {
-                        request_id: request.request_id().to_string(),
-                        provider_id: request.provider_id().to_string(),
-                        reason: format!(
-                            "provider concurrency admission timed out after {}ms",
-                            request.concurrency_acquire_timeout_ms()
-                        ),
-                    });
-                }
-            }
-        };
+        })?;
         let was_probe = lease.is_probe();
         let permit = lease.into_permit();
         let permit_guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), permit);
