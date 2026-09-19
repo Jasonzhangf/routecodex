@@ -1,11 +1,40 @@
 {
   "evidence_id": "v3-web-search-servertool-source-20260919",
   "feature_id": "v3.web_search_servertool_state_machine",
-  "candidate_commit": "5fb925723ca01d6093e5541192609912a36d3b2a",
-  "candidate_tree": "2992f64c05fd72d9900a7c77bb24c6aabaf8d90c",
-  "base_commit": "4d6ed59d0212e002ae2e4de74d922ea815ce7f92",
-  "captured_at": "2026-09-19T10:02:33-07:00",
+  "candidate_commit": "59fa5b3e93d9c189f94b48fca2dbba5a1baf9ead",
+  "candidate_tree": "902ade97bc5da6acc943b41636ea6a2c2721542a",
+  "base_commit": "5d293375f487530a93bd84a47af9aaf2cd81fb05",
+  "captured_at": "2026-09-19T12:04:07-07:00",
   "source_unchanged": true,
+  "source_change": {
+    "commit": "59fa5b3e93d9c189f94b48fca2dbba5a1baf9ead",
+    "parent": "5d293375f487530a93bd84a47af9aaf2cd81fb05",
+    "path": "v3/crates/servertool-core/src/web_search_contract.rs",
+    "summary": "WebSearchHookScope::validate rejects request-only scope when either session_id or conversation_id starts with request:.",
+    "diff_stat": "1 file changed, 12 insertions(+), 1 deletion(-)",
+    "regression_test": "request_rejects_distinct_request_only_scope"
+  },
+  "lifecycle_rerun": {
+    "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle -- --nocapture",
+    "result": "pass",
+    "tests": "67 passed; 0 failed",
+    "named_tests": {
+      "active_cleanup_uses_child_handle_when_start_token_is_missing": "pass",
+      "anchor_identity_mismatch_never_signals_live_process_group": "pass"
+    },
+    "classification": "prior reported lifecycle failures reproduced as passing on candidate; no environment blocker observed"
+  },
+  "architecture_receipts": {
+    "admission_snapshot": {
+      "command": "npm --prefix v3 run verify:v3-architecture-ci",
+      "generated": true,
+      "files": 481,
+      "digest": "7d63efbe50d6b6399889b37af7e8257d6d2cc2af008c5c3b8143d3a6714f221f"
+    },
+    "architecture_ci": "39/39 sub-gates green",
+    "mainline_caller_flow": "pass; markdown and HTML review surfaces synced; binding_pending=4; locked chains=51; pending chains=22",
+    "architecture_docs": "pass; docs=25; resources=179; edges=427"
+  },
   "scope": {
     "owner": "v3.web_search_servertool_state_machine",
     "paths": [
@@ -49,8 +78,8 @@
   },
   "artifact": {
     "path": "v3/target/debug/rccv3",
-    "sha256": "cd2a8286f46dd9d1b61851a7ec3dc631db2915dcef6f450be003598520c5cc25",
-    "bytes": 76671448
+    "sha256": "756b7e3b1a5a24d73a8f2558ef4f1b90f6eec445551cd92024b54ef51f077eb1",
+    "bytes": 76753784
   },
   "gates": [
     {
@@ -71,12 +100,12 @@
     {
       "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle -- --nocapture",
       "result": "pass",
-      "tests": "66 passed; 0 failed"
+      "tests": "67 passed; 0 failed"
     },
     {
       "command": "cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture",
       "result": "pass",
-      "tests": "5 passed; 0 failed"
+      "tests": "6 passed; 0 failed"
     },
     {
       "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture",
@@ -89,11 +118,11 @@
       "tests": "78 lib + 6 config + 1 readiness + 11 native replay passed; 0 failed"
     },
     {
-      "command": "cargo fmt --all -- --check",
+      "command": "cargo fmt --manifest-path v3/Cargo.toml --all -- --check",
       "result": "pass"
     },
     {
-      "command": "CARGO_NET_OFFLINE=true cargo check --workspace",
+      "command": "CARGO_NET_OFFLINE=true cargo check --manifest-path v3/Cargo.toml --workspace",
       "result": "pass",
       "notes": "Warnings only; no errors."
     },
