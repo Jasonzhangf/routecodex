@@ -1,0 +1,93 @@
+{
+  "evidence_id": "v3-internal-hooks-sidecar-control-loss-source-20260919",
+  "feature_id": "v3.rcc_internal_hooks_sidecar",
+  "candidate_commit": "807a60c988311e7a4a50e6413b49c7daccee4fdf",
+  "base_commit": "ae39dd7bc",
+  "captured_at": "2026-09-19T10:15:00-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "rust_v3_internal_hooks_sidecar",
+    "paths": [
+      "v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs",
+      "v3/crates/routecodex-v3-lifecycle/src/internal_hooksd_tests.rs",
+      "v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks",
+      "result": "pass",
+      "tests": "78 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture",
+      "result": "pass",
+      "tests": "16 passed; 0 failed"
+    },
+    {
+      "command": "node --test v3/tests/scripts/v3-cli-distribution.spec.mjs",
+      "result": "pass",
+      "tests": "6 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-mainline-caller-flow",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-docs",
+      "result": "pass",
+      "tests": "docs: 25; resources: 176; edges: 425"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:v3-managed-server-lifecycle",
+      "result": "pass",
+      "tests": "lifecycle 72 passed; CLI 23 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-managed-server-lifecycle",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:v3-managed-server-lifecycle-red-fixtures",
+      "result": "pass",
+      "tests": "69 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "cargo fmt --check",
+      "cwd": "v3",
+      "result": "pass"
+    }
+  ],
+  "live_boundary": {
+    "status": "pending_merged_main_install_restart_replay",
+    "required": [
+      "Rebuild and install from merged main.",
+      "Restart the managed instance through the official lifecycle command.",
+      "Verify listeners 4444 and 7777.",
+      "Repeat the exact hooksd PID-scoped failure injection and verify hooks_unavailable plus listener health."
+    ]
+  },
+  "notes": [
+    "This receipt binds source and test gate execution to candidate commit 807a60c98.",
+    "The candidate fixes control-loss detection for the readiness-to-identity race and validates the persisted control-socket identity and protocol on every health probe.",
+    "The candidate also accepts the correct post-readiness crash degradation detail in the CLI regression.",
+    "The receipt commit itself contains documentation only; live runtime evidence remains separate."
+  ]
+}
