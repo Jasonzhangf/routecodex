@@ -13,8 +13,128 @@ use crate::wire::{
     build_v3_provider_12_responses_wire_payload, V3ProviderAuthSecretHandle,
     V3ResponsesProviderTarget,
 };
+use crate::{
+    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,
+    V3ProviderTransportAttemptState, V3ProviderTransportHandoffScope, V3ProviderTransportKind,
+};
 use routecodex_v3_config::V3ResponsesTransportKind;
 use serde_json::json;
+
+fn probe_sse_fixture(
+    stream: V3ProviderSseStream,
+) -> (
+    V3ProviderResp14Raw,
+    V3AdaptiveConcurrencyController,
+    V3ProviderTransportAttemptBroker,
+    V3ProviderTransportAttemptKey,
+) {
+    let provider_key = "probe-sse-provider:key1";
+    let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+    let held = controller.try_acquire(provider_key, 0).unwrap();
+    let probe = controller.try_acquire(provider_key, 0).unwrap();
+    assert!(probe.is_probe());
+    controller.release(held.into_permit()).unwrap();
+    let guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), probe.into_permit())
+        .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted);
+
+    let broker = V3ProviderTransportAttemptBroker::default();
+    let key = V3ProviderTransportAttemptKey {
+        request_id: "req-probe-sse".into(),
+        provider_id: "probe-sse-provider".into(),
+        attempt_id: 0,
+    };
+    broker
+        .begin(
+            key.clone(),
+            V3ProviderTransportKind::Http,
+            V3ProviderTransportHandoffScope {
+                pipeline_id: "pipeline-probe-sse".into(),
+                server_id: "server-probe-sse".into(),
+                port: 4444,
+                session_scope: "session-probe-sse".into(),
+                runtime_generation: 1,
+            },
+        )
+        .unwrap();
+    broker
+        .transition(&key, V3ProviderTransportAttemptState::Streaming)
+        .unwrap();
+    let raw = V3ProviderResp14Raw::from_sse(
+        "req-probe-sse".into(),
+        "probe-sse-provider".into(),
+        200,
+        vec![],
+        stream,
+    );
+    (
+        hold_sse_lease(raw, guard, broker.clone(), Some(key.clone())),
+        controller,
+        broker,
+        key,
+    )
+}
+
+fn assert_probe_sse_released(controller: &V3AdaptiveConcurrencyController) {
+    let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
+    assert_eq!(snapshot.in_flight, 0);
+    assert!(!snapshot.probe_in_flight);
+    assert_eq!(snapshot.budget, 2);
+}
+
+#[test]
+fn probe_sse_headers_keep_permit_and_handoff_streaming() {
+    let (raw, controller, broker, key) = probe_sse_fixture(Box::pin(stream::pending::<
+        Result<Vec<u8>, V3ProviderError>,
+    >()));
+    let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
+    assert_eq!(snapshot.in_flight, 1);
+    assert!(snapshot.probe_in_flight);
+    assert_eq!(
+        broker.state(&key),
+        Some(V3ProviderTransportAttemptState::Streaming)
+    );
+    drop(raw);
+    assert_probe_sse_released(&controller);
+}
+
+#[tokio::test]
+async fn probe_sse_eof_releases_once_and_marks_handoff_terminal() {
+    let (raw, controller, broker, key) =
+        probe_sse_fixture(Box::pin(stream::empty::<Result<Vec<u8>, V3ProviderError>>()));
+    let V3ProviderResponseBody::Sse(mut body) = raw.into_body() else {
+        panic!("probe response must remain SSE");
+    };
+    assert!(body.next().await.is_none());
+    assert_probe_sse_released(&controller);
+    assert_eq!(
+        broker.state(&key),
+        Some(V3ProviderTransportAttemptState::Terminal)
+    );
+    drop(body);
+    assert_probe_sse_released(&controller);
+}
+
+#[tokio::test]
+async fn probe_sse_error_releases_immediately_and_marks_handoff_failed() {
+    let error = V3ProviderError::ResponseBody {
+        request_id: "req-probe-sse".into(),
+        provider_id: "probe-sse-provider".into(),
+        reason: "injected stream failure".into(),
+    };
+    let (raw, controller, broker, key) =
+        probe_sse_fixture(Box::pin(stream::once(async move { Err(error) })));
+    let V3ProviderResponseBody::Sse(mut body) = raw.into_body() else {
+        panic!("probe response must remain SSE");
+    };
+    assert!(body.next().await.unwrap().is_err());
+    assert_probe_sse_released(&controller);
+    assert_eq!(
+        broker.state(&key),
+        Some(V3ProviderTransportAttemptState::Failed)
+    );
+    assert!(body.next().await.is_none());
+    assert_probe_sse_released(&controller);
+}
 
 fn responses_http_target() -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {

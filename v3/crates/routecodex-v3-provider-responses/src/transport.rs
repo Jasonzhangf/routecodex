@@ -952,11 +952,14 @@ fn hold_sse_lease(
         unreachable!("SSE lease must only wrap an SSE response");
     };
     let stream = Box::pin(stream::unfold(
-        (stream, guard, 0_u64),
-        move |(mut stream, guard, provider_sequence)| {
+        (stream, Some(guard), 0_u64, false),
+        move |(mut stream, mut guard, provider_sequence, terminal)| {
             let handoff = handoff.clone();
             let attempt_key = attempt_key.clone();
             async move {
+                if terminal {
+                    return None;
+                }
                 match stream.next().await {
                     Some(Ok(bytes)) => {
                         let observed = match &attempt_key {
@@ -968,26 +971,35 @@ fn hold_sse_lease(
                         match observed {
                             Ok(true) => Some((
                                 Ok(bytes),
-                                (stream, guard, provider_sequence.saturating_add(1)),
+                                (stream, guard, provider_sequence.saturating_add(1), false),
                             )),
-                            Ok(false) | Err(_) => Some((
-                                Err(V3ProviderError::InternalTransport {
-                                    request_id: attempt_key
-                                        .as_ref()
-                                        .map(|key| key.request_id.clone())
-                                        .unwrap_or_default(),
-                                    provider_id: attempt_key
-                                        .as_ref()
-                                        .map(|key| key.provider_id.clone())
-                                        .unwrap_or_default(),
-                                    lane: V3ProviderInternalTransportLane::Response,
-                                    reason: format!(
-                                        "provider transport frame sequence mismatch at {}",
-                                        provider_sequence
-                                    ),
-                                }),
-                                (stream, guard, provider_sequence),
-                            )),
+                            Ok(false) | Err(_) => {
+                                if let Some(attempt_key) = &attempt_key {
+                                    let _ = handoff.transition(
+                                        attempt_key,
+                                        crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                                    );
+                                }
+                                drop(guard.take());
+                                Some((
+                                    Err(V3ProviderError::InternalTransport {
+                                        request_id: attempt_key
+                                            .as_ref()
+                                            .map(|key| key.request_id.clone())
+                                            .unwrap_or_default(),
+                                        provider_id: attempt_key
+                                            .as_ref()
+                                            .map(|key| key.provider_id.clone())
+                                            .unwrap_or_default(),
+                                        lane: V3ProviderInternalTransportLane::Response,
+                                        reason: format!(
+                                            "provider transport frame sequence mismatch at {}",
+                                            provider_sequence
+                                        ),
+                                    }),
+                                    (stream, guard, provider_sequence, true),
+                                ))
+                            }
                         }
                     }
                     Some(Err(error)) => {
@@ -997,7 +1009,8 @@ fn hold_sse_lease(
                                 crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
                             );
                         }
-                        Some((Err(error), (stream, guard, provider_sequence)))
+                        drop(guard.take());
+                        Some((Err(error), (stream, guard, provider_sequence, true)))
                     }
                     None => {
                         if let Some(attempt_key) = &attempt_key {
