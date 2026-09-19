@@ -2447,6 +2447,8 @@ features:
   - npm run verify:v3-architecture-docs
   - npm run verify:servertool-rust-only
   - npm run build:v3-cli
+  source_evidence:
+  - docs/architecture/evidence/v3-web-search-servertool-source.json
   completion_rule:
     source: Red fixtures first, then Rust ChatProcess/ServerTool/provider-wire tests plus architecture gates and build pass.
     runtime: After global install and managed restart, live 5520 MiniMax explicit search proves search-only dispatch; declared-tool-only request stays normal route; GPT native search path has no ServerTool

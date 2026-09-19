@@ -1,0 +1,150 @@
+{
+  "evidence_id": "v3-web-search-servertool-source-20260919",
+  "feature_id": "v3.web_search_servertool_state_machine",
+  "candidate_commit": "5fb925723ca01d6093e5541192609912a36d3b2a",
+  "candidate_tree": "2992f64c05fd72d9900a7c77bb24c6aabaf8d90c",
+  "base_commit": "4d6ed59d0212e002ae2e4de74d922ea815ce7f92",
+  "captured_at": "2026-09-19T10:02:33-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "v3.web_search_servertool_state_machine",
+    "paths": [
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-mainline-call-map.yml",
+      "docs/architecture/v3-resource-operation-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      "docs/architecture/wiki/html/v3-mainline-caller-flow.html",
+      "docs/architecture/wiki/v3-mainline-caller-flow.md",
+      "v3/Cargo.lock",
+      "v3/crates/routecodex-v3-hooks/src/web_search_adapter.rs",
+      "v3/crates/routecodex-v3-hooks/tests/binary_handler_config.rs",
+      "v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs",
+      "v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/tests.rs",
+      "v3/crates/routecodex-v3-lifecycle/src/lib.rs",
+      "v3/crates/routecodex-v3-runtime/Cargo.toml",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hook_request.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel/direct_web_search.rs",
+      "v3/crates/routecodex-v3-runtime/src/kernel/tests/direct_websearch_mode_b.rs",
+      "v3/crates/routecodex-v3-runtime/tests/responses_relay_mode_b_web_search_integration.rs",
+      "v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs",
+      "v3/crates/routecodex-v3-runtime/tests/v3_web_search_anthropic_wire.rs",
+      "v3/crates/routecodex-v3-server/src/lib.rs",
+      "v3/crates/servertool-core/src/web_search_contract.rs",
+      "v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs",
+      "v3/scripts/architecture/verify-v3-provider-session-cooldown.mjs",
+      "v3/scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs",
+      "v3/scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs"
+    ]
+  },
+  "artifact": {
+    "path": "v3/target/debug/rccv3",
+    "sha256": "cd2a8286f46dd9d1b61851a7ec3dc631db2915dcef6f450be003598520c5cc25",
+    "bytes": 76671448
+  },
+  "gates": [
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture",
+      "result": "pass",
+      "tests": "26 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_sidecar -- --nocapture",
+      "result": "pass",
+      "tests": "15 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture",
+      "result": "pass",
+      "tests": "10 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-lifecycle -- --nocapture",
+      "result": "pass",
+      "tests": "66 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture",
+      "result": "pass",
+      "tests": "5 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture",
+      "result": "pass",
+      "tests": "4 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture",
+      "result": "pass",
+      "tests": "78 lib + 6 config + 1 readiness + 11 native replay passed; 0 failed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "pass"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo check --workspace",
+      "result": "pass",
+      "notes": "Warnings only; no errors."
+    },
+    {
+      "command": "npm --prefix v3 run verify:v3-provider-session-cooldown",
+      "result": "pass"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-provider-session-cooldown-red-fixtures",
+      "result": "pass",
+      "tests": "30/30 mutations rejected; 6 anchor tests passed"
+    },
+    {
+      "command": "npm --prefix v3 run verify:v3-protocol-conversion-field-parity",
+      "result": "pass"
+    },
+    {
+      "command": "npm --prefix v3 run test:v3-protocol-conversion-field-parity-red-fixtures",
+      "result": "pass",
+      "tests": "124 forbidden mutations rejected"
+    },
+    {
+      "command": "npm run verify:servertool-rust-only",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-mainline-caller-flow",
+      "result": "pass",
+      "notes": "Markdown and HTML review surfaces are synced."
+    },
+    {
+      "command": "npm run verify:v3-architecture-docs",
+      "result": "pass"
+    },
+    {
+      "command": "npm --prefix v3 run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "npm --prefix v3 run build:v3-cli",
+      "result": "pass",
+      "artifact_sha256": "cd2a8286f46dd9d1b61851a7ec3dc631db2915dcef6f450be003598520c5cc25"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    }
+  ]
+}
