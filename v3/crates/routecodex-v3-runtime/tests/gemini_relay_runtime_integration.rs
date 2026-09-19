@@ -911,57 +911,46 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             .await
             .expect("provider attempt failure must reach terminal Error06");
         }
-        let blocked = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-fresh-after-uncommitted-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"blocked"}]}],
-                    "stream":false
-                }),
-            },
-            &succeeding,
-            provider_health.runtime_health(),
-        )
-        .await;
+        let held_manifest = manifest.clone();
+        let held_health = provider_health.runtime_health();
+        let held = tokio::spawn(async move {
+            execute_v3_gemini_relay_runtime_with_provider_health(
+                &held_manifest,
+                V3GeminiRelayRuntimeInput {
+                    server_id: server_id.into(),
+                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                        "test-server",
+                        "test-group",
+                        concat!(module_path!(), ":", line!()),
+                    )
+                    .expect("test provider failure session scope"),
+                    request_id: format!("req-gemini-held-after-uncommitted-{case}"),
+                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                    payload: json!({
+                        "contents":[{"role":"user","parts":[{"text":"held"}]}],
+                        "stream":false
+                    }),
+                },
+                &succeeding,
+                held_health,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(
-            blocked.is_err(),
-            "{case} fresh request must be blocked while provider cooldown is active"
+            !held.is_finished(),
+            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
         );
 
-        // provider cooldown 与 model-key health 都需要各自成功 probe，随后 fresh 成功。
+        // provider cooldown 与 model-key health 都需要各自成功 probe；成功 probe
+        // 发布 availability generation 后，被 hold 的 fresh 请求继续执行。
         revive_cooled_provider(&provider_health, server_id).await;
-        let second = execute_v3_gemini_relay_runtime_with_provider_health(
-            &manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-after-provider-revival-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"next"}]}],
-                    "stream":false
-                }),
-            },
-            &succeeding,
-            provider_health.runtime_health(),
-        )
-        .await
-        .expect("probe-revived provider must accept a fresh request");
-        assert_eq!(second.status, 200);
+        let revived = tokio::time::timeout(Duration::from_secs(2), held)
+            .await
+            .expect("held request must wake after provider recovery")
+            .expect("held request task must not panic")
+            .expect("probe-revived provider must accept the held request");
+        assert_eq!(revived.status, 200);
     }
 }
 
