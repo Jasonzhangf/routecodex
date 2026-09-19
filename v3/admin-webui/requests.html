@@ -12,7 +12,7 @@
 <div class="shell">
   <div class="topbar">
     <div class="spacer"></div>
-    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="reload-btn" type="button">Reload</button>
+    <button class="btn primary" id="reload-btn" type="button">Reload</button>
   </div>
 
   <main>
@@ -52,8 +52,8 @@
       </div>
       <span class="page-info muted" id="page-info">—</span>
       <span class="spacer"></span>
-      <button class="btn amb-button amb-button-cap" id="export-csv-top" type="button" disabled>Export CSV</button>
-      <button class="btn amb-button amb-button-cap" id="copy-tsv-top" type="button" disabled>Copy to clipboard</button>
+      <button class="btn" id="export-csv-top" type="button" disabled>Export CSV</button>
+      <button class="btn" id="copy-tsv-top" type="button" disabled>Copy to clipboard</button>
     </div>
 
     <div class="requests-grid">
@@ -61,20 +61,28 @@
         <div class="filter-search">
           <input id="search-filter" type="search" placeholder="Search request / model / error…" aria-label="Search" autocomplete="off">
         </div>
+        <p class="filter-help">Everything is checked by default, so nothing is filtered. Uncheck a value to hide it — the table updates immediately. Within one group the checked values are OR (Success <em>or</em> Error); across groups they are AND (that status <em>and</em> that provider). The number beside each value is how many records it currently has.</p>
         <div class="filter-group">
-          <h3><span class="layer">Layer 2</span> Status</h3>
+          <h3>Status <button class="filter-clear" type="button" data-clear="statusInclude">All</button></h3>
           <div class="filter-list" id="filter-status"></div>
         </div>
         <div class="filter-group">
-          <h3><span class="layer">Layer 3</span> Provider <button class="filter-clear" type="button" data-clear="providerSel">Clear</button></h3>
+          <h3>Provider <button class="filter-clear" type="button" data-clear="providerInclude">All</button></h3>
           <div class="filter-list" id="filter-provider"></div>
         </div>
         <div class="filter-group">
-          <h3><span class="layer">Layer 4</span> Model <button class="filter-clear" type="button" data-clear="modelSel">Clear</button></h3>
+          <h3>Model <button class="filter-clear" type="button" data-clear="modelInclude">All</button></h3>
           <div class="filter-list" id="filter-model"></div>
         </div>
+        <div class="filter-group">
+          <h3>Error code <button class="filter-clear" type="button" data-clear="errorCodeInclude">All</button></h3>
+          <div class="filter-list" id="filter-error-code"></div>
+        </div>
         <details class="adv-filters">
-          <summary>More filters & sort</summary>
+          <summary>More filters &amp; sort</summary>
+          <p class="filter-help">These single-choice facets override the checked boxes above when set to anything other than <em>all</em>.</p>
+          <summary>More filters &amp; sort</summary>
+          <p class="filter-help">These single-choice facets replace the checked boxes above when set to anything other than <em>all</em>.</p>
           <div class="adv-grid">
             <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
             <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
@@ -90,10 +98,10 @@
 
       <div>
         <div class="pagination">
-          <button class="btn amb-button amb-button-cap" id="page-prev" type="button">&#8592; Prev</button>
+          <button class="btn" id="page-prev" type="button">&#8592; Prev</button>
           <span id="page-info" class="page-info">page — of — · — records</span>
           <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
-          <button class="btn amb-button amb-button-cap" id="page-next" type="button">Next &#8594;</button>
+          <button class="btn" id="page-next" type="button">Next &#8594;</button>
         </div>
 
         <div class="section">

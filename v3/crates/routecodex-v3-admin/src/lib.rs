@@ -27,6 +27,21 @@ pub const STATIC_VIEW_USAGE_JS: &str = include_str!("../../../admin-webui/app/vi
 pub const STATIC_VIEW_PROVIDERS_JS: &str =
     include_str!("../../../admin-webui/app/views/providers.js");
 pub const STATIC_VIEW_ROUTES_JS: &str = include_str!("../../../admin-webui/app/views/routes.js");
+// The usage view is split across focused modules. Browsers request each module
+// as its own URL, so every module needs an embedded asset and a route; a missing
+// entry here surfaces as a 404 that breaks the whole page.
+pub const STATIC_VIEW_USAGE_STATE_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-state.js");
+pub const STATIC_VIEW_USAGE_FILTERS_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-filters.js");
+pub const STATIC_VIEW_USAGE_PANELS_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-panels.js");
+pub const STATIC_VIEW_USAGE_PANEL_VIEWS_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-panel-views.js");
+pub const STATIC_VIEW_USAGE_EXPORT_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-export.js");
+pub const STATIC_VIEW_USAGE_SUMMARY_JS: &str =
+    include_str!("../../../admin-webui/app/views/usage-summary.js");
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderHealthEntry {
