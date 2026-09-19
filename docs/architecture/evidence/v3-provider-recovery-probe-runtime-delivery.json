@@ -132,5 +132,22 @@
       },
       "interpretation": "blocked_until_ms and next_probe_at_ms are independent persisted deadlines; this snapshot is evidence only and does not redefine the configured maximum wait"
     }
-  }
+  },
+  "required_gates": [
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
+      "result": "pass",
+      "tests": "12 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture",
+      "result": "pass",
+      "tests": "114 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-provider-action-gate",
+      "result": "pass",
+      "required_machine_edges": 48
+    }
+  ]
 }
