@@ -326,7 +326,7 @@ async fn cooldown_only_exhaustion_waits_for_successful_rescue_probe() {
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_probe_failure_keeps_waiting_for_later_recovery() {
+async fn cooldown_only_exhaustion_probe_failure_returns_terminal_exhaustion() {
     let server_id = "cooldown_only_exhaustion_failure";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -390,7 +390,7 @@ async fn cooldown_only_exhaustion_probe_failure_keeps_waiting_for_later_recovery
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
         !selection.is_finished(),
-        "failed rescue probes must keep the request held"
+        "selection waits only for rescue probes already in flight"
     );
 
     health
@@ -407,32 +407,28 @@ async fn cooldown_only_exhaustion_probe_failure_keeps_waiting_for_later_recovery
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(
         !selection.is_finished(),
-        "a failed probe must not project terminal exhaustion"
+        "the remaining in-flight probe still gates the one rescue pass"
     );
 
     health
         .store
-        .complete_provider_cooldown_probe_success_at_generation(
+        .complete_provider_cooldown_probe_failure_at_generation(
             &second.provider_id,
             Some(&second.auth_alias),
             Some(&second.model_id),
             20_001,
             Some(second_permit.expected_generation()),
         )
-        .expect("later rescue probe success");
+        .expect("second rescue probe failure");
 
     let selection = tokio::time::timeout(Duration::from_millis(500), selection)
         .await
-        .expect("selection must wake after a later rescue probe succeeds")
+        .expect("selection must return after the one rescue pass")
         .expect("selection task must not panic");
-    match selection {
-        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
-            v3_relay_provider_candidate_key(&selected.candidate),
-            excluded_key,
-            "the request must resume with a nonfailed candidate after later recovery"
-        ),
-        _ => panic!("the request must resume after the recovery ladder succeeds"),
-    }
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "failed rescue probes must project terminal exhaustion instead of waiting for availability"
+    );
 }
 
 #[tokio::test]
