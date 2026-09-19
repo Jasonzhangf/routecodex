@@ -5,10 +5,10 @@
 
 use serde::{Deserialize, Serialize};
 use servertool_core::web_search_contract::{WebSearchHookOutcome, WebSearchHookRequest};
-use std::io::Write;
+use std::io::{ErrorKind, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, TryRecvError};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,96 +98,172 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     self.command
                 ))
             })?;
-        let mut stdin = child.stdin.take().ok_or_else(|| {
+        let mut stdin = Some(child.stdin.take().ok_or_else(|| {
             WebSearchAdapterError::Unavailable("web_search subagent stdin unavailable".to_string())
+        })?);
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            WebSearchAdapterError::Unavailable("web_search subagent stdout unavailable".to_string())
         })?;
-        let (write_sender, write_receiver) = mpsc::sync_channel(1);
-        let writer = std::thread::spawn(move || {
-            let result = stdin.write_all(payload.as_bytes());
-            drop(stdin);
-            let _ = write_sender.send(result);
-        });
-        let mut write_result = None;
-        let mut child_exited = false;
+        let mut stderr = child.stderr.take().ok_or_else(|| {
+            WebSearchAdapterError::Unavailable("web_search subagent stderr unavailable".to_string())
+        })?;
+        for pipe in [
+            stdin.as_ref().expect("stdin is present").as_raw_fd(),
+            stdout.as_raw_fd(),
+            stderr.as_raw_fd(),
+        ] {
+            if let Err(error) = set_nonblocking(pipe) {
+                terminate_child(&mut child);
+                return Err(error);
+            }
+        }
+        let payload = payload.as_bytes();
+        let mut payload_offset = 0;
+        let mut stdin_open = true;
+        let mut stdout_open = true;
+        let mut stderr_open = true;
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
+        let mut exit_status = None;
         loop {
-            if write_result.is_none() {
-                match write_receiver.try_recv() {
-                    Ok(result) => write_result = Some(result),
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {
+            if stdin_open && payload_offset < payload.len() {
+                match stdin
+                    .as_mut()
+                    .expect("stdin is present while it is open")
+                    .write(&payload[payload_offset..])
+                {
+                    Ok(0) => {
                         terminate_child(&mut child);
-                        let _ = writer.join();
                         return Err(WebSearchAdapterError::Unavailable(
-                            "web_search subagent stdin writer stopped without a result".to_string(),
+                            "web_search subagent stdin closed before request completed".to_string(),
                         ));
+                    }
+                    Ok(written) => payload_offset += written,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                    Err(error) => {
+                        terminate_child(&mut child);
+                        return Err(WebSearchAdapterError::Unavailable(format!(
+                            "web_search subagent stdin failed: {error}"
+                        )));
                     }
                 }
             }
-            if let Some(Err(error)) = write_result.as_ref() {
-                terminate_child(&mut child);
-                let _ = writer.join();
-                return Err(WebSearchAdapterError::Unavailable(format!(
-                    "web_search subagent stdin failed: {error}"
-                )));
+            if stdin_open && payload_offset == payload.len() {
+                stdin_open = false;
+                drop(stdin.take());
             }
-            if !child_exited {
+            if stdout_open {
+                match drain_stdout(&mut stdout, &mut stdout_bytes) {
+                    Ok(open) => stdout_open = open,
+                    Err(error) => {
+                        terminate_child(&mut child);
+                        return Err(error);
+                    }
+                }
+            }
+            if stderr_open {
+                match drain_stderr(&mut stderr, &mut stderr_bytes) {
+                    Ok(open) => stderr_open = open,
+                    Err(error) => {
+                        terminate_child(&mut child);
+                        return Err(error);
+                    }
+                }
+            }
+            if exit_status.is_none() {
                 match child.try_wait() {
-                    Ok(Some(_)) => child_exited = true,
+                    Ok(Some(status)) => exit_status = Some(status),
                     Ok(None) => {}
                     Err(error) => {
                         terminate_child(&mut child);
-                        let _ = writer.join();
                         return Err(WebSearchAdapterError::Unavailable(format!(
                             "web_search subagent wait failed: {error}"
                         )));
                     }
                 }
             }
-            if child_exited && write_result.is_some() {
+            if !stdin_open && exit_status.is_some() && !stdout_open && !stderr_open {
                 break;
             }
             if std::time::Instant::now() >= deadline {
                 terminate_child(&mut child);
-                let _ = writer.join();
                 return Err(WebSearchAdapterError::Timeout(
                     "web_search subagent exceeded request deadline".to_string(),
                 ));
             }
-            match (child_exited, write_result.is_some()) {
-                (true, true) => break,
-                _ => std::thread::sleep(Duration::from_millis(5)),
-            }
+            std::thread::sleep(Duration::from_millis(5));
         }
-        writer.join().map_err(|_| {
+        let status = exit_status.ok_or_else(|| {
             WebSearchAdapterError::Unavailable(
-                "web_search subagent stdin writer panicked".to_string(),
+                "web_search subagent exited without a status".to_string(),
             )
         })?;
-        if let Some(Err(error)) = write_result {
-            return Err(WebSearchAdapterError::Unavailable(format!(
-                "web_search subagent stdin failed: {error}"
-            )));
-        }
-        let output = child.wait_with_output().map_err(|error| {
-            WebSearchAdapterError::Unavailable(format!(
-                "web_search subagent output failed: {error}"
-            ))
-        })?;
-        if !output.status.success() {
+        if !status.success() {
             return Err(WebSearchAdapterError::Unavailable(format!(
                 "web_search subagent exited {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
+                status,
+                String::from_utf8_lossy(&stderr_bytes)
             )));
         }
         let outcome: WebSearchHookOutcome =
-            serde_json::from_slice(&output.stdout).map_err(|error| {
+            serde_json::from_slice(&stdout_bytes).map_err(|error| {
                 WebSearchAdapterError::MalformedResponse(format!(
                     "web_search subagent returned invalid outcome JSON: {error}"
                 ))
             })?;
         validate_outcome(&outcome, &request.call_id)?;
         Ok(outcome)
+    }
+}
+
+fn set_nonblocking(file_descriptor: std::os::fd::RawFd) -> Result<(), WebSearchAdapterError> {
+    let flags = unsafe { libc::fcntl(file_descriptor, libc::F_GETFL) };
+    if flags < 0 {
+        return Err(WebSearchAdapterError::Unavailable(format!(
+            "web_search subagent pipe flags read failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    let result = unsafe { libc::fcntl(file_descriptor, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+    if result < 0 {
+        return Err(WebSearchAdapterError::Unavailable(format!(
+            "web_search subagent pipe nonblocking setup failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(())
+}
+
+fn drain_stdout(
+    stdout: &mut ChildStdout,
+    bytes: &mut Vec<u8>,
+) -> Result<bool, WebSearchAdapterError> {
+    drain_pipe(stdout, bytes, "stdout")
+}
+
+fn drain_stderr(
+    stderr: &mut ChildStderr,
+    bytes: &mut Vec<u8>,
+) -> Result<bool, WebSearchAdapterError> {
+    drain_pipe(stderr, bytes, "stderr")
+}
+
+fn drain_pipe(
+    pipe: &mut impl Read,
+    bytes: &mut Vec<u8>,
+    label: &str,
+) -> Result<bool, WebSearchAdapterError> {
+    let mut buffer = [0_u8; 8192];
+    match pipe.read(&mut buffer) {
+        Ok(0) => Ok(false),
+        Ok(read) => {
+            bytes.extend_from_slice(&buffer[..read]);
+            Ok(true)
+        }
+        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(true),
+        Err(error) => Err(WebSearchAdapterError::Unavailable(format!(
+            "web_search subagent {label} failed: {error}"
+        ))),
     }
 }
 
@@ -239,6 +315,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use servertool_core::web_search_contract::WebSearchHookScope;
+    use std::sync::mpsc;
 
     fn request(deadline_unix_ms: u64) -> WebSearchHookRequest {
         WebSearchHookRequest {
@@ -411,7 +488,10 @@ mod tests {
         let outcome = receiver.recv_timeout(Duration::from_secs(3)).expect(
             "web_search adapter must enforce its deadline while the subagent is not reading stdin",
         );
-        assert!(matches!(outcome, Err(WebSearchAdapterError::Timeout(_))));
+        assert!(
+            matches!(outcome, Err(WebSearchAdapterError::Timeout(_))),
+            "unexpected non-reading subagent outcome: {outcome:?}"
+        );
         worker.join().unwrap();
     }
 
@@ -431,7 +511,58 @@ mod tests {
         let outcome = receiver
             .recv_timeout(Duration::from_secs(3))
             .expect("web_search adapter must terminate descendants that keep stdin open");
-        assert!(matches!(outcome, Err(WebSearchAdapterError::Timeout(_))));
+        assert!(
+            matches!(outcome, Err(WebSearchAdapterError::Timeout(_))),
+            "unexpected descendant outcome: {outcome:?}"
+        );
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn command_adapter_times_out_when_detached_descendant_keeps_stdin_open() {
+        let test_binary = std::env::current_exe().unwrap();
+        let mut request = request(future_deadline());
+        request.query = "x".repeat(1024 * 1024);
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                format!(
+                    "cat >/dev/null; ROUTECODEX_WEB_SEARCH_DETACHED_HELPER=1 '{}' --exact web_search_adapter::tests::detached_descendant_helper --nocapture",
+                    test_binary.display()
+                ),
+            ],
+            Duration::from_millis(20),
+        );
+        let started = std::time::Instant::now();
+        let (sender, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = sender.send(adapter.execute(&request));
+        });
+        let outcome = receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("web_search adapter must return when a detached descendant keeps stdin open");
+        assert!(
+            matches!(outcome, Err(WebSearchAdapterError::Timeout(_))),
+            "unexpected detached descendant outcome: {outcome:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "deadline return must not wait for the detached descendant"
+        );
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn detached_descendant_helper() {
+        if std::env::var_os("ROUTECODEX_WEB_SEARCH_DETACHED_HELPER").is_none() {
+            return;
+        }
+        let session_id = unsafe { libc::setsid() };
+        assert!(
+            session_id > 0,
+            "test helper must detach from the adapter process group"
+        );
+        std::thread::sleep(Duration::from_secs(2));
     }
 }
