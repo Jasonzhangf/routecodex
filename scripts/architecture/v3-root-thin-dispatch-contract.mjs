@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 export function collectV3RootThinDispatchFailures({
   rootPackageText,
   changedPaths = [],
+  repoRoot,
 } = {}) {
   const failures = [];
   let rootPackage;
@@ -26,7 +27,10 @@ export function collectV3RootThinDispatchFailures({
       failures.push(`root package lifecycle alias must remain retired: ${scriptName}`);
     }
   }
-  if (changedPaths.includes('src/build-info.ts')) {
+  const rootBuildInfoExists = repoRoot
+    ? existsSync(resolve(repoRoot, 'src', 'build-info.ts'))
+    : false;
+  if (rootBuildInfoExists || changedPaths.includes('src/build-info.ts')) {
     failures.push('V3 independent build isolation must not modify root runtime build-info');
   }
   return failures;
@@ -51,7 +55,7 @@ export function detectV3IsolationChangedPaths({ repoRoot, env = process.env } = 
       if (explicitBase) throw new Error(`cannot resolve V3 isolation base commit: ${candidate}`);
       continue;
     }
-    const diff = spawnSync('git', ['diff', '--name-only', mergeBase.stdout.trim(), '--'], {
+    const diff = spawnSync('git', ['diff', '--name-only', '--diff-filter=ACMRT', mergeBase.stdout.trim(), '--'], {
       cwd: repoRoot,
       encoding: 'utf8',
     });

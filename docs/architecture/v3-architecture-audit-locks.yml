@@ -70,8 +70,8 @@ locked_items:
     locked_at: '2026-07-23T20:05:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:6d464f4c7a5db684d479844a903b573904da3fcb3be2b13b75a0a23e0387cd25
-    last_manual_authorization_id: auth-20260824-v3-protocol-fields-responses-direct
+    fingerprint: sha256:31869eb07abff120397b23bcae58f753b5414bea0fae937e587281ce887a63ff
+    last_manual_authorization_id: auth-20260918-v3-responses-direct-lock-drift-repair
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -1173,3 +1173,10 @@ manual_authorizations:
     reason: "Jason authorized retiring the V3 Stopless runtime resource. The timing chain's entry symbol now names the server-tool API while timing remains an independent side-channel."
     fingerprint_before: sha256:4c8c2ea7aa25177f91e2aba4567095a335b513c267b8e20fee4c37ca372a8eba
     fingerprint_after: sha256:f028534b46300c81ae3d629b50191b18f6c0ee2f758f13b6289b733810662c5f
+  - authorization_id: auth-20260918-v3-responses-direct-lock-drift-repair
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-09-18T18:31:05-07:00'
+    reason: "Jason authorized repairing the pre-existing audit-lock drift exposed by rebuilding the admission view from canonical sources. The current Responses Direct fingerprint was recalculated from the checked-in caller map; no runtime behavior or ownership is changed by this lock refresh."
+    fingerprint_before: sha256:6d464f4c7a5db684d479844a903b573904da3fcb3be2b13b75a0a23e0387cd25
+    fingerprint_after: sha256:31869eb07abff120397b23bcae58f753b5414bea0fae937e587281ce887a63ff

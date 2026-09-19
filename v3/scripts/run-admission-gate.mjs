@@ -23,6 +23,25 @@ function fail(message) {
   process.exit(2);
 }
 
+function ensureAdmissionRepo() {
+  const compiler = resolve(v3Root, '..', 'scripts', 'architecture', 'compile-v3-build-admission.mjs');
+  const check = spawnSync(process.execPath, [compiler, '--check'], {
+    cwd: resolve(v3Root, '..'),
+    env: process.env,
+    stdio: 'inherit',
+  });
+  if (check.status === 0 && existsSync(resolve(admissionRepo, 'docs'))) return;
+
+  const regenerate = spawnSync(process.execPath, [compiler], {
+    cwd: resolve(v3Root, '..'),
+    env: process.env,
+    stdio: 'inherit',
+  });
+  if (regenerate.status !== 0 || !existsSync(resolve(admissionRepo, 'docs'))) {
+    fail('generated architecture admission repo view is stale or missing and regeneration failed');
+  }
+}
+
 if (!requested || requested.startsWith('/') || requested.includes('..')) {
   fail('gate path must be a V3-local relative path');
 }
@@ -36,9 +55,7 @@ if (process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1') {
   process.exit(result.status ?? 2);
 }
 
-if (!existsSync(resolve(admissionRepo, 'docs'))) {
-  fail('tracked architecture admission repo view is missing');
-}
+ensureAdmissionRepo();
 
 mkdirSync(controlRoot, { recursive: true });
 const workspace = mkdtempSync(resolve(controlRoot, 'run-'));

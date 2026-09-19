@@ -171,6 +171,11 @@ function compileAdmission() {
 
 function verifyAdmissionLockstep() {
   verifyProviderCompatLegacyMirror();
+  const repoOutput = resolve(outputRoot, 'repo');
+  const manifestPath = resolve(outputRoot, 'manifest.json');
+  if (!existsSync(repoOutput) || !existsSync(manifestPath)) {
+    compileAdmission();
+  }
   const expected = expectedAdmission();
   const failures = [];
   for (const entry of expected.files) {
@@ -191,7 +196,6 @@ function verifyAdmissionLockstep() {
   for (const output of actualOutputs) {
     if (!expectedOutputs.has(output)) failures.push(`unexpected generated admission file: ${output}`);
   }
-  const manifestPath = resolve(outputRoot, 'manifest.json');
   if (!existsSync(manifestPath)) {
     failures.push('missing generated admission manifest: manifest.json');
   } else {

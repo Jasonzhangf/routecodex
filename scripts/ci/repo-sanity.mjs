@@ -66,83 +66,90 @@ function isForbiddenTrackedPath(p) {
 }
 
 function checkRootLayout() {
-  // Fixed top-level layout. Adding new root entries requires an explicit policy change.
-  const sourceRoots = new Set([
+  // Deny new top-level entries by default. The baseline is the root tree at
+  // the merge-base with origin/main; only entries already present there, or
+  // explicitly approved transitional roots, are accepted.
+  const mergeBase = runGit(['merge-base', 'HEAD', 'origin/main']).trim();
+  const baseline = new Set(
+    runGit(['ls-tree', '--name-only', mergeBase])
+      .split('\n')
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  const approvedTransitional = new Set([
+    '.appsdk',
+    '.appsdk-control',
+    '.appsdk-prepare.json',
+    'contracts',
+    'playground',
+    'v4',
+  ]);
+  const approvedIgnored = new Set([
     '.agent-collab',
-    '.agents',
-    '.beads',
-    '.github',
-    '.githooks',
-    '.gitattributes',
-    '.gitignore',
-    'AGENTS.md',
-    'HEARTBEAT.md',
-    'MEMORY.md',
-    'README.md',
-    'config',
-    'config.toolreason-10000.toml',
-    'deprecated',
-    'docs',
-    'eslint.config.js',
-    'memory',
-    'note.md',
-    'package-lock.json',
-    'package.json',
-    'scripts',
-    'src',
-    'sharedmodule',
-    'task.md',
-    'tests',
-    'tsconfig.json',
-    'v3',
-  ]);
-  const generatedRoots = new Set([
-    'artifacts',
-    'coverage',
-    'dist',
-    'logs',
-    'node_modules',
-    'tmp',
-    '.tmp',
-    'test-results',
-  ]);
-  const localStateRoots = new Set([
     '.agent-state',
     '.cache',
     '.DS_Store',
     '.local-index',
-    'CACHE.md',
-    'bin',
-    'lib',
     '.reasonix',
+    '.tmp',
+    'artifacts',
+    'bin',
+    'CACHE.md',
+    'coverage',
+    'dist',
+    'lib',
+    'logs',
+    'node_modules',
     'reasonix.toml',
+    'test-results',
+    'tmp',
   ]);
-  const temporaryLegacyRoots = new Set([
-    // 其他工具链/项目遗留在 repo 顶层的条目（appsdk 工具链、v4 项目、
-    // playground 实验、contracts 状态机等）。这些不是 RouteCodex 源码，
-    // 暂允许存在（未来单独清理迁移），不得继续新增。
-    '.appsdk',
-    '.appsdk-control',
-    '.appsdk-prepare.json',
-    'active',
-    'contracts',
-    'generated',
-    'playground',
-    'protected',
-    'v4',
+  const removedRoots = new Set([
+    '.beads',
+    'config.toolreason-10000.toml',
+    'src',
   ]);
-  const allowed = new Set([
-    ...sourceRoots,
-    ...generatedRoots,
-    ...localStateRoots,
-    ...temporaryLegacyRoots,
-  ]);
-
   const rootEntries = listRootEntries({ includeIgnored: true });
-  const unexpected = rootEntries.filter((name) => !allowed.has(name));
+  const unexpected = rootEntries.filter(
+    (name) =>
+      !baseline.has(name)
+      && !approvedTransitional.has(name)
+      && !approvedIgnored.has(name),
+  );
   if (unexpected.length) {
-    console.error('[repo-sanity] unexpected root entries (top-level is fixed):');
+    console.error('[repo-sanity] unexpected root entries (new top-level entries are denied by default):');
     for (const name of unexpected) console.error(`- ${name}`);
+    process.exit(2);
+  }
+  const revived = rootEntries.filter((name) => removedRoots.has(name));
+  if (revived.length) {
+    console.error('[repo-sanity] retired root entries must stay physically deleted:');
+    for (const name of revived) console.error(`- ${name}`);
+    process.exit(2);
+  }
+}
+
+function checkGeneratedRootsIgnored() {
+  const generatedPaths = [
+    'src/build-info.ts',
+    'v3/.appsdk-prepare.json',
+    'v3/build-contracts',
+    'v3/build-control',
+  ];
+  const violations = generatedPaths.filter((entry) => !isIgnoredByGit(entry));
+  if (violations.length) {
+    console.error('[repo-sanity] generated paths must be ignored:');
+    for (const violation of violations) console.error(`- ${violation}`);
+    process.exit(2);
+  }
+
+  const tracked = new Set(runGit(['ls-files']).split('\n').map((entry) => entry.trim()).filter(Boolean));
+  const trackedViolations = generatedPaths.filter((entry) =>
+    Array.from(tracked).some((trackedPath) => trackedPath === entry || trackedPath.startsWith(`${entry}/`)),
+  );
+  if (trackedViolations.length) {
+    console.error('[repo-sanity] generated paths must never be tracked:');
+    for (const violation of trackedViolations) console.error(`- ${violation}`);
     process.exit(2);
   }
 }
@@ -384,6 +391,7 @@ if (forbidden.length) {
 }
 
 checkRootLayout();
+checkGeneratedRootsIgnored();
 checkRootPackageLock();
 checkApprovedGeneratedSubroots();
 checkRootGeneratedResidue();
