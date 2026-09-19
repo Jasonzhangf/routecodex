@@ -5,7 +5,8 @@ use routecodex_v3_hooks::{
 use serde_json::Value;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::process::Stdio;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tokio::process::{Child, Command as TokioCommand};
 
 mod hooks_install;
@@ -205,29 +206,36 @@ async fn run_managed_hooks_sidecar(
             {
                 return stop_sidecar_after_primary_error(sidecar, status_error).await;
             }
-            tokio::select! {
-                _ = wait_for_sidecar_stop(&mut supervisor_stop_rx) => sidecar.stop().await,
-                status = sidecar.child.wait() => {
-                    if *supervisor_stop_rx.borrow() {
-                        return sidecar.stop().await;
+            if sidecar.control_socket_identity.is_some() {
+                let control_socket_path = sidecar
+                    .control_socket_path
+                    .as_deref()
+                    .expect("internal hooksd with a control socket identity has a path");
+                tokio::select! {
+                    _ = wait_for_sidecar_stop(&mut supervisor_stop_rx) => sidecar.stop().await,
+                    status = sidecar.child.wait() => {
+                        if *supervisor_stop_rx.borrow() {
+                            return sidecar.stop().await;
+                        }
+                        let exit = status.map_err(V3LifecycleError::Io)?;
+                        degrade_after_sidecar_exit(&instance_dir, &instance_id, sidecar, exit).await
                     }
-                    let exit = status.map_err(V3LifecycleError::Io)?;
-                    let detail = Some(format!(
-                        "hooks sidecar unavailable: {}: hooks sidecar exited after readiness: {exit}",
-                        hooks_unavailable(HooksUnavailableReason::Crashed)
-                    ));
-                    let cleanup_result = sidecar.stop().await;
-                    let status_result =
-                        write_hooks_running_status(&instance_dir, &instance_id, detail);
-                    match (status_result, cleanup_result) {
-                        (Ok(()), Ok(())) => Ok(()),
-                        (Err(status_error), Ok(())) => Err(status_error),
-                        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
-                        (Err(status_error), Err(cleanup_error)) => Err(
-                            V3LifecycleError::Validation(format!(
-                                "{status_error}; hooks sidecar cleanup failed: {cleanup_error}"
-                            )),
-                        ),
+                    _ = wait_for_sidecar_control_loss(control_socket_path) => {
+                        if *supervisor_stop_rx.borrow() {
+                            return sidecar.stop().await;
+                        }
+                        degrade_after_sidecar_control_loss(&instance_dir, &instance_id, sidecar).await
+                    }
+                }
+            } else {
+                tokio::select! {
+                    _ = wait_for_sidecar_stop(&mut supervisor_stop_rx) => sidecar.stop().await,
+                    status = sidecar.child.wait() => {
+                        if *supervisor_stop_rx.borrow() {
+                            return sidecar.stop().await;
+                        }
+                        let exit = status.map_err(V3LifecycleError::Io)?;
+                        degrade_after_sidecar_exit(&instance_dir, &instance_id, sidecar, exit).await
                     }
                 }
             }
@@ -250,6 +258,97 @@ async fn run_managed_hooks_sidecar(
             write_hooks_running_status(&instance_dir, &instance_id, detail)
         }
     }
+}
+
+async fn degrade_after_sidecar_exit(
+    instance_dir: &Path,
+    instance_id: &str,
+    sidecar: V3HooksSidecarProcess,
+    exit: std::process::ExitStatus,
+) -> Result<(), V3LifecycleError> {
+    let detail = Some(format!(
+        "hooks sidecar unavailable: {}: hooks sidecar exited after readiness: {exit}",
+        hooks_unavailable(HooksUnavailableReason::Crashed)
+    ));
+    let cleanup_result = sidecar.stop().await;
+    let status_result = write_hooks_running_status(instance_dir, instance_id, detail);
+    match (status_result, cleanup_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(status_error), Ok(())) => Err(status_error),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Err(status_error), Err(cleanup_error)) => Err(V3LifecycleError::Validation(format!(
+            "{status_error}; hooks sidecar cleanup failed: {cleanup_error}"
+        ))),
+    }
+}
+
+async fn degrade_after_sidecar_control_loss(
+    instance_dir: &Path,
+    instance_id: &str,
+    sidecar: V3HooksSidecarProcess,
+) -> Result<(), V3LifecycleError> {
+    let detail = Some(format!(
+        "hooks sidecar unavailable: {}: hooks sidecar control socket became unavailable after readiness",
+        hooks_unavailable(HooksUnavailableReason::Crashed)
+    ));
+    let cleanup_result = sidecar.stop().await;
+    let status_result = write_hooks_running_status(instance_dir, instance_id, detail);
+    match (status_result, cleanup_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(status_error), Ok(())) => Err(status_error),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Err(status_error), Err(cleanup_error)) => Err(V3LifecycleError::Validation(format!(
+            "{status_error}; hooks sidecar cleanup failed: {cleanup_error}"
+        ))),
+    }
+}
+
+async fn wait_for_sidecar_control_loss(path: &Path) {
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        if !sidecar_control_health(path).await {
+            return;
+        }
+    }
+}
+
+async fn sidecar_control_health(path: &Path) -> bool {
+    // Every probe failure is control loss. The supervisor must publish an
+    // explicit degraded state instead of ending silently with a probe error.
+    let mut stream = match UnixStream::connect(path).await {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+    if stream
+        .write_all(b"{\"method\":\"health\"}\n")
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    let mut reader = tokio::io::BufReader::new(stream);
+    let mut line = String::new();
+    let read = match tokio::time::timeout(Duration::from_secs(1), reader.read_line(&mut line)).await
+    {
+        Ok(Ok(read)) => read,
+        _ => return false,
+    };
+    if read == 0 {
+        return false;
+    }
+    let response: routecodex_v3_hooks::ControlResponse = match serde_json::from_str(line.trim_end())
+    {
+        Ok(response) => response,
+        Err(_) => return false,
+    };
+    response.ok
+        && response
+            .result
+            .as_ref()
+            .and_then(|result| result["status"].as_str())
+            == Some("ok")
 }
 
 async fn stop_sidecar_after_primary_error(
