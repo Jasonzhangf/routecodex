@@ -69,6 +69,10 @@ pub(crate) fn direct_model_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), Stri
         .map_err(|error| error.to_string())
 }
 
+fn is_responses_protocol(protocol: &str) -> bool {
+    matches!(protocol, "openai-responses" | "responses")
+}
+
 pub(crate) fn relay_model_projection(ctx: &mut ExecCtx<'_>) -> Result<(), String> {
     let value = object(ctx, "relay_model_projection")?;
     let client_protocol = information_string(ctx, "v4.information.client_protocol")?;
@@ -105,9 +109,17 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
     if !value.is_object() {
         return Err("direct_response_passthrough requires object payload".to_string());
     }
+    // Direct Responses must drop registered provider diagnostics before the
+    // client boundary. Direct non-Responses paths remain provider-payload
+    // passthrough and must not be processed by the Responses-only consumer.
+    let value = if is_responses_protocol(&client_protocol) {
+        super::protocol::provider_response::consume_responses_sse_extra_fields(&value)?
+    } else {
+        value
+    };
     // Transport already supplies the raw provider body as the data-plane
-    // object. Direct response hooks validate protocol identity only; they do
-    // not unwrap a second synthetic HTTP envelope.
+    // object. This hook validates protocol identity, consumes Responses-only
+    // provider diagnostics, and does not unwrap a synthetic HTTP envelope.
     ctx.write_data(value)
         .map_err(|error| error.to_string())
 }
