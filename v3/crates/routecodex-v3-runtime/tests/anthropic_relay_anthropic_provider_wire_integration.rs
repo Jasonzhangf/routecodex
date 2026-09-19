@@ -13,6 +13,27 @@ use routecodex_v3_runtime::{
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
+fn ensure_isolated_provider_state_dir() {
+    static INITIALIZE: std::sync::Once = std::sync::Once::new();
+    INITIALIZE.call_once(|| {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock must follow the Unix epoch")
+            .as_nanos();
+        let state_dir = std::env::temp_dir().join(format!(
+            "routecodex-v3-anthropic-provider-wire-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&state_dir)
+            .expect("Anthropic provider wire tests must own an isolated provider state directory");
+        std::env::set_var("ROUTECODEX_V3_STATE_DIR", &state_dir);
+        std::env::set_var(
+            "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+            state_dir.join("provider-cooldowns.json"),
+        );
+    });
+}
+
 struct AnthropicProviderJsonTransport {
     captured_url: Mutex<Option<String>>,
     captured_body: Mutex<Option<Value>>,
@@ -348,6 +369,7 @@ impl ResponsesTransport for AnthropicProviderJsonToolMissingNameTransport {
 
 #[tokio::test]
 async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wire() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_selected";
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
@@ -404,6 +426,7 @@ async fn anthropic_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 
 #[tokio::test]
 async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_request() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_dynamic_packet";
     let dynamic_system = json!([
         {
@@ -522,6 +545,7 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
 
 #[tokio::test]
 async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_events() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_stream_projection";
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),
@@ -565,6 +589,7 @@ async fn anthropic_relay_stream_request_projects_json_provider_body_as_sse_event
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_sse_success";
     let output = execute_v3_anthropic_relay_runtime(
         &manifest(server_id),
