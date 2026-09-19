@@ -1,9 +1,10 @@
 {
   "evidence_id": "v3-internal-hooks-sidecar-control-loss-source-20260919",
-  "feature_id": "v3.rcc_internal_hooks_sidecar",
+  "feature_id": "v3.managed_server_lifecycle",
   "candidate_commit": "807a60c988311e7a4a50e6413b49c7daccee4fdf",
+  "candidate_tree": "ef0a4847aa9ff30976df2fc31623fb6375a598cb",
   "base_commit": "ae39dd7bc",
-  "captured_at": "2026-09-19T10:15:00-07:00",
+  "captured_at": "2026-09-19T13:08:48-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_internal_hooks_sidecar",
