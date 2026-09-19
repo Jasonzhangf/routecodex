@@ -1,10 +1,10 @@
 {
   "evidence_id": "v3-provider-recovery-probe-bound-source-20260918",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "a648d2702d47189f834a4d0752c02aa3b9da0af1",
-  "candidate_tree": "038d90a1d9f2ea8bd6a59970d2e76a4bd377b8cf",
+  "candidate_commit": "f07a112c76a4984e4dc0d7c274b163b573a0ff12",
+  "candidate_tree": "ce3e73a58e65c325edb5056b299db859a03e6fd4",
   "base_commit": "b7a2957df6780396c208042de6e88768b5e757fe",
-  "captured_at": "2026-09-18T21:00:00-07:00",
+  "captured_at": "2026-09-18T21:29:00-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
@@ -44,7 +44,7 @@
     {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_cooldown_persistence_contract -- --nocapture",
       "result": "pass",
-      "tests": "6 passed; 0 failed"
+      "tests": "7 passed; 0 failed"
     },
     {
       "command": "npm run test:v3-provider-session-cooldown-red-fixtures",
