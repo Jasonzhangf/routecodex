@@ -273,6 +273,69 @@ async fn internal_hooksd_crash_before_readiness_reports_hooks_unavailable_crashe
 
 #[tokio::test]
 #[cfg(unix)]
+async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_started = root.path().join("hooksd-started");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\nsleep 0.2\nexit 17\n",
+            hooksd_started.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-crash-after-readiness",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-crash-after-readiness".to_string(),
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-crash-after-readiness")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "ready sidecar crash must degrade the running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(hooksd_started.exists());
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(!instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+
+    let stop = supervisor.stop().await;
+    assert!(
+        stop.is_ok(),
+        "cleanup after degraded sidecar must be bounded"
+    );
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_stops() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();

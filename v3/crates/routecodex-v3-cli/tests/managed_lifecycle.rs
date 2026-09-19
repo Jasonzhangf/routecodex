@@ -911,6 +911,96 @@ fn failed_hooks_sidecar_does_not_block_managed_start_or_live_status() {
 }
 
 #[test]
+fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\nsleep 0.2\nexit 17\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+        let health = http_get_json(port, "/health");
+        assert_eq!(health["status"], "ok");
+    }
+    let instance_dir = single_instance_dir(&state_root);
+    wait_for_hooksd_marker(
+        &instance_dir,
+        &hooksd_started,
+        "ready hooksd did not start before crash",
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = wait_status_file_state(&instance_dir, "running")
+            .get("detail")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if detail.contains("hooks_unavailable:crashed") && detail.contains("exited after readiness")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "ready hooksd crash was not published as degraded running status: {detail}"
+        );
+        sleep(Duration::from_millis(50));
+    }
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(!instance_dir.join("hooks-sidecar.pid").exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+    for port in ports {
+        let health = http_get_json(port, "/health");
+        assert_eq!(health["status"], "ok");
+    }
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
 fn slow_hooks_sidecar_does_not_block_managed_stop() {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
