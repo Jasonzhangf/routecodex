@@ -50,6 +50,53 @@ fn wait_for_socket(path: &std::path::Path) {
     panic!("socket did not appear: {}", path.display());
 }
 
+fn wait_for_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("path did not appear: {}", path.display());
+}
+
+fn try_read_response(
+    stream: &mut UnixStream,
+    timeout: Duration,
+) -> std::io::Result<ControlResponse> {
+    stream.set_read_timeout(Some(timeout))?;
+    let mut line = String::new();
+    let read = BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+    if read == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "control connection closed before a response",
+        ));
+    }
+    serde_json::from_str(&line)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
+struct ChildGuard(std::process::Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if self.0.try_wait().ok().flatten().is_none() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+struct ReleaseGuard(PathBuf);
+
+impl Drop for ReleaseGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.0, b"release");
+    }
+}
+
 fn web_search_request(deadline_unix_ms: u64) -> WebSearchHookRequest {
     WebSearchHookRequest {
         request_id: "req-web-search-1".to_string(),
@@ -341,6 +388,105 @@ fn handlers_config_mounts_command_web_search_adapter() {
     assert!(status.success(), "{status:?}");
     let _ = std::fs::remove_file(control_socket);
     let _ = std::fs::remove_file(handlers_config);
+}
+
+#[test]
+fn binary_slow_web_search_does_not_block_health_or_shutdown() {
+    let control_socket = unique_socket("slow-web-search-control");
+    let handlers_config = unique_path("slow-web-search-handlers.json");
+    let started_marker = unique_path("slow-web-search-started");
+    let release_marker = unique_path("slow-web-search-release");
+    let response = r#"{"completed":{"callId":"call-web-search-1","status":"completed","content":"typed result","sources":[],"metadata":null,"error":null}}"#;
+    let command = format!(
+        "cat >/dev/null; : > '{}'; while [ ! -f '{}' ]; do sleep 0.01; done; printf '%s' '{}'",
+        started_marker.display(),
+        release_marker.display(),
+        response
+    );
+    let config = serde_json::json!({
+        "schema_version": 1,
+        "web_search_adapter": {
+            "command": "/bin/sh",
+            "args": ["-c", command],
+            "timeout_ms": 15000
+        },
+        "handlers": []
+    });
+    std::fs::write(&handlers_config, serde_json::to_vec(&config).unwrap()).unwrap();
+    let _release_guard = ReleaseGuard(release_marker.clone());
+
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
+            .arg("--socket")
+            .arg(&control_socket)
+            .arg("--handlers-config")
+            .arg(&handlers_config)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("rccv3-hooksd should start"),
+    );
+    let stdout = child.0.stdout.take().expect("sidecar stdout");
+    let mut readiness_line = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut readiness_line)
+        .expect("read readiness");
+    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
+    assert_eq!(readiness["ready"], true);
+
+    wait_for_socket(&control_socket);
+    let mut search_stream = UnixStream::connect(&control_socket).unwrap();
+    writeln!(
+        search_stream,
+        "{}",
+        serde_json::to_string(&ControlRequest::ExecuteWebSearch {
+            request: Box::new(web_search_request(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64
+                    + 60_000,
+            )),
+        })
+        .unwrap()
+    )
+    .unwrap();
+    search_stream.flush().unwrap();
+    wait_for_path(&started_marker);
+
+    let mut health_stream = UnixStream::connect(&control_socket).unwrap();
+    writeln!(
+        health_stream,
+        "{}",
+        serde_json::to_string(&ControlRequest::Health).unwrap()
+    )
+    .unwrap();
+    let health = try_read_response(&mut health_stream, Duration::from_secs(2))
+        .expect("health must complete while web search is running");
+    assert!(health.ok, "{health:?}");
+
+    let mut shutdown_stream = UnixStream::connect(&control_socket).unwrap();
+    writeln!(
+        shutdown_stream,
+        "{}",
+        serde_json::to_string(&ControlRequest::Shutdown).unwrap()
+    )
+    .unwrap();
+    let shutdown = try_read_response(&mut shutdown_stream, Duration::from_secs(2))
+        .expect("shutdown must complete while web search is running");
+    assert!(shutdown.ok, "{shutdown:?}");
+    assert!(
+        !release_marker.exists(),
+        "web search must still be blocked when shutdown completes"
+    );
+
+    let status = child.0.wait().unwrap();
+    assert!(status.success(), "{status:?}");
+
+    let _ = std::fs::remove_file(control_socket);
+    let _ = std::fs::remove_file(handlers_config);
+    let _ = std::fs::remove_file(started_marker);
+    let _ = std::fs::remove_file(release_marker);
 }
 
 #[test]
