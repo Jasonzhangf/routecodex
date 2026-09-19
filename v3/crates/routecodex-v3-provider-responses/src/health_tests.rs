@@ -168,7 +168,8 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
     let policy = V3ProviderFailurePolicy {
         failure_threshold: 2,
         cooldown_ms: 3_600_000,
-        probe_interval_ms: 3_600_000,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
@@ -198,12 +199,8 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         .unwrap();
     assert_eq!(second.state, "cooldown");
     assert_eq!(second.cooldown_until_ms, Some(3_600_101));
-    assert!(store
-        .provider_cooldown_probe_keys_due(3_600_100)
-        .unwrap()
-        .is_empty());
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(3_600_101).unwrap(),
+        store.provider_cooldown_probe_keys_due(5_101).unwrap(),
         vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
     );
     assert!(

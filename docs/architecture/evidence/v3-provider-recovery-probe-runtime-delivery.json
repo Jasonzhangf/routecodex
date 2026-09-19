@@ -1,0 +1,153 @@
+{
+  "evidence_id": "v3-provider-recovery-probe-runtime-delivery-20260918",
+  "feature_id": "v3.provider_global_subscription_probe",
+  "captured_at": "2026-09-18T23:33:32-07:00",
+  "source": {
+    "main_commit": "d9ee0d3d109c8bbc2239084df4c27e631c09c84e",
+    "main_tree": "a31362ad2ca017f15fcab31c7fb79f1b641a052f",
+    "bound_source_receipt": "docs/architecture/evidence/v3-provider-recovery-probe-bound-source.json",
+    "bound_source_receipt_sha256": "b3fc1850b878e9b2ada76c9a62a2c0aefe6781a4ec82fca0ea77c6ed2a8e95c2",
+    "implementation_source_unchanged_since_bound_receipt": true,
+    "post_receipt_runtime_change": "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs test coverage only"
+  },
+  "install": {
+    "command": "npm run install:v3",
+    "result": "pass",
+    "binary": "/Users/fanzhang/.local/bin/rccv3",
+    "version": "rccv3 0.90.4799 (crate 0.1.0)",
+    "sha256": "7f2db7e99e09653b5dc1ab5b48794270a0ebe8bf99d5ec57883c4c716d76cbcb"
+  },
+  "config": {
+    "active": "/Volumes/extension/.rcc/config.toml",
+    "sha256": "279cc832ba8d5e9fd1b07b0d065dd2400845bc1bd7cd5ecebd82b03a46968b92",
+    "check": "config ok: version=3 servers=2",
+    "provider_health": {
+      "cc-sol": {
+        "path": "/Volumes/extension/.rcc/provider/cc-sol/config.v2.toml",
+        "sha256": "5002bbfc3561252c8fecc4ca73b26a7d09f0fbb5540a1a9a81056df393f96f8e",
+        "value": "health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }"
+      },
+      "kdns-freesail": {
+        "path": "/Volumes/extension/.rcc/provider/kdns-freesail/config.v2.toml",
+        "sha256": "e7c0d30a6330c30869d38a5787ae1c90cb8d37ff2d482419e1b0f84fc17695c6",
+        "value": "health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }"
+      },
+      "kdns": {
+        "path": "/Volumes/extension/.rcc/provider/kdns/config.v2.toml",
+        "sha256": "5e1d7dbf8b8cd97b8cbe4084375333bb6459b153df331c253bcc216ac968afa6",
+        "value": "health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }"
+      }
+    }
+  },
+  "restart": {
+    "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
+    "result": "pass",
+    "instance_id": "v3-ffac59a2be9ecfcca93c",
+    "state": "running",
+    "pid": 65050,
+    "loaded_binary": "/Users/fanzhang/.local/bin/rccv3",
+    "status": {
+      "command": "rccv3 status -c /Volumes/extension/.rcc/config.toml",
+      "result": "pass"
+    }
+  },
+  "health": [
+    {
+      "port": 4444,
+      "url": "http://127.0.0.1:4444/health",
+      "http_status": 200,
+      "body": "{\"bind\":\"0.0.0.0\",\"build_version\":\"0.90.4799\",\"manifest_version\":3,\"port\":4444,\"server_id\":\"routecodex_v3_4444\",\"status\":\"ok\",\"version\":3}"
+    },
+    {
+      "port": 7777,
+      "url": "http://127.0.0.1:7777/health",
+      "http_status": 200,
+      "body": "{\"bind\":\"0.0.0.0\",\"build_version\":\"0.90.4799\",\"manifest_version\":3,\"port\":7777,\"server_id\":\"responses_v3_7777\",\"status\":\"ok\",\"version\":3}"
+    },
+    {
+      "port": 8777,
+      "url": "http://127.0.0.1:8777/health",
+      "http_status": 404,
+      "note": "admin WebUI; not a configured health listener"
+    }
+  ],
+  "same_entry_replay": {
+    "entry": "tmux codex TUI -> http://127.0.0.1:4444/v1/responses",
+    "profile": "long",
+    "session": "01a0b854-1201-7393-ab34-a8d0b9a4c022",
+    "tmux": "rcc-v3-long-post-restart-0918",
+    "prompt": "Run exactly this shell command and then reply with only its stdout: printf RCC_V3_LONG_POST_RESTART_TOOL_OK",
+    "client_result": "RCC_V3_LONG_POST_RESTART_TOOL_OK",
+    "request_records": [
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260918T232841826-264180-43661",
+        "provider_id": "cc-sol",
+        "provider": "cc-sol:key1:gpt-5.6-sol",
+        "model": "gpt-5.6-sol",
+        "execution_mode": "direct",
+        "provider_status": 200,
+        "response_status": "completed",
+        "finish_reason": "stop",
+        "duration_ms": 21115,
+        "timing_external_ms": 21112,
+        "log": "/Volumes/extension/.rcc/logs/server-v3-4444.request-records.jsonl"
+      },
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260918T232903061-264193-43674",
+        "provider_id": "kdns-freesail",
+        "provider": "kdns-freesail:key1:deepseek-v4.1-flash",
+        "model": "deepseek-v4.1-flash",
+        "execution_mode": "relay",
+        "provider_status": 200,
+        "response_status": "completed",
+        "finish_reason": "stop",
+        "duration_ms": 2061,
+        "timing_external_ms": 2048,
+        "timing_internal_ms": 10,
+        "log": "/Volumes/extension/.rcc/logs/server-v3-4444.request-records.jsonl"
+      }
+    ]
+  },
+  "probe_contract": {
+    "configured_probe_interval_ms": 120000,
+    "meaning": "maximum recovery-probe wait",
+    "effective_wait": "min(current recovery ladder step, configured maximum)",
+    "ordinary_ladder_max_ms": 900000,
+    "long_ladder_max_ms": 1800000,
+    "ordinary_ladder_ms": [5000, 30000, 60000, 180000, 900000],
+    "long_ladder_ms": [5000, 30000, 60000, 180000, 900000, 1800000],
+    "cooldown_ms": 900000,
+    "persistence": {
+      "path": "/Volumes/extension/.rcc/state/provider-cooldowns-d5fe73f91ba843026893d89c8b516999.json",
+      "sha256": "a4da36cc4f06e62a25726236ad08595f8ab83a2568dc24a6f5bdb7bab30efa78",
+      "mtime": "2026-09-18T23:32:10-07:00",
+      "observed_entry": {
+        "provider_id": "kdns",
+        "auth_alias": "key2",
+        "model_id": null,
+        "failure_class": "ProbeLong",
+        "blocked_until_ms": 1789791687931,
+        "next_probe_at_ms": 1789799650270,
+        "probe_in_flight": false
+      },
+      "interpretation": "blocked_until_ms and next_probe_at_ms are independent persisted deadlines; this snapshot is evidence only and does not redefine the configured maximum wait"
+    }
+  },
+  "required_gates": [
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
+      "result": "pass",
+      "tests": "12 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture",
+      "result": "pass",
+      "tests": "114 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-provider-action-gate",
+      "result": "pass",
+      "required_machine_edges": 48
+    }
+  ]
+}

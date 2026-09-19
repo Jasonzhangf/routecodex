@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { runAll } from '../_common.mjs';
 
 const warningCommand = ['node', '-e', "console.error('WARN_FIXTURE'); process.exit(17)"];
@@ -32,5 +33,12 @@ assert.equal(invalidAndIndependent.warnings.length, 0, JSON.stringify(invalidAnd
 assert.equal(invalidAndIndependent.failures.length, 2, JSON.stringify(invalidAndIndependent));
 assert.match(invalidAndIndependent.failures[0], /invalid gate severity: OPTIONAL/);
 assert.match(invalidAndIndependent.failures[1], /BLOCK_FIXTURE/);
+
+const verifySource = readFileSync(new URL('../verify.mjs', import.meta.url), 'utf8');
+assert.match(
+  verifySource,
+  /label:\s*'admission'[\s\S]*?args:\s*\[\s*'scripts\/run-admission-gate\.mjs'\s*,\s*'scripts\/architecture\/verify-admission\.mjs'\s*,?\s*\]/u,
+  'CI admission must use the owner that materializes the ignored generated bundle before verification',
+);
 
 process.stdout.write('[test:v3-gate-severity-regression] PASS\n');

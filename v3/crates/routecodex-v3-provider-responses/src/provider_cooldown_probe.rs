@@ -19,6 +19,8 @@ pub struct V3ProviderCooldownProbeState {
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
     pub probe_interval_ms: u64,
+    /// Configured maximum cadence. `None` uses the bounded ladder.
+    pub max_probe_interval_ms: Option<u64>,
     pub probe_failure_count: u8,
     /// Long cadence is reserved for repeated 401/402/403/503 style failures.
     pub long_probe_backoff: bool,

@@ -20,6 +20,8 @@ const LADDER_MS: [u64; 7] = [
     900_000, // after probe failure 6 (capped)
 ];
 
+const LONG_LADDER_MS: [u64; 6] = [5_000, 30_000, 60_000, 180_000, 900_000, 1_800_000];
+
 fn scope() -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a").unwrap()
 }
@@ -220,7 +222,7 @@ fn probe_failures_cap_ordinary_errors_at_fifteen_minutes() {
 }
 
 #[test]
-fn long_policy_probe_keeps_the_extended_cadence() {
+fn long_policy_probe_is_capped_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction {
         class_code: "provider_http_503".to_string(),
@@ -235,7 +237,7 @@ fn long_policy_probe_keeps_the_extended_cadence() {
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)
         .unwrap();
     let mut now_ms = 1;
-    for delta in [5_000, 30_000, 60_000, 180_000, 900_000, 3_600_000] {
+    for delta in LONG_LADDER_MS {
         let due_at = now_ms + delta;
         assert_eq!(
             store
@@ -253,6 +255,71 @@ fn long_policy_probe_keeps_the_extended_cadence() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
+                due_at,
+                Some(permit.expected_generation()),
+            )
+            .unwrap();
+        now_ms = due_at;
+    }
+}
+
+#[test]
+fn configured_fast_recovery_probe_caps_the_ladder_at_two_minutes() {
+    let manifest = routecodex_v3_config::compile_v3_config_05_manifest(
+        routecodex_v3_config::parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "a", env = "KEY" }] }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", priority = 1 }]
+"#,
+        )
+        .expect("parse fast-recovery manifest"),
+    )
+    .expect("compile fast-recovery manifest");
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
+    for now_ms in 1..=3 {
+        store
+            .record_provider_failure_in_session(
+                &scope(),
+                "p",
+                Some("a"),
+                Some("m"),
+                Some("provider_error"),
+                now_ms,
+            )
+            .unwrap();
+    }
+    let mut now_ms = 3;
+    for (step, delta) in [5_000, 30_000, 120_000, 120_000].into_iter().enumerate() {
+        let due_at = now_ms + delta;
+        assert_eq!(
+            store
+                .provider_cooldown_probe_keys_due(due_at)
+                .unwrap()
+                .len(),
+            1,
+            "fast-recovery probe step {step} must be due at {delta}ms"
+        );
+        let permit = store
+            .acquire_provider_cooldown_probe("p", Some("a"), None)
+            .unwrap()
+            .expect("fast-recovery probe permit");
+        store
+            .complete_provider_cooldown_probe_failure_at_generation(
+                "p",
+                Some("a"),
+                None,
                 due_at,
                 Some(permit.expected_generation()),
             )

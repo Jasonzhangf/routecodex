@@ -695,6 +695,7 @@ impl V3ProviderFailureRuntimeHealth {
                     failure_threshold: u32::MAX,
                     cooldown_ms: 1,
                     probe_interval_ms: 1,
+                    max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
                     cooldown_scope: V3ProviderFailureCooldownScope::Session,
@@ -1563,8 +1564,10 @@ fn provider_failure_policy_from_error_policy_directive(
     Ok(Some(V3ProviderFailurePolicy {
         failure_threshold,
         cooldown_ms: duration_ms.unwrap_or(1),
-        probe_interval_ms: duration_ms
-            .unwrap_or(v3_internal_error_handling().unrecoverable_probe_interval_ms),
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: Some(
+            duration_ms.unwrap_or(v3_internal_error_handling().unrecoverable_probe_interval_ms),
+        ),
         long_probe_backoff: matches!(status, 401 | 402 | 403 | 503),
         until_restart: until_restart.unwrap_or(false),
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,

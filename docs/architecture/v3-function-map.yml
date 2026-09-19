@@ -4496,13 +4496,19 @@ features:
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
+  - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
+  - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
+  - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_probe_backoff_ladder_contract.rs
+  - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
@@ -4513,6 +4519,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-config/src
+  - v3/crates/routecodex-v3-config/tests/config_v3_contract.rs
   - docs/architecture
   - docs/goals
   forbidden_paths:

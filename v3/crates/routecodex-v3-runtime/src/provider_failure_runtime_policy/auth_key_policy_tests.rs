@@ -229,14 +229,14 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(18_000_100)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("probe interval query"),
         Vec::new()
     );
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(18_000_101)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("probe interval query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
     );
@@ -266,7 +266,7 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert!(
         !health
             .store()
-            .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 18_000_100)
+            .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 5_100)
             .expect("before-first-auth-probe scheduling projection")
             .available,
         "401 auth key must remain blocked until the first configured probe is due"
@@ -290,7 +290,7 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(18_000_101)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("provider cooldown probe query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
     );
@@ -344,7 +344,7 @@ fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 900_100)
+            .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 5_100)
             .expect("403 pre-probe scheduling projection")
             .available,
         false
@@ -352,7 +352,7 @@ fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(900_101)
+            .provider_cooldown_probe_keys_due(5_101)
             .expect("403 probe due query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
     );

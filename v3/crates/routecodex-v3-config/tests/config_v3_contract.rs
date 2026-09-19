@@ -1695,6 +1695,22 @@ fn rejects_ambiguous_cross_provider_alias_invalid_health_and_unknown_endpoint() 
             .unwrap_err();
     assert!(error.to_string().contains("health failure_threshold"));
 
+    for (probe_interval, expected) in [
+        ("0", "health probe_interval_ms must be positive"),
+        ("1800001", "health probe_interval_ms must not exceed"),
+    ] {
+        let invalid_probe = FULL_CONFIG.replace(
+            "health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }",
+            &format!(
+                "health = {{ enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = {probe_interval} }}"
+            ),
+        );
+        let error =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid_probe).unwrap())
+                .unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
     let unknown_endpoint = FULL_CONFIG.replace(
         "endpoints = [\"responses\"]",
         "endpoints = [\"responses\", \"unknown_protocol\"]",
