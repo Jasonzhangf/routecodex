@@ -11,6 +11,8 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum WebSearchAdapterError {
@@ -254,16 +256,24 @@ fn drain_pipe(
     label: &str,
 ) -> Result<bool, WebSearchAdapterError> {
     let mut buffer = [0_u8; 8192];
-    match pipe.read(&mut buffer) {
-        Ok(0) => Ok(false),
-        Ok(read) => {
-            bytes.extend_from_slice(&buffer[..read]);
-            Ok(true)
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) => return Ok(false),
+            Ok(read) => {
+                if bytes.len().saturating_add(read) > MAX_OUTPUT_BYTES {
+                    return Err(WebSearchAdapterError::MalformedResponse(format!(
+                        "web_search subagent {label} exceeded {MAX_OUTPUT_BYTES} byte limit"
+                    )));
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(true),
+            Err(error) => {
+                return Err(WebSearchAdapterError::Unavailable(format!(
+                    "web_search subagent {label} failed: {error}"
+                )))
+            }
         }
-        Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(true),
-        Err(error) => Err(WebSearchAdapterError::Unavailable(format!(
-            "web_search subagent {label} failed: {error}"
-        ))),
     }
 }
 
@@ -306,7 +316,18 @@ fn validate_outcome(
             }
             Ok(())
         }
-        WebSearchHookOutcome::Failed(_) => Ok(()),
+        WebSearchHookOutcome::Failed(failure) => {
+            failure
+                .validate()
+                .map_err(|error| WebSearchAdapterError::MalformedResponse(error.to_string()))?;
+            if failure.call_id != expected_call_id {
+                return Err(WebSearchAdapterError::MalformedResponse(format!(
+                    "web_search subagent returned failed call_id {} for request call_id {}",
+                    failure.call_id, expected_call_id
+                )));
+            }
+            Ok(())
+        }
     }
 }
 
@@ -387,6 +408,53 @@ mod tests {
     }
 
     #[test]
+    fn command_adapter_rejects_oversized_stdout() {
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                format!("cat >/dev/null; head -c {} /dev/zero", MAX_OUTPUT_BYTES + 1),
+            ],
+            Duration::from_secs(2),
+        );
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            adapter.execute(&request(future_deadline())),
+            Err(WebSearchAdapterError::MalformedResponse(reason))
+                if reason.contains("stdout exceeded")
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "oversized stdout must fail before the request deadline"
+        );
+    }
+
+    #[test]
+    fn command_adapter_rejects_oversized_stderr() {
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                format!(
+                    "cat >/dev/null; head -c {} /dev/zero >&2",
+                    MAX_OUTPUT_BYTES + 1
+                ),
+            ],
+            Duration::from_secs(2),
+        );
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            adapter.execute(&request(future_deadline())),
+            Err(WebSearchAdapterError::MalformedResponse(reason))
+                if reason.contains("stderr exceeded")
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "oversized stderr must fail before the request deadline"
+        );
+    }
+
+    #[test]
     fn command_adapter_rejects_mismatched_call_id() {
         let response = json!({
             "completed": {
@@ -416,9 +484,12 @@ mod tests {
     fn command_adapter_returns_typed_failure() {
         let response = json!({
             "failed": {
-                "code": "search_unavailable",
-                "message": "controlled failure",
-                "retryable": true
+                "callId": "call-web-search-1",
+                "error": {
+                    "code": "search_unavailable",
+                    "message": "controlled failure",
+                    "retryable": true
+                }
             }
         });
         let mut adapter = CommandWebSearchAdapter::new(
@@ -430,7 +501,62 @@ mod tests {
             Duration::from_secs(2),
         );
         let outcome = adapter.execute(&request(future_deadline())).unwrap();
-        assert!(matches!(outcome, WebSearchHookOutcome::Failed(_)));
+        let WebSearchHookOutcome::Failed(failure) = outcome else {
+            panic!("expected failed outcome");
+        };
+        assert_eq!(failure.call_id, "call-web-search-1");
+    }
+
+    #[test]
+    fn command_adapter_rejects_failed_mismatched_call_id() {
+        let response = json!({
+            "failed": {
+                "callId": "call-other",
+                "error": {
+                    "code": "search_unavailable",
+                    "message": "controlled failure",
+                    "retryable": true
+                }
+            }
+        });
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                format!("cat >/dev/null; printf '%s' '{}'", response),
+            ],
+            Duration::from_secs(2),
+        );
+        assert!(matches!(
+            adapter.execute(&request(future_deadline())),
+            Err(WebSearchAdapterError::MalformedResponse(_))
+        ));
+    }
+
+    #[test]
+    fn command_adapter_rejects_failed_empty_error_fields() {
+        let response = json!({
+            "failed": {
+                "callId": "call-web-search-1",
+                "error": {
+                    "code": "",
+                    "message": "",
+                    "retryable": false
+                }
+            }
+        });
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec![
+                "-c".to_string(),
+                format!("cat >/dev/null; printf '%s' '{}'", response),
+            ],
+            Duration::from_secs(2),
+        );
+        assert!(matches!(
+            adapter.execute(&request(future_deadline())),
+            Err(WebSearchAdapterError::MalformedResponse(_))
+        ));
     }
 
     #[test]

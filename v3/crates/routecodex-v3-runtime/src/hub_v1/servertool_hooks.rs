@@ -11,7 +11,8 @@ use servertool_core::cli_contract::{
 };
 use servertool_core::outcome_contract::is_client_exec_cli_projection;
 pub use servertool_core::web_search_contract::{
-    WebSearchError as V3WebSearchError, WebSearchHookContractError as V3WebSearchHookContractError,
+    WebSearchError as V3WebSearchError, WebSearchFailure as V3WebSearchFailure,
+    WebSearchHookContractError as V3WebSearchHookContractError,
     WebSearchHookOutcome as V3WebSearchHookOutcome, WebSearchResult as V3WebSearchResult,
     WebSearchResultStatus as V3WebSearchResultStatus, WebSearchSource as V3WebSearchSource,
 };
@@ -35,6 +36,14 @@ pub(crate) fn web_search_hook_outcome_from_center_state(
                 .and_then(|value| value.get("text_result"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            let sources = state
+                .normalized_result()
+                .and_then(|value| value.get("sources"))
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| V3WebSearchHookContractError::MalformedSources)?
+                .unwrap_or_default();
             let metadata = state
                 .normalized_result()
                 .and_then(|value| value.get("usage"))
@@ -43,7 +52,7 @@ pub(crate) fn web_search_hook_outcome_from_center_state(
                 call_id: call_id.to_string(),
                 status: V3WebSearchResultStatus::Completed,
                 content,
-                sources: Vec::new(),
+                sources,
                 metadata,
                 error: None,
             };
@@ -51,15 +60,22 @@ pub(crate) fn web_search_hook_outcome_from_center_state(
             Ok(V3WebSearchHookOutcome::Completed(result))
         }
         V3WebSearchCenterPhase::Failed => {
+            let call_id = state
+                .original_call_id()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or(V3WebSearchHookContractError::MissingCallId)?;
             let message = state
                 .typed_failure()
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or("web_search ServerTool state is terminal failed")
                 .to_string();
-            Ok(V3WebSearchHookOutcome::Failed(V3WebSearchError {
-                code: "web_search_failed".to_string(),
-                message,
-                retryable: false,
+            Ok(V3WebSearchHookOutcome::Failed(V3WebSearchFailure {
+                call_id: call_id.to_string(),
+                error: V3WebSearchError {
+                    code: "web_search_failed".to_string(),
+                    message,
+                    retryable: false,
+                },
             }))
         }
         _ => Ok(V3WebSearchHookOutcome::NotApplicable),
@@ -748,13 +764,17 @@ mod web_search_hook_contract_tests {
         let state = V3WebSearchCenterState::new()
             .transition_to(V3WebSearchCenterPhase::Failed, "test_failed")
             .unwrap()
+            .with_original_call_id(Some("call_web_search_1".to_string()))
             .with_typed_failure(Some("backend timeout"));
         assert_eq!(
             web_search_hook_outcome_from_center_state(&state).unwrap(),
-            V3WebSearchHookOutcome::Failed(V3WebSearchError {
-                code: "web_search_failed".to_string(),
-                message: "backend timeout".to_string(),
-                retryable: false,
+            V3WebSearchHookOutcome::Failed(V3WebSearchFailure {
+                call_id: "call_web_search_1".to_string(),
+                error: V3WebSearchError {
+                    code: "web_search_failed".to_string(),
+                    message: "backend timeout".to_string(),
+                    retryable: false,
+                },
             })
         );
     }
@@ -794,5 +814,53 @@ mod web_search_hook_contract_tests {
         };
         assert_eq!(result.content.as_deref(), Some("typed search result"));
         assert_eq!(result.metadata, Some(json!({"search_queries":1})));
+    }
+
+    #[test]
+    fn web_search_hook_outcome_preserves_sources_without_text_result() {
+        let state = V3WebSearchCenterState::new()
+            .transition_to(
+                V3WebSearchCenterPhase::LocalToolSurfaceActive,
+                "test_active",
+            )
+            .unwrap()
+            .transition_to(V3WebSearchCenterPhase::ToolCallObserved, "test_observed")
+            .unwrap()
+            .transition_to(
+                V3WebSearchCenterPhase::SearchDispatchPrepared,
+                "test_prepared",
+            )
+            .unwrap()
+            .transition_to(V3WebSearchCenterPhase::SearchInFlight, "test_in_flight")
+            .unwrap()
+            .transition_to(
+                V3WebSearchCenterPhase::SearchResultCaptured,
+                "test_captured",
+            )
+            .unwrap()
+            .with_original_call_id(Some("call_web_search_1".to_string()))
+            .with_normalized_result(Some(json!({
+                "query":"typed query",
+                "text_result":null,
+                "sources":[{
+                    "refId":"source-1",
+                    "url":"https://example.com",
+                    "title":"Example"
+                }]
+            })));
+        let V3WebSearchHookOutcome::Completed(result) =
+            web_search_hook_outcome_from_center_state(&state).unwrap()
+        else {
+            panic!("completed state must produce a completed outcome");
+        };
+        assert_eq!(result.content, None);
+        assert_eq!(
+            result.sources,
+            vec![V3WebSearchSource {
+                ref_id: "source-1".to_string(),
+                url: Some("https://example.com".to_string()),
+                title: Some("Example".to_string()),
+            }]
+        );
     }
 }

@@ -1,50 +1,27 @@
-//! V3 Mode B web_search 本地搜索 hop 语义。
+//! V3 Mode B web_search 状态机与结果投影语义。
 //!
 //! 归属 `v3.web_search_servertool_state_machine`：
-//! - Resp03 拦截后的搜索 hop（backend binding direct pin + 一次 provider 往返）
 //! - 响应文本归一化（Responses output_text / Chat choices）
 //! - hosted `web_search_call` 等价投影 + 原 call_id 配对 `function_call_output`
 //! - 下一轮 Req04 配对验证收尾（SearchResultCaptured -> Completed）
 //!
 //! 控制状态只进 ServerToolCenter 控制资源；这里投影的是协议等价结果，
-//! 不重建 entry payload、不重入主模型、不做第二套 VR。
+//! 不重建 entry payload、不重入主模型、不做第二套 VR。搜索执行由
+//! typed hooks sidecar helper 独占。
 
 use super::responses_relay_runtime::{
-    find_responses_tool_output_ids, provider_target, V3ResponsesRelayRuntimeError,
+    find_responses_tool_output_ids, V3ResponsesRelayRuntimeError,
     V3ResponsesRelayServerToolExecution, V3ResponsesRelayServerToolScope,
     V3ResponsesRelayServerToolState,
 };
 use super::V3HubRelayResponseError;
 use super::{
-    build_provider_req_compat_06_from_v3_hub_req_outbound_07,
-    build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02,
-    build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04,
-    build_v3_hub_req_inbound_01_client_raw,
-    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
-    build_v3_hub_req_outbound_07_from_v3_hub_req_target_06,
-    build_v3_hub_req_target_06_from_v3_hub_req_execution_05,
-    build_v3_provider_req_outbound_08_from_provider_req_compat_06,
-    build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08, V3HubEntryProtocol,
-    V3HubExecutionMode, V3HubInvocationSource, V3HubTargetResolution, V3HubTransportIntent,
     V3ServerToolCenterKey, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
     V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
 };
-use super::{
-    build_v3_provider_transport_request_for_protocol, provider_wire_protocol_for_selected_candidate,
-};
-use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
-};
 use routecodex_v3_config::V3Config05ManifestPublished;
-use routecodex_v3_error::{V3ErrorSourceKind, V3ProviderFailureSessionScope};
-use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ResponsesTransport, V3ProviderError,
-    V3ProviderResponseBody,
-};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use servertool_core::web_search_contract::WebSearchSource;
 
 impl V3ResponsesRelayServerToolState {
     fn web_search_center_key(scope: &V3ResponsesRelayServerToolScope) -> V3ServerToolCenterKey {
@@ -137,236 +114,6 @@ pub(crate) fn store_v3_responses_relay_web_search_state(
     )
 }
 
-/// Mode B 搜索 hop：一次额外的 provider/search 往返（非主模型 re-entry）。
-/// 搜索请求经正常 Hub 链 + VR 路由（backend binding 以 `provider.model`
-/// 形式 direct pin），响应文本归一化为 hosted web_search text_result，
-/// 状态机迁移 ToolCallObserved -> SearchDispatchPrepared -> SearchInFlight
-/// -> SearchResultCaptured。
-pub(crate) async fn execute_local_web_search_hop<T: ResponsesTransport + ?Sized>(
-    manifest: &V3Config05ManifestPublished,
-    server_id: &str,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    backend_binding: Option<&str>,
-    web_search_state: &V3WebSearchCenterState,
-    transport: &T,
-    request_id: &str,
-    allow_exhaustion_rescue_probe: bool,
-) -> Result<V3WebSearchCenterState, V3ResponsesRelayRuntimeError> {
-    let binding = backend_binding
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::WebSearchBackendBindingMissing(
-                "metadata_center_local_search requires exactly one backend binding".to_string(),
-            )
-        })?;
-    let query = web_search_state
-        .query()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-                "websearch tool call missing query at dispatch".to_string(),
-            )
-        })?
-        .to_string();
-    // 状态机推进：ToolCallObserved -> SearchDispatchPrepared（dispatch 准备）。
-    let prepared = web_search_state
-        .transition_to(
-            V3WebSearchCenterPhase::SearchDispatchPrepared,
-            "search_hop_dispatch_prepared",
-        )
-        .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
-    // 1. 搜索请求 payload：model = backend binding（direct pin 到搜索目标），
-    //    input = 简短引导 + query，tools 仅 hosted web_search 声明（干净工具
-    //    列表、干净上下文、引导提示简单——不携带主模型历史/其他工具），走
-    //    JSON transport。
-    let guided_text = format!("search the web: {query}");
-    let search_payload = json!({
-        "model": binding,
-        "input": [{
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "input_text", "text": guided_text}]
-        }],
-        "tools": [{"type": "web_search", "external_web_access": true}],
-        "stream": false
-    });
-    // 2. target 解析：body.model = backend binding -> direct model plan pin。
-    let target_resolution_input = V3RelayProviderTargetResolutionInput {
-        manifest,
-        server_id,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &search_payload,
-        request_local_excluded_candidates: &BTreeSet::new(),
-        failure_session_scope,
-        provider_health,
-        now_ms: v3_relay_provider_policy_now_epoch_ms()?,
-        deterministic_sample: 0,
-    };
-    let target_resolution = if allow_exhaustion_rescue_probe {
-        resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
-    } else {
-        resolve_v3_relay_target_outcome(target_resolution_input)
-    };
-    let selected = match target_resolution {
-        V3RelayProviderTargetResolution::Selected(selected) => selected,
-        V3RelayProviderTargetResolution::Failed(source)
-            if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
-        {
-            return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
-                source.message.clone(),
-            ))
-        }
-        V3RelayProviderTargetResolution::Failed(source) => {
-            return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                "{}: {}",
-                source.code, source.message
-            )))
-        }
-        V3RelayProviderTargetResolution::Exhausted {
-            attempted_candidates,
-        } => {
-            return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
-                attempted_candidates,
-            })
-        }
-    };
-    // 3. 搜索请求入站链（正常 Hub 链构造 req05，非 entry payload 重建）。
-    let req01 = build_v3_hub_req_inbound_01_client_raw(
-        search_payload,
-        V3HubEntryProtocol::Responses,
-        V3HubInvocationSource::ServertoolFollowup,
-        V3HubTransportIntent::Json,
-    );
-    let req02 =
-        build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(req01).map_err(|error| {
-            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(
-                "servertool followup canonicalization failed: {error}"
-            ))
-        })?;
-    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
-    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
-        req04,
-        V3HubExecutionMode::Relay,
-    );
-    // 4. req06 -> req07 -> compat -> wire -> transport。
-    let provider_wire_protocol = provider_wire_protocol_for_selected_candidate(&selected.candidate)
-        .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))?;
-    let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-        req05,
-        V3HubTargetResolution::Routed,
-        selected.candidate.clone(),
-    );
-    let req07 =
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
-    let target = provider_target(manifest, req07.selected_target())?;
-    let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-        .map_err(V3ResponsesRelayRuntimeError::ProviderCompat)?;
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
-    let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
-    let provider_semantic = _req09.into_provider_semantic_payload();
-    let wire = build_v3_provider_12_responses_wire_payload(request_id, target, provider_semantic)
-        .map_err(V3ResponsesRelayRuntimeError::Provider)?;
-    let transport_request =
-        build_v3_provider_transport_request_for_protocol(provider_wire_protocol, wire)?;
-    // 状态机推进：SearchDispatchPrepared -> SearchInFlight（请求已发出）。
-    let in_flight = prepared
-        .transition_to(
-            V3WebSearchCenterPhase::SearchInFlight,
-            "search_hop_in_flight",
-        )
-        .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?;
-    // 搜索 hop 是 Resp03 内的独立 provider 往返：必须受标准 transport 超时
-    // 约束（防止搜索后端挂起无限阻塞主响应），失败记录搜索 provider health
-    // （冷却），错误显式上抛进入主请求错误链（禁止降级吞错）。
-    let provider_raw = match tokio::time::timeout(
-        crate::hub_v1::v3_relay_transport_response_timeout(
-            manifest,
-            &selected.candidate.provider_id,
-        ),
-        transport.send(transport_request),
-    )
-    .await
-    {
-        Ok(Ok(raw)) => raw,
-        Ok(Err(error)) => {
-            record_web_search_hop_failure(
-                provider_health,
-                failure_session_scope,
-                &selected.candidate,
-                Some(&error.to_string()),
-            );
-            return Err(V3ResponsesRelayRuntimeError::Provider(error));
-        }
-        Err(_) => {
-            let timeout_reason = "web search hop response header timed out".to_string();
-            record_web_search_hop_failure(
-                provider_health,
-                failure_session_scope,
-                &selected.candidate,
-                Some(&timeout_reason),
-            );
-            return Err(V3ResponsesRelayRuntimeError::Provider(
-                V3ProviderError::Transport {
-                    request_id: request_id.to_string(),
-                    provider_id: selected.candidate.provider_id.clone(),
-                    reason: timeout_reason,
-                },
-            ));
-        }
-    };
-    // 5. 响应归一化：仅接受 JSON body，提取 message 文本作为 text_result。
-    let text_result = match provider_raw.into_body() {
-        V3ProviderResponseBody::Json(bytes) => {
-            let provider_value: Value = serde_json::from_slice(&bytes)
-                .map_err(V3ResponsesRelayRuntimeError::ProviderJson)?;
-            extract_web_search_text_result(&provider_value).ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
-                    "search provider response has no message text".to_string(),
-                )
-            })?
-        }
-        _ => {
-            return Err(V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
-                "search hop requires a JSON transport response".to_string(),
-            ))
-        }
-    };
-    // 6. 状态迁移 SearchResultCaptured，携带归一化结果。
-    let captured = in_flight
-        .transition_to(
-            V3WebSearchCenterPhase::SearchResultCaptured,
-            "search_hop_result_captured",
-        )
-        .map_err(|reason| V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(reason))?
-        .with_normalized_result(Some(json!({
-            "query": query,
-            "text_result": text_result
-        })));
-    Ok(captured)
-}
-
-/// 搜索 hop 失败时记录搜索 provider health（冷却），防止持续失败的搜索后端
-/// 反复命中；health 记录失败不改变主错误语义（side-effect，显式忽略）。
-fn record_web_search_hop_failure(
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    candidate: &routecodex_v3_target::V3TargetCandidate,
-    reason: Option<&str>,
-) {
-    let _ = provider_health.record_provider_failure_record(
-        failure_session_scope,
-        &candidate.provider_id,
-        Some(&candidate.auth_alias),
-        Some(&candidate.model_id),
-        reason,
-        v3_relay_provider_policy_now_epoch_ms().unwrap_or_default(),
-    );
-}
-
 /// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted
 /// `web_search_call`（completed、action.search、text_result）与原始
 /// call_id 配对的 `function_call_output`。控制状态不进入 payload——
@@ -391,16 +138,60 @@ pub(crate) fn project_web_search_result_into_finalized(
                 "websearch query missing at projection".to_string(),
             )
         })?;
-    let text_result = captured
-        .normalized_result()
-        .and_then(|result| result.get("text_result"))
+    let normalized = captured.normalized_result().ok_or_else(|| {
+        V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
+            "websearch normalized result missing at projection".to_string(),
+        )
+    })?;
+    let text_result = normalized
+        .get("text_result")
         .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
-                "websearch normalized text_result missing at projection".to_string(),
-            )
-        })?;
+        .filter(|value| !value.is_empty());
+    let sources: Vec<WebSearchSource> = normalized
+        .get("sources")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| {
+            V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(format!(
+                "websearch normalized sources are malformed at projection: {error}"
+            ))
+        })?
+        .unwrap_or_default();
+    if text_result.is_none() && sources.is_empty() {
+        return Err(V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
+            "websearch normalized result has neither text_result nor sources at projection"
+                .to_string(),
+        ));
+    }
+    let mut results = Vec::new();
+    if let Some(text_result) = text_result {
+        results.push(json!({
+            "type": "text_result",
+            "ref_id": call_id,
+            "text": text_result
+        }));
+    }
+    results.extend(sources.iter().map(|source| {
+        json!({
+            "type": "text_result",
+            "ref_id": source.ref_id,
+            "title": source.title,
+            "url": source.url
+        })
+    }));
+    let paired_output = if text_result.is_some() && sources.is_empty() {
+        Value::String(
+            text_result
+                .expect("text_result presence was checked for the legacy string shape")
+                .to_string(),
+        )
+    } else {
+        json!({
+            "type": "web_search_tool_result",
+            "results": results
+        })
+    };
     let Some(object) = finalized.as_object_mut() else {
         return Err(V3ResponsesRelayRuntimeError::WebSearchResultUnavailable(
             "finalized provider response must be an object".to_string(),
@@ -422,13 +213,13 @@ pub(crate) fn project_web_search_result_into_finalized(
         "name": "web_search",
         "status": "completed",
         "action": {"type": "search", "query": query},
-        "results": [{"type": "text_result", "ref_id": call_id, "text": text_result}]
+        "results": results
     }));
     // 原始 call_id 配对的 function_call_output：下一轮 Req04 据此恢复配对注入。
     output.push(json!({
         "type": "function_call_output",
         "call_id": call_id,
-        "output": text_result
+        "output": paired_output
     }));
     Ok(())
 }
@@ -595,18 +386,6 @@ pub(crate) fn resolve_web_search_mode_and_backend(
         return matched;
     }
     (routecodex_v3_config::V3WebSearchExecutionMode::None, None)
-}
-
-pub(crate) fn resolve_request_web_search_backend_binding(
-    manifest: &V3Config05ManifestPublished,
-    payload: &Value,
-) -> Option<String> {
-    let model = payload
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    resolve_web_search_mode_and_backend(manifest, model).1
 }
 
 /// 下一轮 Req04 配对验证：中心存在 `SearchResultCaptured` 且当前请求的
@@ -854,7 +633,7 @@ mod web_search_hop_tests {
     }
 
     #[test]
-    fn project_web_search_result_into_finalized_fails_without_text_result() {
+    fn project_web_search_result_into_finalized_projects_sources_without_text_result() {
         let mut finalized = json!({"id": "resp_main", "output": [], "status": "completed"});
         let captured = V3WebSearchCenterState::new()
             .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
@@ -868,10 +647,101 @@ mod web_search_hop_tests {
             .transition_to(V3WebSearchCenterPhase::SearchInFlight, "hop")
             .expect("in_flight")
             .transition_to(V3WebSearchCenterPhase::SearchResultCaptured, "hop")
-            .expect("captured");
+            .expect("captured")
+            .with_normalized_result(Some(json!({
+                "query": "x",
+                "text_result": null,
+                "sources": [{
+                    "refId": "source-1",
+                    "url": "https://example.com",
+                    "title": "Example"
+                }]
+            })));
+        project_web_search_result_into_finalized(&mut finalized, &captured).expect("project");
+        let output = finalized["output"].as_array().expect("output array");
+        let call = &output[0];
+        assert_eq!(call["type"], "web_search_call");
+        assert_eq!(call["id"], "web_search_call_ws_1");
+        assert_eq!(call["results"][0]["type"], "text_result");
+        assert_eq!(call["results"][0]["ref_id"], "source-1");
+        assert_eq!(call["results"][0]["title"], "Example");
+        assert_eq!(call["results"][0]["url"], "https://example.com");
+        assert!(call["results"][0].get("text").is_none());
+        assert!(call.get("phase").is_none());
+        let pair = &output[1];
+        assert_eq!(pair["type"], "function_call_output");
+        assert_eq!(pair["call_id"], "call_ws_1");
+        assert_eq!(pair["output"]["type"], "web_search_tool_result");
+        assert_eq!(pair["output"]["results"], call["results"]);
+    }
+
+    #[test]
+    fn project_web_search_result_into_finalized_projects_text_and_sources() {
+        let mut finalized = json!({"id": "resp_main", "output": [], "status": "completed"});
+        let captured = V3WebSearchCenterState::new()
+            .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
+            .expect("active")
+            .with_original_call_id(Some("call_ws_1"))
+            .with_query(Some("x"))
+            .transition_to(V3WebSearchCenterPhase::ToolCallObserved, "resp03")
+            .expect("observed")
+            .transition_to(V3WebSearchCenterPhase::SearchDispatchPrepared, "hop")
+            .expect("prepared")
+            .transition_to(V3WebSearchCenterPhase::SearchInFlight, "hop")
+            .expect("in_flight")
+            .transition_to(V3WebSearchCenterPhase::SearchResultCaptured, "hop")
+            .expect("captured")
+            .with_normalized_result(Some(json!({
+                "query": "x",
+                "text_result": "summary",
+                "sources": [{
+                    "refId": "source-1",
+                    "url": "https://example.com",
+                    "title": "Example"
+                }]
+            })));
+        project_web_search_result_into_finalized(&mut finalized, &captured).expect("project");
+        let output = finalized["output"].as_array().expect("output array");
+        let call = &output[0];
+        assert_eq!(call["id"], "web_search_call_ws_1");
+        assert_eq!(call["results"].as_array().expect("results").len(), 2);
+        assert_eq!(call["results"][0]["ref_id"], "call_ws_1");
+        assert_eq!(call["results"][0]["text"], "summary");
+        assert_eq!(call["results"][1]["ref_id"], "source-1");
+        assert_eq!(call["results"][1]["title"], "Example");
+        assert_eq!(call["results"][1]["url"], "https://example.com");
+        let pair = &output[1];
+        assert_eq!(pair["call_id"], "call_ws_1");
+        assert_eq!(pair["output"]["type"], "web_search_tool_result");
+        assert_eq!(pair["output"]["results"], call["results"]);
+    }
+
+    #[test]
+    fn project_web_search_result_into_finalized_fails_without_text_or_sources() {
+        let mut finalized = json!({"id": "resp_main", "output": [], "status": "completed"});
+        let captured = V3WebSearchCenterState::new()
+            .transition_to(V3WebSearchCenterPhase::LocalToolSurfaceActive, "req04")
+            .expect("active")
+            .with_original_call_id(Some("call_ws_1"))
+            .with_query(Some("x"))
+            .transition_to(V3WebSearchCenterPhase::ToolCallObserved, "resp03")
+            .expect("observed")
+            .transition_to(V3WebSearchCenterPhase::SearchDispatchPrepared, "hop")
+            .expect("prepared")
+            .transition_to(V3WebSearchCenterPhase::SearchInFlight, "hop")
+            .expect("in_flight")
+            .transition_to(V3WebSearchCenterPhase::SearchResultCaptured, "hop")
+            .expect("captured")
+            .with_normalized_result(Some(json!({
+                "query": "x",
+                "text_result": null,
+                "sources": []
+            })));
         let error = project_web_search_result_into_finalized(&mut finalized, &captured)
-            .expect_err("missing text_result must fail");
-        assert!(error.to_string().contains("text_result missing"));
+            .expect_err("missing text_result and sources must fail");
+        assert!(error
+            .to_string()
+            .contains("neither text_result nor sources"));
     }
 
     #[test]

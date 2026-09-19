@@ -112,6 +112,29 @@ pub struct WebSearchError {
     pub retryable: bool,
 }
 
+/// Typed failure returned by the WebSearch hook adapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct WebSearchFailure {
+    pub call_id: String,
+    pub error: WebSearchError,
+}
+
+impl WebSearchFailure {
+    pub fn validate(&self) -> Result<(), WebSearchHookContractError> {
+        if self.call_id.trim().is_empty() {
+            return Err(WebSearchHookContractError::MissingCallId);
+        }
+        if self.error.code.trim().is_empty() {
+            return Err(WebSearchHookContractError::FailedResultMissingErrorCode);
+        }
+        if self.error.message.trim().is_empty() {
+            return Err(WebSearchHookContractError::FailedResultMissingErrorMessage);
+        }
+        Ok(())
+    }
+}
+
 /// Typed result returned by the WebSearch hook adapter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -172,7 +195,7 @@ impl WebSearchResult {
 pub enum WebSearchHookOutcome {
     NotApplicable,
     Completed(WebSearchResult),
-    Failed(WebSearchError),
+    Failed(WebSearchFailure),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -199,10 +222,16 @@ pub enum WebSearchHookContractError {
     CompletedResultEmpty,
     #[error("failed web_search result requires a typed error")]
     FailedResultMissingError,
+    #[error("failed web_search result requires a non-empty error code")]
+    FailedResultMissingErrorCode,
+    #[error("failed web_search result requires a non-empty error message")]
+    FailedResultMissingErrorMessage,
     #[error("failed web_search result must not carry content or sources")]
     FailedResultHasContent,
     #[error("web_search result source requires a non-empty refId")]
     MissingSourceRef,
+    #[error("web_search normalized sources are malformed")]
+    MalformedSources,
     #[error("web_search result metadata must not carry control state")]
     ControlStateInMetadata,
 }
@@ -272,7 +301,7 @@ mod tests {
         WebSearchResult {
             call_id: "call-web-search-1".to_string(),
             status: WebSearchResultStatus::Completed,
-            content: Some("result".to_string()),
+            content: None,
             sources: vec![WebSearchSource {
                 ref_id: "source-1".to_string(),
                 url: Some("https://example.com".to_string()),

@@ -42,6 +42,7 @@ const copied = [
   "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs",
   "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+  "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
   "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
   "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
@@ -309,13 +310,13 @@ const cases = [
   },
   {
     name: "Web-search dry-run enables provider rescue probe",
-    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
     mutate: (source) =>
       source.replace(
-        "if allow_exhaustion_rescue_probe {",
-        "if true {",
+        "ControlRequest::ExecuteWebSearch",
+        "ControlRequest::ExecuteLocalWebSearch",
       ),
-    diagnostic: /Web-search hop must preserve the dry-run prohibition/u,
+    diagnostic: /Web-search state machine must bind execution to the typed hooks-sidecar owner/u,
   },
   {
     name: "Shared rescue owner ignores dry-run gate",

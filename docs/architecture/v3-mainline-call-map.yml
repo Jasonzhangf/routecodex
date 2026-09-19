@@ -4995,10 +4995,28 @@ chains:
       side_channel_writes: []
 - chain_id: v3.web_search_servertool_state_machine
   owner_feature_id: v3.web_search_servertool_state_machine
-  status: design
-  summary: As-Is web_search uses Req04/Resp03 Chat Process hooks plus a request-local provider search hop; the typed subagent hook contract and removal of the re-enter hop remain open.
+  status: source_bound
+  summary: Req04/Resp03 Chat Process hooks preserve web_search control state; the managed lifecycle explicitly passes the instance hooks-sidecar socket through ServerTool control state, and Relay/Direct execute one typed ExecuteWebSearch request without provider re-entry.
   manifest: docs/goals/v3-web-search-servertool-state-machine-proposal.md
   edges:
+  - step_id: v3-web-search-sm-sidecar-socket-01
+    from_node: V3Lifecycle04ChildSpawned
+    to_node: V3ServerToolState01ControlScope
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    binding_kind: typed_control_path_carrier
+    behavior_gap: The lifecycle derives the socket path from the managed instance directory, waits for hooks-sidecar readiness before publishing managed Running, and calls the server constructor; the server constructor is the sole carrier writer into Relay and Direct ServerTool state.
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes:
+      - v3.lifecycle.hooks_sidecar_process
+      produces:
+      - v3.hooks.control_socket.runtime_carrier
+      side_channel_reads: []
+      side_channel_writes: []
+    status: as_is_bound
   - step_id: v3-web-search-sm-01
     from_node: V3HubReqChatProcess04Governed
     to_node: V3WebSearch01RouteEvidenceClassified
@@ -5021,8 +5039,8 @@ chains:
   - step_id: v3-web-search-sm-02
     from_node: V3WebSearch01RouteEvidenceClassified
     to_node: V3WebSearchBackendBindingCompiled
-    caller_symbol: resolve_request_web_search_backend_binding
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    caller_symbol: resolve_request_web_search_execution_mode
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
     callee_symbol: resolve_web_search_mode_and_backend
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
     binding_kind: typed_runtime_node
@@ -5032,7 +5050,8 @@ chains:
       consumes:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
-      produces: []
+      produces:
+      - v3.web_search.backend_binding
       side_channel_reads:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
@@ -5062,44 +5081,42 @@ chains:
   - step_id: v3-web-search-sm-04
     from_node: V3ServerToolState01ControlScope
     to_node: V3WebSearch02SearchDispatchPrepared
-    caller_symbol: execute_local_web_search_hop
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    callee_symbol: execute_local_web_search_hop
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    binding_kind: obsolete_reenter_transition
-    behavior_gap: This is the current request-local provider hop, not the target typed subagent dispatch; it is retained only until shadow parity and P5 replacement.
+    caller_symbol: execute_web_search_through_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    callee_symbol: capture_sidecar_result
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: The active sidecar helper advances SearchDispatchPrepared -> SearchInFlight -> SearchResultCaptured only after a typed call-id-bound result is validated.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
       - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      - v3.web_search.backend_binding
       produces:
-      - v3.request.normal_payload
+      - v3.servertool.state_machine_control
       side_channel_reads:
       - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      - v3.web_search.backend_binding
       side_channel_writes: []
-    status: obsolete
+    status: as_is_bound
   - step_id: v3-web-search-sm-05
     from_node: V3WebSearch02SearchDispatchPrepared
-    to_node: ProviderReqOutbound06WirePayload
-    caller_symbol: execute_local_web_search_hop
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    callee_symbol: build_v3_provider_12_responses_wire_payload
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/wire.rs
-    binding_kind: obsolete_reenter_transition
-    behavior_gap: The search hop reconstructs Req01 -> Req09 and performs a second provider attempt; the target DAG requires one typed search result return to the same hook node.
+    to_node: ControlServer
+    caller_symbol: execute_web_search_through_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    callee_symbol: ControlRequest::ExecuteWebSearch
+    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    binding_kind: typed_control_request
+    behavior_gap: The active path sends one typed control request over the configured hooks sidecar socket and validates protocol, call id, typed outcome, malformed/missing adapter response, and deadline before capturing state; no provider request is reconstructed.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
-      - v3.request.normal_payload
+      - v3.hooks.control_socket.runtime_carrier
+      - v3.web_search.hook_request
       produces:
-      - v3.hub.provider_wire_payload
+      - v3.web_search.hook_outcome
+      - v3.servertool.state_machine_control
       side_channel_reads: []
       side_channel_writes: []
-    status: obsolete
+    status: as_is_bound
   - step_id: v3-web-search-sm-06
     from_node: HubRespChatProcess03Governed
     to_node: V3WebSearch03SearchResultCaptured
@@ -5128,8 +5145,8 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
     callee_symbol: project_web_search_result_into_finalized
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
-    binding_kind: obsolete_reenter_transition
-    behavior_gap: Result projection is currently coupled to the request-local hop path; P5 must bind the same projection to the typed WebSearchResult and preserve call-id pairing.
+    binding_kind: typed_result_projection
+    behavior_gap: Result projection consumes the call-id-bound typed sidecar result and preserves pairing.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5139,7 +5156,7 @@ chains:
       side_channel_reads:
       - v3.servertool.state_machine_control
       side_channel_writes: []
-    status: obsolete
+    status: as_is_bound
   - step_id: v3-web-search-sm-08
     from_node: V3HubReqChatProcess04Governed
     to_node: V3WebSearch04ToolResultInjected

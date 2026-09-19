@@ -6,8 +6,17 @@ use routecodex_v3_provider_responses::{
     V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
+use routecodex_v3_hooks::{ControlRequest, ControlResponse};
 use serde_json::json;
-use std::time::Duration;
+use servertool_core::web_search_contract::{
+    WebSearchHookOutcome, WebSearchResult, WebSearchResultStatus,
+};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
 
@@ -1929,44 +1938,75 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
 }
 
 /// direct 模式 Mode B websearch 全链：Req04 激活（web_search 声明本地化为
-/// websearch）、Resp03 拦截剥离、异步搜索 hop（backend direct pin）、
-/// hosted web_search_call + 原 call_id 配对投影、状态机 SearchResultCaptured。
-struct WebSearchHopTransport;
+/// websearch）、Resp03 拦截剥离、typed hooks sidecar 搜索、hosted
+/// web_search_call + 原 call_id 配对投影、状态机 SearchResultCaptured。
+struct WebSearchHopTransport {
+    sends: Arc<std::sync::atomic::AtomicUsize>,
+}
 #[async_trait]
 impl ResponsesTransport for WebSearchHopTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        let body = request.body();
-        if body.get("model").and_then(serde_json::Value::as_str) == Some("gpt-search") {
-            // 搜索 hop 响应：Responses 格式 message + output_text。
-            Ok(V3ProviderResp14Raw::from_json(
-                request.request_id(),
-                request.provider_id(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                br#"{"id":"resp_search","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"search result for routecodex"}]}]}"#
-                    .to_vec(),
-            ))
-        } else {
-            // 主模型响应：本地 websearch function_call（Mode B 需拦截）。
-            Ok(V3ProviderResp14Raw::from_json(
-                request.request_id(),
-                request.provider_id(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
-                br#"{"id":"resp_main","output":[{"type":"function_call","name":"websearch","call_id":"call_ws_1","arguments":"{\"query\":\"routecodex\"}"}]}"#
-                    .to_vec(),
-            ))
-        }
+        self.sends
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // 主模型响应：本地 websearch function_call（Mode B 需拦截）。
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_main","output":[{"type":"function_call","name":"websearch","call_id":"call_ws_1","arguments":"{\"query\":\"routecodex\"}"}]}"#
+                .to_vec(),
+        ))
     }
+}
+
+fn web_search_sidecar_socket_path(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("rcc-{label}-{nonce}.sock"))
+}
+
+fn serve_direct_web_search_sidecar(
+    socket_path: PathBuf,
+) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
+    let listener = UnixListener::bind(&socket_path).expect("bind direct sidecar test socket");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept direct sidecar request");
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().expect("clone direct sidecar stream"))
+            .read_line(&mut line)
+            .expect("read direct sidecar request");
+        let request: ControlRequest =
+            serde_json::from_str(line.trim()).expect("decode direct sidecar request");
+        let ControlRequest::ExecuteWebSearch { request } = request else {
+            panic!("expected ExecuteWebSearch");
+        };
+        let response = ControlResponse::ok(json!({
+            "outcome": WebSearchHookOutcome::Completed(WebSearchResult {
+                call_id: request.call_id.clone(),
+                status: WebSearchResultStatus::Completed,
+                content: Some("search result for routecodex".to_string()),
+                sources: Vec::new(),
+                metadata: None,
+                error: None,
+            })
+        }));
+        writeln!(
+            stream,
+            "{}",
+            serde_json::to_string(&response).expect("encode direct sidecar response")
+        )
+        .expect("write direct sidecar response");
+        *request
+    })
 }
 
 fn direct_web_search_mode_b_manifest() -> V3Config05ManifestPublished {
@@ -2019,7 +2059,11 @@ targets = [
 #[tokio::test]
 async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
     let manifest = direct_web_search_mode_b_manifest();
-    let server_tool_state = V3ResponsesDirectServerToolState::default();
+    let socket_path = web_search_sidecar_socket_path("direct-sidecar");
+    let sidecar = serve_direct_web_search_sidecar(socket_path.clone());
+    let server_tool_state =
+        V3ResponsesDirectServerToolState::default().with_hooks_sidecar_socket(Some(socket_path.clone()));
+    let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let scope = V3ResponsesDirectServerToolScope::new(
         "/v1/responses",
         "session-ws-direct",
@@ -2044,10 +2088,21 @@ async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &WebSearchHopTransport,
+        &WebSearchHopTransport {
+            sends: sends.clone(),
+        },
     )
     .await;
+    let request = sidecar.join().expect("join direct sidecar worker");
+    let _ = std::fs::remove_file(&socket_path);
     assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        sends.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "typed sidecar execution must not issue a second provider attempt"
+    );
+    assert_eq!(request.call_id, "call_ws_1");
+    assert_eq!(request.query, "routecodex");
     let value = match output.client_payload.body {
         V3ClientBody::Json(value) => value,
         V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {

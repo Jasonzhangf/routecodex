@@ -3324,6 +3324,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   resource_bindings:
+  - v3.hooks.control_socket.runtime_carrier
   - v3.servertool.state_machine_control
   - v3.web_search.execution_mode
   - v3.web_search.backend_binding
@@ -3781,8 +3782,10 @@ features:
   - routecodex-v3-config
   - routecodex-v3-runtime
   - routecodex-v3-hooks
+  - routecodex-v3-lifecycle
   - routecodex-v3-virtual-router
   - routecodex-v3-target
+  - routecodex-v3-server
   owner_scope: V3 web_search two-axis route activation and ServerTool internal state-machine
     lifecycle; Route/VR selects only from current-turn evidence, ChatProcess owns
     tool/result pairing, provider compat owns wire shape only.
@@ -3808,11 +3811,13 @@ features:
   - WebSearchHookRequest
   - CommandWebSearchAdapter
   - HooksSidecarCore::execute_web_search
+  - execute_web_search_through_hooks_sidecar
   - apply_v3_web_search_request_hook_at_req04
   - apply_v3_web_search_tool_call_hook_at_resp03
   - V3WebSearchDispatcher
   - V3WebSearchBackendBindingCompiled
   mainline_bindings:
+  - v3-web-search-sm-sidecar-socket-01
   - v3-web-search-sm-01
   - v3-web-search-sm-02
   - v3-web-search-sm-03
@@ -3828,16 +3833,22 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
+  - docs/architecture/wiki/v3-mainline-caller-flow.md
+  - docs/architecture/wiki/html/v3-mainline-caller-flow.html
   - v3/crates/servertool-core
   - v3/crates/routecodex-v3-hooks
   - sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src
   - v3/crates/provider-compat-core/src
   - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-runtime
+  - v3/Cargo.lock
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+  - v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/tests.rs
+  - v3/crates/routecodex-v3-lifecycle/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-virtual-router
   - v3/crates/routecodex-v3-target
   forbidden_paths:
-  - v3/crates/routecodex-v3-server
   - v3/crates/routecodex-v3-sse
   - src/server/runtime/http-server
   - src/providers

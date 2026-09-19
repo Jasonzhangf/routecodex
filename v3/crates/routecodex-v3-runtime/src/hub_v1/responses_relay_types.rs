@@ -571,6 +571,18 @@ impl V3ResponsesRelayServerToolScope {
 #[derive(Debug, Default)]
 pub struct V3ResponsesRelayServerToolState {
     pub(crate) center: V3ServerToolCenter,
+    hooks_sidecar_socket: Option<std::path::PathBuf>,
+}
+
+impl V3ResponsesRelayServerToolState {
+    pub fn with_hooks_sidecar_socket(mut self, socket_path: Option<std::path::PathBuf>) -> Self {
+        self.hooks_sidecar_socket = socket_path;
+        self
+    }
+
+    pub(crate) fn hooks_sidecar_socket(&self) -> Option<&std::path::Path> {
+        self.hooks_sidecar_socket.as_deref()
+    }
 }
 
 #[derive(Clone)]
@@ -1073,6 +1085,13 @@ pub enum V3ResponsesRelayRuntimeError {
     WebSearchBackendBindingMissing(String),
     #[error("web_search local search hop failed: {0}")]
     WebSearchDispatchFailed(String),
+    #[error("web_search hooks sidecar failed [{code}] retryable={retryable}: {message}")]
+    WebSearchSidecarFailed {
+        call_id: String,
+        code: String,
+        message: String,
+        retryable: bool,
+    },
     #[error("web_search local search hop returned no usable result: {0}")]
     WebSearchResultUnavailable(String),
     #[error("V3 Responses Relay provider SSE transport failed: {0}")]

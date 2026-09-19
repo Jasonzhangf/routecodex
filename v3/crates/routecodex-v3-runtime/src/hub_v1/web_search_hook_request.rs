@@ -1,16 +1,33 @@
-use super::V3ResponsesRelayServerToolScope;
 use crate::V3RequestExecutionControl;
 use serde_json::Value;
-use servertool_core::web_search_contract::{WebSearchHookContractError, WebSearchHookRequest};
+use servertool_core::web_search_contract::{
+    WebSearchHookContractError, WebSearchHookRequest, WebSearchHookScope,
+};
 
-pub(crate) fn build_v3_web_search_hook_request(
+pub(crate) trait V3WebSearchHookScopeSource {
+    fn web_search_hook_scope(&self) -> WebSearchHookScope;
+}
+
+impl V3WebSearchHookScopeSource for super::V3ResponsesRelayServerToolScope {
+    fn web_search_hook_scope(&self) -> WebSearchHookScope {
+        self.web_search_hook_scope()
+    }
+}
+
+impl V3WebSearchHookScopeSource for crate::kernel::V3ResponsesDirectServerToolScope {
+    fn web_search_hook_scope(&self) -> WebSearchHookScope {
+        self.web_search_hook_scope()
+    }
+}
+
+pub(crate) fn build_v3_web_search_hook_request<S: V3WebSearchHookScopeSource + ?Sized>(
     request_id: &str,
     call_id: &str,
     query: &str,
     count: Option<u32>,
     recency: Option<String>,
     content_types: Vec<String>,
-    scope: &V3ResponsesRelayServerToolScope,
+    scope: &S,
     execution_control: &V3RequestExecutionControl,
     policy_id: &str,
 ) -> Result<WebSearchHookRequest, WebSearchHookContractError> {
@@ -31,11 +48,13 @@ pub(crate) fn build_v3_web_search_hook_request(
     Ok(request)
 }
 
-pub(crate) fn build_v3_web_search_hook_request_from_value(
+pub(crate) fn build_v3_web_search_hook_request_from_value<
+    S: V3WebSearchHookScopeSource + ?Sized,
+>(
     request_id: &str,
     call_id: &str,
     input: &Value,
-    scope: &V3ResponsesRelayServerToolScope,
+    scope: &S,
     execution_control: &V3RequestExecutionControl,
     policy_id: &str,
 ) -> Result<WebSearchHookRequest, WebSearchHookContractError> {
@@ -79,6 +98,7 @@ pub(crate) fn build_v3_web_search_hook_request_from_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::V3ResponsesRelayServerToolScope;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
 

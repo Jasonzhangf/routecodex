@@ -28,7 +28,10 @@ pub(crate) fn prepare_v3_responses_direct_web_search_control_request(
     let (Some(server_tool_state), Some(server_tool_scope)) =
         (server_tool_state, server_tool_scope)
     else {
-        return Ok(());
+        return Err(runtime_source(
+            "V3DirectWebSearchReq01LocalToolSurfaceActive",
+            "web_search execution state is unavailable",
+        ));
     };
     if !server_tool_scope.has_client_session_scope() {
         return Ok(());

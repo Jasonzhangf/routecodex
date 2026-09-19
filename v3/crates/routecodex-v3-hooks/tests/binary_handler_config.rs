@@ -353,10 +353,13 @@ fn web_search_adapter_trait_is_available_to_the_sidecar_boundary() {
             _request: &WebSearchHookRequest,
         ) -> Result<WebSearchHookOutcome, WebSearchAdapterError> {
             Ok(WebSearchHookOutcome::Failed(
-                servertool_core::web_search_contract::WebSearchError {
-                    code: "controlled".to_string(),
-                    message: "fixture".to_string(),
-                    retryable: false,
+                servertool_core::web_search_contract::WebSearchFailure {
+                    call_id: "call-web-search-1".to_string(),
+                    error: servertool_core::web_search_contract::WebSearchError {
+                        code: "controlled".to_string(),
+                        message: "fixture".to_string(),
+                        retryable: false,
+                    },
                 },
             ))
         }

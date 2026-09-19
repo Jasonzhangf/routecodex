@@ -3,7 +3,9 @@
 use routecodex_v3_config::{
     load_v3_config_snapshot_from_path, V3AdminWebuiManifest, V3Config05ManifestPublished,
 };
-use routecodex_v3_server::{spawn_v3_server_aggregate_with_admin, V3ServerAggregateHandle};
+use routecodex_v3_server::{
+    spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket, V3ServerAggregateHandle,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -929,24 +931,28 @@ impl V3ManagedLifecycle {
         let admin_config_path = admin_webui
             .as_ref()
             .map(|_| PathBuf::from(&declaration.config_path));
-        let handle =
-            match spawn_v3_server_aggregate_with_admin(manifest, admin_webui, admin_config_path)
-                .await
-            {
-                Ok(handle) => handle,
-                Err(error) => {
-                    write_status(
-                        &instance_dir,
-                        &declaration.instance_id,
-                        V3ManagedRunState::Failed,
-                        Some(error.to_string()),
-                    )?;
-                    let _ = fs::remove_file(instance_dir.join("pid.cache"));
-                    let _ = fs::remove_file(instance_dir.join("control.json"));
-                    let _ = fs::remove_file(&socket_path);
-                    return Err(error.into());
-                }
-            };
+        let handle = match spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
+            manifest,
+            admin_webui,
+            admin_config_path,
+            Some(instance_dir.join("hooks-sidecar.sock")),
+        )
+        .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                write_status(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    V3ManagedRunState::Failed,
+                    Some(error.to_string()),
+                )?;
+                let _ = fs::remove_file(instance_dir.join("pid.cache"));
+                let _ = fs::remove_file(instance_dir.join("control.json"));
+                let _ = fs::remove_file(&socket_path);
+                return Err(error.into());
+            }
+        };
         let handle = handle;
         let handoff_path = instance_dir.join(FRONT_HANDOFF_FILE);
         if handoff_path.exists() {
@@ -969,14 +975,35 @@ impl V3ManagedLifecycle {
             fs::remove_file(provider_handoff_path)?;
         }
         let handle = Some(handle);
-        write_status(
+        let mut hooks_sidecar = V3HooksSidecarSupervisor::spawn(instance_dir.clone());
+        let hooks_sidecar_detail = match hooks_sidecar.wait_for_readiness().await {
+            Ok(detail) => detail,
+            Err(error) => {
+                return control_plane::fail_managed_runtime_with_hooks_cleanup(
+                    &instance_dir,
+                    &declaration.instance_id,
+                    handle,
+                    hooks_sidecar,
+                    error,
+                )
+                .await;
+            }
+        };
+        if let Err(error) = write_status(
             &instance_dir,
             &declaration.instance_id,
             V3ManagedRunState::Running,
-            None,
-        )?;
-        let hooks_sidecar =
-            V3HooksSidecarSupervisor::spawn(instance_dir.clone(), declaration.instance_id.clone());
+            hooks_sidecar_detail,
+        ) {
+            return control_plane::fail_managed_runtime_with_hooks_cleanup(
+                &instance_dir,
+                &declaration.instance_id,
+                handle,
+                hooks_sidecar,
+                error,
+            )
+            .await;
+        }
         return control_plane::run_managed_control_loop(
             &instance_dir,
             &declaration,

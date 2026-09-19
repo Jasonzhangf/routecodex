@@ -1,5 +1,6 @@
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
+use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -47,8 +48,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     )?;
     let request_web_search_execution_mode =
         resolve_request_web_search_execution_mode(manifest, &input.payload);
-    let request_web_search_backend_binding =
-        resolve_request_web_search_backend_binding(manifest, &input.payload);
+    if request_web_search_execution_mode.is_metadata_center_local_search()
+        && server_tool_state.is_none()
+    {
+        return Err(V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
+            "web_search execution state is unavailable".to_string(),
+        ));
+    }
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         input.payload,
         V3HubEntryProtocol::Responses,
@@ -734,16 +740,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     {
                         web_search_state
                     } else {
-                        execute_local_web_search_hop(
-                            manifest,
-                            &input.server_id,
-                            &input.failure_session_scope,
-                            &provider_failure_health,
-                            request_web_search_backend_binding.as_deref(),
-                            &web_search_state,
-                            transport,
+                        let execution = server_tool_state.as_ref().ok_or_else(|| {
+                            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
+                                "web_search execution scope is unavailable".to_string(),
+                            )
+                        })?;
+                        execute_web_search_through_hooks_sidecar(
+                            execution.control.hooks_sidecar_socket(),
                             &input.request_id,
-                            allow_exhaustion_rescue_probe,
+                            &execution.scope,
+                            &request_execution_control,
+                            &web_search_state,
                         )
                         .await?
                     };
@@ -1059,16 +1066,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     {
                         web_search_state
                     } else {
-                        execute_local_web_search_hop(
-                            manifest,
-                            &input.server_id,
-                            &input.failure_session_scope,
-                            &provider_failure_health,
-                            request_web_search_backend_binding.as_deref(),
-                            &web_search_state,
-                            transport,
+                        let execution = server_tool_state.as_ref().ok_or_else(|| {
+                            V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
+                                "web_search execution scope is unavailable".to_string(),
+                            )
+                        })?;
+                        execute_web_search_through_hooks_sidecar(
+                            execution.control.hooks_sidecar_socket(),
                             &input.request_id,
-                            allow_exhaustion_rescue_probe,
+                            &execution.scope,
+                            &request_execution_control,
+                            &web_search_state,
                         )
                         .await?
                     };

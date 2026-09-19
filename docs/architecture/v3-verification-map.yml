@@ -2410,6 +2410,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   mainline_bindings:
+  - v3-web-search-sm-sidecar-socket-01
   - v3-web-search-sm-01
   - v3-web-search-sm-02
   - v3-web-search-sm-03
@@ -2429,6 +2430,7 @@ features:
   required_negative:
   - A completed WebSearchResult without call identity is rejected; WebSearchHookRequest scope/deadline binding is required before the adapter executes.
   - A mismatched call id, malformed adapter output, NotApplicable result, missing adapter, expired deadline, or unavailable subagent fails explicitly.
+  - A configured sidecar path is passed only through the typed runtime control state; an absent socket path or failed typed response enters the existing error chain without a second provider attempt.
   - Completed results cannot carry errors; failed results cannot carry content or sources; control state cannot appear in result metadata at any nesting depth.
   - Center-state conversion maps only an explicit usage object into provider metadata and does not duplicate normalized query/result content.
   - Declared web_search tool alone does not activate web_search route.

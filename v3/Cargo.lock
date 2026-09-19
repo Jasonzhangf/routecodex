@@ -1380,6 +1380,7 @@ dependencies = [
  "routecodex-v3-config",
  "routecodex-v3-debug",
  "routecodex-v3-error",
+ "routecodex-v3-hooks",
  "routecodex-v3-provider-responses",
  "routecodex-v3-route-classifier",
  "routecodex-v3-sse",
