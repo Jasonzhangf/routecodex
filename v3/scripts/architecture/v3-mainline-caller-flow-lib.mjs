@@ -364,6 +364,12 @@ function edgeReviewKind(edge) {
   if (status === 'binding_pending') {
     return { key: 'binding_pending', label: 'binding_pending', note: 'map owner exists but runtime/source binding is not proven' };
   }
+  if (status === 'as_is_bound') {
+    return { key: 'as_is_bound', label: 'as-is-bound', note: 'As-Is runtime/source binding exists; the target contract or replacement remains a gap' };
+  }
+  if (status === 'obsolete') {
+    return { key: 'obsolete', label: 'obsolete', note: 'As-Is edge exists only until the declared replacement/removal phase' };
+  }
   if (edgeKind === 'aggregate_entry_edge') {
     return { key: 'aggregate-only', label: 'aggregate-only', note: 'wrapper edge only; not a semantic adjacent pipeline transition' };
   }
@@ -549,6 +555,8 @@ export function auditV3ReviewSurfaceHtmlText(html, source_path = V3_CALLER_FLOW_
     'live-bound',
     'aggregate-only',
     'binding_pending',
+    'as_is_bound',
+    'obsolete',
     'runtime gap',
   ];
   const failures = [];
@@ -1196,7 +1204,7 @@ function renderAuditHtml(parsed, sourceAudit) {
     `<code>${escapeHtml(edge.edge_kind)}</code>`,
   ]);
   const runtimeGapRows = allEdges
-    .filter(({ edge }) => ['binding_pending', 'typed-test-only', 'aggregate-only'].includes(edgeReviewKind(edge).key))
+    .filter(({ edge }) => ['binding_pending', 'typed-test-only', 'aggregate-only', 'as_is_bound', 'obsolete'].includes(edgeReviewKind(edge).key))
     .map(({ chain, edge }) => {
       const kind = edgeReviewKind(edge);
       return [
@@ -1216,7 +1224,9 @@ function renderAuditHtml(parsed, sourceAudit) {
         <div class="format-card"><h3>live-bound</h3><p>Real source symbols are bound in Rust runtime/source files; live replay remains a separate required proof.</p></div>
         <div class="format-card"><h3>aggregate-only</h3><p>Wrapper/entry edge only. It must not be read as an adjacent semantic pipeline transition.</p></div>
         <div class="format-card"><h3>binding_pending</h3><p>Map owner is declared but caller/callee or source evidence is not yet strong enough to claim closure.</p></div>
-        <div class="format-card"><h3>runtime gap</h3><p>Any typed-test-only, aggregate-only, or binding_pending edge is a visible runtime gap until a runtime worker binds and verifies the adjacent owner path.</p></div>
+        <div class="format-card"><h3>as-is-bound</h3><p>As-Is runtime/source binding exists, but the declared target contract or replacement is still open.</p></div>
+        <div class="format-card"><h3>obsolete</h3><p>As-Is edge is retained only until the declared replacement or removal phase; it is not target-state closure.</p></div>
+        <div class="format-card"><h3>runtime gap</h3><p>Any typed-test-only, aggregate-only, binding_pending, as-is-bound, or obsolete edge is a visible runtime gap until a runtime worker binds and verifies the adjacent owner path.</p></div>
       </div>
       ${invalidAggregateRows.length ? `
         <h3>Invalid aggregate wrappers</h3>

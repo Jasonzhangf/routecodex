@@ -365,13 +365,13 @@ for (const [field, fileField] of [
 for (const [index, edge] of allEdges.entries()) {
   const where = `edge[${index}]`;
   if (!edge.step_id || !edge.from_node || !edge.to_node || !edge.owner_feature_id) fail(`${where}: incomplete identity`);
-  if (!['anchored', 'binding_pending'].includes(edge.status)) fail(`${where}: invalid status ${edge.status}`);
+  if (!['anchored', 'binding_pending', 'as_is_bound', 'obsolete'].includes(edge.status)) fail(`${where}: invalid status ${edge.status}`);
   for (const field of ['consumes', 'produces', 'side_channel_reads', 'side_channel_writes']) {
     for (const resourceId of array(edge.resource_flow?.[field])) {
       if (!resourceIds.has(resourceId)) fail(`${where}: undeclared resource ${resourceId}`);
     }
   }
-  if (edge.status === 'anchored') {
+  if (['anchored', 'as_is_bound', 'obsolete'].includes(edge.status)) {
     for (const field of ['caller_file', 'callee_file', 'caller_symbol', 'callee_symbol']) {
       if (!edge[field]) fail(`${where}: anchored edge missing ${field}`);
     }

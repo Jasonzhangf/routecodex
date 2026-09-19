@@ -35,7 +35,7 @@ flowchart TD
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
   module_v3_scripts["v3/scripts"]
-  module_pending -->|8 edges / 1 paths| module_pending
+  module_pending -->|1 edges / 1 paths| module_pending
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
   module_routecodex_v3_hooks -->|5 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
@@ -54,9 +54,9 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
-  module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
+  module_v3_runtime__hub_v1 -->|6 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|123 edges / 25 paths| module_v3_runtime__hub_v1
+  module_v3_runtime__hub_v1 -->|129 edges / 26 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -82,7 +82,7 @@ flowchart TD
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
-| pending | pending | 8 | `v3.web_search_servertool_state_machine` |
+| pending | pending | 1 | `v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
 | routecodex-v3-hooks | routecodex-v3-hooks | 5 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
@@ -101,9 +101,9 @@ flowchart TD
 | v3-runtime::hub_v1 | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime::hub_v1 | routecodex-v3-sse | 1 | `v3.sse.protocol_codec_projection_boundary` |
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
-| v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
+| v3-runtime::hub_v1 | v3-provider-responses | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 123 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 129 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
@@ -140,17 +140,8 @@ flowchart TD
 
 | chain_id | step_id | from_node | to_node |
 | --- | --- | --- | --- |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-01 | HubReqChatProcess03Governed | V3WebSearch01RouteEvidenceClassified |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-02 | V3WebSearch01RouteEvidenceClassified | VrRoute04SelectedTarget |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-03 | HubRespChatProcess03Governed | V3ServerToolState01ControlScope |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-04 | V3ServerToolState01ControlScope | V3WebSearch02SearchDispatchPrepared |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-05 | V3WebSearch02SearchDispatchPrepared | ProviderReqOutbound06WirePayload |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-06 | HubRespChatProcess03Governed | V3WebSearch03SearchResultCaptured |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-07 | V3WebSearch03SearchResultCaptured | HubRespOutbound04ClientSemantic |
-| v3.web_search_servertool_state_machine | v3-web-search-sm-08 | HubReqChatProcess03Governed | V3WebSearch04ToolResultInjected |
 | v3.tool_thinking_hook_skeleton.mainline | v3-tool-thinking-resp02-preserve-anthropic-input | ProviderRespCompat02ProviderCompat | V3HubRespInbound02Normalized |
-| v3.responses_chat_sse_typed_tree | v3-responses-sse-tree-03 | HubRespChatProcess03Governed | HubRespOutbound04ClientSemantic |
-| v3.openai_chat_sse_typed_tree | v3-chat-sse-tree-02 | HubRespChatProcess03Governed | HubRespOutbound04ClientSemantic |
+| v3.responses_chat_sse_typed_tree | v3-responses-sse-tree-03 | HubRespChatProcess03Governed | V3HubRespOutbound05ClientSemantic |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-01 | V3Front01StableRequestOwner | V3Front02RequestLeaseBound |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-02 | V3Front02RequestLeaseBound | V3Front08ClientTerminalOrError |
 
@@ -195,13 +186,13 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-hooks-sidecar-life-01` | `V3Lifecycle04ChildSpawned` → `V3HooksInstallRecord` | anchored | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | hooks_runtime_mode<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-life-02` | `V3HooksInstallRecord` → `ControlServer` | anchored | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | ControlServer::with_native_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-forward-01` | `ControlServer` → `HooksSidecarCore` | anchored | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::forward<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-native-01` | `HooksSidecarCore` → `NativeAppServerTransport` | anchored | HooksSidecarCore::send_to_target<br/><small>routecodex-v3-hooks/src/lib.rs</small> | NativeAppServerTransport::send_message<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-status-01` | `ControlServer` → `NativeAppServerTransport` | anchored | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-timer-01` | `ControlServer` → `HooksSidecarCore` | anchored | timer_tick<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
-| `v3-hooks-sidecar-hook-01` | `HooksSidecarCore` → `HookRegistry` | anchored | HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small> | HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-life-01` | `V3Lifecycle04ChildSpawned` → `V3HooksInstallRecord` | as_is_bound | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | hooks_runtime_mode<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-life-02` | `V3HooksInstallRecord` → `ControlServer` | as_is_bound | start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small> | ControlServer::with_native_sockets_handlers_and_state<br/><small>routecodex-v3-hooks/src/control.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-forward-01` | `ControlServer` → `HooksSidecarCore` | as_is_bound | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::forward<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-native-01` | `HooksSidecarCore` → `NativeAppServerTransport` | obsolete | HooksSidecarCore::send_to_target<br/><small>routecodex-v3-hooks/src/lib.rs</small> | NativeAppServerTransport::send_message<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-status-01` | `ControlServer` → `NativeAppServerTransport` | obsolete | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-timer-01` | `ControlServer` → `HooksSidecarCore` | as_is_bound | timer_tick<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-hook-01` | `HooksSidecarCore` → `HookRegistry` | obsolete | HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small> | HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 
 ## v3.provider_global_cooldown_persistence
 
@@ -230,7 +221,7 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-provider-global-cooldown-01` | `V3Config05ManifestPublished` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::from_manifest<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::from_manifest<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_cooldown_persistence` |
+| `v3-provider-global-cooldown-01` | `V3Config05ManifestPublished` → `V3ProviderHealthStore` | as_is_bound | V3ProviderFailureRuntimeHealth::from_manifest<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::from_manifest<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_cooldown_persistence` |
 | `v3-provider-global-cooldown-02` | `V3ProviderHealthStore` → `V3ProviderCooldownCoordinator` | anchored | start_provider_health_persistence<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | V3ProviderCooldownCoordinator::load<br/><small>routecodex-v3-provider-responses/src/global_cooldown.rs</small> | `v3.provider_global_cooldown_persistence` |
 | `v3-provider-global-cooldown-03` | `V3ServerStartup01ListenerSetPreflight` → `V3ProviderHealthStore` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-server/src/lib.rs</small> | `v3.provider_global_cooldown_persistence` |
 
@@ -1996,36 +1987,48 @@ flowchart TD
 
 ## v3.web_search_servertool_state_machine
 
-web_search route activates only from current-turn evidence; ServerTool state manager owns search-only dispatch, follow-up marker, and paired tool-result injection; provider compat owns only provider wire shape.
+As-Is web_search uses Req04/Resp03 Chat Process hooks plus a request-local provider search hop; the typed subagent hook contract and removal of the re-enter hop remain open.
 
 Owner feature: `v3.web_search_servertool_state_machine`
 Manifest: `docs/goals/v3-web-search-servertool-state-machine-proposal.md`
 
 ```mermaid
 flowchart TD
-  subgraph c_50_v3_web_search_servertool_state_machine_m_pending["pending"]
-    c_50_v3_web_search_servertool_state_machine_0["pending<br/>pending<br/><small>pending</small>"]
+  subgraph c_50_v3_web_search_servertool_state_machine_m_v3_provider_responses["v3-provider-responses"]
+    c_50_v3_web_search_servertool_state_machine_7["v3-provider-responses<br/>build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small>"]
   end
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-01<br/>HubReqChatProcess03Governed → V3WebSearch01RouteEvidenceClassified| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-02<br/>V3WebSearch01RouteEvidenceClassified → VrRoute04SelectedTarget| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-03<br/>HubRespChatProcess03Governed → V3ServerToolState01ControlScope| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-04<br/>V3ServerToolState01ControlScope → V3WebSearch02SearchDispatchPrepared| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-05<br/>V3WebSearch02SearchDispatchPrepared → ProviderReqOutbound06WirePayload| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-06<br/>HubRespChatProcess03Governed → V3WebSearch03SearchResultCaptured| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-07<br/>V3WebSearch03SearchResultCaptured → HubRespOutbound04ClientSemantic| c_50_v3_web_search_servertool_state_machine_0
-  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-08<br/>HubReqChatProcess03Governed → V3WebSearch04ToolResultInjected| c_50_v3_web_search_servertool_state_machine_0
+  subgraph c_50_v3_web_search_servertool_state_machine_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
+    c_50_v3_web_search_servertool_state_machine_0["v3-runtime::hub_v1<br/>govern_v3_servertool_request_at_req04<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_1["v3-runtime::hub_v1<br/>apply_v3_web_search_request_hook_at_req04<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_2["v3-runtime::hub_v1<br/>resolve_request_web_search_backend_binding<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_3["v3-runtime::hub_v1<br/>resolve_web_search_mode_and_backend<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_4["v3-runtime::hub_v1<br/>apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_5["v3-runtime::hub_v1<br/>V3ServerToolCenter::store<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_6["v3-runtime::hub_v1<br/>execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_8["v3-runtime::hub_v1<br/>intercept_local_web_search_call<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_9["v3-runtime::hub_v1<br/>project_web_search_result_into_finalized<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+    c_50_v3_web_search_servertool_state_machine_10["v3-runtime::hub_v1<br/>apply_v3_responses_relay_web_search_control_completion<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small>"]
+  end
+  c_50_v3_web_search_servertool_state_machine_0 -->|v3-web-search-sm-01<br/>V3HubReqChatProcess04Governed → V3WebSearch01RouteEvidenceClassified| c_50_v3_web_search_servertool_state_machine_1
+  c_50_v3_web_search_servertool_state_machine_2 -->|v3-web-search-sm-02<br/>V3WebSearch01RouteEvidenceClassified → V3WebSearchBackendBindingCompiled| c_50_v3_web_search_servertool_state_machine_3
+  c_50_v3_web_search_servertool_state_machine_4 -->|v3-web-search-sm-03<br/>HubRespChatProcess03Governed → V3ServerToolState01ControlScope| c_50_v3_web_search_servertool_state_machine_5
+  c_50_v3_web_search_servertool_state_machine_6 -->|v3-web-search-sm-04<br/>V3ServerToolState01ControlScope → V3WebSearch02SearchDispatchPrepared| c_50_v3_web_search_servertool_state_machine_6
+  c_50_v3_web_search_servertool_state_machine_6 -->|v3-web-search-sm-05<br/>V3WebSearch02SearchDispatchPrepared → ProviderReqOutbound06WirePayload| c_50_v3_web_search_servertool_state_machine_7
+  c_50_v3_web_search_servertool_state_machine_4 -->|v3-web-search-sm-06<br/>HubRespChatProcess03Governed → V3WebSearch03SearchResultCaptured| c_50_v3_web_search_servertool_state_machine_8
+  c_50_v3_web_search_servertool_state_machine_9 -->|v3-web-search-sm-07<br/>V3WebSearch03SearchResultCaptured → V3HubRespOutbound05ClientSemantic| c_50_v3_web_search_servertool_state_machine_9
+  c_50_v3_web_search_servertool_state_machine_10 -->|v3-web-search-sm-08<br/>V3HubReqChatProcess04Governed → V3WebSearch04ToolResultInjected| c_50_v3_web_search_servertool_state_machine_10
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-web-search-sm-01` | `HubReqChatProcess03Governed` → `V3WebSearch01RouteEvidenceClassified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-02` | `V3WebSearch01RouteEvidenceClassified` → `VrRoute04SelectedTarget` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-03` | `HubRespChatProcess03Governed` → `V3ServerToolState01ControlScope` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-04` | `V3ServerToolState01ControlScope` → `V3WebSearch02SearchDispatchPrepared` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-05` | `V3WebSearch02SearchDispatchPrepared` → `ProviderReqOutbound06WirePayload` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-06` | `HubRespChatProcess03Governed` → `V3WebSearch03SearchResultCaptured` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-07` | `V3WebSearch03SearchResultCaptured` → `HubRespOutbound04ClientSemantic` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
-| `v3-web-search-sm-08` | `HubReqChatProcess03Governed` → `V3WebSearch04ToolResultInjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-01` | `V3HubReqChatProcess04Governed` → `V3WebSearch01RouteEvidenceClassified` | as_is_bound | govern_v3_servertool_request_at_req04<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | apply_v3_web_search_request_hook_at_req04<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-02` | `V3WebSearch01RouteEvidenceClassified` → `V3WebSearchBackendBindingCompiled` | as_is_bound | resolve_request_web_search_backend_binding<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | resolve_web_search_mode_and_backend<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-03` | `HubRespChatProcess03Governed` → `V3ServerToolState01ControlScope` | as_is_bound | apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | V3ServerToolCenter::store<br/><small>routecodex-v3-runtime/src/hub_v1/common.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-04` | `V3ServerToolState01ControlScope` → `V3WebSearch02SearchDispatchPrepared` | obsolete | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-05` | `V3WebSearch02SearchDispatchPrepared` → `ProviderReqOutbound06WirePayload` | obsolete | execute_local_web_search_hop<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | build_v3_provider_12_responses_wire_payload<br/><small>routecodex-v3-provider-responses/src/wire.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-06` | `HubRespChatProcess03Governed` → `V3WebSearch03SearchResultCaptured` | as_is_bound | apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | intercept_local_web_search_call<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-07` | `V3WebSearch03SearchResultCaptured` → `V3HubRespOutbound05ClientSemantic` | obsolete | project_web_search_result_into_finalized<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | project_web_search_result_into_finalized<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | `v3.web_search_servertool_state_machine` |
+| `v3-web-search-sm-08` | `V3HubReqChatProcess04Governed` → `V3WebSearch04ToolResultInjected` | as_is_bound | apply_v3_responses_relay_web_search_control_completion<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | apply_v3_responses_relay_web_search_control_completion<br/><small>routecodex-v3-runtime/src/hub_v1/web_search_hop.rs</small> | `v3.web_search_servertool_state_machine` |
 
 ## v3.console_request_count_visibility.mainline
 
@@ -2668,6 +2671,9 @@ Owner feature: `v3.responses_chat_sse_typed_tree_refactor`
 
 ```mermaid
 flowchart TD
+  subgraph c_65_v3_responses_chat_sse_typed_tree_m_pending["pending"]
+    c_65_v3_responses_chat_sse_typed_tree_6["pending<br/>pending<br/><small>pending</small>"]
+  end
   subgraph c_65_v3_responses_chat_sse_typed_tree_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_65_v3_responses_chat_sse_typed_tree_0["v3-runtime::hub_v1<br/>run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small>"]
     c_65_v3_responses_chat_sse_typed_tree_1["v3-runtime::hub_v1<br/>V3ResponsesJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
@@ -2675,15 +2681,14 @@ flowchart TD
     c_65_v3_responses_chat_sse_typed_tree_3["v3-runtime::hub_v1<br/>V3ResponsesSseProtocolMetadata::from_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
     c_65_v3_responses_chat_sse_typed_tree_4["v3-runtime::hub_v1<br/>V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
     c_65_v3_responses_chat_sse_typed_tree_5["v3-runtime::hub_v1<br/>classify_v3_responses_sse_output_item<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small>"]
-    c_65_v3_responses_chat_sse_typed_tree_6["v3-runtime::hub_v1<br/>rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small>"]
     c_65_v3_responses_chat_sse_typed_tree_7["v3-runtime::hub_v1<br/>V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
     c_65_v3_responses_chat_sse_typed_tree_8["v3-runtime::hub_v1<br/>V3RelaySseHookCatalog::rewrite_responses<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small>"]
   end
   c_65_v3_responses_chat_sse_typed_tree_0 -->|v3-responses-json-document-01<br/>ProviderRespInbound01Raw → HubRespInbound02Parsed| c_65_v3_responses_chat_sse_typed_tree_1
   c_65_v3_responses_chat_sse_typed_tree_2 -->|v3-responses-sse-tree-01<br/>ProviderRespInbound01Raw → HubRespInbound02Parsed| c_65_v3_responses_chat_sse_typed_tree_3
   c_65_v3_responses_chat_sse_typed_tree_4 -->|v3-responses-sse-tree-02<br/>HubRespInbound02Parsed → HubRespChatProcess03Governed| c_65_v3_responses_chat_sse_typed_tree_5
-  c_65_v3_responses_chat_sse_typed_tree_6 -->|v3-responses-sse-tree-03<br/>HubRespChatProcess03Governed → HubRespOutbound04ClientSemantic| c_65_v3_responses_chat_sse_typed_tree_6
-  c_65_v3_responses_chat_sse_typed_tree_7 -->|v3-responses-relay-typed-hook-catalog-01<br/>HubRespInbound02Parsed → HubRespOutbound04ClientSemantic| c_65_v3_responses_chat_sse_typed_tree_8
+  c_65_v3_responses_chat_sse_typed_tree_6 -->|v3-responses-sse-tree-03<br/>HubRespChatProcess03Governed → V3HubRespOutbound05ClientSemantic| c_65_v3_responses_chat_sse_typed_tree_6
+  c_65_v3_responses_chat_sse_typed_tree_7 -->|v3-responses-relay-typed-hook-catalog-01<br/>HubRespInbound02Parsed → V3HubRespOutbound05ClientSemantic| c_65_v3_responses_chat_sse_typed_tree_8
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2691,8 +2696,8 @@ flowchart TD
 | `v3-responses-json-document-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small> | V3ResponsesJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-responses-sse-tree-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs</small> | V3ResponsesSseProtocolMetadata::from_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-responses-sse-tree-02` | `HubRespInbound02Parsed` → `HubRespChatProcess03Governed` | anchored | V3ResponsesSseReducerState::apply_event<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | classify_v3_responses_sse_output_item<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
-| `v3-responses-sse-tree-03` | `HubRespChatProcess03Governed` → `HubRespOutbound04ClientSemantic` | binding_pending | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small> | rewrite_v3_responses_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
-| `v3-responses-relay-typed-hook-catalog-01` | `HubRespInbound02Parsed` → `HubRespOutbound04ClientSemantic` | anchored | V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3RelaySseHookCatalog::rewrite_responses<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-responses-sse-tree-03` | `HubRespChatProcess03Governed` → `V3HubRespOutbound05ClientSemantic` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-responses-relay-typed-hook-catalog-01` | `HubRespInbound02Parsed` → `V3HubRespOutbound05ClientSemantic` | anchored | V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3RelaySseHookCatalog::rewrite_responses<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 
 ## v3.openai_chat_sse_typed_tree
 
@@ -2705,24 +2710,25 @@ flowchart TD
   subgraph c_66_v3_openai_chat_sse_typed_tree_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_66_v3_openai_chat_sse_typed_tree_0["v3-runtime::hub_v1<br/>enqueue_sse_client_chunks<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
     c_66_v3_openai_chat_sse_typed_tree_1["v3-runtime::hub_v1<br/>classify_v3_openai_chat_sse_chunk<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small>"]
-    c_66_v3_openai_chat_sse_typed_tree_2["v3-runtime::hub_v1<br/>rewrite_v3_openai_chat_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small>"]
-    c_66_v3_openai_chat_sse_typed_tree_3["v3-runtime::hub_v1<br/>run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small>"]
-    c_66_v3_openai_chat_sse_typed_tree_4["v3-runtime::hub_v1<br/>V3OpenAiChatJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small>"]
-    c_66_v3_openai_chat_sse_typed_tree_5["v3-runtime::hub_v1<br/>V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
-    c_66_v3_openai_chat_sse_typed_tree_6["v3-runtime::hub_v1<br/>V3RelaySseHookCatalog::rewrite_chat<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_2["v3-runtime::hub_v1<br/>project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_3["v3-runtime::hub_v1<br/>build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_4["v3-runtime::hub_v1<br/>run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_5["v3-runtime::hub_v1<br/>V3OpenAiChatJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_6["v3-runtime::hub_v1<br/>V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
+    c_66_v3_openai_chat_sse_typed_tree_7["v3-runtime::hub_v1<br/>V3RelaySseHookCatalog::rewrite_chat<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small>"]
   end
   c_66_v3_openai_chat_sse_typed_tree_0 -->|v3-chat-sse-tree-01<br/>ProviderRespInbound01Raw → HubRespInbound02Parsed| c_66_v3_openai_chat_sse_typed_tree_1
-  c_66_v3_openai_chat_sse_typed_tree_2 -->|v3-chat-sse-tree-02<br/>HubRespChatProcess03Governed → HubRespOutbound04ClientSemantic| c_66_v3_openai_chat_sse_typed_tree_2
-  c_66_v3_openai_chat_sse_typed_tree_3 -->|v3-chat-json-document-01<br/>ProviderRespInbound01Raw → HubRespInbound02Parsed| c_66_v3_openai_chat_sse_typed_tree_4
-  c_66_v3_openai_chat_sse_typed_tree_5 -->|v3-relay-typed-hook-catalog-01<br/>HubRespInbound02Parsed → HubRespOutbound04ClientSemantic| c_66_v3_openai_chat_sse_typed_tree_6
+  c_66_v3_openai_chat_sse_typed_tree_2 -->|v3-chat-sse-tree-02<br/>HubRespChatProcess03Governed → V3HubRespOutbound05ClientSemantic| c_66_v3_openai_chat_sse_typed_tree_3
+  c_66_v3_openai_chat_sse_typed_tree_4 -->|v3-chat-json-document-01<br/>ProviderRespInbound01Raw → HubRespInbound02Parsed| c_66_v3_openai_chat_sse_typed_tree_5
+  c_66_v3_openai_chat_sse_typed_tree_6 -->|v3-relay-typed-hook-catalog-01<br/>HubRespInbound02Parsed → V3HubRespOutbound05ClientSemantic| c_66_v3_openai_chat_sse_typed_tree_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-chat-sse-tree-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | enqueue_sse_client_chunks<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | classify_v3_openai_chat_sse_chunk<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
-| `v3-chat-sse-tree-02` | `HubRespChatProcess03Governed` → `HubRespOutbound04ClientSemantic` | binding_pending | rewrite_v3_openai_chat_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small> | rewrite_v3_openai_chat_sse_content<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-chat-sse-tree-02` | `HubRespChatProcess03Governed` → `V3HubRespOutbound05ClientSemantic` | anchored | project_json_response<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 | `v3-chat-json-document-01` | `ProviderRespInbound01Raw` → `HubRespInbound02Parsed` | anchored | run_json_response_hooks<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs</small> | V3OpenAiChatJsonDocument::from_json<br/><small>routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
-| `v3-relay-typed-hook-catalog-01` | `HubRespInbound02Parsed` → `HubRespOutbound04ClientSemantic` | anchored | V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3RelaySseHookCatalog::rewrite_chat<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
+| `v3-relay-typed-hook-catalog-01` | `HubRespInbound02Parsed` → `V3HubRespOutbound05ClientSemantic` | anchored | V3HubRelayResponseHookRegistry::typed_sse_catalog<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | V3RelaySseHookCatalog::rewrite_chat<br/><small>routecodex-v3-runtime/src/hub_v1/relay_sse_hooks.rs</small> | `v3.responses_chat_sse_typed_tree_refactor` |
 
 ## v3.sse_error_and_direct_consumer_pre_wiring
 
