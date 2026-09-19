@@ -1,10 +1,10 @@
 {
   "evidence_id": "v3-provider-recovery-probe-bound-source-20260918",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "f07a112c76a4984e4dc0d7c274b163b573a0ff12",
-  "candidate_tree": "ce3e73a58e65c325edb5056b299db859a03e6fd4",
-  "base_commit": "b7a2957df6780396c208042de6e88768b5e757fe",
-  "captured_at": "2026-09-18T21:29:00-07:00",
+  "candidate_commit": "f1f999916c0b0c9c1af46e00a2b700e81de16320",
+  "candidate_tree": "ba733e07c6048653c8a0442f69753ac5c3aec770",
+  "base_commit": "ab21333c8",
+  "captured_at": "2026-09-18T21:47:00-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
