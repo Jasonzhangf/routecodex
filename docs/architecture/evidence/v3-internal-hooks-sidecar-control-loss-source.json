@@ -1,10 +1,10 @@
 {
   "evidence_id": "v3-internal-hooks-sidecar-control-loss-source-20260919",
   "feature_id": "v3.managed_server_lifecycle",
-  "candidate_commit": "807a60c988311e7a4a50e6413b49c7daccee4fdf",
-  "candidate_tree": "ef0a4847aa9ff30976df2fc31623fb6375a598cb",
+  "candidate_commit": "f1829c06d0c7334d22e490af86da2d04de95b513",
+  "candidate_tree": "6b57ce23ef3e6ffcae23ba518d9d0de4d4a82656",
   "base_commit": "ae39dd7bc",
-  "captured_at": "2026-09-19T13:08:48-07:00",
+  "captured_at": "2026-09-19T13:20:00-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_internal_hooks_sidecar",
@@ -86,7 +86,8 @@
     ]
   },
   "notes": [
-    "This receipt binds source and test gate execution to candidate commit 807a60c98.",
+    "This receipt binds source and test gate execution to candidate commit f1829c06d and tree 6b57ce23.",
+    "The receipt commit that follows f1829c06d changes this evidence file only; the scoped source and test paths remain unchanged.",
     "The candidate fixes control-loss detection for the readiness-to-identity race and validates the persisted control-socket identity and protocol on every health probe.",
     "The candidate also accepts the correct post-readiness crash degradation detail in the CLI regression.",
     "The receipt commit itself contains documentation only; live runtime evidence remains separate."
