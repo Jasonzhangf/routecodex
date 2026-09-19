@@ -14,7 +14,12 @@ const { failures, warnings } = await runAll([
     severity: GATE_SEVERITY.BLOCK,
   },
   { label: 'isolation', command: 'node', args: ['scripts/verify-isolation.mjs'], severity: GATE_SEVERITY.BLOCK },
-  { label: 'admission', command: 'node', args: ['scripts/architecture/verify-admission.mjs'], severity: GATE_SEVERITY.BLOCK },
+  {
+    label: 'admission',
+    command: 'node',
+    args: ['scripts/run-admission-gate.mjs', 'scripts/architecture/verify-admission.mjs'],
+    severity: GATE_SEVERITY.BLOCK,
+  },
   { label: 'distribution', command: 'npm', args: ['run', 'test:distribution'], severity: GATE_SEVERITY.BLOCK },
   { label: 'install-cleanup', command: 'npm', args: ['run', 'test:install-cleanup'], severity: GATE_SEVERITY.BLOCK },
   {
