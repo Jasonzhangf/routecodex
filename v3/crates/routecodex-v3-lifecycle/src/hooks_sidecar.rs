@@ -206,11 +206,8 @@ async fn run_managed_hooks_sidecar(
             {
                 return stop_sidecar_after_primary_error(sidecar, status_error).await;
             }
-            if sidecar.control_socket_identity.is_some() {
-                let control_socket_path = sidecar
-                    .control_socket_path
-                    .as_deref()
-                    .expect("internal hooksd with a control socket identity has a path");
+            if let Some(control_socket_path) = sidecar.control_socket_path.as_deref() {
+                let control_socket_identity = sidecar.control_socket_identity;
                 tokio::select! {
                     _ = wait_for_sidecar_stop(&mut supervisor_stop_rx) => sidecar.stop().await,
                     status = sidecar.child.wait() => {
@@ -220,7 +217,7 @@ async fn run_managed_hooks_sidecar(
                         let exit = status.map_err(V3LifecycleError::Io)?;
                         degrade_after_sidecar_exit(&instance_dir, &instance_id, sidecar, exit).await
                     }
-                    _ = wait_for_sidecar_control_loss(control_socket_path) => {
+                    _ = wait_for_sidecar_control_loss(control_socket_path, control_socket_identity) => {
                         if *supervisor_stop_rx.borrow() {
                             return sidecar.stop().await;
                         }
@@ -303,18 +300,27 @@ async fn degrade_after_sidecar_control_loss(
     }
 }
 
-async fn wait_for_sidecar_control_loss(path: &Path) {
+async fn wait_for_sidecar_control_loss(
+    path: &Path,
+    expected_identity: Option<CodexAppSocketIdentity>,
+) {
     let mut interval = tokio::time::interval(Duration::from_millis(250));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         interval.tick().await;
-        if !sidecar_control_health(path).await {
+        if !sidecar_control_health(path, expected_identity).await {
             return;
         }
     }
 }
 
-async fn sidecar_control_health(path: &Path) -> bool {
+async fn sidecar_control_health(
+    path: &Path,
+    expected_identity: Option<CodexAppSocketIdentity>,
+) -> bool {
+    if !sidecar_control_socket_identity_matches(path, expected_identity) {
+        return false;
+    }
     // Every probe failure is control loss. The supervisor must publish an
     // explicit degraded state instead of ending silently with a probe error.
     let mut stream = match UnixStream::connect(path).await {
@@ -343,12 +349,27 @@ async fn sidecar_control_health(path: &Path) -> bool {
         Ok(response) => response,
         Err(_) => return false,
     };
-    response.ok
+    response.protocol == RCC_HOOKS_SIDECAR_PROTOCOL
+        && response.ok
         && response
             .result
             .as_ref()
             .and_then(|result| result["status"].as_str())
             == Some("ok")
+}
+
+fn sidecar_control_socket_identity_matches(
+    path: &Path,
+    expected_identity: Option<CodexAppSocketIdentity>,
+) -> bool {
+    let Some(expected_identity) = expected_identity else {
+        return false;
+    };
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    let current_identity = codexapp_socket_identity(&metadata);
+    current_identity.is_socket && current_identity == expected_identity
 }
 
 async fn stop_sidecar_after_primary_error(

@@ -969,7 +969,9 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        if detail.contains("hooks_unavailable:crashed") && detail.contains("exited after readiness")
+        if detail.contains("hooks_unavailable:crashed")
+            && (detail.contains("exited after readiness")
+                || detail.contains("control socket became unavailable"))
         {
             break;
         }
