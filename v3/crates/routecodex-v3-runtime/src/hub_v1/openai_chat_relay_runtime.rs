@@ -1074,6 +1074,15 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
+                            if let Some(failure) = classify_v3_provider_terminal_admission(
+                                V3HubProviderWireProtocol::Responses,
+                                &normalized,
+                            ) {
+                                return Err(format!(
+                                    "provider emitted {}: {}",
+                                    failure.code, failure.message
+                                ));
+                            }
                             let event = classify_v3_responses_sse_event(&normalized)
                                 .map(|semantic| project_v3_responses_sse_event_json(&semantic))
                                 .map_err(|error| error.to_string())?;
@@ -1108,14 +1117,7 @@ fn project_responses_sse_as_openai_chat_stream(
                                 })?;
                                 pending.push_back(format!("data: {governed}\n\n").into_bytes());
                             }
-                            // response.completed 与 response.incomplete 都是 Responses
-                            // 协议合法终态：codec 已为 incomplete 投影终帧
-                            // （finish_reason=length/content_filter + usage），客户端
-                            // SSE 流同样必须收口 [DONE]，否则截断响应会以
-                            // IncompleteRead / Connection reset 形式中断客户端连接。
-                            if event_type == "response.completed"
-                                || event_type == "response.incomplete"
-                            {
+                            if event_type == "response.completed" {
                                 pending.push_back(b"data: [DONE]\n\n".to_vec());
                                 done_seen = true;
                             }

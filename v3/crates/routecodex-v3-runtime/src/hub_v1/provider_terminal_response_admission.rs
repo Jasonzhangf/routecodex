@@ -24,11 +24,12 @@ pub(crate) fn classify_v3_provider_terminal_admission(
 }
 
 fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
+    let event_type = payload.get("type").and_then(Value::as_str);
     let status = payload
         .pointer("/response/status")
         .or_else(|| payload.get("status"))
         .and_then(Value::as_str);
-    (status == Some("incomplete")).then(|| {
+    (event_type == Some("response.incomplete") || status == Some("incomplete")).then(|| {
         payload
             .pointer("/response/incomplete_details/reason")
             .or_else(|| payload.pointer("/incomplete_details/reason"))
