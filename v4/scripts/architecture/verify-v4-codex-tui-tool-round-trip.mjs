@@ -212,7 +212,15 @@ function roundTripEvidence(records) {
       && Array.isArray(payload?.content)
       && payload.content.some((part) => part?.type === 'input_text' && part?.text === prompt);
   });
-  const turnId = promptRecord?.internal_chat_message_metadata_passthrough?.turn_id;
+  const turnId = promptRecord?.internal_chat_message_metadata_passthrough?.turn_id
+    ?? records.find((record) => {
+      const payload = record?.payload;
+      return record?.type === 'event_msg'
+        && payload?.type === 'item_completed'
+        && payload?.item?.type === 'UserMessage'
+        && Array.isArray(payload?.item?.content)
+        && payload.item.content.some((part) => part?.type === 'text' && part?.text === prompt);
+    })?.payload?.turn_id;
   const toolCall = records.find((record) => {
     const payload = record?.payload;
     return record?.type === 'response_item'
@@ -268,7 +276,6 @@ if (contractOnly) {
     {
       type: 'response_item',
       payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] },
-      internal_chat_message_metadata_passthrough: { turn_id: 'turn-1' },
     },
     {
       type: 'response_item',
@@ -286,14 +293,27 @@ if (contractOnly) {
       type: 'event_msg',
       payload: { type: 'task_complete', last_agent_message: marker },
     },
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'item_completed',
+        turn_id: 'turn-1',
+        item: {
+          type: 'UserMessage',
+          content: [{ type: 'text', text: prompt }],
+        },
+      },
+    },
   ];
   const negativeCases = [
     ['missing prompt correlation', records.filter((_, index) => index !== 0)],
     ['wrong prompt correlation', records.map((record, index) => (
       index === 0 ? { ...record, payload: { ...record.payload, content: [{ type: 'input_text', text: 'other prompt' }] } } : record
     ))],
-    ['missing turn correlation', records.map((record, index) => (
-      index === 0 ? { ...record, internal_chat_message_metadata_passthrough: {} } : record
+    ['missing turn correlation', records.filter((record) => (
+      !(record.type === 'event_msg'
+        && record.payload?.type === 'item_completed'
+        && record.payload?.item?.type === 'UserMessage')
     ))],
     ['call/output mismatch', records.map((record, index) => (
       index === 2 ? { ...record, payload: { ...record.payload, call_id: 'other-call' } } : record
