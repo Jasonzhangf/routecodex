@@ -156,13 +156,12 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
         .expect("provider probe listener must bind");
     let base_url = format!(
         "http://{}/v1",
-        listener.local_addr().expect("provider probe listener address")
+        listener
+            .local_addr()
+            .expect("provider probe listener address")
     );
     let mut manifest = global_pool_alive_manifest(server_id);
-    let provider = manifest
-        .providers
-        .get_mut("first")
-        .expect("first provider");
+    let provider = manifest.providers.get_mut("first").expect("first provider");
     provider.base_url = base_url;
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_FRESH_COOLDOWN_PROBE_KEY".into());
     std::env::set_var(
