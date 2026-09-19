@@ -97,6 +97,8 @@ const files = {
   policy: "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
   cooldownRescue: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
   webSearchHop: "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs",
+  webSearchSidecar:
+    "v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs",
   relayCore: "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs",
   directState: "v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs",
   directProtocolPlan: "v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs",
@@ -523,9 +525,14 @@ requireMatch(
   "Shared rescue owner must terminate dry-run exhaustion before provider probe I/O",
 );
 requireMatch(
-  source.webSearchHop,
-  /allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
-  "Web-search hop must preserve the dry-run prohibition on provider rescue probes",
+  source.webSearchSidecar,
+  /ControlRequest::ExecuteWebSearch[\s\S]*validate_control_response/u,
+  "Web-search state machine must bind execution to the typed hooks-sidecar owner",
+);
+forbidMatch(
+  `${source.webSearchHop}\n${source.webSearchSidecar}`,
+  /execute_local_web_search_hop|build_v3_provider_12_responses_wire_payload/u,
+  "Web-search state machine must not reconstruct a provider request",
 );
 requireMatch(
   source.anthropic,

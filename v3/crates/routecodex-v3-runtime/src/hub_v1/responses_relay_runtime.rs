@@ -1,7 +1,6 @@
 use super::web_search_hop::{
-    apply_v3_responses_relay_web_search_control_completion, execute_local_web_search_hop,
-    project_web_search_result_into_finalized, resolve_request_web_search_backend_binding,
-    resolve_web_search_mode_and_backend,
+    apply_v3_responses_relay_web_search_control_completion,
+    project_web_search_result_into_finalized, resolve_web_search_mode_and_backend,
 };
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
@@ -130,6 +129,20 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     execute_v3_responses_relay_runtime(manifest, input, crate::default_responses_transport()).await
 }
 
+pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    transport: &T,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_with_retry_policy(
+        manifest,
+        input,
+        transport,
+        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+    )
+    .await
+}
+
 pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state<
     T: ResponsesTransport,
 >(
@@ -206,20 +219,6 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         provider_snapshots.provider_response,
     ));
     Ok(output)
-}
-
-pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_retry_policy(
-        manifest,
-        input,
-        transport,
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-    )
-    .await
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTransport>(

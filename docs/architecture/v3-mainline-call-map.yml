@@ -13,7 +13,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
     callee_symbol: hooks_runtime_mode
     callee_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
-    status: anchored
+    status: as_is_bound
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.lifecycle.hooks_sidecar_declaration]
@@ -27,7 +27,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
     callee_symbol: ControlServer::with_native_sockets_handlers_and_state
     callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
-    status: anchored
+    status: as_is_bound
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.sidecar_install_record]
@@ -41,7 +41,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
     callee_symbol: HooksSidecarCore::forward
     callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
-    status: anchored
+    status: as_is_bound
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.control_socket]
@@ -55,7 +55,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-hooks/src/lib.rs
     callee_symbol: NativeAppServerTransport::send_message
     callee_file: v3/crates/routecodex-v3-hooks/src/appserver.rs
-    status: anchored
+    status: obsolete
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.delivery_ledger]
@@ -69,7 +69,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
     callee_symbol: NativeAppServerTransport::session_status
     callee_file: v3/crates/routecodex-v3-hooks/src/appserver.rs
-    status: anchored
+    status: obsolete
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.control_socket]
@@ -83,7 +83,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
     callee_symbol: HooksSidecarCore::run_due_schedules
     callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
-    status: anchored
+    status: as_is_bound
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.schedule_registry]
@@ -97,11 +97,28 @@ chains:
     caller_file: v3/crates/routecodex-v3-hooks/src/lib.rs
     callee_symbol: HookRegistry::dispatch
     callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
-    status: anchored
+    status: obsolete
     owner_feature_id: v3.rcc_internal_hooks_sidecar
     resource_flow:
       consumes: [v3.hooks.mounted_handler_registry]
       produces: [v3.hooks.delivery_ledger]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-hooks-sidecar-web-search-01
+    from_node: ControlServer
+    to_node: HooksSidecarCore
+    caller_symbol: handle_control_request
+    caller_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    callee_symbol: HooksSidecarCore::execute_web_search
+    callee_file: v3/crates/routecodex-v3-hooks/src/lib.rs
+    status: as_is_bound
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes:
+        - v3.hooks.control_socket
+        - v3.web_search.hook_request
+      produces:
+        - v3.web_search.hook_outcome
       side_channel_reads: []
       side_channel_writes: []
 - chain_id: v3.provider_global_cooldown_persistence
@@ -115,7 +132,7 @@ chains:
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: V3ProviderHealthStore::from_manifest
     callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: anchored
+    status: as_is_bound
     owner_feature_id: v3.provider_global_cooldown_persistence
     resource_flow:
       consumes: [v3.config.published_manifest]
@@ -4978,17 +4995,37 @@ chains:
       side_channel_writes: []
 - chain_id: v3.web_search_servertool_state_machine
   owner_feature_id: v3.web_search_servertool_state_machine
-  status: design
-  summary: web_search route activates only from current-turn evidence; ServerTool state manager owns search-only dispatch, follow-up marker, and paired tool-result injection; provider compat owns only provider wire shape.
+  status: source_bound
+  summary: Req04/Resp03 Chat Process hooks preserve web_search control state; the managed lifecycle explicitly passes the instance hooks-sidecar socket through ServerTool control state, and Relay/Direct execute one typed ExecuteWebSearch request without provider re-entry.
   manifest: docs/goals/v3-web-search-servertool-state-machine-proposal.md
   edges:
+  - step_id: v3-web-search-sm-sidecar-socket-01
+    from_node: V3Lifecycle04ChildSpawned
+    to_node: V3ServerToolState01ControlScope
+    caller_symbol: V3ManagedLifecycle::run_managed_child_with_declaration
+    caller_file: v3/crates/routecodex-v3-lifecycle/src/lib.rs
+    callee_symbol: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    callee_file: v3/crates/routecodex-v3-server/src/lib.rs
+    binding_kind: typed_control_path_carrier
+    behavior_gap: The lifecycle derives the socket path from the managed instance directory, waits for hooks-sidecar readiness before publishing managed Running, and calls the server constructor; the server constructor is the sole carrier writer into Relay and Direct ServerTool state.
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes:
+      - v3.lifecycle.hooks_sidecar_process
+      produces:
+      - v3.hooks.control_socket.runtime_carrier
+      side_channel_reads: []
+      side_channel_writes: []
+    status: as_is_bound
   - step_id: v3-web-search-sm-01
-    from_node: HubReqChatProcess03Governed
+    from_node: V3HubReqChatProcess04Governed
     to_node: V3WebSearch01RouteEvidenceClassified
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: govern_v3_servertool_request_at_req04
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: apply_v3_web_search_request_hook_at_req04
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: As-Is hook activates the local web_search surface from the current request; a typed WebSearchHookRequest cannot be constructed from current scope/deadline sources until the Phase 3 adapter binds those fields.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -4998,32 +5035,37 @@ chains:
       side_channel_reads: []
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-02
     from_node: V3WebSearch01RouteEvidenceClassified
-    to_node: VrRoute04SelectedTarget
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    to_node: V3WebSearchBackendBindingCompiled
+    caller_symbol: resolve_request_web_search_execution_mode
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+    callee_symbol: resolve_web_search_mode_and_backend
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: As-Is resolves the compiled backend binding only; no current-turn route classifier edge is bound, so the target-state route-evidence dependency remains missing.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
-      produces: []
+      produces:
+      - v3.web_search.backend_binding
       side_channel_reads:
       - v3.servertool.state_machine_control
       - v3.web_search.execution_mode
       side_channel_writes: []
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-03
     from_node: HubRespChatProcess03Governed
     to_node: V3ServerToolState01ControlScope
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: web_search_hook_outcome_from_center_state
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: Resp03 observes the local call, transitions typed state, and emits a typed HookOutcome; persistence is only bound in the response runtime paths that commit effects.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5035,51 +5077,55 @@ chains:
       - v3.servertool.state_machine_control
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-04
     from_node: V3ServerToolState01ControlScope
     to_node: V3WebSearch02SearchDispatchPrepared
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: execute_web_search_through_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    callee_symbol: capture_sidecar_result
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: The active sidecar helper advances SearchDispatchPrepared -> SearchInFlight -> SearchResultCaptured only after a typed call-id-bound result is validated.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
       - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      - v3.web_search.backend_binding
       produces:
-      - v3.request.normal_payload
+      - v3.servertool.state_machine_control
       side_channel_reads:
       - v3.servertool.state_machine_control
-      - v3.web_search.execution_mode
-      - v3.web_search.backend_binding
       side_channel_writes: []
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-05
     from_node: V3WebSearch02SearchDispatchPrepared
-    to_node: ProviderReqOutbound06WirePayload
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    to_node: ControlServer
+    caller_symbol: execute_web_search_through_hooks_sidecar
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs
+    callee_symbol: ControlRequest::ExecuteWebSearch
+    callee_file: v3/crates/routecodex-v3-hooks/src/control.rs
+    binding_kind: typed_control_request
+    behavior_gap: The active path sends one typed control request over the configured hooks sidecar socket and validates protocol, call id, typed outcome, malformed/missing adapter response, and deadline before capturing state; no provider request is reconstructed.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
-      - v3.request.normal_payload
+      - v3.hooks.control_socket.runtime_carrier
+      - v3.web_search.hook_request
       produces:
-      - v3.hub.provider_wire_payload
+      - v3.web_search.hook_outcome
+      - v3.servertool.state_machine_control
       side_channel_reads: []
       side_channel_writes: []
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-06
     from_node: HubRespChatProcess03Governed
     to_node: V3WebSearch03SearchResultCaptured
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: apply_v3_tool_call_servertool_hook_at_resp03
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    callee_symbol: intercept_local_web_search_call
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: Hosted text is captured when present and converted into a typed WebSearchResult/HookOutcome; otherwise the state remains observed until the local hop or a later typed adapter supplies the result.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5091,14 +5137,16 @@ chains:
       - v3.servertool.state_machine_control
       side_channel_writes:
       - v3.servertool.state_machine_control
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-07
     from_node: V3WebSearch03SearchResultCaptured
-    to_node: HubRespOutbound04ClientSemantic
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: project_web_search_result_into_finalized
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    callee_symbol: project_web_search_result_into_finalized
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    binding_kind: typed_result_projection
+    behavior_gap: Result projection consumes the call-id-bound typed sidecar result and preserves pairing.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5108,14 +5156,16 @@ chains:
       side_channel_reads:
       - v3.servertool.state_machine_control
       side_channel_writes: []
-    status: binding_pending
+    status: as_is_bound
   - step_id: v3-web-search-sm-08
-    from_node: HubReqChatProcess03Governed
+    from_node: V3HubReqChatProcess04Governed
     to_node: V3WebSearch04ToolResultInjected
-    caller_symbol: pending
-    caller_file: pending
-    callee_symbol: pending
-    callee_file: pending
+    caller_symbol: apply_v3_responses_relay_web_search_control_completion
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    callee_symbol: apply_v3_responses_relay_web_search_control_completion
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
+    binding_kind: typed_runtime_node
+    behavior_gap: Completion currently verifies the paired function_call_output; typed injection into the same governed request remains a P5 target binding.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:
@@ -5126,7 +5176,7 @@ chains:
       side_channel_reads:
       - v3.servertool.state_machine_control
       side_channel_writes: []
-    status: binding_pending
+    status: as_is_bound
 - chain_id: v3.console_request_count_visibility.mainline
   owner_feature_id: v3.console_request_count_visibility
   summary: One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
@@ -7290,12 +7340,13 @@ chains:
 
   - step_id: v3-responses-sse-tree-03
     from_node: HubRespChatProcess03Governed
-    to_node: HubRespOutbound04ClientSemantic
-    caller_symbol: rewrite_v3_responses_sse_content
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs
-    callee_symbol: rewrite_v3_responses_sse_content
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree_projection.rs
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
     status: binding_pending
+    behavior_gap: The typed Responses SSE semantic tree is materialized to a canonical JSON response before the adjacent Resp05 projection; no direct semantic-tree-to-Resp05 caller exists yet.
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.responses.semantic_tree]
@@ -7304,7 +7355,7 @@ chains:
       side_channel_writes: []
   - step_id: v3-responses-relay-typed-hook-catalog-01
     from_node: HubRespInbound02Parsed
-    to_node: HubRespOutbound04ClientSemantic
+    to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     callee_symbol: V3RelaySseHookCatalog::rewrite_responses
@@ -7340,12 +7391,12 @@ chains:
       side_channel_writes: [v3.sse.chat.protocol_metadata]
   - step_id: v3-chat-sse-tree-02
     from_node: HubRespChatProcess03Governed
-    to_node: HubRespOutbound04ClientSemantic
-    caller_symbol: rewrite_v3_openai_chat_sse_content
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
-    callee_symbol: rewrite_v3_openai_chat_sse_content
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_sse_tree.rs
-    status: binding_pending
+    to_node: V3HubRespOutbound05ClientSemantic
+    caller_symbol: project_json_response
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    callee_symbol: build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+    status: anchored
     owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
     resource_flow:
       consumes: [v3.sse.chat.semantic_tree]
@@ -7368,7 +7419,7 @@ chains:
       side_channel_writes: []
   - step_id: v3-relay-typed-hook-catalog-01
     from_node: HubRespInbound02Parsed
-    to_node: HubRespOutbound04ClientSemantic
+    to_node: V3HubRespOutbound05ClientSemantic
     caller_symbol: V3HubRelayResponseHookRegistry::typed_sse_catalog
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
     callee_symbol: V3RelaySseHookCatalog::rewrite_chat

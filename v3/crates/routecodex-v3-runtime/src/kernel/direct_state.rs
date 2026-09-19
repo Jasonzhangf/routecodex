@@ -1,6 +1,7 @@
 use crate::hub_v1::{
     V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
 };
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesDirectServerToolScope {
@@ -36,14 +37,36 @@ impl V3ResponsesDirectServerToolScope {
         }
         !(session_id == conversation_id && session_id.starts_with("request:"))
     }
+
+    pub fn web_search_hook_scope(
+        &self,
+    ) -> servertool_core::web_search_contract::WebSearchHookScope {
+        servertool_core::web_search_contract::WebSearchHookScope {
+            entry_endpoint: self.entry_endpoint.clone(),
+            session_id: self.session_id.clone(),
+            conversation_id: self.conversation_id.clone(),
+            port: self.port,
+            routing_group: self.routing_group.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct V3ResponsesDirectServerToolState {
     center: V3ServerToolCenter,
+    hooks_sidecar_socket: Option<PathBuf>,
 }
 
 impl V3ResponsesDirectServerToolState {
+    pub fn with_hooks_sidecar_socket(mut self, socket_path: Option<PathBuf>) -> Self {
+        self.hooks_sidecar_socket = socket_path;
+        self
+    }
+
+    pub(crate) fn hooks_sidecar_socket(&self) -> Option<&std::path::Path> {
+        self.hooks_sidecar_socket.as_deref()
+    }
+
     fn web_search_center_key(
         scope: &V3ResponsesDirectServerToolScope,
     ) -> V3ServerToolCenterKey {

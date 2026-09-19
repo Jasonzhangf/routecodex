@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RouteCodex V3 Business Five-Chain DAG Audit</title>
+  <style>
+    :root{--ink:#17212b;--muted:#5d6b78;--line:#cbd5dd;--paper:#f4f7f8;--panel:#fff;--blue:#1769aa;--blue2:#e8f2fa;--green:#16704a;--green2:#e8f6ef;--amber:#9a6100;--amber2:#fff3d9;--red:#a33131;--red2:#fdecec;--violet:#6651a5;--violet2:#f0edf9;--teal:#1f7773;--teal2:#e7f5f3}
+    *{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font:14px/1.55 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .wrap{max-width:1480px;margin:auto;padding:28px 24px 80px}header,section{background:var(--panel);border:1px solid var(--line);border-radius:8px}header{padding:26px 28px}section{margin-top:22px;padding:24px}
+    h1{margin:0 0 8px;font-size:28px}h2{margin:0 0 5px;font-size:22px}h3{margin:24px 0 10px;font-size:17px}h4{margin:14px 0 8px;font-size:14px}p{margin:7px 0}
+    code{padding:1px 5px;color:#24445e;background:#edf2f6;border-radius:4px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+    .sub{color:var(--muted);max-width:1120px}.meta,.toc,.legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}.toc{margin:18px 0 22px}
+    .pill,.toc a{padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fbfcfd;color:var(--muted);font-size:12px;text-decoration:none}.toc a{color:var(--blue)}
+    .section-head{display:flex;justify-content:space-between;gap:20px;align-items:start}.badge{flex:0 0 auto;padding:4px 8px;border-radius:5px;font-size:11px;font-weight:700;text-transform:uppercase}
+    .badge.as{color:var(--blue);background:var(--blue2)}.badge.to{color:var(--green);background:var(--green2)}.badge.diff{color:var(--violet);background:var(--violet2)}.badge.warn{color:var(--amber);background:var(--amber2)}.badge.fail{color:var(--red);background:var(--red2)}
+    .grid2,.grid3{display:grid;grid-template-columns:1fr 1fr;gap:20px}.grid3{grid-template-columns:repeat(3,1fr)}.lane{padding:18px;background:#fbfcfd;border:1px solid var(--line);border-radius:7px}.lane h3,.lane h4{margin-top:0}
+    .chain{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:14px auto 4px;max-width:760px}.chain.compact{max-width:620px}
+    .node{position:relative;padding:10px 12px;border:1px solid #b9c6d1;border-left:5px solid var(--blue);border-radius:6px;background:#fff;box-shadow:0 1px 2px rgba(20,35,48,.05)}
+    .node .id{display:block;color:#1f4e70;font:700 12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.node .role{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+    .runtime{border-left-color:var(--blue)}.router{border-left-color:var(--teal)}.target{border-left-color:#5f6f2f}.provider{border-left-color:#b15c2b}.server{border-left-color:#6f5ca8}.error{border-left-color:var(--red)}.sse{border-left-color:#267c84}.hook{border-left-color:var(--violet)}
+    .pending{border-style:dashed;background:var(--amber2)}.missing{border-style:dashed;border-color:var(--red);background:var(--red2)}.remove{border-style:dashed;border-color:var(--amber);background:var(--amber2)}.terminal{background:var(--green2);border-color:#91c6aa}
+    .flags{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}.flag{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}.ok{color:var(--green);background:var(--green2)}.warn{color:var(--amber);background:var(--amber2)}.bad{color:var(--red);background:var(--red2)}
+    .arrow{position:relative;height:27px;margin:0 auto;width:2px;background:#9aabb8}.arrow:after{content:"";position:absolute;left:-4px;bottom:-1px;width:8px;height:8px;border-right:2px solid #9aabb8;border-bottom:2px solid #9aabb8;transform:rotate(45deg)}
+    .arrow span{position:absolute;top:6px;left:11px;width:max-content;max-width:260px;color:var(--muted);font-size:11px;white-space:nowrap}.arrow.gap{background:repeating-linear-gradient(to bottom,var(--red) 0 4px,transparent 4px 8px)}.arrow.gap:after{border-color:var(--red)}.arrow.gap span{color:var(--red)}
+    .arrow.pending{background:repeating-linear-gradient(to bottom,var(--amber) 0 4px,transparent 4px 8px)}.arrow.pending:after{border-color:var(--amber)}.arrow.pending span{color:var(--amber)}
+    .fork{display:grid;grid-template-columns:1fr 1fr;gap:14px}.merge{margin:8px 0;padding:8px 10px;color:var(--muted);background:#eef3f6;border:1px dashed #b9c6d1;border-radius:5px;text-align:center;font-size:12px}
+    .callout{margin-top:16px;padding:13px 15px;border-left:4px solid var(--blue);background:var(--blue2);border-radius:5px}.callout.warn{border-left-color:var(--amber);background:var(--amber2)}.callout.fail{border-left-color:var(--red);background:var(--red2)}.callout.ok{border-left-color:var(--green);background:var(--green2)}
+    table{width:100%;margin-top:14px;border-collapse:collapse;font-size:13px}th,td{padding:9px 10px;border:1px solid var(--line);vertical-align:top;text-align:left}th{background:#edf2f6}
+    .status{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;white-space:nowrap}.status.ok{color:var(--green);background:var(--green2)}.status.partial{color:var(--amber);background:var(--amber2)}.status.missing{color:var(--red);background:var(--red2)}
+    ul,ol{margin:8px 0 0;padding-left:22px}li{margin:5px 0}.approval{border:1px solid #d5b46a;background:#fff9e8;border-radius:7px;padding:15px 17px;margin-top:18px}.approval strong{color:#7d5000}
+    @media(max-width:1040px){.grid2,.grid3,.fork{grid-template-columns:1fr}.section-head{flex-direction:column}.wrap{padding:16px 12px 50px}section{padding:17px}header{padding:20px}table{display:block;overflow-x:auto}.arrow span{white-space:normal;max-width:190px}}
+  </style>
+</head>
+<body><div class="wrap">
+<header>
+  <h1>RouteCodex V3 业务 DAG 审计</h1>
+  <p class="sub">从当前业务真源反推 As-Is，按五条业务链垂直展示：请求/响应主链、错误链、Hook 链、Direct/Relay 主链、SSE 处理链。WebSearch 单独对比传统 request-local re-enter 与 Hook → Subagent → typed result 目标路径。</p>
+  <div class="meta"><span class="pill">范围：V3 production path</span><span class="pill">基线：main <code>ba3a144d0</code></span><span class="pill">证据：maps + manifests + Rust callers</span><span class="pill">状态：候选，未提交</span></div>
+</header>
+<nav class="toc"><a href="#verdict">结论</a><a href="#asis">五条 As-Is</a><a href="#websearch">WebSearch</a><a href="#tobe">To-Be</a><a href="#diff">Diff</a><a href="#violations">Closure</a><a href="#migration">Migration</a><a href="#risks">Risks</a></nav>
+
+<section id="verdict"><div class="section-head"><div><h2>结论先行</h2><p class="sub">固定骨架大体成立；真正要先处理的是 Hook 挂载面、WebSearch request-local re-enter、SSE 语义边界和 evidence/acceptance 断层。</p></div><span class="badge fail">Business Audit</span></div>
+  <div class="callout fail"><strong>最关键缺陷：</strong><code>execute_local_web_search_hop</code> 在 Resp03 后再次构造 Req01 → Req09 并走 Provider，形成同一请求内的局部环与第二 Provider attempt。它不符合 Hook → Subagent → typed result 后返回原节点的目标结构。</div>
+  <table><thead><tr><th>业务链</th><th>As-Is</th><th>主要缺口</th><th>结论</th></tr></thead><tbody>
+    <tr><td>请求/响应主链</td><td><span class="status ok">anchored</span></td><td>当前 fixed enum 无 continuation 节点；旧图把它画成主链节点是模型错误。</td><td>保留骨架，修正图。</td></tr>
+    <tr><td>错误链</td><td><span class="status ok">anchored</span></td><td>协议失败路径覆盖不均；Error 与 Provider health owner 已分离。</td><td>不新增 Error lifecycle。</td></tr>
+    <tr><td>Hook 链</td><td><span class="status partial">partial</span></td><td>30 个固定 slot 大量 <code>not_implemented</code>；无 WebSearch Subagent typed result。</td><td>Hook 是挂载面，不是第二业务链。</td></tr>
+    <tr><td>Direct / Relay</td><td><span class="status ok">anchored</span></td><td>共享骨架成立；默认生产入口与统一 terminal acceptance 未全绑定。</td><td>保持唯一 Resp05 / Server06 汇聚。</td></tr>
+    <tr><td>SSE</td><td><span class="status partial">partial</span></td><td>typed SSE tree → Resp05 pending；Direct SSE front 仍待 live replay。</td><td>SSE 只做 transport framing。</td></tr>
+    <tr><td>WebSearch</td><td><span class="status missing">design / re-enter</span></td><td>代码有 local hop，map 仍 design，8 条边 binding_pending；无 Subagent contract。</td><td>先补 typed path，验证 parity 后删 re-enter。</td></tr>
+  </tbody></table>
+  <div class="approval"><strong>审批点：</strong><p>请审批：1) 五条 As-Is 是否符合业务；2) WebSearch 是否按 Hook → Subagent → typed result 重做；3) 是否同意“先补绑定和验证，再删除 re-enter”。审批前不提交、不合并、不改 Runtime。</p></div>
+</section>
+
+<section id="asis"><div class="section-head"><div><h2>1. As-Is 五条业务链</h2><p class="sub">垂直展示，直接按当前 manifest、call map、固定节点枚举与 Rust caller 反推。</p></div><span class="badge as">Reverse Engineered</span></div>
+
+  <article class="lane"><h3>1.1 请求 / 响应主链</h3><div class="grid2">
+    <div><h4>Request：client → provider</h4><div class="chain">
+      <div class="node server"><span class="id">R00 · V3Server03HttpRequestRaw</span><span class="role">HTTP/WS 入口、entry protocol、stream intent、scope。</span><div class="flags"><span class="flag ok">runtime entry</span></div></div><div class="arrow"><span>entry binding</span></div>
+      <div class="node runtime"><span class="id">R01 · V3HubReqInbound01ClientRaw</span><span class="role">原始客户端请求进入固定 Hub v1。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>lossless normalize</span></div>
+      <div class="node runtime"><span class="id">R02 · V3HubReqInbound02Normalized</span><span class="role">Canonical Chat + registered extensions，不丢字段。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>Chat governance</span></div>
+      <div class="node runtime"><span class="id">R04 · V3HubReqChatProcess04Governed</span><span class="role">History/tool/current-turn 治理；Servertool request hook 固定挂载点。</span><div class="flags"><span class="flag ok">anchored</span><span class="flag warn">hook partial</span></div></div><div class="arrow"><span>execution plan</span></div>
+      <div class="node runtime"><span class="id">R05 · V3HubReqExecution05Planned</span><span class="role">产生 typed execution plan。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>target resolution</span></div>
+      <div class="node target"><span class="id">R06 · V3HubReqTarget06Resolved</span><span class="role">Routed / exact target 解析；无 continuation 固定节点。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>provider semantic</span></div>
+      <div class="node runtime"><span class="id">R07 · V3HubReqOutbound07ProviderSemantic</span><span class="role">Canonical Chat → provider semantic，唯一 outbound 语义边界。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>provider compat</span></div>
+      <div class="node provider"><span class="id">R08 · ProviderReqCompat06ProviderCompat</span><span class="role">只做 provider-private compat。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>wire payload</span></div>
+      <div class="node provider"><span class="id">R09 · V3ProviderReqOutbound08WirePayload</span><span class="role">最终 provider wire payload。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>transport request</span></div>
+      <div class="node provider"><span class="id">R10 · V3ProviderReqOutbound09TransportRequest</span><span class="role">Auth handle 只在此边界解析。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>network attempt</span></div>
+      <div class="node provider"><span class="id">R11 · Provider transport attempt</span><span class="role">失败进入 Error01，不直接写客户端。</span><div class="flags"><span class="flag ok">runtime bound</span></div></div>
+    </div></div>
+    <div><h4>Response：provider → client</h4><div class="chain">
+      <div class="node provider"><span class="id">S01 · V3ProviderRespInbound01Raw</span><span class="role">Raw JSON/SSE provider response。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>provider compat</span></div>
+      <div class="node provider"><span class="id">S02 · ProviderRespCompat02ProviderCompat</span><span class="role">Provider-private response compatibility。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>normalize</span></div>
+      <div class="node runtime"><span class="id">S03 · V3HubRespInbound02Normalized</span><span class="role">Provider raw → canonical response semantic。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>response governance</span></div>
+      <div class="node runtime"><span class="id">S04 · V3HubRespChatProcess03Governed</span><span class="role">Response tool/history governance；Servertool response hook 挂载点。</span><div class="flags"><span class="flag ok">anchored</span><span class="flag warn">websearch pending</span></div></div><div class="arrow"><span>client semantic</span></div>
+      <div class="node runtime"><span class="id">S05 · V3HubRespOutbound05ClientSemantic</span><span class="role">成功、错误、Direct、Relay、servertool 的唯一语义汇聚点。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>JSON / SSE frame</span></div>
+      <div class="node server"><span class="id">S06 · V3ServerRespOutbound06ClientFrame</span><span class="role">唯一 client frame 出口。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>terminal</span></div>
+      <div class="node terminal"><span class="id">S07 · Client terminal</span><span class="role">成功 JSON / SSE terminal / Error06 terminal。</span><div class="flags"><span class="flag ok">terminal</span></div></div>
+    </div></div>
+  </div>
+  <div class="callout warn"><strong>真源修正：</strong>固定枚举只有 15 个节点：Req01、Req02、Req04、Req05、Req06、Req07、Compat06、Req08、Req09、Resp01、Compat02、Resp02、Resp03、Resp05、Server06。当前 Runtime 明确拒绝非空 <code>previous_response_id</code>，所以旧图中的 ReqContinuation03 / RespContinuation04 不能作为 As-Is 固定节点。</div>
+  </article>
+
+  <article class="lane" style="margin-top:20px"><h3>1.2 Error 链</h3><div class="chain compact">
+    <div class="node error"><span class="id">E01 · V3Error01SourceRaised</span><span class="role">Provider / transport / request / response / internal failure typed source。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>classify</span></div>
+    <div class="node error"><span class="id">E02 · V3Error02Classified</span><span class="role">稳定错误类别，不改 payload。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>action plan</span></div>
+    <div class="node error"><span class="id">E03 · V3Error03TargetLocalAction</span><span class="role">Target-local retry / switch 计划。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>exhaustion</span></div>
+    <div class="node error"><span class="id">E04 · V3Error04TargetExhaustionDecision</span><span class="role">判断 target pool 是否耗尽，不重进 Router。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>execution decision</span></div>
+    <div class="node error"><span class="id">E05 · V3Error05ExecutionDecision</span><span class="role">Reselect / retry / terminal；Provider 才是 health mutation owner。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>client projection</span></div>
+    <div class="node error"><span class="id">E06 · V3Error06ClientProjected</span><span class="role">Typed client error，最终仍走 S05 → S06。</span><div class="flags"><span class="flag ok">anchored</span></div></div>
+  </div><div class="callout"><strong>允许的旁路边：</strong>Provider failure → E01 → E03 → E04 → E05 → health mutation / reselection。Error 不拥有 payload rewrite，也不拥有 SSE semantic。</div></article>
+
+  <article class="lane" style="margin-top:20px"><h3>1.3 Hook 链</h3><div class="grid2"><div><div class="chain compact">
+    <div class="node runtime"><span class="id">H01 · V3Config05ManifestPublished</span><span class="role">发布 pipeline、resource、hook declarations。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>compile closed catalog</span></div>
+    <div class="node hook"><span class="id">H02 · V3HubStaticHookRegistry</span><span class="role">15 nodes × entry/exit = 30 slots；校验 profile/resource 边界。</span><div class="flags"><span class="flag ok">anchored</span><span class="flag warn">many no-op</span></div></div><div class="arrow"><span>typed slot</span></div>
+    <div class="node hook"><span class="id">H03 · Hook owner result</span><span class="role">返回 typed result/error，不直接写 client frame。</span><div class="flags"><span class="flag ok">contract</span></div></div><div class="arrow"><span>return to same node</span></div>
+    <div class="node runtime"><span class="id">H04 · 原节点继续</span><span class="role">Req04/Resp03 继续固定骨架，不重新进入 Req01。</span><div class="flags"><span class="flag ok">no re-enter</span></div></div>
+  </div></div><div><table><thead><tr><th>Hook point</th><th>Owner / 用途</th><th>状态</th></tr></thead><tbody>
+    <tr><td><code>Route</code></td><td><code>responses_direct_route_hook</code></td><td><span class="status ok">anchored</span></td></tr><tr><td><code>RequestProjection</code></td><td><code>responses_direct_request_projection_hook</code> + key hooks</td><td><span class="status ok">anchored</span></td></tr>
+    <tr><td><code>ProviderTransport</code></td><td><code>responses_direct_provider_transport_hook</code></td><td><span class="status ok">anchored</span></td></tr><tr><td><code>ResponseProjection</code></td><td><code>responses_direct_response_projection_hook_with_context</code></td><td><span class="status ok">anchored</span></td></tr>
+    <tr><td><code>Error</code></td><td><code>responses_direct_error_hook</code></td><td><span class="status ok">anchored</span></td></tr><tr><td>Servertool profile</td><td>Req04 / Resp03 fixed mount</td><td><span class="status partial">partial</span></td></tr>
+    <tr><td>WebSearch Subagent hook</td><td>typed request/result contract 不存在</td><td><span class="status missing">MISSING</span></td></tr>
+  </tbody></table><div class="callout warn"><strong>结构缺口：</strong>Hook registry 已有，但 WebSearch 不是 Hook 调 Subagent 并返回 typed result。缺 <code>WebSearchHookRequest</code>、<code>WebSearchSubagentAdapter</code>、<code>WebSearchResult</code>、<code>HookOutcome</code> 绑定，不是新 Runtime lifecycle。</div></div></div></article>
+
+  <article class="lane" style="margin-top:20px"><h3>1.4 Direct / Relay 主链</h3><div class="chain compact">
+    <div class="node runtime"><span class="id">D00 · Shared request skeleton</span><span class="role">R00 → R01 → R02 → R04 → R05 → R06。</span><div class="flags"><span class="flag ok">shared</span></div></div><div class="arrow"><span>Target08 → Target09 → Target10</span></div>
+    <div class="node target"><span class="id">D01 · V3Target10ConcreteProviderSelected</span><span class="role">候选扩展、capability/context/availability admission、concrete provider。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>execution decision</span></div>
+    <div class="node runtime"><span class="id">D02 · V3Execution11ProtocolDecision</span><span class="role">Direct 或 Relay；Responses + <code>responses.process=chat</code> 优先 Relay。</span><div class="flags"><span class="flag ok">anchored</span></div></div>
+    <div class="fork"><div><h4>Direct</h4><div class="chain compact">
+      <div class="node runtime"><span class="id">DD1 · V3ResponsesDirect11Policy</span><span class="role">Direct policy，不绕过 Target10。</span></div><div class="arrow"><span>request projection</span></div><div class="node provider"><span class="id">DD2 · Provider12 → Transport13</span><span class="role">wire payload → transport request。</span></div><div class="arrow"><span>provider response</span></div><div class="node runtime"><span class="id">DD3 · DirectResp14 → DirectResp15</span><span class="role">response projection，不直写 client。</span></div>
+    </div></div><div><h4>Relay</h4><div class="chain compact">
+      <div class="node runtime"><span class="id">RR1 · Req02 → Req04 → Req05</span><span class="role">Relay request hooks。</span></div><div class="arrow"><span>Req06 → Req07 → Req08 → Req09</span></div><div class="node provider"><span class="id">RR2 · Provider transport</span><span class="role">Provider attempt。</span></div><div class="arrow"><span>Resp01 → Compat02 → Resp02 → Resp03</span></div><div class="node runtime"><span class="id">RR3 · Relay response governance</span><span class="role">JSON/SSE 语义仍在 Resp05 前完成。</span></div>
+    </div></div></div><div class="merge">Direct 与 Relay 在 S05 汇聚，然后只有 S06 一个 client exit。</div>
+    <div class="node runtime"><span class="id">D03 · V3HubRespOutbound05ClientSemantic</span><span class="role">所有执行模式的唯一 client semantic。</span><div class="flags"><span class="flag ok">single merge</span></div></div><div class="arrow"><span>only client frame</span></div><div class="node server terminal"><span class="id">D04 · V3ServerRespOutbound06ClientFrame</span><span class="role">唯一 terminal；Provider 直出 client 是禁止路径。</span><div class="flags"><span class="flag ok">terminal</span></div></div>
+  </div></article>
+
+  <article class="lane" style="margin-top:20px"><h3>1.5 SSE 处理链</h3><div class="grid2"><div><h4>Provider SSE transport</h4><div class="chain compact">
+    <div class="node provider"><span class="id">SSE01 · V3SseTransportIn01RawChunk</span><span class="role">Provider raw bytes/chunk。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>incremental decode</span></div>
+    <div class="node sse"><span class="id">SSE02 · V3SseTransportIn02DecodedFrame</span><span class="role">SSE fields → frame，不解析业务事件。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>validate stream</span></div>
+    <div class="node sse"><span class="id">SSE03 · V3SseTransportIn03ValidatedFrameStream</span><span class="role">合法 frame stream；无 retry/continuation/servertool/routing。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>encode output</span></div>
+    <div class="node sse"><span class="id">SSE04 · V3SseTransportOut04EncodedChunk</span><span class="role">Transport output chunk。</span><div class="flags"><span class="flag ok">anchored</span></div></div>
+  </div></div><div><h4>Client SSE boundary</h4><div class="chain compact">
+    <div class="node server"><span class="id">SSE05 · V3DirectSseAccept01ClientChannel</span><span class="role">可先建立 channel 和 transport-only keepalive。</span><div class="flags"><span class="flag ok">anchored</span><span class="flag warn">live pending</span></div></div><div class="arrow"><span>runtime worker</span></div>
+    <div class="node server"><span class="id">SSE06 · V3DirectSseAccept02RuntimeWorker</span><span class="role">只转发 projected client frame 或 Error06 terminal。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>projected frame only</span></div>
+    <div class="node server terminal"><span class="id">SSE07 · V3DirectSseAccept03ProjectedClientFrame</span><span class="role">不能暴露 failed provider prefix。</span><div class="flags"><span class="flag ok">terminal boundary</span></div></div><div class="arrow pending"><span>typed SSE tree → Resp05 pending</span></div>
+    <div class="node runtime"><span class="id">SSE08 · V3HubRespOutbound05ClientSemantic</span><span class="role">唯一响应语义 owner。</span><div class="flags"><span class="flag ok">semantic owner</span></div></div><div class="arrow"><span>only frame exit</span></div><div class="node server"><span class="id">SSE09 · V3ServerRespOutbound06ClientFrame</span><span class="role">唯一 HTTP/SSE body exit。</span><div class="flags"><span class="flag warn">bind pending</span></div></div>
+  </div></div></div><div class="callout fail"><strong>SSE forbidden semantics：</strong><code>response.completed</code>、<code>response.requires_action</code>、<code>response.failed</code>、<code>tool_call</code>、<code>continuation</code>、<code>servertool</code>、<code>retry_or_reroute_policy</code> 不得进入 SSE transport core。</div></article>
+</section>
+
+<section id="websearch"><div class="section-head"><div><h2>2. WebSearch：As-Is re-enter vs To-Be Hook / Subagent</h2><p class="sub">保留 tool detection、scope validation、call_id pairing 和最终投影；替换搜索执行 owner。</p></div><span class="badge fail">Structural Gap</span></div>
+  <div class="grid2">
+    <article class="lane"><h3>As-Is：传统 request-local re-enter</h3><div class="chain compact">
+      <div class="node runtime"><span class="id">W01 · S04 V3HubRespChatProcess03Governed</span><span class="role">主响应进入 Resp03 governance。</span><div class="flags"><span class="flag ok">anchored</span></div></div><div class="arrow"><span>tool call detected</span></div>
+      <div class="node hook"><span class="id">W02 · apply_v3_tool_call_servertool_hook_at_resp03</span><span class="role">识别 web_search / web_search_preview。</span><div class="flags"><span class="flag warn">partial</span></div></div><div class="arrow pending"><span>state dispatch</span></div>
+      <div class="node remove"><span class="id">W03 · V3ServerToolState01ControlScope</span><span class="role">ServerToolCenter scope 与 phase。</span><div class="flags"><span class="flag warn">remove candidate</span></div></div><div class="arrow gap"><span>INVALID request-local cycle</span></div>
+      <div class="node remove"><span class="id">W04 · execute_local_web_search_hop</span><span class="role">再次构造 payload、Target resolution、Req01 → Req09、Provider transport。</span><div class="flags"><span class="flag bad">re-enter</span></div></div><div class="arrow gap"><span>second provider attempt</span></div>
+      <div class="node remove"><span class="id">W05 · SearchDispatchPrepared / SearchInFlight</span><span class="role">只服务 re-enter 的状态推进。</span><div class="flags"><span class="flag bad">cycle node</span></div></div><div class="arrow"><span>capture result</span></div>
+      <div class="node pending"><span class="id">W06 · SearchResultCaptured</span><span class="role">结果捕获后回原响应链投影。</span><div class="flags"><span class="flag warn">partial</span></div></div><div class="arrow"><span>project hosted result</span></div>
+      <div class="node runtime"><span class="id">W07 · S04 → S05 → S06</span><span class="role">最终仍走共享响应出口。</span><div class="flags"><span class="flag ok">shared exit</span></div></div>
+    </div><div class="callout fail"><strong>As-Is 问题：</strong>map 为 <code>design</code>，8 条边为 <code>binding_pending</code>；代码却已存在 local hop，说明实现、绑定和验证三者不一致。</div></article>
+    <article class="lane"><h3>To-Be：Hook → Subagent → typed result → 原链继续</h3><div class="chain compact">
+      <div class="node runtime"><span class="id">T-W01 · Req04 / Resp03 typed hook</span><span class="role">识别搜索意图或 tool call，只产生 typed request。</span><div class="flags"><span class="flag ok">existing slot</span></div></div><div class="arrow gap"><span>MISSING_BINDING</span></div>
+      <div class="node missing"><span class="id">T-W02 · WebSearchHookRequest</span><span class="role">query、call_id、scope、deadline、search policy；控制状态不进 payload。</span><div class="flags"><span class="flag bad">MISSING</span></div></div><div class="arrow gap"><span>adapter binding</span></div>
+      <div class="node missing"><span class="id">T-W03 · WebSearchSubagentAdapter</span><span class="role">调用已有、具备 web search 能力的 subagent；不进入 Router/Provider re-enter。</span><div class="flags"><span class="flag bad">MISSING</span></div></div><div class="arrow gap"><span>typed result only</span></div>
+      <div class="node missing"><span class="id">T-W04 · WebSearchResult</span><span class="role">result、sources、status、error、usage；唯一 owner、bounded schema。</span><div class="flags"><span class="flag bad">MISSING</span></div></div><div class="arrow"><span>HookOutcome</span></div>
+      <div class="node hook"><span class="id">T-W05 · Hook return</span><span class="role">返回原 Req04/Resp03；失败进入 Error chain，不伪装成功。</span><div class="flags"><span class="flag warn">to bind</span></div></div><div class="arrow"><span>normal main chain</span></div>
+      <div class="node runtime terminal"><span class="id">T-W06 · S04 → S05 → S06</span><span class="role">结果投影后继续原响应链和唯一 client frame；下一轮从正常 Req01 开始。</span><div class="flags"><span class="flag ok">normal exit</span></div></div>
+    </div><div class="callout ok"><strong>最小替换：</strong>先保留 detection、scope、pairing、projection；只替换搜索执行 owner。旧 phase/center 在 typed subagent parity 通过后再删除。</div></article>
+  </div>
+  <table><thead><tr><th>检查</th><th>As-Is</th><th>To-Be</th><th>处理</th></tr></thead><tbody>
+    <tr><td>搜索执行 owner</td><td><code>execute_local_web_search_hop</code> 再走 Hub/Provider</td><td><code>WebSearchSubagentAdapter</code> 唯一 owner</td><td>先补 typed binding，再替换</td></tr>
+    <tr><td>控制状态</td><td>ServerToolCenter phase 承载 re-enter</td><td>只保留跨轮 pairing 的最小状态</td><td>逐 phase 消融</td></tr>
+    <tr><td>结果</td><td>Capture 后投影 hosted result</td><td><code>WebSearchResult</code> + bounded error</td><td>补 schema / negative tests</td></tr>
+    <tr><td>失败</td><td>Local hop dispatch error</td><td>Typed hook failure → Error01 → Error06</td><td>禁止 success-wrap</td></tr>
+    <tr><td>主链</td><td>Resp03 后重入 Req01</td><td>Hook 返回原节点</td><td>删除 re-enter edge</td></tr>
+  </tbody></table>
+</section>
+
+<section id="tobe"><div class="section-head"><div><h2>3. To-Be 最小闭环</h2><p class="sub">不增加第二 Router、第二响应出口、第二 SSE lifecycle。</p></div><span class="badge to">Minimal Closed Loop</span></div><div class="chain compact">
+  <div class="node server"><span class="id">T01 · Client request</span><span class="role">真实入口、协议、stream intent、scope 明确。</span></div><div class="arrow"><span>Server03 → Req01 → Req02</span></div>
+  <div class="node runtime"><span class="id">T02 · Req04 / Req05 / Req06</span><span class="role">Governance、execution plan、target resolution；Hook 只返回 typed result。</span></div><div class="arrow"><span>Execution11</span></div>
+  <div class="node runtime"><span class="id">T03 · Direct | Relay</span><span class="role">只影响语义 ownership 和协议处理，共享骨架。</span></div><div class="arrow"><span>Req07 → Compat06 → Req08 → Req09</span></div>
+  <div class="node provider"><span class="id">T04 · Provider transport attempt</span><span class="role">失败进入 Error01，不直接写 client。</span></div><div class="arrow"><span>raw JSON / SSE</span></div>
+  <div class="node runtime"><span class="id">T05 · Resp01 → Compat02 → Resp02 → Resp03</span><span class="role">兼容、归一化、响应治理；Hook 返回 typed result。</span></div><div class="arrow"><span>single semantic</span></div>
+  <div class="node runtime"><span class="id">T06 · Resp05 Client semantic</span><span class="role">所有模式汇聚。</span></div><div class="arrow"><span>JSON / SSE frame only</span></div>
+  <div class="node server terminal"><span class="id">T07 · Server06 terminal</span><span class="role">唯一合法 terminal。</span></div>
+</div><div class="callout ok"><strong>删除判定：</strong>删除后不破坏 correctness、traceability、verifiability、acceptance、delivery 的节点应删除。当前删除目标是 WebSearch request-local re-enter edge 和只服务它的 phase；detection、pairing、typed result、Error mapping 保留。</div></section>
+
+<section id="diff"><div class="section-head"><div><h2>4. DAG Diff</h2><p class="sub">只列结构差异，不因命名不同判 gap。</p></div><span class="badge diff">As-Is → To-Be</span></div><table><thead><tr><th>类型</th><th>证据</th><th>结构影响</th><th>最小补齐</th></tr></thead><tbody>
+  <tr><td><strong>WRONG_MODEL</strong></td><td>旧图把 Continuation03 / Continuation04 当固定主链节点；当前 fixed enum 无此节点。</td><td>请求/响应图被错误扩展。</td><td>移除固定 continuation 节点，保留 retired 历史证据。</td></tr>
+  <tr><td><strong>INVALID_CYCLE</strong></td><td><code>execute_local_web_search_hop</code> 在 Resp03 后重入 Req01 → Req09。</td><td>同请求局部环 + 第二 Provider attempt。</td><td>Hook → Subagent → typed result，返回原节点。</td></tr>
+  <tr><td><strong>MISSING_NODE</strong></td><td>无 WebSearchHookRequest / Adapter / Result / HookOutcome。</td><td>WebSearch 需求无法沿 Hook 到可验证结果。</td><td>复用现有 Subagent，缺 owner 时再加最小 adapter。</td></tr>
+  <tr><td><strong>WRONG_DEPENDENCY</strong></td><td>搜索执行依赖 Hub/VR/Provider re-entry。</td><td>双 Router / 状态污染风险。</td><td>删除 re-enter edge；adapter 不依赖 Virtual Router。</td></tr>
+  <tr><td><strong>MISSING_BINDING</strong></td><td>WebSearch 8 条边 binding_pending；SSE tree → Resp05 pending。</td><td>需求无法追踪到实现。</td><td>绑定现有 hook/builder，重复边删除。</td></tr>
+  <tr><td><strong>MISSING_EDGE</strong></td><td>WebSearch typed result 无回边；SSE typed tree 未完整汇聚 Resp05。</td><td>结果只能走旧 state machine 或隐式 payload。</td><td>补 Hook return edge 和 SSE → Resp05 唯一边。</td></tr>
+  <tr><td><strong>MISSING_VERIFICATION</strong></td><td>旧 state-machine gates 不证明 Subagent 路径；缺 timeout/wrong-scope/no-reentry 负例。</td><td>替换后可能假绿或 success-wrap。</td><td>每条新 edge 一个 focused positive + negative。</td></tr>
+  <tr><td><strong>MISSING_EVIDENCE</strong></td><td>Core manifest <code>live_cutover:false</code>；Direct SSE pending live replay。</td><td>Source green 误读为生产闭环。</td><td>按入口记录 request id、SHA、artifact hash、结果。</td></tr>
+  <tr><td><strong>MISSING_ACCEPTANCE</strong></td><td>没有统一绑定真实入口 + JSON/SSE + Error + WebSearch Subagent 的用户级验收。</td><td>测试通过不等于需求满足。</td><td>补业务 terminal acceptance matrix。</td></tr>
+  <tr><td><strong>REDUNDANT_NODE</strong></td><td>部分 WebSearch phase/center 只服务 re-enter；部分 pass-through edge 可能重复。</td><td>复杂度增加但不改善业务结果。</td><td>逐 phase 消融，不能批量删。</td></tr>
+</tbody></table></section>
+
+<section id="violations"><div class="section-head"><div><h2>5. Closure Violations</h2><p class="sub">按业务路径检查。</p></div><span class="badge warn">Path Specific</span></div><table><thead><tr><th>检查</th><th>判定</th><th>证据与影响</th></tr></thead><tbody>
+  <tr><td>A. Orphan Requirement</td><td><span class="status partial">成立</span></td><td>WebSearch 的 Subagent 需求无 typed hook 实现；continuation 固定需求已 retired。</td></tr>
+  <tr><td>B. Orphan Implementation</td><td><span class="status missing">成立</span></td><td><code>execute_local_web_search_hop</code> 存在，但 map design、8 条边 pending。</td></tr>
+  <tr><td>C. Unverified Implementation</td><td><span class="status partial">成立</span></td><td>WebSearch re-enter、SSE typed tree、部分 pending edge 验证强度不足。</td></tr>
+  <tr><td>D. Unbound Verification</td><td><span class="status partial">局部成立</span></td><td>旧 WebSearch gates 不能证明 Subagent 路径；SSE tree → Resp05 未完整绑定。</td></tr>
+  <tr><td>E. Missing Acceptance</td><td><span class="status missing">成立</span></td><td>Source/controlled gates 未统一绑定真实入口、JSON/SSE、Error、WebSearch result。</td></tr>
+  <tr><td>F. Missing Evidence</td><td><span class="status partial">边界成立</span></td><td><code>live_cutover:false</code>；Direct SSE pending live replay。</td></tr>
+  <tr><td>G. Dependency Gap</td><td><span class="status missing">成立</span></td><td>WebSearch typed edge、SSE Resp05 edge、部分 servertool edge 缺失。</td></tr>
+  <tr><td>H. Dead Node</td><td><span class="status partial">局部可证明</span></td><td>只服务 re-enter 的 phase/center 是删除候选；重复 pass-through 需逐条核实。</td></tr>
+  <tr><td>I. Cycle</td><td><span class="status missing">WebSearch 成立</span></td><td>固定骨架无环；WebSearch 同请求重入 Req01 是局部非法环。</td></tr>
+  <tr><td>J. Premature Closure</td><td><span class="status partial">路径级成立</span></td><td>主链绑定不能替代 WebSearch、SSE、真实入口 acceptance。</td></tr>
+</tbody></table></section>
+
+<section id="migration"><div class="section-head"><div><h2>6. Minimal Migration Plan</h2><p class="sub">Binding → verification → evidence → edge → necessary node → architecture，最后才考虑重构。</p></div><span class="badge to">No Rewrite</span></div><table><thead><tr><th>顺序</th><th>动作</th><th>为什么最小</th><th>完成证据</th></tr></thead><tbody>
+  <tr><td>1</td><td>修正审计真源：移除 fixed continuation 假节点，保留 retired 历史/控制证据。</td><td>先让图与 fixed enum 和 manifest 一致。</td><td>Req/Resp 图与 manifest 节点完全一致。</td></tr>
+  <tr><td>2</td><td>逐条处理 WebSearch 8 条 pending 和 SSE tree pending；能绑现有 Hook/builder 就绑定，重复边删除。</td><td>主链已存在，优先补绑定。</td><td>每条 edge 有 caller/callee/owner，positive + negative 通过。</td></tr>
+  <tr><td>3</td><td>定义 <code>WebSearchHookRequest</code>、<code>WebSearchResult</code>、<code>HookOutcome</code> 最小 typed contract。</td><td>只补现有 Hook 的 input/output。</td><td>Schema、owner、scope、deadline、error 可机器验证。</td></tr>
+  <tr><td>4</td><td>复用已有 Subagent；只有无唯一 owner 时才加 <code>WebSearchSubagentAdapter</code>。</td><td>能复用就不新增；搜索不进入 Router/Provider re-enter。</td><td>真实 subagent 调用、typed result、无 Router re-entry。</td></tr>
+  <tr><td>5</td><td>替换 local hop 的搜索执行；保留 detection、call_id pairing、最终投影，验证 parity 后删 re-enter edge。</td><td>替换唯一 owner，不重写 Response 链。</td><td>同 query 等价 result；无 Req01 re-entry；失败进 Error01 → E06。</td></tr>
+  <tr><td>6</td><td>逐 phase 消融 WebSearch state machine，只留 pairing/scope/跨轮所需状态。</td><td>删除优于添加，避免第二控制真源。</td><td>每个删除项有理由和回归证据。</td></tr>
+  <tr><td>7</td><td>绑定 typed SSE tree → Resp05，保持 SSE transport core 无业务语义。</td><td>已有唯一 semantic owner。</td><td>JSON/SSE 同 finalized semantic；provider → client shortcut 负例失败。</td></tr>
+  <tr><td>8</td><td>补真实入口 acceptance：JSON、SSE、Error、WebSearch Subagent、Direct、Relay。</td><td>不新增治理节点，只绑定 terminal 证据。</td><td>request id、main SHA、artifact hash、入口协议、结果、node trace 一致。</td></tr>
+</tbody></table><div class="callout"><strong>不做什么：</strong>不重写 Runtime；不加第二 Router；不让 Provider 直出 client；不把 SSE 提升为业务层；不在 parity 前删除旧 WebSearch；不把 continuation 假节点塞回固定骨架。</div></section>
+
+<section id="risks"><div class="section-head"><div><h2>7. Remaining Risks 与 Closure Criteria</h2><p class="sub">补完最小 DAG 后仍需持续管理。</p></div><span class="badge warn">Residual</span></div><table><thead><tr><th>风险</th><th>证据</th><th>后果</th><th>处理</th></tr></thead><tbody>
+  <tr><td>Subagent 能力 ≠ provider web_search</td><td>目标要求“具备 web search 能力的模型”，当前无 typed adapter。</td><td>质量、来源、超时、错误语义不一致。</td><td>Typed result、timeout、negative、真实 replay。</td></tr>
+  <tr><td>re-enter 删除过早</td><td>Local hop 已实现，替代路径未验证。</td><td>WebSearch 回退或 success-wrap。</td><td>先 parity，后删除。</td></tr>
+  <tr><td>SSE 语义误下沉</td><td>Transport boundary 已声明，typed tree 仍 pending。</td><td>第二事件语义或 client shortcut。</td><td>Resp05 保持唯一 semantic owner。</td></tr>
+  <tr><td>Hook slot 过度治理</td><td>30 个 slot 很多 no-op。</td><td>治理骨架被误当业务链。</td><td>按需绑定，删除 re-enter-only 节点。</td></tr>
+  <tr><td>live cutover 未证明</td><td>Core manifest <code>live_cutover:false</code>。</td><td>Source green 被误读为生产闭环。</td><td>按入口绑定 same-entry replay。</td></tr>
+</tbody></table>
+  <div class="grid2"><div class="lane"><h4>结构闭环</h4><ol><li>五条链都能到合法 terminal。</li><li>图与 fixed enum / manifest 一致。</li><li>Direct/Relay 共享 Resp05 和唯一 S06。</li><li>Error 只计划，Provider 才改 health。</li><li>Hook 返回 typed result 并回原节点。</li><li>WebSearch 无 request-local cycle。</li><li>SSE 只 framing，无业务语义。</li></ol></div><div class="lane"><h4>验证与证据</h4><ol><li>每条新 edge 有 positive + negative。</li><li>WebSearch 覆盖 success/timeout/wrong-scope/error/no-reentry。</li><li>JSON/SSE 同 Resp05 semantic，provider raw 不直出。</li><li>Error 覆盖 reselection/exhaustion/client projection。</li><li>真实入口 acceptance 绑定 request id、SHA、artifact hash、结果。</li><li>所有 pending 已 anchored 或明确 deferred。</li><li>删除 re-enter 有 parity 和回滚说明。</li></ol></div></div>
+  <div class="callout fail"><strong>FAIL closed：</strong>路径只能到 Provider raw、Resp03、Server frame 或 Subagent raw result，不能到可审计 terminal，就不能宣称业务闭环完成。</div></section>
+</div></body></html>

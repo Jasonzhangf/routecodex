@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const typesPath = 'v3/crates/routecodex-v3-config/src/types.rs';
-const validatePath = 'v3/crates/routecodex-v3-config/src/validate.rs';
-const hookPath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs';
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const sourceRoot = process.env.ROUTECODEX_V3_RELAY_HOOK_SOURCE_ROOT
+  ? resolve(process.env.ROUTECODEX_V3_RELAY_HOOK_SOURCE_ROOT)
+  : resolve(scriptDir, '..', '..');
+const typesPath = join(sourceRoot, 'crates/routecodex-v3-config/src/types.rs');
+const validatePath = join(sourceRoot, 'crates/routecodex-v3-config/src/validate.rs');
+const hookPath = join(sourceRoot, 'crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs');
 const types = readFileSync(typesPath, 'utf8');
 const validate = readFileSync(validatePath, 'utf8');
 const hooks = readFileSync(hookPath, 'utf8');
@@ -12,7 +18,7 @@ const failures = [];
 const nodeCount = (types.match(/Self::(?:V3(?:Hub|Provider|Server)|Provider)[A-Za-z0-9]+/g) ?? [])
   .filter((value, index, all) => all.indexOf(value) === index)
   .length;
-if (nodeCount !== 17) failures.push(`V3HubFixedNode::ALL must own exactly 17 fixed nodes, found ${nodeCount}`);
+if (nodeCount !== 15) failures.push(`V3HubFixedNode::ALL must own exactly 15 fixed nodes, found ${nodeCount}`);
 if (!hooks.includes('V3_HUB_V1_NODE_HOOK_COUNT: usize = V3HubFixedNode::ALL.len() * 2')) {
   failures.push('entry/exit hook count must derive from the closed fixed-node set');
 }
@@ -43,7 +49,7 @@ if (/serde\(default\)[\s\S]{0,80}pub (?:allowed_resources|forbidden_resources):/
 for (const scope of ['Server', 'Listener', 'RoutingGroup', 'Session', 'Request', 'Provider', 'Hook', 'Debug']) {
   if (!types.includes(`    ${scope},`)) failures.push(`missing runtime resource scope ${scope}`);
 }
-for (const kind of ['Control', 'Continuation', 'Debug', 'Error', 'Snapshot', 'ProviderHealth']) {
+for (const kind of ['Control', 'Debug', 'Error', 'Snapshot', 'ProviderHealth']) {
   if (!types.includes(`    ${kind},`)) failures.push(`missing side-channel resource kind ${kind}`);
 }
 if (!hooks.includes('V3HubHookProfile::Servertool')
