@@ -834,6 +834,15 @@ fn enqueue_sse_client_chunks(
             .get("choices")
             .and_then(Value::as_array)
             .ok_or_else(|| "OpenAI Chat SSE choices are missing".to_string())?;
+        if let Some(failure) = classify_v3_provider_terminal_admission(
+            V3HubProviderWireProtocol::OpenAiChat,
+            &client_payload,
+        ) {
+            return Err(format!(
+                "provider emitted {}: {}",
+                failure.code, failure.message
+            ));
+        }
         if state.terminal && !choices.is_empty() {
             return Err(
                 "OpenAI Chat SSE emitted a non-usage frame after terminal finish_reason".into(),
@@ -951,9 +960,8 @@ fn project_responses_sse_as_openai_chat_stream(
                             .map_err(|error| error.to_string());
                         let result = decoder_result.and_then(|_| transducer.finish());
                         if let Err(error) = result {
-                            let recorded = provider_outcome.record_failure(&error).await;
                             return Some((
-                                Err(recorded.map(|_| error).unwrap_or_else(|record| record)),
+                                Err(error),
                                 (
                                     provider,
                                     decoder,
