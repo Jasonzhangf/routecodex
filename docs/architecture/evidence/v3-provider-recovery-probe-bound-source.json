@@ -11,7 +11,7 @@
     "paths": [
       "docs/architecture/v3-function-map.yml",
       "docs/architecture/v3-verification-map.yml",
-      "docs/goals/v3-provider-health-scoring-cooldown-design.md",
+      "docs/design/v3-provider-health-scoring-cooldown-design.md",
       "docs/goals/v3-provider-adaptive-health-cooldown-probe.md",
       "v3/crates/routecodex-v3-config/src/internal.rs",
       "v3/crates/routecodex-v3-config/src/internal.toml",

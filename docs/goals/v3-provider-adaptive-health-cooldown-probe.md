@@ -73,8 +73,11 @@ White-box positive/negative pairs:
    combine;
 3. success resets consecutive streak; unrelated/session success cannot revive a
    different key;
-4. no recovery history starts at 1m; fast recovery lowers the next score;
-5. high error rate or slow recovery raises schedule through 5m/15m/1h/3h/5h;
+4. no recovery history starts at the 5s first step; fast recovery lowers the
+   diagnostic score without bypassing the typed probe;
+5. failed probes advance through 30s/1m/3m/15m and remain capped at 15m for
+   ordinary failures or 30m for long-policy failures; a configured maximum can
+   only make the cadence faster;
 6. failed probe keeps key blocked and reschedules; successful probe alone
    restores availability;
 7. concurrent probe acquisition is single-flight; stale completion fails;
@@ -122,7 +125,9 @@ provider config, and client payload/error projection changes.
 3. Physically retire duplicate transitions in `V3ProviderGlobalSubscriptionHealthStore` and `V3ProviderCooldownCoordinator` after caller/dependency proof.
 4. Keep one typed transition: `Error02Classified -> record failure -> score -> cooldown/probe deadline -> permit -> result -> history -> availability`.
 5. Use one blocked/probe deadline; only successful probe clears generation.
-6. Use bounded score `0.6 * failure_rate + 0.4 * normalized_recovery_time`; no recovery history starts at 1m; score bands select the ladder.
+6. Use bounded score `0.6 * failure_rate + 0.4 * normalized_recovery_time`; no
+   recovery history starts at the 5s first step; the score remains diagnostic
+   and does not reschedule the ladder.
 7. Validate all policy values at config compilation; malformed values fail fast.
 8. Update resource/function/mainline/verification maps and generated wiki in lockstep.
 
