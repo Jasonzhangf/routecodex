@@ -59,8 +59,10 @@ fn anthropic_incomplete_reason(payload: &Value) -> Option<&str> {
         .get("stop_reason")
         .or_else(|| payload.pointer("/delta/stop_reason"))
         .and_then(Value::as_str);
-    if stop_reason == Some("max_tokens") {
-        return Some("max_tokens");
+    match stop_reason {
+        Some("max_tokens") => return Some("max_tokens"),
+        Some("refusal") => return Some("content_filter"),
+        _ => {}
     }
     let status = payload.get("status").and_then(Value::as_str);
     (status == Some("incomplete")).then(|| {
@@ -120,6 +122,16 @@ mod tests {
                 V3HubProviderWireProtocol::Anthropic,
                 json!({"type": "message_delta", "delta": {"stop_reason": "max_tokens"}}),
                 "max_tokens",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message", "stop_reason": "refusal"}),
+                "content_filter",
+            ),
+            (
+                V3HubProviderWireProtocol::Anthropic,
+                json!({"type": "message_delta", "delta": {"stop_reason": "refusal"}}),
+                "content_filter",
             ),
         ] {
             let failure = classify_v3_provider_terminal_admission(protocol, &payload)
