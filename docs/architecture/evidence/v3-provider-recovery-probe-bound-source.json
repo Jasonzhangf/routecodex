@@ -1,7 +1,7 @@
 {
   "evidence_id": "v3-provider-recovery-probe-bound-source-20260918",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "f1f999916c0b0c9c1af46e00a2b700e81de16320",
+  "candidate_commit": "f1f99991651cc8e1cfc351c07502b1850e5e4c4c",
   "candidate_tree": "ba733e07c6048653c8a0442f69753ac5c3aec770",
   "base_commit": "ab21333c8",
   "captured_at": "2026-09-18T21:47:00-07:00",
