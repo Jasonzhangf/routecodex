@@ -458,7 +458,8 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     &response_id,
                 )?;
             }
-            let mut request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+            let mut request =
+                build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
                 request_id,
                 provider_id,
                 url_text,
@@ -467,6 +468,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 body,
                 Vec::new(),
                 Some(Duration::from_millis(request_timeout_ms)),
+                concurrency_acquire_timeout_ms,
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
@@ -627,6 +629,32 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     provider_headers: Vec<V3ProviderRequestHeader>,
     timeout: Option<Duration>,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+        request_id,
+        provider_id,
+        url_text,
+        auth,
+        stream_intent,
+        body,
+        provider_headers,
+        timeout,
+        60_000,
+    )
+}
+
+/// Build a provider HTTP request with both the request deadline and the
+/// provider admission deadline carried from the typed target.
+pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+    request_id: impl Into<String>,
+    provider_id: impl Into<String>,
+    url_text: impl AsRef<str>,
+    auth: V3ProviderAuthHandle,
+    stream_intent: V3ResponsesStreamIntent,
+    body: Value,
+    provider_headers: Vec<V3ProviderRequestHeader>,
+    timeout: Option<Duration>,
+    concurrency_acquire_timeout_ms: u64,
+) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = request_id.into();
     let provider_id = provider_id.into();
     let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
@@ -647,7 +675,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
             provider_headers,
             timeout,
             initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
+            concurrency_acquire_timeout_ms,
             sse_first_frame_timeout_ms: None,
             cancellation: None,
             compatibility_profile: None,

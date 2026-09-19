@@ -1153,12 +1153,13 @@ features:
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately, the first over-budget request is a real probe, HTTP 429 confirms saturation, and the existing provider acquireTimeoutMs is compiled by Config, propagated through Target, and enforced by Provider transport'
   - 'A saturated admission wait expires at the configured acquireTimeoutMs as a typed provider transport failure and enters the existing Error/Target switch chain; it never waits indefinitely, fabricates client success, or blocks unrelated sessions'
+  - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   required_contract:
   - Provider concurrency admission policy is Config-owned: acquireTimeoutMs and maxInFlight are published once in V3Config05ManifestPublished, consumed by Target, and carried into Provider transport; they are not reconstructed by Runtime, Server, Router, Error, payload, MetadataCenter, or Debug
   - Admission timeout is a provider transport failure, not a client-input failure or a session-global wait; it traverses the existing typed Error/Target switch path and only becomes terminal after candidate exhaustion
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
-  - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources
+  - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
   - Server and CLI cannot import Provider transport
   - Provider node structs 12, 13, and 14 cannot be constructed by non-owner code
   - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload

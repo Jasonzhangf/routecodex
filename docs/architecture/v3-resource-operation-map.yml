@@ -476,7 +476,7 @@ resources:
       timeout: an admission wait that reaches acquireTimeoutMs becomes a typed provider transport failure and enters the existing Error/Target switch chain
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
-    allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses]
+    allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload]
     may_enter_provider_body: false
     may_enter_client_body: false

@@ -194,6 +194,34 @@ async fn saturated_provider_admission_returns_typed_transport_failure() {
 }
 
 #[test]
+fn direct_http_builder_preserves_target_admission_timeout() {
+    let mut target = responses_http_target();
+    target.concurrency_acquire_timeout_ms = 37;
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-direct-admission-timeout",
+            target.provider_id,
+            "https://api2.orangeai.cc/v1/chat/completions",
+            target.auth,
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"glm-5.2","messages":[]}),
+            Vec::new(),
+            Some(std::time::Duration::from_secs(5)),
+            target.concurrency_acquire_timeout_ms,
+        )
+        .unwrap();
+
+    let V3Transport13ResponsesRequestKind::Http {
+        concurrency_acquire_timeout_ms,
+        ..
+    } = request.kind
+    else {
+        panic!("direct HTTP builder must produce an HTTP request");
+    };
+    assert_eq!(concurrency_acquire_timeout_ms, 37);
+}
+
+#[test]
 fn compact_wire_uses_the_native_http_endpoint() {
     let wire = build_v3_provider_12_responses_compact_wire_payload(
         "req-compact",

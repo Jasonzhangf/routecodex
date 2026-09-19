@@ -1,6 +1,6 @@
 use crate::transport::{
     build_v3_anthropic_provider_request_header,
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Transport13ResponsesRequest,
 };
@@ -71,7 +71,7 @@ pub fn build_v3_provider_global_probe_request(
         ),
         _ => unreachable!(),
     };
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
         url,
@@ -80,6 +80,7 @@ pub fn build_v3_provider_global_probe_request(
         body,
         headers,
         Some(std::time::Duration::from_millis(target.request_timeout_ms)),
+        target.concurrency_acquire_timeout_ms,
     )
     .map_err(|error| error.to_string())
 }
