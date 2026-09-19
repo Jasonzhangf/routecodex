@@ -273,6 +273,568 @@ async fn internal_hooksd_crash_before_readiness_reports_hooks_unavailable_crashe
 
 #[tokio::test]
 #[cfg(unix)]
+async fn internal_hooksd_crash_after_readiness_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_started = root.path().join("hooksd-started");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\nsleep 0.2\nexit 17\n",
+            hooksd_started.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-crash-after-readiness",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-crash-after-readiness".to_string(),
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-crash-after-readiness")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "ready sidecar crash must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(hooksd_started.exists());
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(!instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+
+    let stop = supervisor.stop().await;
+    assert!(
+        stop.is_ok(),
+        "cleanup after unavailable sidecar must be bounded"
+    );
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn internal_hooksd_control_loss_degrades_running_instance_while_anchor_is_alive() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_pid_path = root.path().join("hooksd.pid");
+    let hooksd_script = root.path().join("fake-hooksd.rb");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &hooksd_script,
+        r#"require "socket"
+require "json"
+
+socket = UNIXServer.new(ARGV[0])
+puts JSON.generate({ protocol: "rcc-hooks-sidecar/v1", ready: true })
+$stdout.flush
+loop do
+  client = socket.accept
+  line = client.gets
+  next unless line
+  request = JSON.parse(line)
+  if request["method"] == "health"
+    client.puts JSON.generate({
+      protocol: "rcc-hooks-sidecar/v1",
+      ok: true,
+      result: { status: "ok" }
+    })
+  end
+  client.close
+end
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\n/usr/bin/ruby '{}' \"$2\" &\nhooksd_pid=$!\nprintf '%s\\n' \"$hooksd_pid\" > '{}'\nwait \"$hooksd_pid\" || true\nwhile :; do sleep 1; done\n",
+            hooksd_script.display(),
+            hooksd_pid_path.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-control-loss",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor =
+        V3HooksSidecarSupervisor::spawn(instance_dir.clone(), "hooks-control-loss".to_string());
+    let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let record = loop {
+        if hooksd_pid_path.exists() {
+            if let Ok(record) = read_json::<serde_json::Value>(&process_record_path) {
+                if record["control_socket_identity"].is_object() {
+                    break record;
+                }
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "internal hooksd was not adopted with a control socket identity"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let hooksd_pid: libc::pid_t = fs::read_to_string(&hooksd_pid_path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let leader_pid = record["leader_pid"].as_u64().unwrap() as libc::pid_t;
+    assert_ne!(hooksd_pid, leader_pid);
+    assert_eq!(
+        unsafe { libc::kill(leader_pid, 0) },
+        0,
+        "the lifecycle anchor must remain alive before the failure injection"
+    );
+    assert_eq!(unsafe { libc::kill(hooksd_pid, libc::SIGKILL) }, 0);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-control-loss")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed")
+            && detail.contains("control socket became unavailable")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "control loss must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(!process_record_path.exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+    assert!(supervisor.stop().await.is_ok());
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn internal_hooksd_invalid_health_response_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_pid_path = root.path().join("hooksd.pid");
+    let hooksd_script = root.path().join("fake-hooksd.rb");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &hooksd_script,
+        r#"require "socket"
+require "json"
+
+socket = UNIXServer.new(ARGV[0])
+puts JSON.generate({ protocol: "rcc-hooks-sidecar/v1", ready: true })
+$stdout.flush
+loop do
+  client = socket.accept
+  begin
+    client.gets
+    client.puts JSON.generate({
+      protocol: "rcc-hooks-sidecar/v1",
+      ok: false,
+      error: "deliberately invalid"
+    })
+  rescue
+  end
+  client.close
+end
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\n/usr/bin/ruby '{}' \"$2\" &\nhooksd_pid=$!\nprintf '%s\\n' \"$hooksd_pid\" > '{}'\nwait \"$hooksd_pid\" || true\nwhile :; do sleep 1; done\n",
+            hooksd_script.display(),
+            hooksd_pid_path.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-control-loss-invalid",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-control-loss-invalid".to_string(),
+    );
+    let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if hooksd_pid_path.exists() {
+            if let Ok(record) = read_json::<serde_json::Value>(&process_record_path) {
+                if record["control_socket_identity"].is_object() {
+                    break;
+                }
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "internal hooksd was not adopted with a control socket identity"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-control-loss-invalid")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed")
+            && detail.contains("control socket became unavailable")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "an invalid health response must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(!process_record_path.exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+    assert!(supervisor.stop().await.is_ok());
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn internal_hooksd_socket_loss_before_identity_capture_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_script = root.path().join("fake-hooksd.rb");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &hooksd_script,
+        r#"require "socket"
+require "json"
+
+socket = UNIXServer.new(ARGV[0])
+puts JSON.generate({ protocol: "rcc-hooks-sidecar/v1", ready: true })
+$stdout.flush
+socket.close
+File.unlink(ARGV[0])
+sleep
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\n/usr/bin/ruby '{}' \"$2\" &\nwait $!\n",
+            hooksd_script.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-identity-race",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor =
+        V3HooksSidecarSupervisor::spawn(instance_dir.clone(), "hooks-identity-race".to_string());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-identity-race")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed")
+            && detail.contains("control socket became unavailable")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "socket loss before identity capture must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(!instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+    assert!(supervisor.stop().await.is_ok());
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn internal_hooksd_replacement_socket_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_script = root.path().join("fake-hooksd.rb");
+    let replacement_script = root.path().join("replacement-hooksd.rb");
+    let replacement_ready = root.path().join("replacement.ready");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &hooksd_script,
+        r#"require "socket"
+require "json"
+
+socket = UNIXServer.new(ARGV[0])
+puts JSON.generate({ protocol: "rcc-hooks-sidecar/v1", ready: true })
+$stdout.flush
+loop do
+  client = socket.accept
+  client.gets
+  client.puts JSON.generate({
+    protocol: "rcc-hooks-sidecar/v1",
+    ok: true,
+    result: { status: "ok" }
+  })
+  client.close
+end
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\n/usr/bin/ruby '{}' \"$2\" &\nwait $!\n",
+            hooksd_script.display()
+        ),
+    );
+    fs::write(
+        &replacement_script,
+        r#"require "socket"
+require "json"
+
+path = ARGV[0]
+ready = ARGV[1]
+File.unlink(path) if File.exist?(path)
+socket = UNIXServer.new(path)
+File.write(ready, "ready")
+loop do
+  client = socket.accept
+  client.gets
+  client.puts JSON.generate({
+    protocol: "rcc-hooks-sidecar/v1",
+    ok: true,
+    result: { status: "ok" }
+  })
+  client.close
+end
+"#,
+    )
+    .unwrap();
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-replacement-socket",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-replacement-socket".to_string(),
+    );
+    let process_record_path = instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !read_json::<serde_json::Value>(&process_record_path)
+        .map(|record| record["control_socket_identity"].is_object())
+        .unwrap_or(false)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "internal hooksd was not adopted with a control socket identity"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let control_socket = instance_dir.join("hooks-sidecar.sock");
+    fs::remove_file(&control_socket).unwrap();
+    let mut replacement = Command::new("/usr/bin/ruby")
+        .arg(&replacement_script)
+        .arg(&control_socket)
+        .arg(&replacement_ready)
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while !replacement_ready.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "replacement socket did not become ready"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-replacement-socket")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed")
+            && detail.contains("control socket became unavailable")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a replacement control socket must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(control_socket.exists());
+    assert!(supervisor.stop().await.is_ok());
+    assert_eq!(
+        unsafe { libc::kill(replacement.id() as libc::pid_t, libc::SIGKILL) },
+        0
+    );
+    let _ = replacement.wait();
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn internal_hooksd_wrong_protocol_health_degrades_running_instance() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let hooksd_script = root.path().join("wrong-protocol-hooksd.rb");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        &hooksd_script,
+        r#"require "socket"
+require "json"
+
+socket = UNIXServer.new(ARGV[0])
+puts JSON.generate({ protocol: "rcc-hooks-sidecar/v1", ready: true })
+$stdout.flush
+loop do
+  client = socket.accept
+  client.gets
+  client.puts JSON.generate({
+    protocol: "wrong-hooks-sidecar/v1",
+    ok: true,
+    result: { status: "ok" }
+  })
+  client.close
+end
+"#,
+    )
+    .unwrap();
+    write_executable(
+        &bin_directory.join("rccv3-hooksd"),
+        &format!(
+            "#!/bin/sh\n/usr/bin/ruby '{}' \"$2\" &\nwait $!\n",
+            hooksd_script.display()
+        ),
+    );
+    write_record(root.path(), &bin_directory, &record_path);
+    fs::write(instance_dir.join("pid.cache"), "runtime-pid").unwrap();
+    fs::write(instance_dir.join("control.json"), "runtime-control").unwrap();
+    write_status(
+        &instance_dir,
+        "hooks-wrong-protocol",
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    std::env::set_var(TEST_HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let supervisor =
+        V3HooksSidecarSupervisor::spawn(instance_dir.clone(), "hooks-wrong-protocol".to_string());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, "hooks-wrong-protocol")
+            .unwrap()
+            .unwrap_or_default();
+        if detail.contains("hooks_unavailable:crashed")
+            && detail.contains("control socket became unavailable")
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a wrong-protocol health response must publish unavailable running status: {detail}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    assert!(!instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists());
+    assert!(!instance_dir.join("hooks-sidecar.sock").exists());
+    assert!(supervisor.stop().await.is_ok());
+    std::env::remove_var(TEST_HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn internal_hooksd_start_failure_removes_control_socket_after_owned_group_stops() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();

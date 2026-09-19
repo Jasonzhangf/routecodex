@@ -275,6 +275,8 @@ features:
     source: Lifecycle whitebox, negative, CLI blackbox, architecture/resource/module, fmt, Clippy, workspace, and secret/broad-kill gates pass.
     runtime: 5555 is owned by the managed instance rather than an agent exec session; managed restart preserves real JSON/SSE Responses, releases only overlapping foreign managed listener ports when needed,
       and leaves V2 5520/10000/4444 healthy.
+    source_evidence:
+    - docs/architecture/evidence/v3-internal-hooks-sidecar-control-loss-source.json
     forbidden_claim: Do not claim completion from source or temporary-port evidence alone; no broad kill, fallback, second supervisor, SSE/Anthropic ownership, or secret persistence is allowed.
       Start takeover may only signal explicit PIDs listening on the configured listener set.
 - feature_id: v3.config_server_full_function

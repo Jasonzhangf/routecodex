@@ -299,6 +299,64 @@ receipts" below.
 This probe is native transport evidence only. It does not prove message
 delivery, execution, reply, or read closure.
 
+### Current candidate gate receipts (2026-09-19)
+
+Source candidate for the readiness-crash degradation fix:
+
+```text
+commit      bd1bb0ca7a17ec0c2ed8bf40d9361bce3505c699
+base        origin/main 75137048e4a6e6cc36cb131501bf314ae767893e
+worktree    /Users/fanzhang/Documents/github/routecodex/playground/61c8752-live-close-0919
+changed     v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar.rs
+            v3/crates/routecodex-v3-lifecycle/src/internal_hooksd_tests.rs
+            v3/crates/routecodex-v3-cli/tests/managed_lifecycle.rs
+```
+
+These receipts were executed against that candidate. They are source, test,
+gate, and controlled CLI failure-injection evidence only, not production
+install, restart, or same-entry live replay evidence.
+
+```text
+2026-09-19T18:04Z  exit 0  node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-lifecycle internal_hooksd_tests -- --nocapture
+                     internal_hooksd_tests: 11 passed
+2026-09-19T18:04Z  exit 0  node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-hooks -- --nocapture
+                     lib tests plus binary_handler_config/binary_readiness/native_delivery_replay passed
+2026-09-19T18:04Z  exit 0  node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle -- --nocapture
+                     managed_lifecycle: 23 passed
+2026-09-19T18:04Z  exit 0  npm run verify:v3-managed-server-lifecycle
+                     V3 managed server lifecycle architecture gate passed
+2026-09-19T18:04Z  exit 0  npm run test:v3-managed-server-lifecycle-red-fixtures
+                     V3 managed lifecycle red fixtures passed: 69
+2026-09-19T18:05Z  exit 0  npm run verify:v3-architecture-docs
+                     docs: 25; resources: 176; edges: 425
+2026-09-19T18:05Z  exit 0  npm run verify:v3-resource-map
+2026-09-19T18:05Z  exit 0  npm run verify:v3-module-boundaries
+2026-09-19T18:05Z  exit 0  npm run verify:v3-cargo-fmt
+2026-09-19T18:09Z  exit 0  npm run verify:v3-architecture-ci
+                     [verify:v3-architecture-ci] ok (39/39 sub-gates green)
+2026-09-19T18:09Z  exit 0  git diff --check
+```
+
+Controlled readiness-crash failure injection:
+
+```text
+CLI test internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy
+install record  temp hooks_root/install.json with bin_directory containing rccv3-hooksd
+sidecar script   emits {"protocol":"rcc-hooks-sidecar/v1","ready":true}, then exits 17
+managed start    candidate rccv3 start; both temporary listeners health status=ok
+status detail    hooks sidecar unavailable: hooks_unavailable:crashed:
+                 hooks sidecar exited after readiness: exit status: 17
+control          pid.cache and control.json preserved
+cleanup          hooks-sidecar.pid and hooks-sidecar.sock removed
+managed stop     state=stopped; listeners closed
+```
+
+No new TUI/TUI or TUI/Desktop same-entry replay is claimed for this candidate.
+The change is lifecycle supervision only; hooks transport, native delivery
+evidence, and the existing same-entry replay receipts above are unchanged.
+Production install, restart, and live replay are delivery steps recorded
+separately after this review candidate merges.
+
 ## Live App Server replay evidence
 
 ### Replay on the shared default App Server (2026-09-15)
