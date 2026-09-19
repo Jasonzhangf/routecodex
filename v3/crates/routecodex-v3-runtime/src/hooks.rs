@@ -555,6 +555,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
             request_timeout_ms: candidate.request_timeout_ms,
             initial_concurrency_budget: candidate.initial_concurrency_budget,
+            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         },
         request_body,
     )
@@ -783,6 +784,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
             request_timeout_ms: candidate.request_timeout_ms,
             initial_concurrency_budget: candidate.initial_concurrency_budget,
+            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         },
         wire_body,
     )

@@ -82,6 +82,7 @@ enum V3Transport13ResponsesRequestKind {
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
         initial_concurrency_budget: u32,
+        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -94,6 +95,7 @@ enum V3Transport13ResponsesRequestKind {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         initial_concurrency_budget: u32,
+        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -239,6 +241,19 @@ impl V3Transport13ResponsesRequest {
                 initial_concurrency_budget,
                 ..
             } => *initial_concurrency_budget,
+        }
+    }
+
+    fn concurrency_acquire_timeout_ms(&self) -> u64 {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                concurrency_acquire_timeout_ms,
+                ..
+            }
+            | V3Transport13ResponsesRequestKind::WebSocketV2 {
+                concurrency_acquire_timeout_ms,
+                ..
+            } => *concurrency_acquire_timeout_ms,
         }
     }
 
@@ -425,6 +440,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let initial_concurrency_budget = target.initial_concurrency_budget;
+    let concurrency_acquire_timeout_ms = target.concurrency_acquire_timeout_ms;
     let compatibility_profile = target.compatibility_profile.clone();
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
@@ -454,12 +470,14 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
+                concurrency_acquire_timeout_ms: timeout_ms,
                 compatibility_profile: request_compatibility_profile,
                 sse_first_frame_timeout_ms: sse_timeout,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
+                *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
                 *sse_timeout = sse_first_frame_timeout_ms;
             }
@@ -503,6 +521,7 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     stream_intent,
                     event: body,
                     initial_concurrency_budget,
+                    concurrency_acquire_timeout_ms,
                     cancellation: None,
                     compatibility_profile,
                 },
@@ -628,6 +647,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
             provider_headers,
             timeout,
             initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
             sse_first_frame_timeout_ms: None,
             cancellation: None,
             compatibility_profile: None,
@@ -766,8 +786,10 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 reason,
             });
         }
+        let acquire_timeout = Duration::from_millis(request.concurrency_acquire_timeout_ms());
         let lease = if let Some(cancellation) = cancellation.clone() {
             tokio::select! {
+                biased;
                 _ = cancellation.cancelled() => {
                     if let Some(attempt_key) = &attempt_key {
                         let _ = self.handoff.transition(
@@ -780,12 +802,54 @@ impl ResponsesTransport for ProviderResponsesTransport {
                         provider_id: request.provider_id().to_string(),
                     });
                 }
-                lease = controller.acquire_with_clock(provider_key.clone(), current_epoch_ms) => lease,
+                result = tokio::time::timeout(
+                    acquire_timeout,
+                    controller.acquire_with_clock(provider_key.clone(), current_epoch_ms),
+                ) => match result {
+                    Ok(lease) => lease,
+                    Err(_) => {
+                        if let Some(attempt_key) = &attempt_key {
+                            let _ = self.handoff.transition(
+                                attempt_key,
+                                crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                            );
+                        }
+                        return Err(V3ProviderError::Transport {
+                            request_id: request.request_id().to_string(),
+                            provider_id: request.provider_id().to_string(),
+                            reason: format!(
+                                "provider concurrency admission timed out after {}ms",
+                                request.concurrency_acquire_timeout_ms()
+                            ),
+                        });
+                    }
+                },
             }
         } else {
-            controller
-                .acquire_with_clock(provider_key.clone(), current_epoch_ms)
-                .await
+            match tokio::time::timeout(
+                acquire_timeout,
+                controller.acquire_with_clock(provider_key.clone(), current_epoch_ms),
+            )
+            .await
+            {
+                Ok(lease) => lease,
+                Err(_) => {
+                    if let Some(attempt_key) = &attempt_key {
+                        let _ = self.handoff.transition(
+                            attempt_key,
+                            crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                        );
+                    }
+                    return Err(V3ProviderError::Transport {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        reason: format!(
+                            "provider concurrency admission timed out after {}ms",
+                            request.concurrency_acquire_timeout_ms()
+                        ),
+                    });
+                }
+            }
         };
         let was_probe = lease.is_probe();
         let permit = lease.into_permit();
@@ -802,6 +866,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 timeout,
                 sse_first_frame_timeout_ms,
                 initial_concurrency_budget: _,
+                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {
@@ -829,6 +894,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 stream_intent,
                 event,
                 initial_concurrency_budget: _,
+                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {

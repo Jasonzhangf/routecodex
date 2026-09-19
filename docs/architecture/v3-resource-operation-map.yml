@@ -469,10 +469,15 @@ resources:
     lifecycle: v3.config.compile_to_provider_transport
     owner_crate: routecodex-v3-config
     owner_node: V3Config05ManifestPublished
-    identity: [providerId, transportKind, websocketEndpoint]
+    identity: [providerId, transportKind, websocketEndpoint, maxInFlight, acquireTimeoutMs, staleLeaseMs]
+    semantic_contract:
+      source: existing provider concurrency acquireTimeoutMs is compiled into the published manifest and remains the sole admission deadline truth
+      propagation: Target carries maxInFlight and acquireTimeoutMs into the selected Provider transport target
+      timeout: an admission wait that reaches acquireTimeoutMs becomes a typed provider transport failure and enters the existing Error/Target switch chain
+      boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses]
-    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored

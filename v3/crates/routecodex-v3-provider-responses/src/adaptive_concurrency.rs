@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 pub const V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS: u64 = 10 * 60_000;
@@ -193,6 +193,17 @@ impl V3AdaptiveConcurrencyController {
         now_ms: u64,
     ) -> V3AdaptiveConcurrencyLease {
         self.acquire_with_clock(provider_key, || now_ms).await
+    }
+
+    pub async fn acquire_with_timeout(
+        &self,
+        provider_key: impl Into<String>,
+        now_ms: u64,
+        timeout: Duration,
+    ) -> Result<V3AdaptiveConcurrencyLease, ()> {
+        tokio::time::timeout(timeout, self.acquire(provider_key, now_ms))
+            .await
+            .map_err(|_| ())
     }
 
     pub async fn acquire_with_clock<F>(
@@ -488,6 +499,30 @@ mod tests {
         );
         assert_eq!(
             controller.snapshot("opencode-go:key2").unwrap().in_flight,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn saturated_admission_expires_without_leaking_a_lease() {
+        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let held = controller.acquire("opencode-go:key1", 0).await;
+        let probe = controller.acquire("opencode-go:key1", 0).await;
+        assert!(probe.is_probe());
+
+        let result = controller
+            .acquire_with_timeout("opencode-go:key1", 0, Duration::from_millis(20))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().in_flight,
+            2
+        );
+
+        controller.release(held.into_permit()).unwrap();
+        controller.release(probe.into_permit()).unwrap();
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().in_flight,
             0
         );
     }
