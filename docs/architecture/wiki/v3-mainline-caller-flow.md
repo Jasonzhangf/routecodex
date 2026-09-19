@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 73 functional paths, 425 caller edges.
+Generated view: 73 functional paths, 426 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -37,7 +37,7 @@ flowchart TD
   module_v3_scripts["v3/scripts"]
   module_pending -->|1 edges / 1 paths| module_pending
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
-  module_routecodex_v3_hooks -->|5 edges / 1 paths| module_routecodex_v3_hooks
+  module_routecodex_v3_hooks -->|6 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
   module_routecodex_v3_sse -->|2 edges / 1 paths| module_routecodex_v3_sse
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
@@ -84,7 +84,7 @@ flowchart TD
 | --- | --- | ---: | --- |
 | pending | pending | 1 | `v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
-| routecodex-v3-hooks | routecodex-v3-hooks | 5 | `v3.rcc_internal_hooks_sidecar` |
+| routecodex-v3-hooks | routecodex-v3-hooks | 6 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | routecodex-v3-sse | routecodex-v3-sse | 2 | `v3.sse.transport_boundary` |
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
@@ -170,6 +170,7 @@ flowchart TD
     c_0_v3_rcc_internal_hooks_sidecar_9["routecodex-v3-hooks<br/>HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
     c_0_v3_rcc_internal_hooks_sidecar_10["routecodex-v3-hooks<br/>HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
     c_0_v3_rcc_internal_hooks_sidecar_11["routecodex-v3-hooks<br/>HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
+    c_0_v3_rcc_internal_hooks_sidecar_12["routecodex-v3-hooks<br/>HooksSidecarCore::execute_web_search<br/><small>routecodex-v3-hooks/src/lib.rs</small>"]
   end
   subgraph c_0_v3_rcc_internal_hooks_sidecar_m_v3_lifecycle["v3-lifecycle"]
     c_0_v3_rcc_internal_hooks_sidecar_0["v3-lifecycle<br/>start_configured_hooks_sidecar<br/><small>routecodex-v3-lifecycle/src/hooks_sidecar.rs</small>"]
@@ -182,6 +183,7 @@ flowchart TD
   c_0_v3_rcc_internal_hooks_sidecar_3 -->|v3-hooks-sidecar-status-01<br/>ControlServer → NativeAppServerTransport| c_0_v3_rcc_internal_hooks_sidecar_7
   c_0_v3_rcc_internal_hooks_sidecar_8 -->|v3-hooks-sidecar-timer-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_9
   c_0_v3_rcc_internal_hooks_sidecar_10 -->|v3-hooks-sidecar-hook-01<br/>HooksSidecarCore → HookRegistry| c_0_v3_rcc_internal_hooks_sidecar_11
+  c_0_v3_rcc_internal_hooks_sidecar_3 -->|v3-hooks-sidecar-web-search-01<br/>ControlServer → HooksSidecarCore| c_0_v3_rcc_internal_hooks_sidecar_12
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -193,6 +195,7 @@ flowchart TD
 | `v3-hooks-sidecar-status-01` | `ControlServer` → `NativeAppServerTransport` | obsolete | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | NativeAppServerTransport::session_status<br/><small>routecodex-v3-hooks/src/appserver.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 | `v3-hooks-sidecar-timer-01` | `ControlServer` → `HooksSidecarCore` | as_is_bound | timer_tick<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::run_due_schedules<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
 | `v3-hooks-sidecar-hook-01` | `HooksSidecarCore` → `HookRegistry` | obsolete | HooksSidecarCore::dispatch_hook_event<br/><small>routecodex-v3-hooks/src/lib.rs</small> | HookRegistry::dispatch<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.rcc_internal_hooks_sidecar` |
+| `v3-hooks-sidecar-web-search-01` | `ControlServer` → `HooksSidecarCore` | as_is_bound | handle_control_request<br/><small>routecodex-v3-hooks/src/control.rs</small> | HooksSidecarCore::execute_web_search<br/><small>routecodex-v3-hooks/src/lib.rs</small> | `v3.web_search_servertool_state_machine` |
 
 ## v3.provider_global_cooldown_persistence
 
