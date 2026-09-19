@@ -128,6 +128,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
         let mut stderr_bytes = Vec::new();
         let mut exit_status = None;
         loop {
+            let mut pipe_progress = false;
             if stdin_open && payload_offset < payload.len() {
                 match stdin
                     .as_mut()
@@ -156,7 +157,10 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             }
             if stdout_open {
                 match drain_stdout(&mut stdout, &mut stdout_bytes) {
-                    Ok(open) => stdout_open = open,
+                    Ok((open, progressed)) => {
+                        stdout_open = open;
+                        pipe_progress |= progressed;
+                    }
                     Err(error) => {
                         terminate_child(&mut child);
                         return Err(error);
@@ -165,7 +169,10 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             }
             if stderr_open {
                 match drain_stderr(&mut stderr, &mut stderr_bytes) {
-                    Ok(open) => stderr_open = open,
+                    Ok((open, progressed)) => {
+                        stderr_open = open;
+                        pipe_progress |= progressed;
+                    }
                     Err(error) => {
                         terminate_child(&mut child);
                         return Err(error);
@@ -193,7 +200,9 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     "web_search subagent exceeded request deadline".to_string(),
                 ));
             }
-            std::thread::sleep(Duration::from_millis(5));
+            if !pipe_progress {
+                std::thread::sleep(Duration::from_millis(5));
+            }
         }
         let status = exit_status.ok_or_else(|| {
             WebSearchAdapterError::Unavailable(
@@ -239,14 +248,14 @@ fn set_nonblocking(file_descriptor: std::os::fd::RawFd) -> Result<(), WebSearchA
 fn drain_stdout(
     stdout: &mut ChildStdout,
     bytes: &mut Vec<u8>,
-) -> Result<bool, WebSearchAdapterError> {
+) -> Result<(bool, bool), WebSearchAdapterError> {
     drain_pipe(stdout, bytes, "stdout")
 }
 
 fn drain_stderr(
     stderr: &mut ChildStderr,
     bytes: &mut Vec<u8>,
-) -> Result<bool, WebSearchAdapterError> {
+) -> Result<(bool, bool), WebSearchAdapterError> {
     drain_pipe(stderr, bytes, "stderr")
 }
 
@@ -254,11 +263,12 @@ fn drain_pipe(
     pipe: &mut impl Read,
     bytes: &mut Vec<u8>,
     label: &str,
-) -> Result<bool, WebSearchAdapterError> {
-    let mut buffer = [0_u8; 8192];
+) -> Result<(bool, bool), WebSearchAdapterError> {
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut progressed = false;
     loop {
         match pipe.read(&mut buffer) {
-            Ok(0) => return Ok(false),
+            Ok(0) => return Ok((false, progressed)),
             Ok(read) => {
                 if bytes.len().saturating_add(read) > MAX_OUTPUT_BYTES {
                     return Err(WebSearchAdapterError::MalformedResponse(format!(
@@ -266,8 +276,11 @@ fn drain_pipe(
                     )));
                 }
                 bytes.extend_from_slice(&buffer[..read]);
+                progressed = true;
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(true),
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                return Ok((true, progressed));
+            }
             Err(error) => {
                 return Err(WebSearchAdapterError::Unavailable(format!(
                     "web_search subagent {label} failed: {error}"
@@ -336,7 +349,16 @@ mod tests {
     use super::*;
     use serde_json::json;
     use servertool_core::web_search_contract::WebSearchHookScope;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Mutex, OnceLock};
+
+    static OVERSIZED_OUTPUT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn oversized_output_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        OVERSIZED_OUTPUT_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("oversized output test lock poisoned")
+    }
 
     fn request(deadline_unix_ms: u64) -> WebSearchHookRequest {
         WebSearchHookRequest {
@@ -409,6 +431,7 @@ mod tests {
 
     #[test]
     fn command_adapter_rejects_oversized_stdout() {
+        let _guard = oversized_output_test_guard();
         let mut adapter = CommandWebSearchAdapter::new(
             "/bin/sh".to_string(),
             vec![
@@ -431,6 +454,7 @@ mod tests {
 
     #[test]
     fn command_adapter_rejects_oversized_stderr() {
+        let _guard = oversized_output_test_guard();
         let mut adapter = CommandWebSearchAdapter::new(
             "/bin/sh".to_string(),
             vec![
