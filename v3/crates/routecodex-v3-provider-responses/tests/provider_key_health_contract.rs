@@ -128,6 +128,7 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
         failure_threshold: 3,
         cooldown_ms: 60_000,
         probe_interval_ms: 60_000,
+        max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,

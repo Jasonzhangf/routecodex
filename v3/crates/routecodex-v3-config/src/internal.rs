@@ -195,7 +195,7 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
         assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);
         assert!(config.unrecoverable_failure_threshold > 0);
         assert!(config.unrecoverable_cooldown_ms > 0);
-        assert_eq!(config.unrecoverable_probe_interval_ms, 60 * 60_000);
+        assert_eq!(config.unrecoverable_probe_interval_ms, 30 * 60_000);
         V3InternalErrorHandlingPolicy {
             transient_stages: config.transient_stages.clone(),
             transient_wait_ms: config.transient_wait_ms.clone(),

@@ -856,6 +856,18 @@ fn compile_provider_health(
             "provider {provider_id} health cooldown_ms must be positive when enabled"
         )));
     }
+    if let Some(probe_interval_ms) = health.probe_interval_ms {
+        if probe_interval_ms == 0 {
+            return Err(validation(format!(
+                "provider {provider_id} health probe_interval_ms must be positive when configured"
+            )));
+        }
+        if probe_interval_ms > 30 * 60_000 {
+            return Err(validation(format!(
+                "provider {provider_id} health probe_interval_ms must not exceed 1800000ms"
+            )));
+        }
+    }
     Ok(Some(health))
 }
 

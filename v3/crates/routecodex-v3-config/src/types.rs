@@ -598,6 +598,10 @@ pub struct V3ProviderHealthAuthoringConfig {
     pub enabled: bool,
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
+    /// Optional maximum recovery-probe cadence. Probes may run sooner on the
+    /// bounded ladder, but never wait longer than this configured interval.
+    #[serde(default)]
+    pub probe_interval_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2944,13 +2944,17 @@ features:
   - one typed permit generation owns each scheduled or rescue probe and successful completion atomically resets score, streak, delta window, cooldown, and probe backoff state
   - Responses, OpenAI Chat, Anthropic, and Gemini probes require their protocol-specific terminal success shape before recovery
   - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
+  - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
+  - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
+  - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
   - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after two failures
   - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
-  - 401 auth-key probe is not due before the typed 5-hour cooldown deadline and is due at the deadline
+  - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is independently bounded by the provider probe cadence
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
   - an early due probe does not make the provider available before semantic probe success
+  - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
