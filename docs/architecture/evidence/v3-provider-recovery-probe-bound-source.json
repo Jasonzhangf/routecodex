@@ -1,0 +1,105 @@
+{
+  "evidence_id": "v3-provider-recovery-probe-bound-source-20260918",
+  "feature_id": "v3.provider_global_subscription_probe",
+  "candidate_commit": "f1f99991651cc8e1cfc351c07502b1850e5e4c4c",
+  "candidate_tree": "ba733e07c6048653c8a0442f69753ac5c3aec770",
+  "base_commit": "ab21333c8",
+  "captured_at": "2026-09-18T21:47:00-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "rust_v3_provider_adaptive_health_lifecycle",
+    "paths": [
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-verification-map.yml",
+      "docs/design/v3-provider-health-scoring-cooldown-design.md",
+      "docs/goals/v3-provider-adaptive-health-cooldown-probe.md",
+      "v3/crates/routecodex-v3-config/src/internal.rs",
+      "v3/crates/routecodex-v3-config/src/internal.toml",
+      "v3/crates/routecodex-v3-config/src/types.rs",
+      "v3/crates/routecodex-v3-config/src/validate.rs",
+      "v3/crates/routecodex-v3-config/tests/config_v3_contract.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/health.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/health_tests.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs",
+      "v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs",
+      "v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs",
+      "v3/crates/routecodex-v3-provider-responses/tests/provider_key_health_contract.rs",
+      "v3/crates/routecodex-v3-provider-responses/tests/provider_probe_backoff_ladder_contract.rs",
+      "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs",
+      "v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture",
+      "result": "pass",
+      "tests": "5 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture",
+      "result": "pass",
+      "tests": "7 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_cooldown_persistence_contract -- --nocapture",
+      "result": "pass",
+      "tests": "7 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-session-cooldown-red-fixtures",
+      "result": "pass",
+      "tests": "30 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture",
+      "result": "pass",
+      "tests": "55 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-health-contract",
+      "result": "pass",
+      "tests": "13 + 27 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-docs",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "cwd": "v3",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features",
+      "result": "pass"
+    }
+  ],
+  "notes": [
+    "The health contract was rerun serially after an earlier concurrent Cargo-lock exit; the serial run passed.",
+    "The configured probe interval is treated as the maximum recovery-probe interval. The ladder remains 5s, 30s, 60s, 3m, 15m, and for long policy 30m, with the final step repeated.",
+    "This receipt binds source verification to the code candidate commit. The receipt commit itself contains documentation only."
+  ]
+}

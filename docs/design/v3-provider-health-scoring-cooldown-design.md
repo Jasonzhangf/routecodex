@@ -341,7 +341,7 @@ restart
   -> do not reconstruct health truth from diagnostic persistence
 ```
 
-`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；任一 deadline 到达都不得直接恢复调度，只有 semantic probe success 可以清除 block。
+`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；probe failure 只能推进 `next_probe_at_ms`，不得改写原 `blocked_until_ms`。任一 deadline 到达都不得直接恢复调度，只有 semantic probe success 可以清除 block。provider health 的 `probe_interval_ms` 是可选最大探索周期；`cc-sol` 和 `kdns` 系列配置 `120000ms`，即任何失败后的下一次探索间隔最长 2 分钟，较短阶梯仍可更早触发。
 
 ## 8. Same-priority scheduling
 

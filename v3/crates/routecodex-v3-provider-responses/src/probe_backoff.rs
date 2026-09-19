@@ -2,15 +2,16 @@
 /// maximum wait for ordinary failures.
 const PROBE_BACKOFF_MS: [u64; 5] = [5_000, 30_000, 60_000, 3 * 60_000, 15 * 60_000];
 
-/// Authentication and persistent service failures retain the long cadence.
-const LONG_PROBE_BACKOFF_MS: [u64; 7] = [
+pub(crate) const MAX_PROBE_INTERVAL_MS: u64 = 30 * 60_000;
+
+/// Authentication and persistent service failures retain the extended cadence.
+const LONG_PROBE_BACKOFF_MS: [u64; 6] = [
     5_000,
     30_000,
     60_000,
     3 * 60_000,
     15 * 60_000,
-    60 * 60_000,
-    3 * 60 * 60_000,
+    MAX_PROBE_INTERVAL_MS,
 ];
 
 pub(crate) fn probe_backoff_ms(failure_count: u8) -> u64 {
@@ -18,7 +19,7 @@ pub(crate) fn probe_backoff_ms(failure_count: u8) -> u64 {
 }
 
 pub(crate) fn long_probe_backoff_ms(failure_count: u8) -> u64 {
-    LONG_PROBE_BACKOFF_MS[usize::from(failure_count) % LONG_PROBE_BACKOFF_MS.len()]
+    LONG_PROBE_BACKOFF_MS[usize::from(failure_count).min(LONG_PROBE_BACKOFF_MS.len() - 1)]
 }
 
 pub(crate) fn adaptive_probe_interval_ms(
@@ -84,10 +85,11 @@ mod tests {
     }
 
     #[test]
-    fn long_probe_backoff_retains_the_existing_ladder() {
-        assert_eq!(long_probe_backoff_ms(5), 60 * 60_000);
-        assert_eq!(long_probe_backoff_ms(6), 3 * 60 * 60_000);
-        assert_eq!(long_probe_backoff_ms(7), 5_000);
+    fn long_probe_backoff_is_capped_at_thirty_minutes() {
+        assert_eq!(long_probe_backoff_ms(5), 30 * 60_000);
+        assert_eq!(long_probe_backoff_ms(6), 30 * 60_000);
+        assert_eq!(long_probe_backoff_ms(7), 30 * 60_000);
+        assert_eq!(long_probe_backoff_ms(255), 30 * 60_000);
     }
 
     #[test]

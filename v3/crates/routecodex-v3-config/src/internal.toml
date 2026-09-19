@@ -228,7 +228,7 @@ port = 8777
   unrecoverable_http_statuses = [401, 402, 403, 503]
   unrecoverable_failure_threshold = 2
   unrecoverable_cooldown_ms = 3600000
-  unrecoverable_probe_interval_ms = 3600000
+  unrecoverable_probe_interval_ms = 1800000
 
 # WebUI observability persistence guard: one persisted row must stay bounded.
 [observability]

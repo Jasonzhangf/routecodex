@@ -15,8 +15,9 @@ channel; it never enters request/response payload or protocol metadata.
   it owns no state or persistence.
 - `V3ProviderGlobalSubscriptionHealthStore` and `V3ProviderCooldownCoordinator`
   are retired; runtime probe orchestration enters `V3ProviderHealthStore`.
-- `probe_backoff_ms` owns the fixed probe ladder 30s/1m/3m/15m/1h/3h, looping
-  after the 3h step; `adaptive_probe_interval_ms` keeps error-rate and recovery
+- `probe_backoff_ms` owns the bounded probe ladder 5s/30s/1m/3m/15m, capped
+  there for ordinary failures; long-policy failures extend only to 30m;
+  `adaptive_probe_interval_ms` keeps error-rate and recovery
   EWMA diagnostics for the no-configured-policy cooldown-duration source.
 - Managed runtime initialization loads the provider-owned cooldown pool before
   listener readiness; malformed state fails startup explicitly.
@@ -35,8 +36,9 @@ channel; it never enters request/response payload or protocol metadata.
 classification to one state transition. Virtual Router consumes availability
 projection only. Probe transport remains in the existing provider probe owner.
 
-Cooldown and probe use one deadline: a blocked key is unavailable until its
-single `next_probe_at_ms`; only a successful probe clears the block.
+Cooldown and probe deadlines are independent: `blocked_until_ms` keeps business
+traffic blocked, while `next_probe_at_ms` schedules recovery traffic. A failed
+probe may move only `next_probe_at_ms`; only a successful probe clears the block.
 
 ## Adaptive policy
 
@@ -46,9 +48,11 @@ Defaults are bounded and deterministic:
   same `(provider_id, auth_alias, model_id)` key block the key for every session;
   while the probe entry exists, only a successful probe (or an explicit operator
   removal) resurrects the key;
-- cadence: fixed ladder 30s / 1m / 3m / 15m / 1h / 3h. The first probe is due
-  30s after the block; each failed probe advances to the next step; after the
-  3h step the ladder loops back to 30s.
+- cadence: bounded ladder 5s / 30s / 1m / 3m / 15m, with long-policy failures
+  capped at 30m. The first probe is due 5s after the block; each failed probe
+  advances to the next step and the final step repeats. A provider health
+  `probe_interval_ms` is an optional maximum cadence: `120000` means no probe
+  waits longer than two minutes while earlier ladder steps may still run sooner.
 - the adaptive score (`0.6 * failure_rate + 0.4 * recovery_factor`) is a
   diagnostic signal and, without a configured policy, the cooldown-duration
   source; it never reschedules the probe ladder;
@@ -69,8 +73,11 @@ White-box positive/negative pairs:
    combine;
 3. success resets consecutive streak; unrelated/session success cannot revive a
    different key;
-4. no recovery history starts at 1m; fast recovery lowers the next score;
-5. high error rate or slow recovery raises schedule through 5m/15m/1h/3h/5h;
+4. no recovery history starts at the 5s first step; fast recovery lowers the
+   diagnostic score without bypassing the typed probe;
+5. failed probes advance through 30s/1m/3m/15m and remain capped at 15m for
+   ordinary failures or 30m for long-policy failures; a configured maximum can
+   only make the cadence faster;
 6. failed probe keeps key blocked and reschedules; successful probe alone
    restores availability;
 7. concurrent probe acquisition is single-flight; stale completion fails;
@@ -91,7 +98,8 @@ same-entry live replay. DSH Review starts only after all gates pass.
 2. Exactly one Rust owner manages provider-key health, cooldown, and probe state.
 3. Same `(provider_id, auth_alias, model_id)` key enters cooldown after three consecutive provider-health failures.
 4. Error-rate and recovery-time history affect the next probe deadline.
-5. Intervals are bounded: `1m, 5m, 15m, 1h, 3h, 5h`.
+5. Intervals are bounded: `5s, 30s, 1m, 3m, 15m, 30m`; configured provider
+   `probe_interval_ms` may only lower the maximum.
 6. Time expiry never restores availability; successful typed probe is required.
 7. Failed probes keep the key blocked and reschedule from new score.
 8. Different keys/sessions cannot combine counters or revive each other.
@@ -117,7 +125,9 @@ provider config, and client payload/error projection changes.
 3. Physically retire duplicate transitions in `V3ProviderGlobalSubscriptionHealthStore` and `V3ProviderCooldownCoordinator` after caller/dependency proof.
 4. Keep one typed transition: `Error02Classified -> record failure -> score -> cooldown/probe deadline -> permit -> result -> history -> availability`.
 5. Use one blocked/probe deadline; only successful probe clears generation.
-6. Use bounded score `0.6 * failure_rate + 0.4 * normalized_recovery_time`; no recovery history starts at 1m; score bands select the ladder.
+6. Use bounded score `0.6 * failure_rate + 0.4 * normalized_recovery_time`; no
+   recovery history starts at the 5s first step; the score remains diagnostic
+   and does not reschedule the ladder.
 7. Validate all policy values at config compilation; malformed values fail fast.
 8. Update resource/function/mainline/verification maps and generated wiki in lockstep.
 

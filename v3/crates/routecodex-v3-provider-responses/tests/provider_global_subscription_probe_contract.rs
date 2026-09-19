@@ -166,6 +166,16 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
             .len(),
         1
     );
+    let blocked = store
+        .cooldown_entries(first_due + 1)
+        .into_iter()
+        .find(|entry| entry.provider_id == "provider-a")
+        .expect("provider-a cooldown entry");
+    assert_eq!(
+        blocked.until_ms,
+        Some(900_003),
+        "failed probes must not extend the original business cooldown deadline"
+    );
 }
 
 #[test]

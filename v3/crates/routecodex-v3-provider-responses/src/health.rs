@@ -5,7 +5,9 @@ use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
 };
-use crate::probe_backoff::{adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms};
+use crate::probe_backoff::{
+    adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms, MAX_PROBE_INTERVAL_MS,
+};
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key, V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
@@ -59,6 +61,7 @@ pub struct V3ProviderFailurePolicy {
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
     pub probe_interval_ms: u64,
+    pub max_probe_interval_ms: Option<u64>,
     pub long_probe_backoff: bool,
     pub until_restart: bool,
     pub cooldown_scope: V3ProviderFailureCooldownScope,
@@ -70,6 +73,7 @@ impl Default for V3ProviderFailurePolicy {
             failure_threshold: 3,
             cooldown_ms: 900_000,
             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+            max_probe_interval_ms: None,
             long_probe_backoff: false,
             until_restart: false,
             cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
@@ -389,6 +393,7 @@ impl V3ProviderHealthStore {
                             failure_threshold: health.failure_threshold.max(1),
                             cooldown_ms: health.cooldown_ms.max(1),
                             probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                            max_probe_interval_ms: health.probe_interval_ms,
                             long_probe_backoff: false,
                             until_restart: false,
                             cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
@@ -452,6 +457,10 @@ impl V3ProviderHealthStore {
                         blocked_until_ms: Some(blocked_until_ms),
                         next_probe_at_ms: Some(next_probe_at_ms),
                         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+                        max_probe_interval_ms: state
+                            .failure_policies
+                            .get(&key.provider_id)
+                            .and_then(|policy| policy.max_probe_interval_ms),
                         probe_failure_count: 0,
                         long_probe_backoff: key.failure_class
                             == V3ProviderCooldownFailureClass::ProbeLong,
@@ -523,13 +532,26 @@ impl V3ProviderHealthStore {
                 reason: reason.map(str::to_string),
             });
         }
-        let policy = policy_override.unwrap_or_else(|| {
+        let mut policy = policy_override.unwrap_or_else(|| {
             state
                 .failure_policies
                 .get(provider_id)
                 .copied()
                 .unwrap_or_default()
         });
+        if let Some(configured_max_probe_interval_ms) = state
+            .failure_policies
+            .get(provider_id)
+            .and_then(|configured| configured.max_probe_interval_ms)
+        {
+            policy.max_probe_interval_ms = Some(
+                policy
+                    .max_probe_interval_ms
+                    .map_or(configured_max_probe_interval_ms, |maximum| {
+                        maximum.min(configured_max_probe_interval_ms)
+                    }),
+            );
+        }
         if policy.cooldown_scope == V3ProviderFailureCooldownScope::AuthKey {
             let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
             let scope_label = format!("auth_key:{provider_id}:{}", auth_alias.unwrap_or("-"));
@@ -956,7 +978,10 @@ impl V3ProviderHealthStore {
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(None);
         };
-        if probe_state.probe_in_flight || probe_state.blocked_until_ms.is_none() {
+        if probe_state.probe_in_flight
+            || probe_state.blocked_until_ms.is_none()
+            || probe_state.next_probe_at_ms.is_none()
+        {
             return Ok(None);
         }
         probe_state.probe_in_flight = true;
@@ -1160,6 +1185,7 @@ impl V3ProviderHealthStore {
         let Some(existing_probe) = state.provider_cooldown_probes.get(&key) else {
             return Ok(());
         };
+        let max_probe_interval_ms = existing_probe.max_probe_interval_ms;
         let long_probe_backoff = existing_probe.long_probe_backoff;
         let current_generation = state
             .adaptive_history
@@ -1187,14 +1213,16 @@ impl V3ProviderHealthStore {
             .get(&key)
             .map(|history| (history.attempts, history.failures))
             .unwrap_or_default();
-        // Probe retry cadence is a fixed, observable contract: 30s/1m/3m/15m/1h/3h,
-        // looping after the 3h step. Health history still records adaptive
-        // diagnostics, but must not reschedule the ladder.
-        let next_interval = if long_probe_backoff {
+        // The ladder stays observable; a configured fast-recovery provider
+        // only caps how long any step may wait.
+        let ladder_interval = if long_probe_backoff {
             long_probe_backoff_ms(next_probe_failure_count)
         } else {
             probe_backoff_ms(next_probe_failure_count)
         };
+        let next_interval = max_probe_interval_ms
+            .map(|maximum| ladder_interval.min(maximum))
+            .unwrap_or(ladder_interval);
         let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
             return Ok(());
         };
@@ -1204,7 +1232,6 @@ impl V3ProviderHealthStore {
         probe_state.observed_failures = observed_failures;
         probe_state.probe_interval_ms = next_interval;
         probe_state.next_probe_at_ms = Some(now_ms.saturating_add(probe_state.probe_interval_ms));
-        probe_state.blocked_until_ms = probe_state.next_probe_at_ms;
         // Keep the rescue generation single-flight after a failed rescue. The
         // scheduled probe cadence above is the recovery path; allowing every
         // exhausted request to re-open the same failed generation creates a
@@ -1231,6 +1258,10 @@ impl V3ProviderHealthStore {
         if state.health_disabled.contains(provider_id) {
             return Ok(key_health_projection(&state, &key, now_ms));
         }
+        let configured_max_probe_interval_ms = state
+            .failure_policies
+            .get(provider_id)
+            .and_then(|policy| policy.max_probe_interval_ms);
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,
@@ -1259,10 +1290,11 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
-            // The first probe is always the fixed 5s ladder step; adaptive
-            // history (attempts/failures/EWMA above) stays diagnostic and
-            // never reschedules the cadence.
-            let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
+            // A configured fast-recovery provider caps the first ladder step;
+            // otherwise the first probe is the fixed 5s ladder step.
+            let interval = configured_max_probe_interval_ms
+                .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
+                .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
             // 阻塞条件由 typed action 唯一决定：带阈值的 action 按连击阈值；
             // 无阈值的不可恢复 action 立即阻断；无阈值的可恢复 action 仍按
             // score 归零阻断。score 基线是 configured priority，因此低优先级
@@ -1832,6 +1864,7 @@ fn default_failure_policy_from_manifest(
         failure_threshold: threshold,
         cooldown_ms,
         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+        max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
@@ -2265,6 +2298,18 @@ fn upsert_provider_cooldown_probe_with_interval(
             model_id,
         ));
     let probe_in_flight = existing.is_some_and(|probe_state| probe_state.probe_in_flight);
+    let max_probe_interval_ms = existing
+        .and_then(|probe_state| probe_state.max_probe_interval_ms)
+        .or_else(|| {
+            state
+                .failure_policies
+                .get(provider_id)
+                .and_then(|policy| policy.max_probe_interval_ms)
+        });
+    let probe_interval_ms = probe_interval_ms.max(1).min(MAX_PROBE_INTERVAL_MS);
+    let probe_interval_ms = max_probe_interval_ms
+        .map(|maximum| probe_interval_ms.min(maximum))
+        .unwrap_or(probe_interval_ms);
     let rescue_probe_attempted =
         existing.is_some_and(|probe_state| probe_state.rescue_probe_attempted);
     let completion = existing
@@ -2275,7 +2320,8 @@ fn upsert_provider_cooldown_probe_with_interval(
         V3ProviderCooldownProbeState {
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(now_ms.saturating_add(probe_interval_ms.max(1))),
-            probe_interval_ms: probe_interval_ms.max(1),
+            probe_interval_ms,
+            max_probe_interval_ms,
             probe_failure_count: 0,
             long_probe_backoff,
             observed_attempts: 3,

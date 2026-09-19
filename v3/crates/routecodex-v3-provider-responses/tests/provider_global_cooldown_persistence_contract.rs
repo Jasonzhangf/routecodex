@@ -314,3 +314,158 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .contains(&("p".into(), Some("k".into()), Some("m".into()))));
 }
+
+#[test]
+fn restart_preserves_configured_maximum_probe_interval() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-restart-fast-recovery-probes-{}.json",
+        std::process::id()
+    ));
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+    coordinator
+        .record_failure(
+            "p",
+            Some("k"),
+            Some("m"),
+            V3ProviderCooldownFailureClass::ProbeLong,
+            1_000,
+            V3ProviderCooldownObservation::default(),
+        )
+        .unwrap();
+
+    let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    let permit = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .expect("restored cooldown must expose a startup probe");
+    restored
+        .complete_provider_cooldown_probe_failure_at_generation(
+            "p",
+            Some("k"),
+            Some("m"),
+            2_001,
+            Some(permit.expected_generation()),
+        )
+        .unwrap();
+    assert!(restored
+        .provider_cooldown_probe_keys_due(32_000)
+        .unwrap()
+        .is_empty());
+    assert!(restored
+        .provider_cooldown_probe_keys_due(32_001)
+        .unwrap()
+        .contains(&("p".into(), Some("k".into()), Some("m".into()))));
+    let second = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .expect("second probe permit");
+    restored
+        .complete_provider_cooldown_probe_failure_at_generation(
+            "p",
+            Some("k"),
+            Some("m"),
+            32_001,
+            Some(second.expected_generation()),
+        )
+        .unwrap();
+    let third = restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .expect("third probe permit");
+    restored
+        .complete_provider_cooldown_probe_failure_at_generation(
+            "p",
+            Some("k"),
+            Some("m"),
+            92_001,
+            Some(third.expected_generation()),
+        )
+        .unwrap();
+    assert!(restored
+        .provider_cooldown_probe_keys_due(212_000)
+        .unwrap()
+        .is_empty());
+    assert!(restored
+        .provider_cooldown_probe_keys_due(212_001)
+        .unwrap()
+        .contains(&("p".into(), Some("k".into()), Some("m".into()))));
+}
+
+#[test]
+fn restart_resets_a_persisted_deadline_beyond_the_configured_probe_maximum() {
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.p]
+type = "responses"
+base_url = "http://provider.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
+health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000, probe_interval_ms = 120000 }
+[providers.p.models.m]
+[route_groups.g.pools.default]
+targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!(
+        "routecodex-restart-bounded-persisted-probe-{}.json",
+        std::process::id()
+    ));
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 30 * 60_000);
+    coordinator
+        .record_failure(
+            "p",
+            Some("k"),
+            Some("m"),
+            V3ProviderCooldownFailureClass::ProbeLong,
+            1_000,
+            V3ProviderCooldownObservation::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        coordinator.persisted_entries()[0].2,
+        30 * 60_000 + 1_000,
+        "fixture must persist a probe deadline beyond the configured maximum"
+    );
+
+    let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    assert_eq!(
+        restored.provider_cooldown_probe_keys_due(0).unwrap(),
+        vec![("p".into(), Some("k".into()), Some("m".into()))],
+        "restart must make the bounded recovery probe immediately eligible"
+    );
+    assert!(restored
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .is_some());
+}
