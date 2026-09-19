@@ -16,9 +16,10 @@ const fineScopes = [
   'v3_tool',
 ];
 const cases = [
-  { relative: 'docs/design/v3-gate.md', v3: true, v4: false },
-  { relative: 'docs/goals/v3-gate.md', v3: true, v4: false },
-  { relative: 'docs/schemas/v3-gate.yml', v3: true, v4: false },
+  { relative: 'docs/design/v3-gate.md', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'docs/goals/v3-gate.md', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'docs/schemas/v3-gate.yml', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'docs/architecture/v3-gate.yml', fine: { v3_architecture: true }, v3: true, v4: false },
   { relative: '.agents/skills/gate/SKILL.md', v3: false, v4: false },
   { relative: 'scripts/unrelated-tool.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
   { relative: 'scripts/architecture/verify-v3-dependency-projection.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
