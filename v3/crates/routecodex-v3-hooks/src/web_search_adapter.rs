@@ -6,7 +6,8 @@
 use serde::{Deserialize, Serialize};
 use servertool_core::web_search_contract::{WebSearchHookOutcome, WebSearchHookRequest};
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -89,6 +90,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()
             .map_err(|error| {
                 WebSearchAdapterError::Unavailable(format!(
@@ -113,8 +115,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     Ok(result) => write_result = Some(result),
                     Err(TryRecvError::Empty) => {}
                     Err(TryRecvError::Disconnected) => {
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        terminate_child(&mut child);
                         let _ = writer.join();
                         return Err(WebSearchAdapterError::Unavailable(
                             "web_search subagent stdin writer stopped without a result".to_string(),
@@ -123,8 +124,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                 }
             }
             if let Some(Err(error)) = write_result.as_ref() {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_child(&mut child);
                 let _ = writer.join();
                 return Err(WebSearchAdapterError::Unavailable(format!(
                     "web_search subagent stdin failed: {error}"
@@ -135,8 +135,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     Ok(Some(_)) => child_exited = true,
                     Ok(None) => {}
                     Err(error) => {
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        terminate_child(&mut child);
                         let _ = writer.join();
                         return Err(WebSearchAdapterError::Unavailable(format!(
                             "web_search subagent wait failed: {error}"
@@ -148,8 +147,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_child(&mut child);
                 let _ = writer.join();
                 return Err(WebSearchAdapterError::Timeout(
                     "web_search subagent exceeded request deadline".to_string(),
@@ -191,6 +189,17 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
         validate_outcome(&outcome, &request.call_id)?;
         Ok(outcome)
     }
+}
+
+fn terminate_child(child: &mut Child) {
+    let process_group_id = child.id() as libc::pid_t;
+    if process_group_id > 0 {
+        unsafe {
+            libc::kill(-process_group_id, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn request_payload(request: &WebSearchHookRequest) -> Result<String, WebSearchAdapterError> {
@@ -402,6 +411,26 @@ mod tests {
         let outcome = receiver.recv_timeout(Duration::from_secs(3)).expect(
             "web_search adapter must enforce its deadline while the subagent is not reading stdin",
         );
+        assert!(matches!(outcome, Err(WebSearchAdapterError::Timeout(_))));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn command_adapter_times_out_when_descendant_keeps_stdin_open() {
+        let mut request = request(future_deadline());
+        request.query = "x".repeat(1024 * 1024);
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), "sleep 2 <&0 & exit 0".to_string()],
+            Duration::from_millis(20),
+        );
+        let (sender, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = sender.send(adapter.execute(&request));
+        });
+        let outcome = receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("web_search adapter must terminate descendants that keep stdin open");
         assert!(matches!(outcome, Err(WebSearchAdapterError::Timeout(_))));
         worker.join().unwrap();
     }
