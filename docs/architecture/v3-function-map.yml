@@ -4509,6 +4509,7 @@ features:
   - V3ProviderHealthStore::cooldown_entries
   - V3ProviderFailureRuntimeHealth::run_due_provider_health_probes
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
+  - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate

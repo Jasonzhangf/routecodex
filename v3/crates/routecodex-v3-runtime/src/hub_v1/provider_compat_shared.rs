@@ -1,6 +1,6 @@
 use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
 };
@@ -70,7 +70,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
     let timeout = Some(Duration::from_millis(target.request_timeout_ms));
     let url_text = anthropic_messages_url(&target.base_url);
     if provider_headers.is_empty() {
-        return build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+        return build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
             request_id,
             target.provider_id,
             url_text,
@@ -79,10 +79,11 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
             body,
             Vec::new(),
             timeout,
+            target.concurrency_acquire_timeout_ms,
         )
         .map_err(|error| error.to_string());
     }
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
         url_text,
@@ -91,6 +92,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
         body,
         provider_headers,
         timeout,
+        target.concurrency_acquire_timeout_ms,
     )
     .map_err(|error| error.to_string())
 }
@@ -129,7 +131,7 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         provider_compat_core::apply_deepseek_v4_request_compat(&mut body);
     }
     let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
         url_text,
@@ -138,6 +140,7 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         body,
         Vec::new(),
         Some(Duration::from_millis(target.request_timeout_ms)),
+        target.concurrency_acquire_timeout_ms,
     )
     .map_err(|error| error.to_string())
 }
