@@ -1127,6 +1127,7 @@ features:
   owner_kind: rust_project_v3
   owner_scope: 'Generic Rust Provider runtime slice for Responses entry: selected Target with provider_type -> provider wire -> protocol-specific transport request -> typed raw response/source error'
   owner_modules:
+  - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-target
@@ -1150,10 +1151,12 @@ features:
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
-  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately, the first over-budget request is a real probe, HTTP 429 confirms saturation, and no acquire
-    timeout fabricates a local failure'
+  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately, the first over-budget request is a real probe, HTTP 429 confirms saturation, and the existing provider acquireTimeoutMs is compiled by Config, propagated through Target, and enforced by Provider transport'
+  - 'A saturated admission wait expires at the configured acquireTimeoutMs as a typed provider transport failure and enters the existing Error/Target switch chain; it never waits indefinitely, fabricates client success, or blocks unrelated sessions'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   required_contract:
+  - Provider concurrency admission policy is Config-owned: acquireTimeoutMs and maxInFlight are published once in V3Config05ManifestPublished, consumed by Target, and carried into Provider transport; they are not reconstructed by Runtime, Server, Router, Error, payload, MetadataCenter, or Debug
+  - Admission timeout is a provider transport failure, not a client-input failure or a session-global wait; it traverses the existing typed Error/Target switch path and only becomes terminal after candidate exhaustion
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
   - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources
   - Server and CLI cannot import Provider transport

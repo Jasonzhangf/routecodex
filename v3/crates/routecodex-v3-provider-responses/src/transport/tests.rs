@@ -154,7 +154,43 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
         request_timeout_ms: 300_000,
         sse_first_frame_timeout_ms: None,
         initial_concurrency_budget: 8,
+        concurrency_acquire_timeout_ms: 60_000,
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn saturated_provider_admission_returns_typed_transport_failure() {
+    let provider_key = "admission-timeout-provider:key1";
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller.ensure_initial_budget(provider_key, 1).unwrap();
+    let held = controller.acquire(provider_key, 0).await;
+    let probe = controller.acquire(provider_key, 0).await;
+    assert!(probe.is_probe());
+
+    let mut target = responses_http_target();
+    target.provider_id = "admission-timeout-provider".into();
+    target.auth.alias = "key1".into();
+    target.initial_concurrency_budget = 1;
+    target.concurrency_acquire_timeout_ms = 20;
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-admission-timeout",
+        target,
+        json!({"model":"glm-5.2","input":"hello"}),
+    )
+    .unwrap();
+    let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        V3ProviderError::Transport { reason, .. }
+            if reason == "provider concurrency admission timed out after 20ms"
+    ));
+
+    controller.release(held.into_permit()).unwrap();
+    controller.release(probe.into_permit()).unwrap();
 }
 
 #[test]

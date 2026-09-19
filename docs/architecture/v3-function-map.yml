@@ -754,10 +754,13 @@ features:
   runtime_status: owner_queryability_bound_to_existing_p6_source
 - feature_id: v3.responses_provider_runtime
   owner_crates:
+  - routecodex-v3-config
   - routecodex-v3-provider-responses
   - routecodex-v3-runtime
   - routecodex-v3-target
   owner_files:
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
@@ -770,6 +773,7 @@ features:
   - v3.target.concrete_provider
   - v3.responses_direct.policy
   - v3.provider.responses_wire_payload
+  - v3.provider.responses_transport_capability
   - v3.provider.transport_request
   - v3.response.provider_raw
   - v3.secret.provider_auth_handle
@@ -791,10 +795,13 @@ features:
   - direct_runtime_rejects_invalid_current_data_image_before_provider_send
   - general_provider::sse_request_accepts_json_provider_response_as_json_raw_body
   - general_provider::json_request_rejects_sse_provider_response_without_switching_response_kind
+  - compile_v3_config_05_manifest
   allowed_paths:
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-target
+  - v3/crates/routecodex-v3-config/src/lib.rs
+  - v3/crates/routecodex-v3-config/src/provider_config.rs
   - docs/goals/v3-responses-direct-mvp-implementation-plan.md
   - docs/goals/v3-responses-direct-mvp-test-design.md
   - docs/architecture/v3-resource-operation-map.yml
@@ -804,7 +811,6 @@ features:
   - docs/architecture/wiki/v3-responses-direct-mainline.md
   forbidden_paths:
   - v3/crates/routecodex-v3-server/src
-  - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-virtual-router
   - src
   - sharedmodule
