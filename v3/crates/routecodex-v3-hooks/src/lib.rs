@@ -18,6 +18,8 @@ mod daemon;
 pub use daemon::*;
 mod handler;
 pub use handler::*;
+mod web_search_adapter;
+pub use web_search_adapter::*;
 
 pub const PROTOCOL: &str = "rcc-hooks-sidecar/v1";
 
@@ -664,6 +666,7 @@ impl Default for SidecarPersistentState {
 
 pub struct HooksSidecarCore<T> {
     transport: T,
+    web_search_adapter: Option<Box<dyn WebSearchAdapter + Send>>,
     registry: HookRegistry,
     schedules: BTreeMap<String, ScheduledMessage>,
     paused_schedule_ids: BTreeSet<String>,
@@ -676,6 +679,7 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
     pub fn new(transport: T) -> Self {
         Self {
             transport,
+            web_search_adapter: None,
             registry: HookRegistry::default(),
             schedules: BTreeMap::new(),
             paused_schedule_ids: BTreeSet::new(),
@@ -708,6 +712,7 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
         }
         let mut core = Self {
             transport,
+            web_search_adapter: None,
             registry: HookRegistry::default(),
             schedules: state.schedules,
             paused_schedule_ids: state.paused_schedule_ids,
@@ -735,6 +740,23 @@ impl<T: AppServerTransport> HooksSidecarCore<T> {
                 intents: self.intents.clone(),
             },
         )
+    }
+
+    pub fn mount_web_search_adapter(&mut self, adapter: impl WebSearchAdapter + Send + 'static) {
+        self.web_search_adapter = Some(Box::new(adapter));
+    }
+
+    pub fn execute_web_search(
+        &mut self,
+        request: &servertool_core::web_search_contract::WebSearchHookRequest,
+    ) -> Result<servertool_core::web_search_contract::WebSearchHookOutcome, WebSearchAdapterError>
+    {
+        let adapter = self.web_search_adapter.as_mut().ok_or_else(|| {
+            WebSearchAdapterError::Unavailable(
+                "web_search adapter is not mounted in the hooks sidecar".to_string(),
+            )
+        })?;
+        adapter.execute(request)
     }
 
     pub fn register_handler(&mut self, handler_id: &str, hook_kind: &str) {

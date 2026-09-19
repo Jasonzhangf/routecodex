@@ -4,3 +4,4 @@
 
 pub mod cli_contract;
 pub mod outcome_contract;
+pub mod web_search_contract;

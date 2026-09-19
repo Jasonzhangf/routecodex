@@ -1,5 +1,10 @@
-use routecodex_v3_hooks::{ControlRequest, ControlResponse, HookEvent, HookState};
+use routecodex_v3_hooks::{
+    ControlRequest, ControlResponse, HookEvent, HookState, WebSearchAdapter, WebSearchAdapterError,
+};
 use serde_json::Value;
+use servertool_core::web_search_contract::{
+    WebSearchHookOutcome, WebSearchHookRequest, WebSearchHookScope,
+};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -43,6 +48,26 @@ fn wait_for_socket(path: &std::path::Path) {
         std::thread::sleep(Duration::from_millis(10));
     }
     panic!("socket did not appear: {}", path.display());
+}
+
+fn web_search_request(deadline_unix_ms: u64) -> WebSearchHookRequest {
+    WebSearchHookRequest {
+        request_id: "req-web-search-1".to_string(),
+        call_id: "call-web-search-1".to_string(),
+        query: "routecodex".to_string(),
+        count: Some(3),
+        recency: None,
+        content_types: vec!["text".to_string()],
+        scope: WebSearchHookScope {
+            entry_endpoint: "/v1/responses".to_string(),
+            session_id: "session-1".to_string(),
+            conversation_id: "conversation-1".to_string(),
+            port: 5520,
+            routing_group: "default".to_string(),
+        },
+        deadline_unix_ms,
+        policy_id: "metadata-center-local-search".to_string(),
+    }
 }
 
 #[test]
@@ -210,6 +235,141 @@ fn binary_handler_only_config_has_no_native_socket_and_fails_closed_on_send() {
     assert!(status.success(), "{status:?}");
     let _ = std::fs::remove_file(control_socket);
     let _ = std::fs::remove_file(handlers_config);
+}
+
+#[test]
+fn control_execute_web_search_requires_a_mounted_adapter() {
+    let control_socket = unique_socket("web-search-unmounted");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
+        .arg("--socket")
+        .arg(&control_socket)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("rccv3-hooksd should start");
+    let stdout = child.stdout.take().expect("sidecar stdout");
+    let mut readiness_line = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut readiness_line)
+        .expect("read readiness");
+    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
+    assert_eq!(readiness["ready"], true);
+
+    wait_for_socket(&control_socket);
+    let mut stream = UnixStream::connect(&control_socket).unwrap();
+    let response = send_request(
+        &mut stream,
+        &ControlRequest::ExecuteWebSearch {
+            request: Box::new(web_search_request(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64
+                    + 60_000,
+            )),
+        },
+    );
+    assert!(!response.ok, "{response:?}");
+    assert!(response
+        .error
+        .unwrap()
+        .contains("web_search adapter is not mounted"));
+
+    let shutdown = send_request(&mut stream, &ControlRequest::Shutdown);
+    assert!(shutdown.ok, "{shutdown:?}");
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{status:?}");
+    let _ = std::fs::remove_file(control_socket);
+}
+
+#[test]
+fn handlers_config_mounts_command_web_search_adapter() {
+    let control_socket = unique_socket("web-search-mounted");
+    let handlers_config = unique_path("web-search-handlers.json");
+    let response = r#"{"completed":{"callId":"call-web-search-1","status":"completed","content":"typed result","sources":[],"metadata":null,"error":null}}"#;
+    let config = serde_json::json!({
+        "schema_version": 1,
+        "web_search_adapter": {
+            "command": "/bin/sh",
+            "args": ["-c", format!("cat >/dev/null; printf '%s' '{}'", response)],
+            "timeout_ms": 2000
+        },
+        "handlers": []
+    });
+    std::fs::write(&handlers_config, serde_json::to_vec(&config).unwrap()).unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3-hooksd"))
+        .arg("--socket")
+        .arg(&control_socket)
+        .arg("--handlers-config")
+        .arg(&handlers_config)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("rccv3-hooksd should start");
+    let stdout = child.stdout.take().expect("sidecar stdout");
+    let mut readiness_line = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut readiness_line)
+        .expect("read readiness");
+    let readiness: Value = serde_json::from_str(&readiness_line).unwrap();
+    assert_eq!(readiness["ready"], true);
+
+    wait_for_socket(&control_socket);
+    let mut stream = UnixStream::connect(&control_socket).unwrap();
+    let response = send_request(
+        &mut stream,
+        &ControlRequest::ExecuteWebSearch {
+            request: Box::new(web_search_request(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64
+                    + 60_000,
+            )),
+        },
+    );
+    assert!(response.ok, "{response:?}");
+    assert_eq!(
+        response.result.unwrap()["outcome"]["completed"]["callId"],
+        "call-web-search-1"
+    );
+
+    let shutdown = send_request(&mut stream, &ControlRequest::Shutdown);
+    assert!(shutdown.ok, "{shutdown:?}");
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{status:?}");
+    let _ = std::fs::remove_file(control_socket);
+    let _ = std::fs::remove_file(handlers_config);
+}
+
+#[test]
+fn web_search_adapter_trait_is_available_to_the_sidecar_boundary() {
+    struct TypedAdapter;
+
+    impl WebSearchAdapter for TypedAdapter {
+        fn execute(
+            &mut self,
+            _request: &WebSearchHookRequest,
+        ) -> Result<WebSearchHookOutcome, WebSearchAdapterError> {
+            Ok(WebSearchHookOutcome::Failed(
+                servertool_core::web_search_contract::WebSearchFailure {
+                    call_id: "call-web-search-1".to_string(),
+                    error: servertool_core::web_search_contract::WebSearchError {
+                        code: "controlled".to_string(),
+                        message: "fixture".to_string(),
+                        retryable: false,
+                    },
+                },
+            ))
+        }
+    }
+
+    let mut adapter = TypedAdapter;
+    assert!(matches!(
+        adapter.execute(&web_search_request(1)),
+        Ok(WebSearchHookOutcome::Failed(_))
+    ));
 }
 
 #[test]

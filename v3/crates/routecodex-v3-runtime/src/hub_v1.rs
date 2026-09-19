@@ -129,12 +129,16 @@ pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
+pub(crate) mod web_search_hook_request;
 pub(crate) mod web_search_hop;
+mod web_search_sidecar;
 pub use responses_relay_runtime::*;
 pub(crate) use web_search_hop::{
-    execute_local_web_search_hop, first_local_websearch_tool_call,
-    project_web_search_result_into_finalized, resolve_request_web_search_backend_binding,
+    first_local_websearch_tool_call, project_web_search_result_into_finalized,
     resolve_web_search_mode_and_backend,
+};
+pub(crate) use web_search_sidecar::{
+    execute_web_search_through_hooks_sidecar, web_search_sidecar_failure_source,
 };
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;

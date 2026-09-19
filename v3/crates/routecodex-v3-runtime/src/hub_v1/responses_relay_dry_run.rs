@@ -275,6 +275,17 @@ pub fn project_v3_responses_relay_runtime_failure(
             );
             error_output(source, 599, "none", Vec::new(), observability, 0)
         }
+        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
+            call_id,
+            code,
+            message,
+            retryable: _,
+        } => {
+            let source = super::web_search_sidecar::web_search_sidecar_failure_source(
+                &call_id, code, &message,
+            );
+            error_output(source, 599, "none", Vec::new(), observability, 0)
+        }
         error => {
             let message = error.to_string();
             let source = build_v3_error_01_source_raised(

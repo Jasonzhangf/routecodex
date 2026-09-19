@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-relay-hook-resources.mjs');
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const v3Root = resolve(scriptDir, '..', '..');
+const repoRoot = resolve(v3Root, '..');
+const verifier = join(v3Root, 'scripts/architecture/verify-v3-relay-hook-resources.mjs');
 const fixtures = [
   {
     name: 'provider payload leak',
@@ -61,14 +64,18 @@ const failures = [];
 for (const fixture of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-relay-hook-resource-'));
   try {
-    cpSync(resolve(repoRoot, 'v3'), join(root, 'v3'), {
+    cpSync(v3Root, join(root, 'v3'), {
       recursive: true,
       filter: (source) => !source.includes('/target/'),
     });
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');
     writeFileSync(target, fixture.mutate ? fixture.mutate(source) : source + fixture.append);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_RELAY_HOOK_SOURCE_ROOT: join(root, 'v3') },
+    });
     const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) failures.push(`${fixture.name}: gate unexpectedly passed`);
     else if (!fixture.diagnostic.test(output)) failures.push(`${fixture.name}: wrong diagnostic: ${output.slice(-600)}`);

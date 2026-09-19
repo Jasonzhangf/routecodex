@@ -300,6 +300,62 @@ async fn stopping_supervisor_during_slow_startup_is_bounded_and_cleans_owned_sta
 
 #[tokio::test]
 #[cfg(unix)]
+async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        bin_directory.join("rccv3-hooksd"),
+        format!(
+            "#!/bin/sh\nsleep 1\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
+        .unwrap()
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": root.path(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let mut supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-readiness-barrier-instance".to_string(),
+    );
+    {
+        let readiness_future = supervisor.wait_for_readiness();
+        tokio::pin!(readiness_future);
+        let pending = tokio::time::timeout(Duration::from_millis(250), &mut readiness_future).await;
+        assert!(
+            pending.is_err(),
+            "readiness must remain pending until the sidecar protocol reports ready"
+        );
+        let readiness = tokio::time::timeout(Duration::from_secs(3), &mut readiness_future)
+            .await
+            .expect("supervisor readiness must complete")
+            .unwrap();
+        assert!(readiness.is_none());
+    }
+    supervisor.stop().await.unwrap();
+    std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn supervisor_timeout_force_reaps_owned_group_and_record() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
