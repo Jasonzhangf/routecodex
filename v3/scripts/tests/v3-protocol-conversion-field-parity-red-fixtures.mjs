@@ -79,7 +79,7 @@ const cases = [
   {
     name: 'Internal web search canonicalization is collapsed into the client inbound error variant',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
-    from: 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(\n            "web_search hooks sidecar task failed: {error}"\n        ))',
+    from: 'WebSearchSidecarControlError::Message(format!(\n            "web_search hooks sidecar task failed: {error}"\n        ))',
     to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
     diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
   },

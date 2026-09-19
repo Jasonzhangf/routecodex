@@ -116,7 +116,7 @@ const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModu
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
 requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
-requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error`, 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(');
+requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error`, 'WebSearchSidecarControlError::Message(format!(');
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
