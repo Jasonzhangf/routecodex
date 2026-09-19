@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use servertool_core::web_search_contract::{WebSearchHookOutcome, WebSearchHookRequest};
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +82,8 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             .validate()
             .map_err(|error| WebSearchAdapterError::InvalidRequest(error.to_string()))?;
         let timeout = self.remaining_timeout(request)?;
+        let payload = request_payload(request)?;
+        let deadline = std::time::Instant::now() + timeout;
         let mut child = Command::new(&self.command)
             .args(&self.args)
             .stdin(Stdio::piped())
@@ -96,35 +99,76 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
         let mut stdin = child.stdin.take().ok_or_else(|| {
             WebSearchAdapterError::Unavailable("web_search subagent stdin unavailable".to_string())
         })?;
-        stdin
-            .write_all(request_payload(request)?.as_bytes())
-            .map_err(|error| {
-                WebSearchAdapterError::Unavailable(format!(
-                    "web_search subagent stdin failed: {error}"
-                ))
-            })?;
-        drop(stdin);
-
-        let deadline = std::time::Instant::now() + timeout;
+        let (write_sender, write_receiver) = mpsc::sync_channel(1);
+        let writer = std::thread::spawn(move || {
+            let result = stdin.write_all(payload.as_bytes());
+            drop(stdin);
+            let _ = write_sender.send(result);
+        });
+        let mut write_result = None;
+        let mut child_exited = false;
         loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if std::time::Instant::now() >= deadline => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(WebSearchAdapterError::Timeout(
-                        "web_search subagent exceeded request deadline".to_string(),
-                    ));
-                }
-                Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(WebSearchAdapterError::Unavailable(format!(
-                        "web_search subagent wait failed: {error}"
-                    )));
+            if write_result.is_none() {
+                match write_receiver.try_recv() {
+                    Ok(result) => write_result = Some(result),
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = writer.join();
+                        return Err(WebSearchAdapterError::Unavailable(
+                            "web_search subagent stdin writer stopped without a result".to_string(),
+                        ));
+                    }
                 }
             }
+            if let Some(Err(error)) = write_result.as_ref() {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(WebSearchAdapterError::Unavailable(format!(
+                    "web_search subagent stdin failed: {error}"
+                )));
+            }
+            if !child_exited {
+                match child.try_wait() {
+                    Ok(Some(_)) => child_exited = true,
+                    Ok(None) => {}
+                    Err(error) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = writer.join();
+                        return Err(WebSearchAdapterError::Unavailable(format!(
+                            "web_search subagent wait failed: {error}"
+                        )));
+                    }
+                }
+            }
+            if child_exited && write_result.is_some() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                return Err(WebSearchAdapterError::Timeout(
+                    "web_search subagent exceeded request deadline".to_string(),
+                ));
+            }
+            match (child_exited, write_result.is_some()) {
+                (true, true) => break,
+                _ => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        writer.join().map_err(|_| {
+            WebSearchAdapterError::Unavailable(
+                "web_search subagent stdin writer panicked".to_string(),
+            )
+        })?;
+        if let Some(Err(error)) = write_result {
+            return Err(WebSearchAdapterError::Unavailable(format!(
+                "web_search subagent stdin failed: {error}"
+            )));
         }
         let output = child.wait_with_output().map_err(|error| {
             WebSearchAdapterError::Unavailable(format!(
@@ -340,5 +384,25 @@ mod tests {
             adapter.execute(&request(future_deadline())),
             Err(WebSearchAdapterError::Timeout(_))
         ));
+    }
+
+    #[test]
+    fn command_adapter_times_out_while_writing_to_non_reading_subagent() {
+        let mut request = request(future_deadline());
+        request.query = "x".repeat(1024 * 1024);
+        let mut adapter = CommandWebSearchAdapter::new(
+            "/bin/sleep".to_string(),
+            vec!["2".to_string()],
+            Duration::from_millis(20),
+        );
+        let (sender, receiver) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = sender.send(adapter.execute(&request));
+        });
+        let outcome = receiver.recv_timeout(Duration::from_secs(3)).expect(
+            "web_search adapter must enforce its deadline while the subagent is not reading stdin",
+        );
+        assert!(matches!(outcome, Err(WebSearchAdapterError::Timeout(_))));
+        worker.join().unwrap();
     }
 }
