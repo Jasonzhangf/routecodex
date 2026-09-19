@@ -391,6 +391,47 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
 }
 
 #[test]
+fn cooldown_probe_pending_scope_is_projected_once_for_exact_and_auth_key_probes() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_cooldown_failure(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            "exact model probe",
+            100,
+            900_000,
+        )
+        .unwrap();
+    store
+        .record_provider_cooldown_failure(
+            "provider-a",
+            Some("key-a"),
+            None,
+            "auth-key probe",
+            100,
+            900_000,
+        )
+        .unwrap();
+
+    let projection = store.availability_for_session(
+        &session("session-a"),
+        "provider-a",
+        Some("key-a"),
+        Some("gpt-5.5"),
+        101,
+    );
+    assert_eq!(
+        projection
+            .blocked_scopes
+            .iter()
+            .filter(|scope| scope.as_str() == "provider_cooldown_probe_pending")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn cancelled_probe_releases_single_flight_for_the_same_generation() {
     let store = V3ProviderHealthStore::default();
     store

@@ -1603,9 +1603,15 @@ impl V3ProviderHealthStore {
                 });
         if cooldown_probe_pending {
             projection.available = false;
-            projection
+            if !projection
                 .blocked_scopes
-                .push("provider_cooldown_probe_pending".to_string());
+                .iter()
+                .any(|scope| scope == "provider_cooldown_probe_pending")
+            {
+                projection
+                    .blocked_scopes
+                    .push("provider_cooldown_probe_pending".to_string());
+            }
         }
         projection
     }
