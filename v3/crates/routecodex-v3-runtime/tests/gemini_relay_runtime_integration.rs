@@ -6,7 +6,8 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeError, V3GeminiRelayRuntimeInput,
+    V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -792,8 +793,6 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 async fn uncommitted_sse_failure_enters_error_chain_and_provider_cooldown() {
     let server_id = "gemini_gate_failure";
     let manifest = manifest_for_action_gate_scope(server_id);
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let cases = [
         (
             "malformed",
@@ -827,6 +826,8 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         ),
     ];
     for (case, chunks) in cases {
+        let provider_health =
+            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
         let failing = StaticSseTransport {
             chunks: Mutex::new(Some(chunks)),
         };
@@ -936,21 +937,19 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             )
             .await
         });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            !held.is_finished(),
-            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
-        );
-
-        // provider cooldown 与 model-key health 都需要各自成功 probe；成功 probe
-        // 发布 availability generation 后，被 hold 的 fresh 请求继续执行。
-        revive_cooled_provider(&provider_health, server_id).await;
-        let revived = tokio::time::timeout(Duration::from_secs(2), held)
+        // A failed bounded rescue pass must terminate the request instead of
+        // leaving the session waiting for an unbounded future recovery.
+        let terminal = tokio::time::timeout(Duration::from_secs(2), held)
             .await
-            .expect("held request must wake after provider recovery")
-            .expect("held request task must not panic")
-            .expect("probe-revived provider must accept the held request");
-        assert_eq!(revived.status, 200);
+            .expect("bounded rescue pass must not leave the request hanging")
+            .expect("held request task must not panic");
+        assert!(
+            matches!(
+                terminal,
+                Err(V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. })
+            ),
+            "failed rescue probes must project terminal pool exhaustion: {terminal:?}"
+        );
     }
 }
 
