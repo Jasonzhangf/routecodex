@@ -86,7 +86,7 @@ edges:
       produces:
         - v3.hub.execution_plan
       side_channel_reads:
-        - v3.hub.entry_protocol
+        - v3.config.published_manifest
       side_channel_writes:
         - v3.hub.execution_plan
   - step_id: v3-hub-req-04
@@ -105,8 +105,7 @@ edges:
         - v3.config.published_manifest
       produces:
         - v3.hub.resolved_target
-      side_channel_reads:
-        - v3.hub.execution_plan
+      side_channel_reads: []
       side_channel_writes:
         - v3.hub.resolved_target
   - step_id: v3-hub-req-05
