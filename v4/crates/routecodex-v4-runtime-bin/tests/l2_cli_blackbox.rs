@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixStream;
@@ -1222,6 +1223,260 @@ setInterval(() => {}, 1000);
     );
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[test]
+fn adopted_cordis_host_stops_cleanly_and_allows_fresh_start() {
+    let test_root = root("cordis-adopt-restart");
+    let state_root = std::path::PathBuf::from("/tmp").join(format!(
+        "rccv4-adopt-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let port = free_port();
+    let config = initialize(&test_root, port);
+    let manifest = state_root.join("manifest.compiled.json");
+    let runner = test_root.join("adopt-restart-cordis.mjs");
+    let fresh_runner = test_root.join("adopt-restart-cordis-fresh.mjs");
+    let pid_file = test_root.join("adopt-restart.pid");
+    let ready_file = test_root.join("adopt-restart.ready");
+    let fresh_pid_file = test_root.join("adopt-restart-fresh.pid");
+    let fresh_ready_file = test_root.join("adopt-restart-fresh.ready");
+    let managed_stderr_path = test_root.join("adopt-restart-managed.stderr");
+
+    let compile_only = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env(
+            "RCCV4_CORDIS_HOST_SOCKET",
+            state_root.join("missing-admission.sock"),
+        )
+        .args(["start", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("manifest compile");
+    assert!(!compile_only.status.success());
+    assert!(manifest.exists());
+
+    fs::create_dir_all(&state_root).expect("state root");
+    let runner_source = r#"import fs from 'node:fs';
+import net from 'node:net';
+const [, , , socketPath, manifestPath] = process.argv;
+fs.writeFileSync(process.env.RCCV4_TEST_PID_FILE, String(process.pid));
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const graphHash = manifest.execution_epoch.graph_hash;
+const manifestHash = manifest.execution_epoch.manifest_hash;
+const epochId = manifest.execution_epoch.candidate.epoch_id;
+const server = net.createServer((socket) => {
+  let input = '';
+  socket.on('data', (chunk) => {
+    input += chunk;
+    if (!input.includes('\n')) return;
+    const request = JSON.parse(input.slice(0, input.indexOf('\n')));
+    if (request.op === 'handshake') {
+      socket.end(`${JSON.stringify({ ok: true, snapshot: { generation: 1 } })}\n`);
+    } else {
+      socket.end(`${JSON.stringify({
+        ok: true,
+        admission: {
+          active_epoch: { graph_hash: graphHash, manifest_hash: manifestHash, epoch_id: epochId },
+        },
+      })}\n`);
+    }
+  });
+});
+server.listen(socketPath, () => fs.writeFileSync(process.env.RCCV4_TEST_READY_FILE, 'ready'));
+setInterval(() => {}, 1000);
+"#;
+    fs::write(&runner, runner_source).expect("adopt restart runner");
+    fs::write(&fresh_runner, runner_source).expect("fresh adopt restart runner");
+
+    let socket = state_root.join("cordis.sock");
+    let stderr = fs::File::create(test_root.join("adopt-restart.stderr")).expect("stderr");
+    let mut adopted_host = Command::new("node")
+        .arg(&runner)
+        .args([
+            state_root.to_str().expect("state root"),
+            socket.to_str().expect("socket"),
+            manifest.to_str().expect("manifest"),
+        ])
+        .env("RCCV4_TEST_PID_FILE", &pid_file)
+        .env("RCCV4_TEST_READY_FILE", &ready_file)
+        .stderr(stderr)
+        .spawn()
+        .expect("lifecycle-owned socket fixture");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !socket.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(socket.exists(), "fixture socket must become ready");
+    let adopted_pid = fs::read_to_string(&pid_file)
+        .expect("fixture pid")
+        .trim()
+        .parse::<u32>()
+        .expect("Cordis pid");
+    let metadata = fs::symlink_metadata(&socket).expect("socket metadata");
+    let record = serde_json::json!({
+        "runtime_identity": "rccv4",
+        "pid": std::process::id(),
+        "generation_nonce": 1,
+        "cordis_socket_identity": {
+            "pid": adopted_pid,
+            "start_time": routecodex_v4_lifecycle::process_start_time(adopted_pid).expect("Cordis start time"),
+            "device": metadata.dev(),
+            "inode": metadata.ino(),
+        },
+        "config_path": config.to_str().expect("config path"),
+        "manifest_path": manifest.to_str().expect("manifest path"),
+        "manifest_digest": "test-only",
+        "listeners": [format!("127.0.0.1:{port}")],
+    });
+    let record_path = state_root.join("instance.json");
+    let mkfifo = Command::new("/usr/bin/mkfifo")
+        .arg(&record_path)
+        .status()
+        .expect("mkfifo");
+    assert!(mkfifo.success(), "lifecycle witness FIFO must be created");
+    let record_bytes = serde_json::to_vec(&record).expect("record");
+    let record_writer_path = record_path.clone();
+    let record_writer = std::thread::spawn(move || {
+        let mut fifo = fs::OpenOptions::new()
+            .write(true)
+            .open(&record_writer_path)
+            .expect("open lifecycle witness FIFO");
+        fifo.write_all(&record_bytes)
+            .expect("write lifecycle witness");
+        fifo.flush().expect("flush lifecycle witness");
+        fs::remove_file(&record_writer_path).expect("remove lifecycle witness FIFO");
+        drop(fifo);
+    });
+
+    let mut managed_child = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &runner)
+        .env_remove("RCCV4_CORDIS_HOST_SOCKET")
+        .args([
+            "server",
+            "run-managed-child",
+            "--manifest",
+            manifest.to_str().expect("manifest"),
+            "--config",
+            config.to_str().expect("config"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(fs::File::create(&managed_stderr_path).expect("managed stderr"))
+        .spawn()
+        .expect("managed child");
+    assert!(
+        adopted_host
+            .try_wait()
+            .expect("adopted host status")
+            .is_none(),
+        "adopted host must remain live before stop"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !state_root.join("control.sock").exists() {
+        if let Some(status) = managed_child.try_wait().expect("managed child status") {
+            panic!("managed child exited before control plane bind: {status}");
+        }
+        assert!(
+            Instant::now() < deadline,
+            "managed child did not bind control plane"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    record_writer.join().expect("lifecycle witness writer");
+    assert!(
+        adopted_host
+            .try_wait()
+            .expect("adopted host status")
+            .is_none(),
+        "adopted host must remain live after managed child binds"
+    );
+
+    let mut stop = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &runner)
+        .env_remove("RCCV4_CORDIS_HOST_SOCKET")
+        .args(["stop", "-c", config.to_str().expect("config")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("stop adopted instance");
+    let stop_deadline = Instant::now() + Duration::from_secs(5);
+    let mut adopted_host_reaped = false;
+    let stop = loop {
+        if adopted_host
+            .try_wait()
+            .expect("adopted host status")
+            .is_some()
+        {
+            adopted_host_reaped = true;
+        }
+        if stop.try_wait().expect("stop status").is_some() {
+            break stop.wait_with_output().expect("stop output");
+        }
+        assert!(
+            Instant::now() < stop_deadline,
+            "stop did not complete while releasing adopted host"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(adopted_host_reaped, "adopted host must exit during stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        !socket.exists(),
+        "stop must release the exact adopted Cordis host: {}",
+        fs::read_to_string(&managed_stderr_path).unwrap_or_default()
+    );
+    let _ = managed_child.wait().expect("managed child wait");
+
+    let fresh = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &fresh_runner)
+        .env("RCCV4_TEST_PID_FILE", &fresh_pid_file)
+        .env("RCCV4_TEST_READY_FILE", &fresh_ready_file)
+        .env_remove("RCCV4_CORDIS_HOST_SOCKET")
+        .args(["start", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("fresh start after adopted stop");
+    assert!(
+        fresh.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fresh.stderr)
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while TcpStream::connect(("127.0.0.1", port)).is_err() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).is_ok(),
+        "fresh start must publish a managed listener"
+    );
+    let final_stop = Command::new(env!("CARGO_BIN_EXE_rccv4"))
+        .current_dir("/tmp")
+        .env("RCCV4_STATE_ROOT", &state_root)
+        .env("RCCV4_CORDIS_HOST_RUNNER", &fresh_runner)
+        .env("RCCV4_TEST_PID_FILE", &fresh_pid_file)
+        .env("RCCV4_TEST_READY_FILE", &fresh_ready_file)
+        .env_remove("RCCV4_CORDIS_HOST_SOCKET")
+        .args(["stop", "-c", config.to_str().expect("config")])
+        .output()
+        .expect("stop fresh instance");
+    assert!(
+        final_stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&final_stop.stderr)
+    );
 }
 
 #[test]

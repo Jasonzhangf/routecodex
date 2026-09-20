@@ -446,6 +446,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
     let mut cordis = CordisHostGuard::new(
         ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
         &paths,
+        false,
     );
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
@@ -599,6 +600,7 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
             let mut cordis = CordisHostGuard::new(
                 ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
                 &paths,
+                false,
             );
             release_unmanaged_listeners(&manifest)?;
             handoff_cordis_to_child(&mut cordis, external_cordis_socket)?;
@@ -688,6 +690,7 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
     let mut cordis = CordisHostGuard::new(
         ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
         &paths,
+        true,
     );
     let result = run_foreground(manifest);
     let cleanup = cordis.cleanup();
@@ -884,16 +887,20 @@ fn ensure_cordis_host_socket(
 
 struct CordisHostGuard {
     child: Option<Child>,
+    paths: V4LifecyclePaths,
     socket: PathBuf,
     identity: Option<CordisSocketIdentity>,
+    cleanup_adopted: bool,
 }
 
 impl CordisHostGuard {
-    fn new(host: OwnedCordisHost, paths: &V4LifecyclePaths) -> Self {
+    fn new(host: OwnedCordisHost, paths: &V4LifecyclePaths, cleanup_adopted: bool) -> Self {
         Self {
             child: host.child,
+            paths: paths.clone(),
             socket: paths.state_root.join("cordis.sock"),
             identity: host.identity,
+            cleanup_adopted,
         }
     }
 
@@ -901,7 +908,18 @@ impl CordisHostGuard {
         self.child.is_some()
     }
 
+    fn owns_host(&self) -> bool {
+        self.child.is_some() || self.identity.is_some()
+    }
+
     fn cleanup(&mut self) -> Result<(), String> {
+        if self.child.is_none() && self.cleanup_adopted {
+            let Some(identity) = self.identity else {
+                return Ok(());
+            };
+            return routecodex_v4_lifecycle::release_stale_cordis_host(&self.paths, identity)
+                .map_err(|error| error.to_string());
+        }
         cleanup_owned_cordis(&mut self.child, &self.socket, self.identity)
     }
 }
@@ -993,6 +1011,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     let mut cordis_child = CordisHostGuard::new(
         ensure_cordis_host_socket(&intent.manifest, &manifest, &paths)?,
         &paths,
+        true,
     );
     let cordis_socket_identity = cordis_child.identity;
     let record = ManagedInstanceRecord {
@@ -1042,7 +1061,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     };
     stop.store(true, Ordering::Release);
     join_servers_for_shutdown(handles)?;
-    let owned_cordis = cordis_child.owns_child();
+    let owned_cordis = cordis_child.owns_host();
     let cordis_cleanup = cordis_child.cleanup();
     let record_cleanup = control.clear_record().map_err(|error| error.to_string());
     drop(control);
