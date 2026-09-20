@@ -129,8 +129,8 @@ function readJsonLines(file, allowIncompleteTail = false) {
 
 function listenerReceipt(records, startedAtMs, turnId) {
   if (typeof turnId !== 'string' || turnId.length === 0) return null;
-  return records.find((record) => {
-    const row = record?.row;
+  const record = records.find((entry) => {
+    const row = entry?.row;
     const meta = row?.meta;
     return row?.event_type === 'request.completed'
       && row?.result === 'success'
@@ -141,10 +141,15 @@ function listenerReceipt(records, startedAtMs, turnId) {
       && Number.isInteger(row?.started_epoch_ms)
       && row.started_epoch_ms >= startedAtMs;
   }) ?? null;
+  return record?.row ?? null;
 }
 
 function hasListenerReceipt(records, startedAtMs, turnId) {
   return listenerReceipt(records, startedAtMs, turnId) !== null;
+}
+
+function validateListenerReceiptRow(receipt, expectedRequestId) {
+  return receipt?.meta?.request_id === expectedRequestId;
 }
 
 function validateLongProfile() {
@@ -335,6 +340,10 @@ if (contractOnly) {
   };
   const now = Date.now();
   const evidence = roundTripEvidence(records);
+  const listenerRow = listenerReceipt([receipt], now - 1000, evidence.turnId);
+  if (!validateListenerReceiptRow(listenerRow, 'request-1')) {
+    throw new Error('codex TUI tool round-trip contract self-test failed: listener receipt row shape');
+  }
   const negativeReceipts = [
     [],
     [receipt].map((value) => ({
