@@ -1,0 +1,43 @@
+{
+  "evidence_id": "red-gate-c0c4f5bf394e",
+  "issue_id": "V4-PLUGIN-004",
+  "experiment_id": "v4-feature-layer-d-v4-plugin-004",
+  "phase": "negative_intervention",
+  "kind": "red_test",
+  "source_commit": "c0c4f5bf394eedfc8553605cd59d3520f843cf8f",
+  "scope": {
+    "feature_id": "V4-PLUGIN-004",
+    "module_id": "routecodex-v4-standard-plugins"
+  },
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4_plugin_request_red"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "-p",
+    "routecodex-v4-standard-plugins",
+    "--test",
+    "l2_request_plugins",
+    "--manifest-path",
+    "Cargo.toml",
+    "--locked"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "receipt_hash": "sha256:3deb51e0ab847d1af8735ec144e5927e7077c1bfd7104b5027d06b75d3ce789b",
+  "created_at": "2026-09-20T08:03:00.149Z",
+  "expires_at": "2026-09-27T08:03:00.149Z",
+  "input_hashes": [
+    "sha256:020a02f44e91752df2d8f7b836bdce359750f5827b0ed9b1e288c6b814e29659",
+    "sha256:3dcc78731b52e8615011e86ea54248fc8b6a3eedc7f824ed57510846d573875b",
+    "sha256:50c6bf147b7a25b743b78196382dd4ff43a031f81814676613ea2bea9dd294c3",
+    "sha256:51085e183b1a69168603db12333758f775d874f0624367702f17d558abdb2543",
+    "sha256:7d8156b43abaf9fddfdffa44e97d9787fa2efee0ceebd488ae0dacaef35ea936",
+    "sha256:a94bae3d05882d3dbf82ffd953b11a17c23919de0699c76892407fca9be3c469",
+    "sha256:dff52c2f4537d23ac667caa18e6353439e2954ed217cbc98b8e0e5b31e751894",
+    "sha256:f487a2184f1acc5f642cdbe0225115f897f12ba66eb25fe08b8d9b0fbb928704"
+  ],
+  "scope_hash": "sha256:2949f74bae9a2c76a229e21cff23984c1d3bbbf307b51a29da10791f684d8516"
+}

@@ -1,0 +1,36 @@
+{
+  "fix_candidate_id": "v4-layer-batch-d-current",
+  "issue_id": "V4-LAYER-BATCH-D",
+  "module_id": "routecodex-v4-standard-plugins",
+  "worktree_id": "v4-incomplete-delivery-r2-20260920",
+  "base_commit": "65065c1888f4178fe07224a9b82c657e52982c8f",
+  "head_commit": "c0c4f5bf394eedfc8553605cd59d3520f843cf8f",
+  "tree_hash": "d6222630a20b8dcf1fd1bcbcaadf80d17a008892",
+  "diff_hash": "sha256:f56d5e884cab7d47b70dbba718a3f14a71e8744b6999b16a72505617c13a7465",
+  "design_id": "v4-feature-layer-batch-d",
+  "owner": "routecodex-v4-standard-plugins",
+  "scope_hash": "sha256:2949f74bae9a2c76a229e21cff23984c1d3bbbf307b51a29da10791f684d8516",
+  "changed_paths": [
+    "v4/crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/model_hooks.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/request_governance.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/request_normalize.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/request_plugins.rs",
+    "v4/crates/routecodex-v4-standard-plugins/src/responses_wire_build.rs"
+  ],
+  "verification_evidence_ids": [
+    "boundary-audit-c0c4f5bf394e",
+    "plane-isolation-c0c4f5bf394e",
+    "positive-c0c4f5bf394e",
+    "red-gate-c0c4f5bf394e"
+  ],
+  "created_at": "2026-09-20T08:03:00.149Z",
+  "batch_id": "D",
+  "task_ids": [
+    "V4-PLUGIN-001",
+    "V4-PLUGIN-002",
+    "V4-PLUGIN-003",
+    "V4-PLUGIN-004",
+    "V4-PLUGIN-005"
+  ]
+}
