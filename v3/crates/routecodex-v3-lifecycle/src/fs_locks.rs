@@ -187,7 +187,33 @@ pub(crate) fn write_running_status_if_current_detail(
     expected_detail: Option<&str>,
     detail: Option<String>,
 ) -> Result<(), V3LifecycleError> {
+    write_running_status_if_current_detail_for_generation(
+        instance_dir,
+        instance_id,
+        None,
+        expected_detail,
+        detail,
+    )
+}
+
+pub(crate) fn write_running_status_if_current_detail_for_generation(
+    instance_dir: &Path,
+    instance_id: &str,
+    expected_start_nonce: Option<&str>,
+    expected_detail: Option<&str>,
+    detail: Option<String>,
+) -> Result<(), V3LifecycleError> {
     let _lock = acquire_status_file_lock(instance_dir)?;
+    if let Some(expected_start_nonce) = expected_start_nonce {
+        let control_path = instance_dir.join("control.json");
+        if !control_path.exists() {
+            return Ok(());
+        }
+        let control: V3ManagedControlRecord = read_json(&control_path)?;
+        if control.instance_id != instance_id || control.start_nonce != expected_start_nonce {
+            return Ok(());
+        }
+    }
     let status_path = instance_dir.join("status.json");
     if status_path.exists() {
         let status: V3ManagedStatusRecord = read_json(&status_path)?;

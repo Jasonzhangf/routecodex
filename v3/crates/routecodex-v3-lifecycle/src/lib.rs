@@ -1012,6 +1012,7 @@ impl V3ManagedLifecycle {
         hooks_sidecar.spawn_readiness_detail_publisher(
             instance_dir.clone(),
             declaration.instance_id.clone(),
+            start_nonce.clone(),
         );
         return control_plane::run_managed_control_loop(
             &instance_dir,

@@ -305,6 +305,17 @@ async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
     let instance_id = "hooks-deferred-readiness-instance";
+    let start_nonce = "generation-1";
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: start_nonce.to_string(),
+        },
+    )
+    .unwrap();
     write_status(
         &instance_dir,
         instance_id,
@@ -332,7 +343,11 @@ async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
         Some("hooks sidecar readiness pending".to_string())
     );
 
-    supervisor.spawn_readiness_detail_publisher(instance_dir.clone(), instance_id.to_string());
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        start_nonce.to_string(),
+    );
     readiness_tx
         .send(Some(
             "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
@@ -374,6 +389,17 @@ async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
     let instance_id = "hooks-readiness-race-instance";
+    let start_nonce = "generation-1";
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: start_nonce.to_string(),
+        },
+    )
+    .unwrap();
     let crash_detail =
         "hooks sidecar unavailable: hooks_unavailable:crashed: hooks sidecar exited after readiness";
     write_status(
@@ -387,7 +413,11 @@ async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
     let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
     let mut supervisor =
         V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
-    supervisor.spawn_readiness_detail_publisher(instance_dir.clone(), instance_id.to_string());
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        start_nonce.to_string(),
+    );
     readiness_tx
         .send(Some(
             "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
@@ -399,6 +429,61 @@ async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
     let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
     assert_eq!(status.state, V3ManagedRunState::Running);
     assert_eq!(status.detail.as_deref(), Some(crash_detail));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn stale_generation_readiness_does_not_overwrite_new_generation_detail() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-readiness-generation-race-instance";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some("hooks sidecar readiness pending".to_string()),
+    )
+    .unwrap();
+
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: "generation-1".to_string(),
+        },
+    )
+    .unwrap();
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        "generation-1".to_string(),
+    );
+
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: "generation-2".to_string(),
+        },
+    )
+    .unwrap();
+    readiness_tx
+        .send(Some("stale generation detail".to_string()))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert_eq!(
+        read_live_status_detail(&instance_dir, instance_id).unwrap(),
+        Some("hooks sidecar readiness pending".to_string())
+    );
 }
 
 #[tokio::test]

@@ -232,6 +232,7 @@ impl V3HooksSidecarSupervisor {
         &mut self,
         instance_dir: PathBuf,
         instance_id: String,
+        start_nonce: String,
     ) {
         let Some(mut readiness_rx) = self.readiness_rx.take() else {
             return;
@@ -244,9 +245,10 @@ impl V3HooksSidecarSupervisor {
                     hooks_unavailable(HooksUnavailableReason::Crashed)
                 )),
             };
-            if let Err(error) = write_running_status_if_current_detail(
+            if let Err(error) = write_running_status_if_current_detail_for_generation(
                 &instance_dir,
                 &instance_id,
+                Some(&start_nonce),
                 Some("hooks sidecar readiness pending"),
                 detail,
             ) {
