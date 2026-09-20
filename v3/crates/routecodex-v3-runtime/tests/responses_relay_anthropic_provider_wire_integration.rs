@@ -135,6 +135,40 @@ impl ResponsesTransport for AnthropicCyberRefusalThenSuccessTransport {
     }
 }
 
+struct AnthropicCyberRefusalJsonTransport {
+    attempts: Mutex<usize>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicCyberRefusalJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.attempts.lock().unwrap() += 1;
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id":"msg_cyber_refusal_json",
+                "type":"message",
+                "role":"assistant",
+                "model":"claude-fable-5",
+                "content":[{"type":"text","text":"refused"}],
+                "usage":{"input_tokens":7,"output_tokens":2},
+                "stop_reason":"refusal",
+                "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"}
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wire() {
     let transport = AnthropicProviderJsonTransport {
@@ -573,6 +607,52 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
         "single-candidate pool must project the provider failure terminally: {:?}",
         output.node_trace
     );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation_semantics() {
+    let transport = AnthropicCyberRefusalJsonTransport {
+        attempts: Mutex::new(0),
+    };
+    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        &claude_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "anthropic_v3_10000".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-cyber-refusal-json".into(),
+            payload: json!({
+                "model":"claude-fable-5",
+                "input":"Reply OK only.",
+                "stream":false,
+                "max_output_tokens":16
+            }),
+        },
+        &transport,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 1,
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert_eq!(output.status, 502);
+    let observability = output.observability.as_ref().expect("observability");
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    let failure = &observability.provider_failure_events[0];
+    assert_eq!(failure.status, 429);
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("ANTHROPIC_CYBER_REFUSAL")
+    );
+    assert!(failure
+        .message
+        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
 }
 
 #[tokio::test]

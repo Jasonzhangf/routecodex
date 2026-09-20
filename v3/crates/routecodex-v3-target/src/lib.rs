@@ -37,6 +37,7 @@ pub struct V3TargetCandidate {
     pub request_timeout_ms: u64,
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
+    pub concurrency_acquire_timeout_ms: u64,
     pub compatibility_profile: Option<String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
@@ -728,6 +729,10 @@ impl V3TargetInterpreter {
                     .concurrency
                     .as_ref()
                     .map_or(8, |concurrency| concurrency.max_in_flight),
+                concurrency_acquire_timeout_ms: provider
+                    .concurrency
+                    .as_ref()
+                    .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
                 compatibility_profile: provider.compatibility_profile.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),

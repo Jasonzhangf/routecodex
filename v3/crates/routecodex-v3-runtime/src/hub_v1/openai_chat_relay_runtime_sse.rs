@@ -276,6 +276,15 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 }
                                 let event: Value = serde_json::from_str(data)
                                     .map_err(|error| error.to_string())?;
+                                if let Some(failure) = classify_v3_provider_terminal_admission(
+                                    V3HubProviderWireProtocol::Anthropic,
+                                    &event,
+                                ) {
+                                    return Err(format!(
+                                        "provider emitted {}: {}",
+                                        failure.code, failure.message
+                                    ));
+                                }
                                 for mut payload in transducer.push_event(event)? {
                                     let governed = project_sse_event_payload(
                                         request_id.as_str(),

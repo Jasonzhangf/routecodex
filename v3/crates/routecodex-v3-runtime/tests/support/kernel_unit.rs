@@ -1387,6 +1387,101 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
 }
 
 #[tokio::test]
+async fn direct_sse_incomplete_reselects_without_projecting_partial_attempt() {
+    use futures_util::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstIncompleteSecondSucceeds {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for FirstIncompleteSecondSucceeds {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let attempt = self.sends.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                assert_eq!(request.provider_id(), "first");
+                let frames = vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-must-not-commit\"}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_a\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
+                    ),
+                ];
+                return Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    Box::pin(stream::iter(frames)),
+                ));
+            }
+            assert_eq!(request.provider_id(), "second");
+            let frames = vec![Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"provider-b-only\"}],\"usage\":{\"input_tokens\":10,\"output_tokens\":3,\"total_tokens\":13}}}\n\n".to_vec(),
+            )];
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(frames)),
+            ))
+        }
+    }
+
+    let routing_group = "provider_sse_incomplete_reselection";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req-incomplete",
+        "exec-incomplete",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let transport = FirstIncompleteSecondSucceeds {
+        sends: AtomicUsize::new(0),
+    };
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        2,
+        "the incomplete attempt must reselect exactly once: {output:?}"
+    );
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
+        panic!("incomplete attempt must be reselected before client stream starts")
+    };
+    let committed = stream.collect::<Vec<_>>().await;
+    let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("provider-b-only"), "{text}");
+    assert!(!text.contains("provider-a-must-not-commit"), "{text}");
+    assert!(!text.contains("response.incomplete"), "{text}");
+}
+
+#[tokio::test]
 async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure() {
     use futures_util::StreamExt;
 

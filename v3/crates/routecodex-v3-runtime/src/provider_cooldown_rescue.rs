@@ -160,7 +160,6 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
 ) -> V3TargetSelectionAfterRescue {
     let target = V3TargetInterpreter::default();
     let session_availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut exhaustion_rescue_probe_scheduled = false;
     let initial_selection = select_v3_target_with_session_then_global(
         &target,
         expanded.clone(),
@@ -295,68 +294,84 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
     }
-    loop {
-        let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-            Ok(now_ms) => now_ms,
-            Err(error) => {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_clock_failed",
-                    error,
-                ))
-            }
-        };
-        let observed_generation = provider_health.store.availability_generation();
-        let retry_availability = provider_health.session_bound_availability(failure_session_scope);
-        let exhaustion = match select_v3_target_with_session_then_global(
+    let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+        Ok(now_ms) => now_ms,
+        Err(error) => {
+            return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                "V3ProviderCooldownRescueProbe",
+                "target_exhaustion_rescue_clock_failed",
+                error,
+            ))
+        }
+    };
+    let observed_generation = provider_health.store.availability_generation();
+    let retry_availability = provider_health.session_bound_availability(failure_session_scope);
+    let mut selection = select_v3_target_with_session_then_global(
+        &target,
+        expanded.clone(),
+        &retry_availability,
+        provider_health,
+        request_local_excluded_candidates,
+        retry_now_ms,
+        0,
+    );
+    if provider_health.store.availability_generation() != observed_generation {
+        // Health can change concurrently with the first post-probe read. Re-read
+        // once immediately, but never wait for a later availability generation.
+        selection = select_v3_target_with_session_then_global(
             &target,
             expanded.clone(),
-            &retry_availability,
+            &provider_health.session_bound_availability(failure_session_scope),
             provider_health,
             request_local_excluded_candidates,
             retry_now_ms,
             0,
-        ) {
-            Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
-            Err(exhausted) => exhausted,
-        };
-        if provider_health.store.availability_generation() != observed_generation {
-            continue;
-        }
-        if !v3_exhaustion_is_cooldown_only(
-            &expanded,
-            request_local_excluded_candidates,
-            failure_session_scope,
-            provider_health,
-            retry_now_ms,
-        ) {
-            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
-        }
-        if !exhaustion_rescue_probe_scheduled {
-            if let Err(error) = provider_health
-                .run_exhaustion_rescue_probes(manifest, &expanded)
-                .await
-            {
-                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_exhaustion_rescue_probe_failed",
-                    error,
-                ));
-            }
-            exhaustion_rescue_probe_scheduled = true;
-            continue;
-        }
-        if let Err(error) = provider_health
-            .store
-            .wait_for_availability_change(observed_generation)
-            .await
-        {
+        );
+    }
+    let exhaustion = match selection {
+        Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
+        Err(exhausted) => exhausted,
+    };
+    if !v3_exhaustion_is_cooldown_only(
+        &expanded,
+        request_local_excluded_candidates,
+        failure_session_scope,
+        provider_health,
+        retry_now_ms,
+    ) {
+        return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
+    }
+    if let Err(error) = provider_health
+        .run_exhaustion_rescue_probes(manifest, &expanded)
+        .await
+    {
+        return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+            "V3ProviderCooldownRescueProbe",
+            "target_exhaustion_rescue_probe_failed",
+            error,
+        ));
+    }
+    let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+        Ok(now_ms) => now_ms,
+        Err(error) => {
             return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
                 "V3ProviderCooldownRescueProbe",
-                "target_exhaustion_rescue_wait_failed",
-                error.to_string(),
-            ));
+                "target_exhaustion_rescue_clock_failed",
+                error,
+            ))
         }
+    };
+    match select_v3_target_with_session_then_global(
+        &target,
+        expanded,
+        &provider_health.session_bound_availability(failure_session_scope),
+        provider_health,
+        request_local_excluded_candidates,
+        retry_now_ms,
+        deterministic_sample,
+    ) {
+        Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+        Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
     }
 }
 

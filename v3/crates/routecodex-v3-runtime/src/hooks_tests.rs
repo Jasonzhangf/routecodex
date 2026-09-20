@@ -76,6 +76,7 @@ fn direct_policy_with_models(
                 weight: 1,
                 sse_first_frame_timeout_ms: None,
                 initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
                 compatibility_profile: None,
                 env_name: Some("TEST_KEY".to_string()),
                 token_file: None,

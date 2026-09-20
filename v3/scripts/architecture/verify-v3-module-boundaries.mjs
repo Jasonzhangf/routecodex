@@ -254,6 +254,7 @@ for (const path of all) {
     path.endsWith('routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs')
     || path.endsWith('routecodex-v3-runtime/src/provider_failure_runtime_policy.rs');
   const isProviderTransportSurface = path.endsWith('routecodex-v3-provider-responses/src/transport.rs')
+    || path.endsWith('routecodex-v3-provider-responses/src/transport_admission.rs')
     || path.endsWith('routecodex-v3-provider-responses/src/shared.rs');
   const isDebugSamplePersistence = path.endsWith('routecodex-v3-debug/src/sample_store.rs');
   const isServerObservabilityPersistence = path.endsWith('routecodex-v3-server/src/webui_observability.rs');

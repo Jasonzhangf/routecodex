@@ -32,6 +32,7 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
             },
             body,
         )
@@ -174,6 +175,7 @@ mod tests {
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
             initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),
@@ -959,6 +961,7 @@ mod tests {
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
             initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
         }
     }
 
@@ -1360,6 +1363,36 @@ mod tests {
             json!([{"type": "reasoning_text", "text": " "}]),
             "Console Go requires a reasoning representation on the assistant tool turn even when the prior response supplied no reasoning text"
         );
+    }
+
+    #[test]
+    fn wire_wraps_deepseek_v41_malformed_function_arguments_without_thinking_mode() {
+        let mut target = target();
+        target.provider_id = "kdns-freesail".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "deepseek-v4.1-flash".into();
+        target.wire_model = "deepseek-v4.1-flash".into();
+        target.compatibility_profile = Some("responses:deepseek-console-go".into());
+        let body = json!({
+            "model": "deepseek-v4.1-flash",
+            "input": [
+                {"type": "function_call", "call_id": "call_bad", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\""},
+                {"type": "function_call", "call_id": "call_good", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"}
+            ]
+        });
+
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-v41-malformed-arguments",
+            target,
+            body,
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(
+            input[0]["arguments"],
+            "{\"input\":\"{\\\"cmd\\\":\\\"pwd\\\"\"}"
+        );
+        assert_eq!(input[1]["arguments"], "{\"cmd\":\"ls\"}");
     }
 
     #[test]

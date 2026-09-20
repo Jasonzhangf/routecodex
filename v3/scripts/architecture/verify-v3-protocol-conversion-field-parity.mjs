@@ -845,7 +845,7 @@ for (const [owner, body, phrases] of [
   ['v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs'), 'utf8'), ['responses_tool_result_status_survives_chat_canonical_carrier']],
   [paths.responsesAnthropicProviderTests, text.responsesAnthropicProviderTests, ['responses_relay_anthropic_wire_preserves_typed_tool_result_error_status']],
   ['v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs'), 'utf8'), ['"container_upload" => Ok(Self::ContainerUpload),']],
-  [paths.anthropicTests, text.anthropicTests, ['anthropic_json_and_sse_materialization_share_terminal_projection_owner']],
+  [paths.anthropicTests, text.anthropicTests, ['anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it']],
   ['v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/tables/finish_reason_map.json'), 'utf8'), ['"hub": "content_filter"', '"anthropic": "refusal"']],
   ['v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs', readFileSync(repoPath('v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed_tests.rs'), 'utf8'), ['responses_resp03_accepts_registered_incomplete_terminal_and_rejects_malformed_details']],
   [paths.fieldMatrix, text.fieldMatrix, ['    - SSE transport']],

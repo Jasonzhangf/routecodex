@@ -72,7 +72,7 @@ struct MatrixJsonTransport {
 }
 
 #[tokio::test]
-async fn anthropic_json_and_sse_materialization_share_terminal_projection_owner() {
+async fn anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it() {
     let json_response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_terminal_parity",
         "type":"message",
@@ -111,21 +111,85 @@ data: {"type":"message_stop"}
 
 "#.to_vec()),
     ]);
-    let sse_response = materialize_v3_provider_sse_as_canonical_response(
+    let sse_error = materialize_v3_provider_sse_as_canonical_response(
         V3HubProviderWireProtocol::Anthropic,
         Box::pin(stream),
     )
     .await
-    .expect("Anthropic SSE max_tokens must materialize through the JSON terminal owner");
+    .expect_err("provider max_tokens must not be admitted as a successful attempt");
 
-    for response in [&json_response, &sse_response] {
-        assert_eq!(response["status"], "incomplete");
-        assert_eq!(
-            response["incomplete_details"]["reason"],
-            "max_output_tokens"
-        );
-        assert_eq!(response["finish_reason"], "max_tokens");
-    }
+    assert_eq!(json_response["status"], "incomplete");
+    assert_eq!(
+        json_response["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
+    assert_eq!(json_response["finish_reason"], "max_tokens");
+    assert!(
+        sse_error
+            .to_string()
+            .contains("provider response ended before completion: max_tokens"),
+        "unexpected provider materialization error: {sse_error}"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_refusal_provider_terminal_is_rejected_before_success_projection() {
+    let json_response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_refusal_terminal_parity",
+        "type":"message",
+        "role":"assistant",
+        "model":"MiniMax-M3",
+        "content":[{"type":"text","text":"partial"}],
+        "usage":{"input_tokens":3,"output_tokens":2},
+        "stop_reason":"refusal",
+        "stop_details":{"type":"refusal","category":"policy","explanation":"refused"}
+    }))
+    .expect("Anthropic JSON refusal must use the registered terminal projection");
+
+    let stream = futures_util::stream::iter([
+        Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_refusal_terminal_parity","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"stop_reason":null,"usage":{"input_tokens":3}}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+"#.to_vec()),
+        Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+        Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"policy","explanation":"refused"}},"usage":{"output_tokens":2}}
+
+"#.to_vec()),
+        Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+    ]);
+    let sse_error = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Anthropic,
+        Box::pin(stream),
+    )
+    .await
+    .expect_err("provider refusal must not be admitted as a successful attempt");
+
+    assert_eq!(json_response["status"], "incomplete");
+    assert_eq!(
+        json_response["incomplete_details"]["reason"],
+        "content_filter"
+    );
+    assert!(
+        sse_error
+            .to_string()
+            .contains("provider response ended before completion: content_filter"),
+        "unexpected provider materialization error: {sse_error}"
+    );
 }
 
 #[tokio::test]

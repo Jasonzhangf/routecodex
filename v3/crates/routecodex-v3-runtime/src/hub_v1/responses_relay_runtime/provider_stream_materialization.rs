@@ -282,6 +282,18 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         };
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
     })?;
+    if let Some(failure) = classify_v3_provider_terminal_admission(
+        V3HubProviderWireProtocol::Anthropic,
+        &anthropic_message,
+    ) {
+        return Err(
+            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                status: 200,
+                code: failure.code,
+                message: failure.message,
+            },
+        );
+    }
     let response = project_v3_anthropic_message_as_responses_response_with_context(
         &anthropic_message,
         anthropic_context,
@@ -420,6 +432,18 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_openai_chat_provider_strea
                         status: 502,
                         code: "network_error".to_owned(),
                         message,
+                    },
+                );
+            }
+            if let Some(failure) = classify_v3_provider_terminal_admission(
+                V3HubProviderWireProtocol::OpenAiChat,
+                &event,
+            ) {
+                return Err(
+                    V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                        status: 200,
+                        code: failure.code,
+                        message: failure.message,
                     },
                 );
             }
@@ -767,6 +791,62 @@ mod tests {
             } if code == "network_error"
                 && message.contains("finish_reason=network_error")
         ));
+    }
+
+    #[tokio::test]
+    async fn provider_length_finish_reason_is_not_materialized_as_success() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_length\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"chat-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_length\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".to_vec(),
+        )]));
+
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("a provider length terminal must remain an incomplete attempt");
+
+        assert!(
+            matches!(
+                error,
+                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                    status: 200,
+                    ref code,
+                    ref message,
+                } if code == "provider_response_incomplete_length"
+                    && message.contains("provider response ended before completion: length")
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_content_filter_finish_reason_is_not_materialized_as_success() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(
+            b"data: {\"id\":\"chatcmpl_filter\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec(),
+        )]));
+
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("a provider content-filter terminal must remain an incomplete attempt");
+
+        assert!(
+            matches!(
+                error,
+                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                    status: 200,
+                    ref code,
+                    ref message,
+                } if code == "provider_response_incomplete_content_filter"
+                    && message.contains("provider response ended before completion: content_filter")
+            ),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]

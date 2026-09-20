@@ -310,6 +310,25 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
+        if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
+            compat_plan.provider_protocol,
+            &parsed,
+        ) {
+            return Err(build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                failure.code.clone(),
+                failure.message.clone(),
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some(failure.code),
+                    provider_id: Some(provider_id),
+                    upstream_request_id: None,
+                    message: Some(failure.message),
+                },
+            ));
+        }
         (V3ProviderAttemptBody::Json(parsed), None)
     } else {
         return Err(build_v3_error_01_source_raised_external(

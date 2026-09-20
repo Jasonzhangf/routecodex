@@ -2,10 +2,13 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const require = createRequire(import.meta.url);
+const yamlPackage = dirname(require.resolve('yaml/package.json'));
 const files = [
   'docs/goals/v3-protocol-conversion-field-parity-test-design.md',
   'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
@@ -932,11 +935,11 @@ const cases = [
     diagnostic: /forbidden_truth_sources|SSE transport/u,
   },
   {
-    name: 'JSON and SSE shared terminal owner regression is removed',
+    name: 'Provider admission boundary regression is removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
-    from: 'anthropic_json_and_sse_materialization_share_terminal_projection_owner',
-    to: 'anthropic_json_and_sse_terminal_projection_owner_removed',
-    diagnostic: /anthropic_json_and_sse_materialization_share_terminal_projection_owner/u,
+    from: 'anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it',
+    to: 'anthropic_provider_terminal_admission_boundary_removed',
+    diagnostic: /anthropic_json_codec_represents_max_tokens_but_provider_materialization_rejects_it/u,
   },
   {
     name: 'Anthropic refusal finish-reason registry loses content_filter identity',
@@ -980,11 +983,8 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-protocol-parity-red-'));
   try {
     for (const file of files) copyFileInto(root, file);
-    const localNodeModules = resolve(repo, 'v3/node_modules');
-    const nodeModules = existsSync(localNodeModules)
-      ? localNodeModules
-      : resolve(repo, 'node_modules');
-    if (existsSync(nodeModules)) symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
+    mkdirSync(resolve(root, 'node_modules'), { recursive: true });
+    symlinkSync(yamlPackage, resolve(root, 'node_modules/yaml'), 'dir');
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(testCase.from)) throw new Error(`${testCase.name}: mutation source missing`);

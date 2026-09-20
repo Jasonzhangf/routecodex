@@ -398,7 +398,7 @@
       <h2>Manual semantic translation groups / Chat 标准语义手工分组</h2>
       <p>这张表是人工审计主表：左侧先定义 OpenAI Chat 原生字段或新增扩展字段的标准语义，右侧再按 Responses / Anthropic / Gemini 找同义字段组和 value/shape transform。允许一条 Chat 语义对应多个协议字段，也允许协议字段需要 shape 分支；禁止把源字段按名字硬塞成一一对应。</p>
       <div class="table-wrap"><table>
-    <thead><tr><th>OpenAI Chat field / extension</th><th>standard semantic meaning</th><th>direction / impl / gap</th><th>Responses semantic group</th><th>Anthropic semantic group</th><th>Gemini semantic group</th></tr></thead>
+    <thead><tr><th>OpenAI Chat field / extension</th><th>standard semantic meaning</th><th>direction / impl / gap</th><th>Responses semantic group</th><th>Anthropic semantic group</th><th>Gemini semantic group</th><th>DeepSeek provider compatibility semantic group</th></tr></thead>
     <tbody><tr>
     <td class="standard-cell">
       <code>request.model</code>
@@ -421,8 +421,7 @@
     <h4>transform</h4>
     <div>Copy model selector into Chat request model, then Provider08 may replace with selected upstream model.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.model</code></li></ul>
     <h4>response fields</h4>
@@ -430,8 +429,7 @@
     <h4>transform</h4>
     <div>Copy Anthropic model into Chat request model as selector only.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.model</code></li></ul>
     <h4>response fields</h4>
@@ -439,7 +437,7 @@
     <h4>transform</h4>
     <div>Gemini model may come from path or request model; normalize to Chat request.model as selector.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -463,8 +461,7 @@
     <h4>transform</h4>
     <div>Responses input items become ordered Chat messages; message/status/id are item metadata and must not reorder content.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages</code></li><li><code>request.messages[].content</code></li></ul>
     <h4>response fields</h4>
@@ -472,8 +469,7 @@
     <h4>transform</h4>
     <div>Anthropic messages are already ordered but system is top-level; system becomes system/developer Chat message before user/assistant turns.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents</code></li></ul>
     <h4>response fields</h4>
@@ -481,7 +477,7 @@
     <h4>transform</h4>
     <div>Gemini contents become ordered Chat messages; Gemini model role maps to assistant, user role maps to user.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -505,8 +501,7 @@
     <h4>transform</h4>
     <div>Responses message.role maps to Chat role; function_call_output items synthesize Chat role=tool.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].role</code></li><li><code>request.system</code></li><li><code>request.messages[].content[].mid_conv_system.content</code></li></ul>
     <h4>response fields</h4>
@@ -514,8 +509,7 @@
     <h4>transform</h4>
     <div>Anthropic user/assistant roles map directly; top-level or mid-conversation system blocks synthesize Chat system/developer messages.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].role</code></li><li><code>request.systemInstruction.role</code></li></ul>
     <h4>response fields</h4>
@@ -523,7 +517,7 @@
     <h4>transform</h4>
     <div>Gemini role=user maps to user; role=model maps to assistant; systemInstruction becomes system/developer Chat message.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -547,8 +541,7 @@
     <h4>transform</h4>
     <div>Responses input_text/output_text text maps to Chat string content only when no sibling non-text parts require array form.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].text.text</code></li></ul>
     <h4>response fields</h4>
@@ -556,8 +549,7 @@
     <h4>transform</h4>
     <div>Anthropic text blocks map to Chat text string or text parts; citations remain separate extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].text</code></li></ul>
     <h4>response fields</h4>
@@ -565,7 +557,7 @@
     <h4>transform</h4>
     <div>Gemini text parts map to Chat text content; non-text Part variants remain separate groups.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -589,8 +581,7 @@
     <h4>transform</h4>
     <div>Responses text item becomes one Chat text content part; response output_text text maps to response message content.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].text.text</code></li></ul>
     <h4>response fields</h4>
@@ -598,8 +589,7 @@
     <h4>transform</h4>
     <div>Anthropic text block becomes one Chat text part; citations are not merged into text.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].text</code></li></ul>
     <h4>response fields</h4>
@@ -607,7 +597,7 @@
     <h4>transform</h4>
     <div>Gemini text Part becomes one Chat text part.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -636,8 +626,7 @@
     <h4>transform</h4>
     <div>Responses image_url maps to Chat image_url.url; detail maps to detail group, file_id does not map here.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].image.source</code></li></ul>
     <h4>response fields</h4>
@@ -645,8 +634,7 @@
     <h4>transform</h4>
     <div>Anthropic image.source maps here only for URL source variants; base64/source metadata belongs to media source extensions.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -654,7 +642,7 @@
     <h4>transform</h4>
     <div>Gemini inlineData/fileData are not Chat image_url.url unless a protocol-owned URL source is explicitly present.</div>
     <h4>missing / extension</h4><div>Gemini inline bytes/file URI are extension groups, not image_url.url.</div>
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -678,8 +666,7 @@
     <h4>transform</h4>
     <div>Responses detail maps to Chat image_url.detail.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -687,8 +674,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct detail field in current inventory.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].mediaResolution.level</code></li><li><code>request.generationConfig.mediaResolution</code></li></ul>
     <h4>response fields</h4>
@@ -696,7 +682,7 @@
     <h4>transform</h4>
     <div>Gemini mediaResolution is similar but not exact; keep as declared extension unless runtime contract defines value mapping.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -720,8 +706,7 @@
     <h4>transform</h4>
     <div>Responses input_image.file_id maps to image_file.file_id extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -729,8 +714,7 @@
     <h4>transform</h4>
     <div>Anthropic image.source may contain file/base64 variants but inventory is not split; branch under media source audit.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -738,7 +722,7 @@
     <h4>transform</h4>
     <div>Gemini does not expose image file_id; fileData.fileUri is separate URI extension.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -767,8 +751,7 @@
     <h4>transform</h4>
     <div>Responses input_file.file_data maps to inline media/file data when not a provider file id.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].image.source</code></li><li><code>request.messages[].content[].document.source</code></li></ul>
     <h4>response fields</h4>
@@ -776,8 +759,7 @@
     <h4>transform</h4>
     <div>Anthropic source variants with base64/data map here after source.type branch.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].inlineData.data</code></li></ul>
     <h4>response fields</h4>
@@ -785,7 +767,7 @@
     <h4>transform</h4>
     <div>Gemini inlineData.data maps here; inlineData.mimeType maps to media.mime_type.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -814,8 +796,7 @@
     <h4>transform</h4>
     <div>Responses current inventory lacks explicit MIME for input_file/input_image; infer only if protocol later adds one.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].image.source</code></li><li><code>request.messages[].content[].document.source</code></li></ul>
     <h4>response fields</h4>
@@ -823,8 +804,7 @@
     <h4>transform</h4>
     <div>Anthropic source carries media_type inside source shape; inventory row must be shape-expanded before runtime mapping.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].inlineData.mimeType</code></li><li><code>request.contents[].parts[].fileData.mimeType</code></li></ul>
     <h4>response fields</h4>
@@ -832,7 +812,7 @@
     <h4>transform</h4>
     <div>Gemini MIME fields map here; they must not be collapsed into image URL/file id.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -861,8 +841,7 @@
     <h4>transform</h4>
     <div>Responses input_file.file_id maps to Chat file.file_id.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -870,8 +849,7 @@
     <h4>transform</h4>
     <div>Anthropic document.source may contain file id variants but inventory is not split.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -879,7 +857,7 @@
     <h4>transform</h4>
     <div>Gemini has fileData.fileUri not provider file_id.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -908,8 +886,7 @@
     <h4>transform</h4>
     <div>Responses input_file.file_data maps to Chat file.file_data.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].document.source</code></li></ul>
     <h4>response fields</h4>
@@ -917,8 +894,7 @@
     <h4>transform</h4>
     <div>Anthropic document.source data/base64 variants map here after source.type branch.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -926,7 +902,7 @@
     <h4>transform</h4>
     <div>Gemini inlineData.data maps generic inline media, not necessarily Chat file.file_data unless part kind is file.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -950,8 +926,7 @@
     <h4>transform</h4>
     <div>Responses filename maps to Chat file.filename.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].document.title</code></li></ul>
     <h4>response fields</h4>
@@ -959,8 +934,7 @@
     <h4>transform</h4>
     <div>Anthropic document.title is closest filename/title label; document.context remains separate.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -968,7 +942,7 @@
     <h4>transform</h4>
     <div>Gemini fileData has no filename in current inventory.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -997,8 +971,7 @@
     <h4>transform</h4>
     <div>Responses file_url maps to file.file_url extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].document.source</code></li></ul>
     <h4>response fields</h4>
@@ -1006,8 +979,7 @@
     <h4>transform</h4>
     <div>Anthropic document.source URL variants map here after source.type branch.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].fileData.fileUri</code></li></ul>
     <h4>response fields</h4>
@@ -1015,7 +987,7 @@
     <h4>transform</h4>
     <div>Gemini fileData.fileUri maps here, not to image_url.url.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1039,8 +1011,7 @@
     <h4>transform</h4>
     <div>Responses tools/additional tool declarations map to Chat tools where representable; built-ins require extension owners.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.tools[].name</code></li><li><code>request.tools[].description</code></li><li><code>request.tools[].input_schema</code></li></ul>
     <h4>response fields</h4>
@@ -1048,8 +1019,7 @@
     <h4>transform</h4>
     <div>Anthropic tool declarations map to Chat function name/description/parameters.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.tools[].functionDeclarations[].name</code></li><li><code>request.tools[].functionDeclarations[].description</code></li><li><code>request.tools[].functionDeclarations[].parameters</code></li><li><code>request.tools[].functionDeclarations[].parametersJsonSchema</code></li></ul>
     <h4>response fields</h4>
@@ -1057,7 +1027,7 @@
     <h4>transform</h4>
     <div>Gemini functionDeclarations map to Chat function declarations; response schema is extension.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1081,8 +1051,7 @@
     <h4>transform</h4>
     <div>Responses tool_choice maps to Chat tool_choice.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.tool_choice.type</code></li><li><code>request.tool_choice.name</code></li></ul>
     <h4>response fields</h4>
@@ -1090,8 +1059,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_choice maps by type/name; disable_parallel_tool_use maps to parallel group.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.toolConfig.functionCallingConfig.mode</code></li><li><code>request.toolConfig.functionCallingConfig.allowedFunctionNames</code></li></ul>
     <h4>response fields</h4>
@@ -1099,7 +1067,7 @@
     <h4>transform</h4>
     <div>Gemini toolConfig functionCallingConfig maps to tool_choice plus allowed names extension.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1123,8 +1091,7 @@
     <h4>transform</h4>
     <div>Responses parallel_tool_calls maps directly.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.tool_choice.disable_parallel_tool_use</code></li></ul>
     <h4>response fields</h4>
@@ -1132,8 +1099,7 @@
     <h4>transform</h4>
     <div>Anthropic inverse flag maps to Chat parallel_tool_calls = !disable_parallel_tool_use.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1141,7 +1107,7 @@
     <h4>transform</h4>
     <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean; keep it out of outbound parallelism unless a separate compatible target contract is approved.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1165,8 +1131,7 @@
     <h4>transform</h4>
     <div>Responses function/custom call_id maps to Chat tool call id and remains the call_* pairing key. When Chat canonical history is projected back to Responses wire, function_call.id and its paired function_call_output.id must use the same fc_* item id; item status remains an extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_use.id</code></li></ul>
     <h4>response fields</h4>
@@ -1174,8 +1139,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_use.id maps to Chat tool call id.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionCall.id</code></li></ul>
     <h4>response fields</h4>
@@ -1183,7 +1147,7 @@
     <h4>transform</h4>
     <div>Gemini functionCall.id maps to Chat tool call id.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1207,8 +1171,7 @@
     <h4>transform</h4>
     <div>Responses item type/id/status inform call branch; not equivalent to call name or arguments.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_use.caller</code></li></ul>
     <h4>response fields</h4>
@@ -1216,8 +1179,7 @@
     <h4>transform</h4>
     <div>Anthropic caller is extension metadata; tool_use block type maps to Chat function/custom type depending registry.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].toolCall.toolType</code></li></ul>
     <h4>response fields</h4>
@@ -1225,7 +1187,7 @@
     <h4>transform</h4>
     <div>Gemini toolCall.toolType is extension branch metadata.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1249,8 +1211,7 @@
     <h4>transform</h4>
     <div>Responses function_call.name maps to Chat function.name.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_use.name</code></li></ul>
     <h4>response fields</h4>
@@ -1258,8 +1219,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_use.name maps to Chat function.name.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionCall.name</code></li></ul>
     <h4>response fields</h4>
@@ -1267,7 +1227,7 @@
     <h4>transform</h4>
     <div>Gemini functionCall.name maps to Chat function.name.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1279,10 +1239,10 @@
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
       <div>Serialized JSON arguments for one model-emitted function call.</div>
-      <details><summary>Chat shape / value rule</summary><div>Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool declaration. Valid JSON projects as native target input; malformed raw text may use only the named Anthropic compatibility wrapper and must remain function-call semantics.</div></details>
+      <details><summary>Chat shape / value rule</summary><div>Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool declaration. Valid JSON projects as native target input; malformed raw text may use only a named target compatibility wrapper and must remain function-call semantics.</div></details>
       <details><summary>shape branch cases</summary>
     <h4>positive branches</h4>
-    <ul class="field-list"><li><span class="badge positive">positive</span> <code>missing</code> function.arguments is valid JSON object input → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge positive">positive</span> <code>missing</code> governed function call has a string argument value that is invalid JSON → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li></ul>
+    <ul class="field-list"><li><span class="badge positive">positive</span> <code>missing</code> function.arguments is valid JSON object input → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge positive">positive</span> <code>missing</code> governed function call has a string argument value that is invalid JSON → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge positive">positive</span> <code>missing</code> DeepSeek provider target receives a historical function call with a string argument value that is invalid JSON → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li></ul>
     <h4>negative branches</h4>
     <ul class="field-list"><li><span class="badge negative">negative</span> <code>missing</code> missing or non-string function arguments → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li><li><span class="badge negative">negative</span> <code>missing</code> valid function arguments sent through the malformed raw wrapper → <code>missing target</code><br><span class="muted">owner <code>missing</code>; test <code>missing</code></span></li></ul>
   </details>
@@ -1296,8 +1256,7 @@
     <h4>transform</h4>
     <div>Responses function_call.arguments maps to Chat function.arguments.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_use.input</code></li></ul>
     <h4>response fields</h4>
@@ -1305,14 +1264,21 @@
     <h4>transform</h4>
     <div>Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionCall.args</code></li></ul>
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
     <div>Gemini functionCall.args maps to Chat function.arguments.</div>
+
+  </div></td><td><div class="equiv-cell">
+    <h4>request fields</h4>
+    <ul class="field-list"><li><code>request.messages[].tool_calls[].function.arguments</code></li></ul>
+    <h4>response fields</h4>
+    <span class="muted">— no response field</span>
+    <h4>transform</h4>
+    <div>Valid JSON object arguments remain native. Malformed historical raw argument text uses compatibility id v3.function_call.deepseek_raw_argument_wrapper.v1 with the exact raw text under the provider-local input field.</div>
 
   </div></td>
   </tr>
@@ -1338,8 +1304,7 @@
     <h4>transform</h4>
     <div>Responses custom_tool_call.name maps to Chat custom.name.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1347,8 +1312,7 @@
     <h4>transform</h4>
     <div>Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; only a governed custom declaration selects custom semantics from the otherwise function-shaped tool_use fields.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1356,7 +1320,7 @@
     <h4>transform</h4>
     <div>Gemini has no custom raw-input call separate from functionCall/toolCall in current inventory.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1380,8 +1344,7 @@
     <h4>transform</h4>
     <div>Responses custom_tool_call.input maps to Chat custom.input.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1389,8 +1352,7 @@
     <h4>transform</h4>
     <div>Conditional branch is owned by compatibility id v3.custom_tool.anthropic_string_input_wrapper.v1; raw tool_use.input remains function arguments unless governed custom declaration identity selects the exact wrapper branch.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1398,7 +1360,7 @@
     <h4>transform</h4>
     <div>Gemini has no native raw custom input separate from functionCall/toolCall args in this inventory.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1422,8 +1384,7 @@
     <h4>transform</h4>
     <div>Responses function_call_output.call_id maps to Chat tool_call_id for pairing only. Responses wire keeps this pairing key as call_* while the function_call_output item id shares the paired function_call fc_* item id.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_result.tool_use_id</code></li></ul>
     <h4>response fields</h4>
@@ -1431,8 +1392,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_result.tool_use_id maps to Chat tool_call_id.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionResponse.id</code></li></ul>
     <h4>response fields</h4>
@@ -1440,7 +1400,7 @@
     <h4>transform</h4>
     <div>Gemini functionResponse.id maps to Chat tool_call_id.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1464,8 +1424,7 @@
     <h4>transform</h4>
     <div>Responses output maps to tool_result.output.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_result.content</code></li></ul>
     <h4>response fields</h4>
@@ -1473,8 +1432,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_result.content maps to tool_result.output.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionResponse.response</code></li></ul>
     <h4>response fields</h4>
@@ -1482,7 +1440,7 @@
     <h4>transform</h4>
     <div>Gemini functionResponse.response maps to tool_result.output.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1506,8 +1464,7 @@
     <h4>transform</h4>
     <div>Responses result has no native name; recover via call_id if needed, not by duplicating payload.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1515,8 +1472,7 @@
     <h4>transform</h4>
     <div>Anthropic result has no native name; recover via tool_use_id if needed.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].functionResponse.name</code></li></ul>
     <h4>response fields</h4>
@@ -1524,7 +1480,7 @@
     <h4>transform</h4>
     <div>Gemini functionResponse.name maps here; it must not collapse into tool_call_id.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1548,8 +1504,7 @@
     <h4>transform</h4>
     <div>Responses status may map to error/success after explicit value contract; not yet exact.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].tool_result.is_error</code></li></ul>
     <h4>response fields</h4>
@@ -1557,8 +1512,7 @@
     <h4>transform</h4>
     <div>Anthropic is_error maps directly.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].toolResponse.response</code></li></ul>
     <h4>response fields</h4>
@@ -1566,7 +1520,7 @@
     <h4>transform</h4>
     <div>Gemini may encode error in response shape; no explicit boolean in inventory.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1590,8 +1544,7 @@
     <h4>transform</h4>
     <div>Responses reasoning.effort maps to Chat reasoning_effort. Reasoning mode, summary policy, context policy, and response reasoning content are separate semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.output_config.effort</code></li></ul>
     <h4>response fields</h4>
@@ -1599,8 +1552,7 @@
     <h4>transform</h4>
     <div>Anthropic output_config.effort maps directly for the shared low/medium/high/xhigh/max values. OpenAI none/minimal have no Anthropic equivalent. thinking.type, budget_tokens, and display are separate semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingLevel</code></li></ul>
     <h4>response fields</h4>
@@ -1608,7 +1560,7 @@
     <h4>transform</h4>
     <div>Gemini thinkingLevel maps by enum identity for minimal/low/medium/high only after target-model capability validation. includeThoughts and thinkingBudget are separate semantics; thoughtsTokenCount is usage.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1632,8 +1584,7 @@
     <h4>transform</h4>
     <div>Preserve as request summary policy.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1641,8 +1592,7 @@
     <h4>transform</h4>
     <div>No Anthropic provider-wire field is emitted. Valid auto/concise/detailed values select the registered static compatibility projection that preserves complete native thinking as Responses reasoning.summary; the proxy does not reject, truncate, or silently discard reasoning. Invalid values fail before provider send.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1650,7 +1600,7 @@
     <h4>transform</h4>
     <div>No direct equivalent in the audited Gemini request inventory.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1674,8 +1624,7 @@
     <h4>transform</h4>
     <div>Preserve the Responses context value without combining it with execution mode.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1683,8 +1632,7 @@
     <h4>transform</h4>
     <div>No exact Anthropic Messages equivalent in this audited source set.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1692,7 +1640,7 @@
     <h4>transform</h4>
     <div>No exact Gemini equivalent in this audited source set.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1716,8 +1664,7 @@
     <h4>transform</h4>
     <div>Responses mode maps directly and round-trips only to Responses.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1725,8 +1672,7 @@
     <h4>transform</h4>
     <div>Anthropic thinking.type and output_config.effort are not execution-mode equivalents.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1734,7 +1680,7 @@
     <h4>transform</h4>
     <div>No exact Gemini equivalent in the audited request schema.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1758,8 +1704,7 @@
     <h4>transform</h4>
     <div>Responses has no exact include-thoughts request flag in this audited source set.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1767,8 +1712,7 @@
     <h4>transform</h4>
     <div>Anthropic display has a different value domain and continuity behavior; no boolean mapping is claimed.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.thinkingConfig.includeThoughts</code></li></ul>
     <h4>response fields</h4>
@@ -1776,7 +1720,7 @@
     <h4>transform</h4>
     <div>Gemini includeThoughts maps to request.reasoning_include_thoughts and never to response reasoning content.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1800,8 +1744,7 @@
     <h4>transform</h4>
     <div>OpenAI reasoning.summary has a different value domain and meaning.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.thinking.display</code></li></ul>
     <h4>response fields</h4>
@@ -1809,8 +1752,7 @@
     <h4>transform</h4>
     <div>Preserve summarized or omitted exactly within Anthropic thinking.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1818,7 +1760,7 @@
     <h4>transform</h4>
     <div>Gemini includeThoughts is boolean and does not preserve Anthropic continuity behavior.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1842,8 +1784,7 @@
     <h4>transform</h4>
     <div>OpenAI reasoning effort and mode are not Anthropic thinking activation equivalents.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.thinking.type</code></li></ul>
     <h4>response fields</h4>
@@ -1851,8 +1792,7 @@
     <h4>transform</h4>
     <div>Preserve enabled, adaptive, or disabled exactly.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -1860,7 +1800,7 @@
     <h4>transform</h4>
     <div>No exact Gemini equivalent in the audited request schema.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1884,8 +1824,7 @@
     <h4>transform</h4>
     <div>Responses effort is not a token budget in this audited source set.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.thinking.budget_tokens</code></li></ul>
     <h4>response fields</h4>
@@ -1893,8 +1832,7 @@
     <h4>transform</h4>
     <div>Anthropic budget_tokens maps to reasoning budget extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.thinkingConfig.thinkingBudget</code></li></ul>
     <h4>response fields</h4>
@@ -1902,7 +1840,7 @@
     <h4>transform</h4>
     <div>Gemini thinkingBudget maps to request.reasoning_budget_tokens and never to generationConfig.maxOutputTokens.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1926,8 +1864,7 @@
     <h4>transform</h4>
     <div>Responses temperature maps directly.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.temperature</code></li></ul>
     <h4>response fields</h4>
@@ -1935,8 +1872,7 @@
     <h4>transform</h4>
     <div>Anthropic temperature maps directly.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.temperature</code></li></ul>
     <h4>response fields</h4>
@@ -1944,7 +1880,7 @@
     <h4>transform</h4>
     <div>Gemini generationConfig.temperature maps directly.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -1968,8 +1904,7 @@
     <h4>transform</h4>
     <div>Responses top_p maps directly to Chat top_p nucleus sampling control.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.top_p</code></li></ul>
     <h4>response fields</h4>
@@ -1977,8 +1912,7 @@
     <h4>transform</h4>
     <div>Anthropic top_p maps directly to Chat top_p nucleus sampling control.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.topP</code></li></ul>
     <h4>response fields</h4>
@@ -1986,7 +1920,7 @@
     <h4>transform</h4>
     <div>Gemini generationConfig.topP maps to Chat top_p nucleus sampling control.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2010,8 +1944,7 @@
     <h4>transform</h4>
     <div>Responses current inventory has no top_k.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.top_k</code></li></ul>
     <h4>response fields</h4>
@@ -2019,8 +1952,7 @@
     <h4>transform</h4>
     <div>Anthropic top_k maps to top_k extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.topK</code></li></ul>
     <h4>response fields</h4>
@@ -2028,7 +1960,7 @@
     <h4>transform</h4>
     <div>Gemini topK maps to top_k extension.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2052,8 +1984,7 @@
     <h4>transform</h4>
     <div>Responses current source inventory has no exact request stop-sequence field.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.stop_sequences</code></li></ul>
     <h4>response fields</h4>
@@ -2061,8 +1992,7 @@
     <h4>transform</h4>
     <div>Anthropic stop_sequences maps directly to Chat request.stop.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.stopSequences</code></li></ul>
     <h4>response fields</h4>
@@ -2070,7 +2000,7 @@
     <h4>transform</h4>
     <div>Gemini generationConfig.stopSequences maps directly to Chat request.stop and never to candidate finishReason.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2094,8 +2024,7 @@
     <h4>transform</h4>
     <div>Responses max_output_tokens maps to Chat max_completion_tokens on OpenAI Chat outbound; usage output_tokens is response accounting and stays in usage groups.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.max_tokens</code></li></ul>
     <h4>response fields</h4>
@@ -2103,8 +2032,7 @@
     <h4>transform</h4>
     <div>Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is response usage only.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.maxOutputTokens</code></li></ul>
     <h4>response fields</h4>
@@ -2112,7 +2040,7 @@
     <h4>transform</h4>
     <div>Gemini maxOutputTokens maps to Chat max_completion_tokens; candidatesTokenCount is response usage only.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2136,8 +2064,7 @@
     <h4>transform</h4>
     <div>Responses text.format maps to response_format where schema-compatible.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.output_config.format.schema</code></li></ul>
     <h4>response fields</h4>
@@ -2145,8 +2072,7 @@
     <h4>transform</h4>
     <div>Anthropic output_config schema maps to response_format extension.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.responseSchema</code></li><li><code>request.generationConfig.responseJsonSchema</code></li><li><code>request.generationConfig.responseMimeType</code></li></ul>
     <h4>response fields</h4>
@@ -2154,7 +2080,7 @@
     <h4>transform</h4>
     <div>Gemini response schema/mime map to response_format plus MIME/schema extensions.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2178,8 +2104,7 @@
     <h4>transform</h4>
     <div>Responses output_text maps to Chat visible message content.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2187,8 +2112,7 @@
     <h4>transform</h4>
     <div>Anthropic text blocks map to Chat visible message content.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2196,7 +2120,7 @@
     <h4>transform</h4>
     <div>Gemini candidate text parts map to Chat visible message content.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2220,8 +2144,7 @@
     <h4>transform</h4>
     <div>Responses function/custom output items map to Chat response tool_calls tuple by id/name/args/raw-input.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2229,8 +2152,7 @@
     <h4>transform</h4>
     <div>Anthropic tool_use response blocks map to Chat response tool_calls tuple.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2238,7 +2160,7 @@
     <h4>transform</h4>
     <div>Gemini functionCall parts inside candidate content map to Chat response tool_calls tuple after part-type inspection.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2262,8 +2184,7 @@
     <h4>transform</h4>
     <div>Responses status/incomplete_details map to Chat finish_reason with explicit value table.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2271,8 +2192,7 @@
     <h4>transform</h4>
     <div>Anthropic stop_reason maps to Chat finish_reason; stop_sequence/details are supplemental.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2280,7 +2200,7 @@
     <h4>transform</h4>
     <div>Gemini finishReason/blockReason map to Chat finish_reason/error terminal groups.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2304,8 +2224,7 @@
     <h4>transform</h4>
     <div>Responses input/output/total map to Chat prompt/completion/total usage.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2313,8 +2232,7 @@
     <h4>transform</h4>
     <div>Anthropic usage maps base tokens and leaves cache/thinking as extensions.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2322,7 +2240,7 @@
     <h4>transform</h4>
     <div>Gemini usageMetadata maps base and extension token counters.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2346,8 +2264,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2355,8 +2272,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.store</code></li></ul>
     <h4>response fields</h4>
@@ -2364,7 +2280,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2388,8 +2304,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2397,8 +2312,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2406,7 +2320,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2430,8 +2344,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2439,8 +2352,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2448,7 +2360,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2472,8 +2384,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.output_config.format.schema</code></li></ul>
     <h4>response fields</h4>
@@ -2481,8 +2392,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.responseSchema</code></li><li><code>request.generationConfig.responseJsonSchema</code></li><li><code>request.generationConfig.responseMimeType</code></li><li><code>request.generationConfig.responseModalities</code></li></ul>
     <h4>response fields</h4>
@@ -2490,7 +2400,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2514,8 +2424,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2523,8 +2432,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2532,7 +2440,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2556,8 +2464,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2565,8 +2472,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.responseLogprobs</code></li></ul>
     <h4>response fields</h4>
@@ -2574,7 +2480,7 @@
     <h4>transform</h4>
     <div>Gemini responseLogprobs is the boolean enable flag for logprobs output.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2598,8 +2504,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2607,8 +2512,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.logprobs</code></li></ul>
     <h4>response fields</h4>
@@ -2616,7 +2520,7 @@
     <h4>transform</h4>
     <div>Gemini logprobs is the top-logprobs count and requires responseLogprobs=true; responseLogprobs itself is not a count.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2640,8 +2544,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2649,8 +2552,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.frequencyPenalty</code></li></ul>
     <h4>response fields</h4>
@@ -2658,7 +2560,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2682,8 +2584,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2691,8 +2592,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.presencePenalty</code></li></ul>
     <h4>response fields</h4>
@@ -2700,7 +2600,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2724,8 +2624,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2733,8 +2632,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2742,7 +2640,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2766,8 +2664,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2775,8 +2672,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2784,7 +2680,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2808,8 +2704,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2817,8 +2712,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2826,7 +2720,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2850,8 +2744,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2859,8 +2752,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2868,7 +2760,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2892,8 +2784,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2901,8 +2792,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2910,7 +2800,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2934,8 +2824,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.messages[].content[].type</code></li></ul>
     <h4>response fields</h4>
@@ -2943,8 +2832,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.contents[].parts[].type</code></li></ul>
     <h4>response fields</h4>
@@ -2952,7 +2840,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -2976,8 +2864,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2985,8 +2872,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -2994,7 +2880,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3018,8 +2904,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3027,8 +2912,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.safetySettings[].category</code></li><li><code>request.safetySettings[].threshold</code></li></ul>
     <h4>response fields</h4>
@@ -3036,7 +2920,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3060,8 +2944,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3069,8 +2952,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3078,7 +2960,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3102,8 +2984,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.service_tier</code></li></ul>
     <h4>response fields</h4>
@@ -3111,8 +2992,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.serviceTier</code></li></ul>
     <h4>response fields</h4>
@@ -3120,7 +3000,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3144,8 +3024,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3153,8 +3032,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3162,7 +3040,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3186,8 +3064,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3195,8 +3072,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3204,7 +3080,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3228,8 +3104,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3237,8 +3112,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3246,7 +3120,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3270,8 +3144,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3279,8 +3152,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3288,7 +3160,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3312,8 +3184,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3321,8 +3192,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3330,7 +3200,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3354,8 +3224,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3363,8 +3232,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3372,7 +3240,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3396,8 +3264,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3405,8 +3272,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3414,7 +3280,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3438,8 +3304,7 @@
     <h4>transform</h4>
     <div>Responses fields map to this Chat semantic only when the named field carries the same meaning; otherwise the field stays unsupported or extension-owned.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3447,8 +3312,7 @@
     <h4>transform</h4>
     <div>Anthropic has no direct equivalent unless listed here; unsupported target mappings must fail fast or remain explicit extension semantics.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3456,7 +3320,7 @@
     <h4>transform</h4>
     <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
 <tr>
     <td class="standard-cell">
@@ -3480,8 +3344,7 @@
     <h4>transform</h4>
     <div>Responses has no direct top-level seed in the audited source rows; unsupported mappings remain explicit rather than raw payload copies.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <span class="muted">— no request field</span>
     <h4>response fields</h4>
@@ -3489,8 +3352,7 @@
     <h4>transform</h4>
     <div>Anthropic Messages has no direct seed field in this inventory; target mapping must fail fast or stay unsupported.</div>
 
-  </div></td>
-    <td><div class="equiv-cell">
+  </div></td><td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.generationConfig.seed</code></li></ul>
     <h4>response fields</h4>
@@ -3498,7 +3360,7 @@
     <h4>transform</h4>
     <div>Gemini generationConfig.seed maps to Chat request.seed when a provider owner implements deterministic sampling parity.</div>
 
-  </div></td>
+  </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr></tbody>
   </table></div>
     </section>

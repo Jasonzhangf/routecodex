@@ -183,6 +183,7 @@ pub fn provider_target(
         request_timeout_ms: provider.request_timeout_ms,
         sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
         initial_concurrency_budget: selected.initial_concurrency_budget,
+        concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
 }
 
@@ -286,6 +287,25 @@ pub fn provider_request_failure(
         status: 502,
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
+        terminal_projection: None,
+        error_type_fn: extract_error_code_style,
+        error_message_fn: extract_message_code_style,
+    }
+}
+
+pub fn provider_terminal_admission_failure(
+    status: u16,
+    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
+        status,
+        client_response: json!({
+            "error": {
+                "code": failure.code,
+                "message": failure.message,
+            }
+        }),
+        source_stage: "V3ProviderRespInbound01Raw",
         terminal_projection: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,

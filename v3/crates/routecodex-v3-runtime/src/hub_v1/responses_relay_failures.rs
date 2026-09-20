@@ -166,6 +166,24 @@ pub(crate) fn provider_semantic_failure(
     }
 }
 
+pub(crate) fn provider_terminal_admission_failure(
+    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
+    status: u16,
+    provider_id: &str,
+    observability: Option<V3RuntimeObservability>,
+) -> V3ResponsesRelayProviderFailure {
+    V3ResponsesRelayProviderFailure {
+        status,
+        policy_error_type: failure.code,
+        policy_error_message: failure.message,
+        provider_id: provider_id.to_string(),
+        source_stage: "V3ProviderRespInbound01Raw",
+        observability,
+        terminal_projection: None,
+        matched_policy: None,
+    }
+}
+
 pub(crate) fn provider_response_stream_relay_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,
