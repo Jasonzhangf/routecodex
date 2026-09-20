@@ -920,6 +920,36 @@ fn usage_summary_counts_cache_reads_but_not_cache_writes() {
 }
 
 #[test]
+fn usage_summary_derives_total_when_anthropic_omits_it() {
+    let summary = extract_v3_runtime_usage_summary(&json!({
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 2
+        }
+    }))
+    .expect("Anthropic usage summary");
+
+    assert_eq!(summary.input_tokens, Some(10));
+    assert_eq!(summary.output_tokens, Some(2));
+    assert_eq!(summary.total_tokens, Some(12));
+}
+
+#[test]
+fn usage_summary_omits_derived_total_on_u64_overflow() {
+    let summary = extract_v3_runtime_usage_summary(&json!({
+        "usage": {
+            "input_tokens": u64::MAX,
+            "output_tokens": 1
+        }
+    }))
+    .expect("Anthropic usage summary");
+
+    assert_eq!(summary.input_tokens, Some(u64::MAX));
+    assert_eq!(summary.output_tokens, Some(1));
+    assert_eq!(summary.total_tokens, None);
+}
+
+#[test]
 fn usage_summary_accepts_integer_valued_floats_and_rejects_fractions() {
     let summary = extract_v3_runtime_usage_summary(&json!({
         "usage": {

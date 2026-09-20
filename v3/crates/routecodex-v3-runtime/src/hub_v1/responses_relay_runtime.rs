@@ -107,7 +107,8 @@ pub use responses_relay_dry_run::{
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
 use responses_relay_failures::{
     allowed_execution_modes_for_relay_server, error_output,
-    is_v3_responses_provider_response_failure, provider_failure_output, provider_http_failure,
+    is_v3_responses_provider_response_failure, provider_failure_output,
+    provider_failure_output_with_observation, provider_http_failure,
     provider_request_relay_failure, provider_response_hook_failure,
     provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
     provider_terminal_admission_failure, server_routing_group,
@@ -592,7 +593,7 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
     // `usageMetadata`。归一化在唯一共享提取器内完成，禁止各协议 runtime
     // 各自复制一份 usage 解析。
     let usage = value.get("usage").or_else(|| value.get("usageMetadata"))?;
-    let summary = V3RuntimeUsageSummary {
+    let mut summary = V3RuntimeUsageSummary {
         input_tokens: read_v3_usage_u64(usage, &["input_tokens"])
             .or_else(|| read_v3_usage_u64(usage, &["prompt_tokens"]))
             .or_else(|| read_v3_usage_u64(usage, &["promptTokenCount"])),
@@ -635,6 +636,12 @@ pub(crate) fn extract_v3_runtime_usage_summary(value: &Value) -> Option<V3Runtim
                 )
             }),
     };
+    if summary.total_tokens.is_none() {
+        summary.total_tokens = summary
+            .input_tokens
+            .zip(summary.output_tokens)
+            .and_then(|(input_tokens, output_tokens)| input_tokens.checked_add(output_tokens));
+    }
     if summary.input_tokens.is_some()
         || summary.output_tokens.is_some()
         || summary.total_tokens.is_some()

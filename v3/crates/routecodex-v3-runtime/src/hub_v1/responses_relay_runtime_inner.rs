@@ -923,7 +923,11 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             .await
                         );
                         if let Some(failure) = terminal_failure {
-                            return Ok(provider_failure_output(failure, trace, 0));
+                            return Ok(provider_failure_output_with_observation(
+                                failure,
+                                trace,
+                                Some(stream_observation),
+                            ));
                         }
                         continue;
                     }
