@@ -2,7 +2,8 @@ use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
+    V3Provider12ResponsesWirePayload, V3ProviderRequestHeader, V3ResponsesProviderTarget,
+    V3Transport13ResponsesHttpRequest,
 };
 use std::time::Duration;
 
@@ -128,7 +129,10 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
     let stream_intent = wire.stream_intent();
     let mut body = wire.body().clone();
     if is_v3_deepseek_reasoning_target(&target.canonical_model_id) {
-        provider_compat_core::apply_deepseek_v4_request_compat(&mut body);
+        provider_compat_core::apply_deepseek_v4_thinking_chat_compat(&mut body);
+    }
+    if is_v3_deepseek_v4_compat_target(&target) {
+        provider_compat_core::apply_deepseek_function_call_arguments_compat(&mut body);
     }
     let url_text = format!("{}/chat/completions", target.base_url.trim_end_matches('/'));
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
@@ -155,6 +159,14 @@ fn is_v3_deepseek_reasoning_target(canonical_model_id: &str) -> bool {
     canonical_model_id.to_ascii_lowercase().contains("deepseek")
 }
 
+fn is_v3_deepseek_v4_compat_target(target: &V3ResponsesProviderTarget) -> bool {
+    matches!(
+        target.compatibility_profile.as_deref(),
+        Some("chat:deepseek-max" | "responses:deepseek-console-go")
+    ) || target.canonical_model_id == "deepseek-v4-flash"
+        || target.wire_model == "deepseek-v4-flash"
+}
+
 /// gpt 目标判定（请求侧路由决策）：canonical model id 以 `gpt-` 开头（OpenAI 官方
 /// gpt-5.x，Codex 客户端用自己的密文重建 reasoning 历史）。判定真源委托
 /// config 内部配置层模型家族判定，compat 只保留语义包装不重复实现。
@@ -173,5 +185,53 @@ pub(crate) fn is_v3_retain_response_cipher(target_plan_len: usize, model_id: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use routecodex_v3_config::V3ResponsesTransportKind;
+    use routecodex_v3_provider_responses::{
+        build_v3_provider_12_responses_wire_payload, V3ProviderAuthHandle,
+        V3ProviderAuthSecretHandle,
+    };
     use serde_json::json;
+
+    #[test]
+    fn unrelated_deepseek_model_keeps_malformed_arguments_at_openai_chat_transport() {
+        let target = V3ResponsesProviderTarget {
+            provider_id: "unrelated-deepseek".into(),
+            provider_type: "openai_chat".into(),
+            base_url: "http://upstream.invalid/v1".into(),
+            canonical_model_id: "deepseek-v5-preview".into(),
+            wire_model: "deepseek-v5-preview".into(),
+            compatibility_profile: None,
+            auth: V3ProviderAuthHandle {
+                alias: "primary".into(),
+                secret: V3ProviderAuthSecretHandle::Environment("DEEPSEEK_KEY".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 300_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+        };
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-unrelated-deepseek-arguments",
+            target,
+            json!({
+                "model": "deepseek-v5-preview",
+                "messages": [{
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "exec_command", "arguments": "{\"cmd\":\"pwd\""}
+                    }]
+                }]
+            }),
+        )
+        .unwrap();
+        let request = build_v3_openai_chat_transport_request_from_v3_provider_08(wire).unwrap();
+        assert_eq!(
+            request.body()["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            "{\"cmd\":\"pwd\""
+        );
+    }
 }
