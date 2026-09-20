@@ -227,8 +227,8 @@ struct TestTiming(std::sync::Arc<std::sync::Mutex<TestTimingState>>);
 
 struct TestTimingState {
     started: std::time::Instant,
-    external_ms: u64,
-    started_external: bool,
+    external_started: Option<std::time::Instant>,
+    summary: Option<RequestTimingSnapshot>,
 }
 
 impl TestTiming {
@@ -236,32 +236,36 @@ impl TestTiming {
         Self(std::sync::Arc::new(std::sync::Mutex::new(
             TestTimingState {
                 started: std::time::Instant::now(),
-                external_ms: 0,
-                started_external: false,
+                external_started: None,
+                summary: None,
             },
         )))
     }
 
     fn begin_external(&self) {
-        self.0.lock().expect("timing").started_external = true;
+        self.0.lock().expect("timing").external_started = Some(std::time::Instant::now());
     }
 
     fn finish_external(&self) {
         let mut state = self.0.lock().expect("timing");
-        state.started_external = false;
-        state.external_ms = state.started.elapsed().as_millis() as u64;
+        let external_ms = state
+            .external_started
+            .take()
+            .expect("external timing is active")
+            .elapsed()
+            .as_millis() as u64;
+        let runtime_ms = state.started.elapsed().as_millis() as u64;
+        state.summary = Some(RequestTimingSnapshot {
+            internal_ms: runtime_ms.saturating_sub(external_ms),
+            external_ms,
+            phases_ms: Default::default(),
+        });
     }
 }
 
 impl RequestTiming for TestTiming {
     fn snapshot(&self) -> Option<RequestTimingSnapshot> {
-        let state = self.0.lock().expect("timing");
-        let runtime_ms = state.started.elapsed().as_millis() as u64;
-        Some(RequestTimingSnapshot {
-            internal_ms: runtime_ms.saturating_sub(state.external_ms),
-            external_ms: state.external_ms,
-            phases_ms: Default::default(),
-        })
+        self.0.lock().expect("timing").summary
     }
 }
 

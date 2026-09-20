@@ -587,6 +587,11 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
     let external_cordis_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some();
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
     repair_stale_before_admission(&paths)?;
+    if external_cordis_socket {
+        preflight_cordis_admission(&manifest)?;
+    } else {
+        preflight_owned_cordis_replacement(&paths.manifest_path, &manifest)?;
+    }
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
@@ -782,8 +787,31 @@ fn ensure_cordis_host_socket(
                     socket.display()
                 ));
             }
-            Err(_) => std::fs::remove_file(&socket)
-                .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?,
+            Err(_) => {
+                let owned = routecodex_v4_lifecycle::read_record(paths)
+                    .map_err(|error| error.to_string())?
+                    .and_then(|record| record.cordis_socket_identity);
+                let Some(identity) = owned else {
+                    return Err(format!(
+                        "Cordis socket {} is already in use; ownership is unproven",
+                        socket.display()
+                    ));
+                };
+                routecodex_v4_lifecycle::release_stale_cordis_host(paths, identity).map_err(
+                    |error| {
+                        format!(
+                            "Cordis socket {} ownership is unproven: {error}",
+                            socket.display()
+                        )
+                    },
+                )?;
+                if socket.exists() {
+                    return Err(format!(
+                        "Cordis socket {} is already in use; ownership is unproven",
+                        socket.display()
+                    ));
+                }
+            }
         }
     }
     let state = paths.state_root.clone();

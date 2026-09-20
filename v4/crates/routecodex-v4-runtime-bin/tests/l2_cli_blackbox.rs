@@ -260,6 +260,10 @@ fn managed_start_status_restart_stop_uses_v4_state_root() {
         first_pid, preserved_after_restart,
         "failed restart must preserve old PID"
     );
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).is_ok(),
+        "failed restart must preserve the listener"
+    );
 
     let (mut cordis, socket, _cordis_stderr) = start_cordis_fixture(&state_root);
     let cordis_deadline = Instant::now() + Duration::from_secs(3);
@@ -583,6 +587,9 @@ setInterval(() => {}, 1000);
         .current_dir("/tmp")
         .env("RCCV4_STATE_ROOT", &state_root)
         .env("RCCV4_CORDIS_HOST_RUNNER", &runner)
+        .env("RCCV4_TEST_READY_FILE", &ready_file)
+        .env("RCCV4_TEST_PID_FILE", &pid_file)
+        .env_remove("RCCV4_CORDIS_HOST_SOCKET")
         .args(["restart", "-c", config.to_str().expect("config")])
         .output()
         .expect("handoff restart");

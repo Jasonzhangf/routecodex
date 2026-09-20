@@ -124,12 +124,18 @@ fn repair_stale_removes_dead_instance_record_and_socket() {
 }
 
 #[test]
-fn repair_stale_removes_socket_only_after_owner_probe_fails() {
+fn repair_stale_refuses_unwitnessed_control_socket() {
     let paths = V4LifecyclePaths::for_state_root(test_root("socket-only"));
     paths.prepare().expect("prepare");
     std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
-    repair_stale(&paths).expect("repair socket-only stale state");
-    assert!(!paths.control_socket.exists());
+    assert!(matches!(
+        repair_stale(&paths),
+        Err(LifecycleError::StaleState)
+    ));
+    assert!(
+        paths.control_socket.exists(),
+        "unwitnessed control socket must not be removed"
+    );
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
 }
 

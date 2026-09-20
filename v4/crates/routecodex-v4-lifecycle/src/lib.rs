@@ -301,16 +301,11 @@ pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
         if !paths.control_socket.exists() {
             return Err(LifecycleError::NotRunning);
         }
-        // A child can die after unlinking instance.json but before its socket
-        // pathname is removed. Probe the canonical socket first; a responsive
-        // owner is never touched, while an unresponsive socket is disposable
-        // stale lifecycle state and may be removed by this explicit repair.
-        if request_control(paths, "status").is_ok() {
-            return Err(LifecycleError::AlreadyManaged);
-        }
-        fs::remove_file(&paths.control_socket)
-            .map_err(|error| io_error(&paths.control_socket, error))?;
-        return Ok(());
+        // Without an instance record there is no owner witness for this
+        // pathname. A failed protocol probe cannot distinguish a stale V4
+        // socket from a foreign or temporarily unresponsive owner, so fail
+        // closed and require explicit operator cleanup.
+        return Err(LifecycleError::StaleState);
     }
     let record = record.expect("checked above");
     if request_control(paths, "status").is_ok() {
@@ -332,7 +327,7 @@ pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
     Ok(())
 }
 
-fn release_stale_cordis_host(
+pub fn release_stale_cordis_host(
     paths: &V4LifecyclePaths,
     identity: CordisSocketIdentity,
 ) -> Result<(), LifecycleError> {
@@ -349,8 +344,16 @@ fn release_stale_cordis_host(
     if current != Some(identity) {
         return Ok(());
     }
-    if process_start_time(identity.pid) != Some(identity.start_time) {
+    let process_alive = unsafe { libc::kill(identity.pid as libc::pid_t, 0) == 0 }
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    if !process_alive {
+        if fs::symlink_metadata(&socket).is_ok() {
+            fs::remove_file(&socket).map_err(|error| io_error(&socket, error))?;
+        }
         return Ok(());
+    }
+    if process_start_time(identity.pid) != Some(identity.start_time) {
+        return Err(LifecycleError::AlreadyManaged);
     }
     if unsafe { libc::kill(identity.pid as libc::pid_t, libc::SIGTERM) } == -1 {
         let error = std::io::Error::last_os_error();
@@ -374,7 +377,7 @@ fn release_stale_cordis_host(
             Duration::from_secs(2).as_millis() as u64,
         ));
     }
-    if socket.exists() {
+    if fs::symlink_metadata(&socket).is_ok() {
         fs::remove_file(&socket).map_err(|error| io_error(&socket, error))?;
     }
     Ok(())
@@ -981,7 +984,10 @@ mod tests {
             inode: metadata.ino(),
         };
 
-        release_stale_cordis_host(&paths, identity).expect("mismatched identity is ignored");
+        assert!(matches!(
+            release_stale_cordis_host(&paths, identity),
+            Err(LifecycleError::AlreadyManaged)
+        ));
 
         assert!(
             socket.exists(),
