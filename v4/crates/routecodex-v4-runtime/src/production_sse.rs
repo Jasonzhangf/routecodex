@@ -92,41 +92,74 @@ impl NativeProviderSseSource {
         &mut self,
         protocol: &str,
     ) -> Result<(Vec<u8>, ProviderSseTerminalDisposition), String> {
-        let protocol = match protocol {
-            "openai_chat" | "openai-chat" | "openai" => "chat",
-            "openai-responses" | "openai_responses" => "responses",
-            other => other,
-        };
-        let (mut ingress, _) = production_transport_pair(std::time::Instant::now())
-            .map_err(|error| format!("{error:?}"))?;
-        let mut attempt = Vec::new();
-        loop {
-            let bytes = self
-                .runtime
-                .block_on(self.stream.next_chunk())
-                .map_err(|error| error.to_string())?;
-            let Some(bytes) = bytes else {
-                return Ok((
-                    attempt,
-                    ProviderSseTerminalDisposition::Failed {
+        read_attempt_until_terminal_from_source(protocol, self)
+    }
+}
+
+fn read_attempt_until_terminal_from_source<S: ProviderSseSource + ?Sized>(
+    protocol: &str,
+    source: &mut S,
+) -> Result<(Vec<u8>, ProviderSseTerminalDisposition), String> {
+    let protocol = match protocol {
+        "openai_chat" | "openai-chat" | "openai" => "chat",
+        "openai-responses" | "openai_responses" => "responses",
+        other => other,
+    };
+    let (mut ingress, _) = production_transport_pair(std::time::Instant::now())
+        .map_err(|error| format!("{error:?}"))?;
+    let mut attempt = Vec::new();
+    let mut pending_failure = None;
+    loop {
+        let mut bytes = [0u8; 8192];
+        let count = source.read_chunk(&mut bytes)?;
+        if count == 0 {
+            return Ok((
+                attempt,
+                pending_failure
+                    .map(|message| ProviderSseTerminalDisposition::Failed { message })
+                    .unwrap_or(ProviderSseTerminalDisposition::Failed {
                         message: "provider SSE ended without a protocol terminal".to_string(),
-                    },
-                ));
-            };
-            extend_bounded_attempt(&mut attempt, &bytes)?;
-            attempt.extend_from_slice(&bytes);
-            let frames = ingress
-                .push_chunk(&bytes, std::time::Instant::now())
-                .map_err(|error| format!("{error:?}"))?;
-            for (index, frame) in frames.iter().enumerate() {
-                let disposition = classify_provider_sse_terminal(protocol, frame.as_bytes())?;
-                if !matches!(disposition, ProviderSseTerminalDisposition::Continue) {
+                    }),
+            ));
+        }
+        let bytes = &bytes[..count];
+        extend_bounded_attempt(&mut attempt, bytes)?;
+        attempt.extend_from_slice(bytes);
+        let frames = ingress
+            .push_chunk(bytes, std::time::Instant::now())
+            .map_err(|error| format!("{error:?}"))?;
+        for (index, frame) in frames.iter().enumerate() {
+            match classify_provider_sse_terminal(protocol, frame.as_bytes())? {
+                ProviderSseTerminalDisposition::Continue => {}
+                ProviderSseTerminalDisposition::Failed { message } => {
+                    if !matches!(protocol, "chat" | "anthropic") {
+                        if frames_after_terminal(&mut ingress, &frames, index)? {
+                            return Err(
+                                "provider emitted a frame after its protocol terminal".to_string()
+                            );
+                        }
+                        return Ok((
+                            attempt,
+                            ProviderSseTerminalDisposition::Failed { message },
+                        ));
+                    }
+                    pending_failure.get_or_insert(message);
+                }
+                ProviderSseTerminalDisposition::Completed => {
                     if frames_after_terminal(&mut ingress, &frames, index)? {
                         return Err(
                             "provider emitted a frame after its protocol terminal".to_string()
                         );
                     }
-                    return Ok((attempt, disposition));
+                    if pending_failure.is_none() {
+                        return Ok((attempt, ProviderSseTerminalDisposition::Completed));
+                    }
+                    return Ok((
+                        attempt,
+                        pending_failure
+                            .map(|message| ProviderSseTerminalDisposition::Failed { message })
+                            .unwrap_or(ProviderSseTerminalDisposition::Completed),
+                    ));
                 }
             }
         }
@@ -466,9 +499,11 @@ impl<S: ProviderSseSource> ResponseStream for SseTransportDriver<S> {
 mod tests {
     use super::{
         extend_bounded_attempt, frames_after_terminal, production_transport_pair,
+        read_attempt_until_terminal_from_source, BufferedProviderSseSource,
         NativeProviderSseSource, ProviderSseSource, MAX_PROVIDER_ATTEMPT_BYTES,
     };
     use routecodex_v4_provider::NativeProviderTransport;
+    use routecodex_v4_standard_plugins::protocol::provider_response::ProviderSseTerminalDisposition;
     use serde_json::json;
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -536,6 +571,49 @@ mod tests {
             )
             .expect("terminal frame");
         assert!(!frames_after_terminal(&mut ingress, &frames, 0).expect("clean terminal result"));
+    }
+
+    #[test]
+    fn chat_incomplete_failure_waits_for_done_in_the_same_chunk() {
+        let mut source = BufferedProviderSseSource::new(
+            concat!(
+                "data: {\"id\":\"chatcmpl_1\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
+                "data: {\"id\":\"chatcmpl_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n",
+                "data: [DONE]\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+        );
+        let (_, disposition) = read_attempt_until_terminal_from_source("chat", &mut source)
+            .expect("Chat failure and [DONE] in one chunk must remain a typed failure");
+        assert_eq!(
+            disposition,
+            ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_max_output_tokens".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn anthropic_incomplete_failure_waits_for_message_stop_in_the_same_chunk() {
+        let mut source = BufferedProviderSseSource::new(
+            concat!(
+                "event: message_delta\n",
+                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n",
+                "event: message_stop\n",
+                "data: {\"type\":\"message_stop\"}\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+        );
+        let (_, disposition) = read_attempt_until_terminal_from_source("anthropic", &mut source)
+            .expect("Anthropic failure and message_stop in one chunk must remain a typed failure");
+        assert_eq!(
+            disposition,
+            ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_max_output_tokens".to_string(),
+            }
+        );
     }
 
     #[test]

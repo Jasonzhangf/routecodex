@@ -961,10 +961,93 @@ data: "response":{"id":"resp_incomplete","status":"incomplete","incomplete_detai
     .expect("multiline terminal frame must be classified");
     assert_eq!(
         disposition,
-        ProviderSseTerminalDisposition::Incomplete {
-            reason: "max_output_tokens".to_string(),
+        ProviderSseTerminalDisposition::Failed {
+            message: "provider_response_incomplete_max_output_tokens".to_string(),
         }
     );
+}
+
+#[test]
+fn provider_sse_terminal_classifier_rejects_incomplete_chat_and_anthropic_terminals() {
+    for (protocol, frame, expected) in [
+        (
+            "openai",
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                .as_slice(),
+            "provider_response_incomplete_max_output_tokens",
+        ),
+        (
+            "openai",
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n"
+                .as_slice(),
+            "provider_response_incomplete_content_filter",
+        ),
+        (
+            "anthropic",
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n"
+                .as_slice(),
+            "provider_response_incomplete_max_output_tokens",
+        ),
+        (
+            "anthropic",
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"}}\n\n"
+                .as_slice(),
+            "provider_response_incomplete_content_filter",
+        ),
+    ] {
+        assert_eq!(
+            classify_provider_sse_terminal(protocol, frame)
+                .expect("incomplete provider terminal must classify"),
+            ProviderSseTerminalDisposition::Failed {
+                message: expected.to_string(),
+            }
+        );
+    }
+}
+
+#[test]
+fn provider_sse_terminal_classifier_accepts_normal_chat_and_anthropic_terminals() {
+    for (protocol, frame) in [
+        (
+            "openai",
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                .as_slice(),
+        ),
+        (
+            "openai",
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+                .as_slice(),
+        ),
+        (
+            "openai",
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"function_call\"}]}\n\n"
+                .as_slice(),
+        ),
+        (
+            "openai",
+            b"data: {\"id\":\"chatcmpl_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}\n\n"
+                .as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            classify_provider_sse_terminal(protocol, frame)
+                .expect("non-terminal Chat frame must classify"),
+            ProviderSseTerminalDisposition::Continue
+        );
+    }
+    for (protocol, frame) in [
+        ("openai", b"data: [DONE]\n\n".as_slice()),
+        (
+            "anthropic",
+            b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".as_slice(),
+        ),
+    ] {
+        assert_eq!(
+            classify_provider_sse_terminal(protocol, frame)
+                .expect("normal provider terminal must classify"),
+            ProviderSseTerminalDisposition::Completed
+        );
+    }
 }
 
 #[test]

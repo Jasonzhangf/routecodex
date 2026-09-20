@@ -403,7 +403,6 @@ pub fn normalize_provider_sse_frame_for_relay(
 pub enum ProviderSseTerminalDisposition {
     Continue,
     Completed,
-    Incomplete { reason: String },
     Failed { message: String },
 }
 
@@ -414,8 +413,12 @@ pub fn classify_provider_sse_terminal(
     protocol: &str,
     frame: &[u8],
 ) -> Result<ProviderSseTerminalDisposition, String> {
-    let normalized = normalize_provider_sse_frame_for_relay(protocol, frame)?;
-    let text = std::str::from_utf8(&normalized)
+    let classification_input = if matches!(protocol, "openai" | "chat" | "anthropic") {
+        frame
+    } else {
+        &normalize_provider_sse_frame_for_relay(protocol, frame)?
+    };
+    let text = std::str::from_utf8(classification_input)
         .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
     let mut terminal: ProviderSseTerminalDisposition = ProviderSseTerminalDisposition::Continue;
     let mut current_event: Option<String> = None;
@@ -425,7 +428,7 @@ pub fn classify_provider_sse_terminal(
         if line.is_empty() {
             if let Some(data) = current_data.as_deref() {
                 if let Some(disposition) =
-                    classify_provider_sse_event(current_event.as_deref(), data)
+                    classify_provider_sse_event(protocol, current_event.as_deref(), data)
                 {
                     merge_provider_sse_terminal(&mut terminal, disposition);
                 }
@@ -458,22 +461,63 @@ fn merge_provider_sse_terminal(
         (_, ProviderSseTerminalDisposition::Continue) => {}
         (ProviderSseTerminalDisposition::Completed, ProviderSseTerminalDisposition::Completed) => {}
         (ProviderSseTerminalDisposition::Completed, _) => {}
-        (
-            ProviderSseTerminalDisposition::Incomplete { .. }
-            | ProviderSseTerminalDisposition::Failed { .. },
-            _,
-        ) => {}
+        (ProviderSseTerminalDisposition::Failed { .. }, _) => {}
     }
 }
 
 fn classify_provider_sse_event(
+    protocol: &str,
     event: Option<&str>,
     data: &str,
 ) -> Option<ProviderSseTerminalDisposition> {
+    if matches!(protocol, "openai" | "chat") && data.trim() == "[DONE]" {
+        return Some(ProviderSseTerminalDisposition::Completed);
+    }
     let semantic: Value = match serde_json::from_str(data) {
         Ok(value) => value,
         Err(_) => return None,
     };
+    if matches!(protocol, "openai" | "chat") {
+        let finish_reason = semantic
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| {
+                choices.iter().find_map(|choice| {
+                    choice
+                        .get("finish_reason")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|reason| !reason.is_empty())
+                })
+            });
+        return match finish_reason {
+            Some("length") => Some(ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_max_output_tokens".to_string(),
+            }),
+            Some("content_filter") => Some(ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_content_filter".to_string(),
+            }),
+            _ => None,
+        };
+    }
+    if protocol == "anthropic" {
+        if semantic.get("type").and_then(Value::as_str) == Some("message_stop") {
+            return Some(ProviderSseTerminalDisposition::Completed);
+        }
+        let stop_reason = semantic
+            .get("stop_reason")
+            .or_else(|| semantic.pointer("/delta/stop_reason"))
+            .and_then(Value::as_str);
+        return match stop_reason {
+            Some("max_tokens") => Some(ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_max_output_tokens".to_string(),
+            }),
+            Some("refusal") => Some(ProviderSseTerminalDisposition::Failed {
+                message: "provider_response_incomplete_content_filter".to_string(),
+            }),
+            _ => None,
+        };
+    }
     let response = semantic.get("response").unwrap_or(&semantic);
     let status = response.get("status").and_then(Value::as_str);
     let event = event.unwrap_or_default();
@@ -485,8 +529,8 @@ fn classify_provider_sse_event(
             .map(str::trim)
             .filter(|reason| !reason.is_empty())
             .unwrap_or("unknown");
-        return Some(ProviderSseTerminalDisposition::Incomplete {
-            reason: reason.to_string(),
+        return Some(ProviderSseTerminalDisposition::Failed {
+            message: format!("provider_response_incomplete_{reason}"),
         });
     }
     if status == Some("completed") {

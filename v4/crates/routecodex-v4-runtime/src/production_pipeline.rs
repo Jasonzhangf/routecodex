@@ -964,7 +964,6 @@ fn dispatch_request(
             response_body = String::from_utf8_lossy(&bytes).into_owned();
             buffered_provider_body = Some(bytes);
             let matched_policy = match &disposition {
-                ProviderSseTerminalDisposition::Incomplete { .. } => None,
                 ProviderSseTerminalDisposition::Failed { message } => {
                     manifest.product.as_ref().and_then(|product| {
                         ProductErrorPolicyPort::evaluate_semantic_failure(
@@ -2966,7 +2965,7 @@ wire_name = "mock-model"
     }
 
     #[test]
-    fn streaming_incomplete_projects_v3_length_terminal() {
+    fn streaming_incomplete_reselects_before_client_projection() {
         let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
         let provider_address = provider.local_addr().expect("provider address");
         let provider_thread = std::thread::spawn(move || {
@@ -3016,8 +3015,60 @@ wire_name = "mock-model"
             ),
         )
         .expect("provider config");
-        let manifest = runtime_manifest_with_provider_config(
+        let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
+        let second_thread = std::thread::spawn(move || {
+            let (mut stream, _) = second_provider.accept().expect("second provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_after_incomplete\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("second provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("second provider body");
+        });
+        let second_config = std::env::temp_dir().join(format!(
+            "v4-provider-incomplete-second-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &second_config,
+            format!(
+                r#"
+providerId = "second"
+
+[provider]
+baseURL = "http://{second_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("second provider config");
+        let manifest = runtime_manifest_with_two_provider_configs(
             provider_config.to_str().expect("provider config path"),
+            second_config.to_str().expect("second provider config path"),
         );
         let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
         let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
@@ -3048,27 +3099,28 @@ wire_name = "mock-model"
         ) {
             Ok(response) => response,
             Err(response) => panic!(
-                "incomplete terminal dispatch failed with {}: {}",
+                "incomplete reselect dispatch failed with {}: {}",
                 response.status,
                 String::from_utf8_lossy(&response.body)
             ),
         };
         assert_eq!(response.status, 200);
-        let mut stream = response.stream.take().expect("incomplete terminal stream");
-        let mut body = Vec::new();
-        while stream
-            .next_chunk(&mut body)
-            .expect("incomplete terminal chunk")
-        {}
-        let body = String::from_utf8_lossy(&body);
-        assert!(body.contains("\"total_tokens\":5"), "{body}");
-        assert!(body.contains("response.incomplete"), "{body}");
+        let mut stream = response.stream.take().expect("incomplete reselect stream");
+        let mut chunk = Vec::new();
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("incomplete reselect chunk"));
+        let body = String::from_utf8_lossy(&chunk);
+        assert!(body.contains("resp_after_incomplete"), "{body}");
+        assert!(!body.contains("partial-must-not-commit"), "{body}");
         provider_thread.join().expect("provider thread");
+        second_thread.join().expect("second provider thread");
         std::fs::remove_file(provider_config).ok();
+        std::fs::remove_file(second_config).ok();
     }
 
     #[test]
-    fn streaming_incomplete_without_product_policy_projects_v3_length_terminal() {
+    fn streaming_incomplete_without_product_policy_fails_before_client_projection() {
         let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
         let provider_address = provider.local_addr().expect("provider address");
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -3140,7 +3192,7 @@ wire_name = "mock-model"
             .enable_all()
             .build()
             .expect("provider runtime");
-        let mut response = match dispatch_with_request_cancellation(
+        let response = match dispatch_with_request_cancellation(
             &manifest,
             &runtime,
             &availability,
@@ -3151,27 +3203,20 @@ wire_name = "mock-model"
             None,
             Some(provider_runtime.handle().clone()),
         ) {
-            Ok(response) => response,
-            Err(response) => panic!(
-                "incomplete terminal dispatch failed with {}: {}",
-                response.status,
-                String::from_utf8_lossy(&response.body)
-            ),
+            Ok(_) => panic!("incomplete provider attempt must not become a success response"),
+            Err(response) => response,
         };
-        assert_eq!(response.status, 200);
-        let mut stream = response.stream.take().expect("incomplete terminal stream");
-        let mut body = Vec::new();
-        while stream
-            .next_chunk(&mut body)
-            .expect("incomplete terminal chunk")
-        {}
-        let body = String::from_utf8_lossy(&body);
-        assert!(body.contains("response.incomplete"), "{body}");
-        assert!(body.contains("partial-must-not-commit"), "{body}");
+        assert_eq!(response.status, 599);
+        let body = String::from_utf8_lossy(&response.body);
+        assert!(
+            body.contains("provider_response_incomplete_max_output_tokens"),
+            "incomplete terminal must fail before client projection: {body}"
+        );
+        assert!(!body.contains("partial-must-not-commit"), "{body}");
         assert_eq!(
             attempts.load(Ordering::SeqCst),
             1,
-            "incomplete terminal must not trigger a provider retry"
+            "single-provider incomplete exhaustion must not retry itself"
         );
         provider_thread.join().expect("provider thread");
         std::fs::remove_file(provider_config).ok();
