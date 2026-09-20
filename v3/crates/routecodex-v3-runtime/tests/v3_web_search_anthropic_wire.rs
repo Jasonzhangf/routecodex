@@ -281,7 +281,7 @@ fn serve_completed_search(
 async fn search_hop_uses_typed_sidecar_without_provider_reentry() {
     let manifest = anthropic_mode_b_manifest();
     let sends = Arc::new(Mutex::new(0));
-    let socket_path = test_socket_path("anthropic-sidecar");
+    let socket_path = test_socket_path("ws");
     let sidecar = serve_completed_search(socket_path.clone());
     let server_tool_state = V3ResponsesRelayServerToolState::default()
         .with_hooks_sidecar_socket(Some(socket_path.clone()));

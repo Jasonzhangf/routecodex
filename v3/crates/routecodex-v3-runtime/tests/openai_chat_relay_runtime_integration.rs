@@ -1594,7 +1594,7 @@ async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
 }
 
 #[tokio::test]
-async fn openai_chat_provider_pool_exhaustion_holds_until_provider_recovery() {
+async fn openai_chat_provider_pool_exhaustion_terminates_after_failed_rescue_probe() {
     let scope = "openai_chat_pool_exhausted_network_error";
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
