@@ -4,7 +4,9 @@
 //! enforcement. It never calls Router, Target, Provider, or the client frame.
 
 use serde::{Deserialize, Serialize};
-use servertool_core::web_search_contract::{WebSearchHookOutcome, WebSearchHookRequest};
+use servertool_core::web_search_contract::{
+    WebSearchHookOutcome, WebSearchHookRequest, WebSearchResultStatus,
+};
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
@@ -318,6 +320,12 @@ fn validate_outcome(
             "web_search subagent returned not_applicable".to_string(),
         )),
         WebSearchHookOutcome::Completed(result) => {
+            if result.status != WebSearchResultStatus::Completed {
+                return Err(WebSearchAdapterError::MalformedResponse(
+                    "web_search subagent returned completed wrapper with non-completed status"
+                        .to_string(),
+                ));
+            }
             result
                 .validate()
                 .map_err(|error| WebSearchAdapterError::MalformedResponse(error.to_string()))?;
@@ -348,7 +356,9 @@ fn validate_outcome(
 mod tests {
     use super::*;
     use serde_json::json;
-    use servertool_core::web_search_contract::WebSearchHookScope;
+    use servertool_core::web_search_contract::{
+        WebSearchError, WebSearchHookScope, WebSearchResult,
+    };
     use std::sync::{mpsc, Mutex, OnceLock};
 
     static OVERSIZED_OUTPUT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -414,6 +424,28 @@ mod tests {
         };
         assert_eq!(result.call_id, "call-web-search-1");
         assert_eq!(result.content.as_deref(), Some("typed result"));
+    }
+
+    #[test]
+    fn validate_outcome_rejects_completed_wrapper_with_failed_status() {
+        let request = request(future_deadline());
+        let outcome = WebSearchHookOutcome::Completed(WebSearchResult {
+            call_id: request.call_id.clone(),
+            status: WebSearchResultStatus::Failed,
+            content: None,
+            sources: Vec::new(),
+            metadata: None,
+            error: Some(WebSearchError {
+                code: "search_unavailable".to_string(),
+                message: "controlled failure".to_string(),
+                retryable: false,
+            }),
+        });
+
+        assert!(matches!(
+            validate_outcome(&outcome, &request.call_id),
+            Err(WebSearchAdapterError::MalformedResponse(_))
+        ));
     }
 
     #[test]
