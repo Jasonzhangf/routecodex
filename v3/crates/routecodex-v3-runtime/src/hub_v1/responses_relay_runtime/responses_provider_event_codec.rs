@@ -187,6 +187,16 @@ fn apply_v3_typed_responses_event(
                     .to_owned(),
             ));
         }
+        let failure =
+            classify_v3_provider_terminal_admission(V3HubProviderWireProtocol::Responses, event)
+                .expect("response.incomplete was validated before terminal admission");
+        return Err(
+            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
+                status: 200,
+                code: failure.code,
+                message: failure.message,
+            },
+        );
     }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
@@ -641,9 +651,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_is_terminal_typed_response_not_provider_error() {
+    fn response_incomplete_is_provider_error_not_terminal_response() {
         let mut reducer = V3ResponsesSseReducerState::default();
-        let terminal = apply_v3_typed_responses_event(
+        let error = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -655,14 +665,13 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
         )
-        .expect("response.incomplete must produce a terminal response, not an error")
-        .expect("response.incomplete must be terminal");
-        assert_eq!(terminal["status"], json!("incomplete"));
-        assert_eq!(
-            terminal["incomplete_details"]["reason"],
-            json!("max_output_tokens")
+        .expect_err("response.incomplete must enter the provider error chain");
+        assert!(
+            error
+                .to_string()
+                .contains("provider response ended before completion"),
+            "unexpected error: {error}"
         );
-        assert_eq!(terminal["usage"]["total_tokens"], json!(15));
     }
 
     #[test]

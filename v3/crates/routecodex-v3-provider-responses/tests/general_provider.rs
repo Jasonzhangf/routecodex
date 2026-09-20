@@ -152,6 +152,7 @@ fn target_with_auth(
         request_timeout_ms: 300_000,
         sse_first_frame_timeout_ms: None,
         initial_concurrency_budget: 8,
+        concurrency_acquire_timeout_ms: 60_000,
     }
 }
 

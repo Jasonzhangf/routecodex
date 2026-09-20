@@ -222,6 +222,26 @@ fn provider_request_failure(
     }
 }
 
+fn provider_terminal_admission_failure(
+    status: u16,
+    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
+        status,
+        client_response: json!({
+            "type": "error",
+            "error": {
+                "type": failure.code,
+                "message": failure.message,
+            }
+        }),
+        source_stage: "V3ProviderRespInbound01Raw",
+        terminal_projection: None,
+        error_type_fn: extract_error_type_style,
+        error_message_fn: extract_message_type_style,
+    }
+}
+
 fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3RelayProviderFailure {
     if let V3ProviderError::InternalTransport { lane, .. } = &error {
         let source_stage = match lane {

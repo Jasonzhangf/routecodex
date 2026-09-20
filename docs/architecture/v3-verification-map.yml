@@ -658,8 +658,8 @@ features:
   owner_scope: Test-only Relay JSON/SSE/servertool copy-budget observations and mutation-backed source gates
   owner_modules:
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_payload_copy_runtime_probes.rs
-  - scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
-  - scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-relay-payload-copy-budget.mjs
+  - v3/scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs
   test_design:
   - docs/goals/v3-hub-relay-payload-copy-runtime-probes-test-design.md
   mainline_bindings:
@@ -1129,6 +1129,7 @@ features:
   owner_kind: rust_project_v3
   owner_scope: 'Generic Rust Provider runtime slice for Responses entry: selected Target with provider_type -> provider wire -> protocol-specific transport request -> typed raw response/source error'
   owner_modules:
+  - v3/crates/routecodex-v3-config
   - v3/crates/routecodex-v3-provider-responses
   - v3/crates/routecodex-v3-runtime
   - v3/crates/routecodex-v3-target
@@ -1152,12 +1153,15 @@ features:
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
-  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately, the first over-budget request is a real probe, HTTP 429 confirms saturation, and no acquire
-    timeout fabricates a local failure'
+  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately, the first over-budget request is a real probe, HTTP 429 confirms saturation, and the existing provider acquireTimeoutMs is compiled by Config, propagated through Target, and enforced by Provider transport'
+  - 'A saturated admission wait expires at the configured acquireTimeoutMs as a typed provider transport failure and enters the existing Error/Target switch chain; it never waits indefinitely, fabricates client success, or blocks unrelated sessions'
+  - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   required_contract:
+  - Provider concurrency admission policy is Config-owned: acquireTimeoutMs and maxInFlight are published once in V3Config05ManifestPublished, consumed by Target, and carried into Provider transport; they are not reconstructed by Runtime, Server, Router, Error, payload, MetadataCenter, or Debug
+  - Admission timeout is a provider transport failure, not a client-input failure or a session-global wait; it traverses the existing typed Error/Target switch path and only becomes terminal after candidate exhaustion
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
-  - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources
+  - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
   - Server and CLI cannot import Provider transport
   - Provider node structs 12, 13, and 14 cannot be constructed by non-owner code
   - auth secret values never enter manifest, Debug, Error, Provider wire Debug, transport request Debug, or client payload
@@ -1754,6 +1758,17 @@ features:
   - Malformed function-call arguments use the separate registered `v3.function_call.anthropic_raw_argument_wrapper.v1` compatibility projection. It preserves exact raw argument text in `tool_use.input={"input":raw}`
     without relabeling the call as custom; valid JSON arguments remain on the native object path, and missing/non-string arguments fail without `{}` repair, result deletion, provider failure classification,
     or provider switch.
+  - >-
+    DeepSeek Chat-compatible targets use the provider-private
+    `v3.function_call.deepseek_raw_argument_wrapper.v1` projection for malformed historical
+    function arguments: the exact raw string crosses as `function.arguments={"input":raw}`
+    only at the DeepSeek provider boundary, while valid JSON objects remain native and no
+    client invalid-request or provider-switch classification is introduced.
+  - provider-compat-core::deepseek_console_go::tests::wraps_malformed_chat_function_arguments_without_changing_valid_objects
+  - provider-compat-core::deepseek_console_go::tests::wraps_malformed_responses_function_arguments_at_deepseek_boundary
+  - routecodex-v3-runtime::hub_v1::provider_req_compat_06_provider_compat::tests::deepseek_v41_openai_chat_wraps_malformed_history_arguments
+  - routecodex-v3-runtime::hub_v1::provider_compat_shared::tests::unrelated_deepseek_model_keeps_malformed_arguments_at_openai_chat_transport
+  - routecodex-v3-provider-responses::wire::tests::wire_wraps_deepseek_v41_malformed_function_arguments_without_thinking_mode
   - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening
     block-local cache semantics.
   - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance.
@@ -2951,6 +2966,8 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
@@ -2977,6 +2994,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures
@@ -3011,11 +3029,13 @@ features:
   - Bounded Chat Anthropic and Responses terminal facts match once and retain exact policy identity/path through retry backoff and final projection.
   - Configured backoff is a minimum combined with provider-action-gate delay by max rather than addition.
   - Only a non-matching successful response records provider success and reaches Resp03 client commit.
+  - Responses, OpenAI Chat, and Anthropic incomplete provider terminals enter Error01-06 and reselect before any client commit.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
   - Error05 cannot re-match a response-content policy from compressed error message.
   - Retry exhaustion cannot project before route/default exhaustion and cannot project more than once.
+  - A failed incomplete attempt cannot project partial output or record provider success.
   required_gates:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate

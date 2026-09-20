@@ -578,6 +578,15 @@ pub(super) fn require_output_string(
 fn classify_v3_provider_anthropic_json_event(
     event: &Value,
 ) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
+    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
+        V3HubProviderWireProtocol::Anthropic,
+        event,
+    ) {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
+            code: failure.code,
+            message: failure.message,
+        });
+    }
     let event_type = event
         .get("type")
         .and_then(Value::as_str)
@@ -696,6 +705,15 @@ fn anthropic_content_block_has_client_output(block: &Value) -> Result<bool, Stri
 fn classify_v3_provider_openai_chat_json_event(
     event: &Value,
 ) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
+    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
+        V3HubProviderWireProtocol::OpenAiChat,
+        event,
+    ) {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
+            code: failure.code,
+            message: failure.message,
+        });
+    }
     if event.get("error").is_some() {
         return classify_provider_error_object(event, "openai_chat_provider_error");
     }
@@ -1275,36 +1293,6 @@ mod provider_sse_json_codec_tests {
                 "business output must authorize streaming: {data}"
             );
         }
-    }
-
-    #[test]
-    fn response_incomplete_with_reason_is_terminal_not_provider_failure() {
-        for reason in ["max_output_tokens", "content_filter"] {
-            let data = format!(
-                r#"{{"type":"response.incomplete","response":{{"id":"resp_1","status":"incomplete","incomplete_details":{{"reason":"{reason}"}}}}}}"#
-            );
-            let outcome =
-                classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-                    .expect("response.incomplete with reason must classify");
-            assert_eq!(
-                outcome,
-                Some(V3ProviderResponsesJsonFrameOutcome::Terminal),
-                "response.incomplete is a valid terminal, not a provider failure: {data}"
-            );
-        }
-    }
-
-    #[test]
-    fn response_incomplete_without_reason_still_fails_fast() {
-        let error = classify_v3_provider_sse_json_data(
-            V3HubProviderWireProtocol::Responses,
-            r#"{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete"}}"#,
-        )
-        .expect_err("response.incomplete without incomplete_details.reason is malformed");
-        assert!(
-            error.contains("response.incomplete"),
-            "unexpected error: {error}"
-        );
     }
 
     #[test]

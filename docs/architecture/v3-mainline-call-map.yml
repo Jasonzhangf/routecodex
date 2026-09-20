@@ -6862,6 +6862,9 @@ chains:
       produces: [v3.provider.global_subscription_health]
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
+    semantic_contract:
+      - build_v3_provider_global_probe_target is the probe-only Runtime reader that copies the typed provider concurrency capability from the published manifest into the probe target.
+      - The probe target preserves acquireTimeoutMs for Responses, OpenAI Chat, Anthropic, and Gemini transport builders; this control value never enters provider, client, MetadataCenter, or Debug payloads.
 
   - step_id: v3-provider-global-probe-02-success
     from_node: V3ProviderGlobalProbeExecution

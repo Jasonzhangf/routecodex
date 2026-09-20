@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_sse_incomplete_terminates_chat_stream_with_done() {
+    async fn responses_sse_incomplete_fails_before_chat_projection() {
         use futures_util::StreamExt;
         let manifest = test_relay_manifest();
         let outcome = test_relay_outcome(&manifest);
@@ -184,24 +184,52 @@ mod tests {
             V3RuntimeStreamObservation::default(),
             outcome,
         );
-        let mut chunks = Vec::new();
+        let mut saw_error = None;
         while let Some(chunk) = stream.next().await {
             match chunk {
-                Ok(bytes) => chunks.push(bytes),
-                Err(error) => {
-                    panic!("response.incomplete must not error the chat stream: {error}")
-                }
+                Ok(_) => {}
+                Err(error) => saw_error = Some(error),
             }
         }
-        let joined_bytes = chunks.concat();
-        let joined = String::from_utf8_lossy(&joined_bytes);
+        let error = saw_error.expect("response.incomplete must fail before client projection");
         assert!(
-            joined.contains(r#""finish_reason":"length""#),
-            "incomplete must project terminal finish_reason=length: {joined}"
+            error.contains("provider_response_incomplete_max_output_tokens"),
+            "{error}"
         );
+    }
+
+    #[tokio::test]
+    async fn responses_sse_incomplete_type_without_status_fails_before_chat_projection() {
+        use futures_util::StreamExt;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec()),
+            Ok(b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_inc\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n".to_vec()),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
+            provider,
+            None,
+            V3WebSearchExecutionMode::None,
+            None,
+            false,
+            false,
+            V3RuntimeStreamObservation::default(),
+            outcome,
+        );
+        let mut saw_error = None;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(_) => {}
+                Err(error) => saw_error = Some(error),
+            }
+        }
+        let error = saw_error.expect("response.incomplete type must fail without status");
         assert!(
-            joined.contains("data: [DONE]"),
-            "incomplete terminal must close the chat SSE stream with [DONE]: {joined}"
+            error.contains("provider_response_incomplete_max_output_tokens"),
+            "{error}"
         );
     }
 

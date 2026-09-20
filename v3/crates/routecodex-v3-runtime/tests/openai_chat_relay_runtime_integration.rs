@@ -378,8 +378,122 @@ struct ReselectTransport {
     provider_ids: Mutex<Vec<String>>,
 }
 
+struct ResponsesIncompleteThenChatSuccessTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+struct IncompleteWireThenChatSuccessTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
 struct PostCommitRecoverySseTransport {
     provider_ids: std::sync::Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesIncompleteThenChatSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        if provider_id == "openai_chat_responses_incomplete_reselect_primary" {
+            let frames = vec![
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"primary-partial-must-not-commit\"}\n\n".to_vec(),
+                ),
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_primary_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
+                ),
+            ];
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(futures_util::stream::iter(frames)),
+            ));
+        }
+        let frames = vec![
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"data: {\"id\":\"chatcmpl-incomplete-reselect\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"secondary-after-incomplete\"},\"finish_reason\":null}]}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"data: {\"id\":\"chatcmpl-incomplete-reselect\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        let frames = if provider_id.ends_with("_primary") {
+            if provider_id.contains("openai_chat_wire") {
+                vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"primary-partial-must-not-commit\"},\"finish_reason\":null}]}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
+                ]
+            } else {
+                vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"primary-partial-must-not-commit\"}}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
+                    ),
+                ]
+            }
+        } else {
+            vec![
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"data: {\"id\":\"chatcmpl-secondary\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"secondary-after-incomplete\"},\"finish_reason\":null}]}\n\n".to_vec(),
+                ),
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"data: {\"id\":\"chatcmpl-secondary\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec(),
+                ),
+                Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
+            ]
+        };
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
 }
 
 #[async_trait]
@@ -426,6 +540,169 @@ data: [DONE]
             Box::pin(stream),
         ))
     }
+}
+
+#[tokio::test]
+async fn responses_provider_incomplete_reselects_before_chat_client_commit() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_responses_incomplete_reselect";
+    let manifest = manifest_with_two_responses_providers_for_scope(server_id);
+    let transport = ResponsesIncompleteThenChatSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-incomplete-reselect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("incomplete Responses provider attempt must reselect");
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
+    assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(
+        provider_ids,
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ]
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("secondary-after-incomplete"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(
+        !text.contains("provider_response_incomplete_max_output_tokens"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_wire_incomplete_reselect";
+    let manifest = manifest_with_two_providers_for_scope(server_id, true);
+    let transport = IncompleteWireThenChatSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-openai-chat-wire-incomplete-reselect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("incomplete OpenAI Chat provider attempt must reselect");
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
+    assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(
+        provider_ids,
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ]
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("secondary-after-incomplete"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+}
+
+#[tokio::test]
+async fn anthropic_provider_incomplete_reselects_before_client_commit() {
+    use futures_util::StreamExt;
+    let server_id = "anthropic_wire_incomplete_reselect";
+    let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
+    let transport = IncompleteWireThenChatSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-wire-incomplete-reselect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("incomplete Anthropic provider attempt must reselect");
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
+    assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(
+        provider_ids,
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ]
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("secondary-after-incomplete"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
 }
 
 #[tokio::test]
@@ -2135,6 +2412,122 @@ targets = [
             ""
         },
     );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn manifest_with_two_responses_providers_for_scope(
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    ensure_openai_chat_relay_test_state_dir();
+    let primary = format!("{scope}_primary");
+    let secondary = format!("{scope}_secondary");
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 1
+routing_group = "__SCOPE__"
+endpoints = ["openai_chat"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {}
+[providers.__PRIMARY__]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "__PRIMARY__", env = "V3_RESPONSES_PRIMARY_KEY" }] }
+[providers.__PRIMARY__.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+[providers.__SECONDARY__]
+type = "openai_chat"
+base_url = "http://secondary.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "__SECONDARY__", env = "V3_OPENAI_CHAT_SECONDARY_KEY" }] }
+[providers.__SECONDARY__.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools", "web_search"]
+[route_groups.__SCOPE__.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
+]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
+]
+"#
+    .replace("__SCOPE__", scope)
+    .replace("__PRIMARY__", &primary)
+    .replace("__SECONDARY__", &secondary);
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn manifest_with_two_anthropic_providers_for_scope(
+    scope: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    ensure_openai_chat_relay_test_state_dir();
+    let primary = format!("{scope}_primary");
+    let secondary = format!("{scope}_secondary");
+    let source = r#"
+version = 3
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 1
+routing_group = "__SCOPE__"
+endpoints = ["openai_chat"]
+[servers.__SCOPE__.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {}
+[providers.__PRIMARY__]
+type = "anthropic"
+base_url = "http://primary.invalid"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "__PRIMARY__", env = "V3_ANTHROPIC_PRIMARY_KEY" }] }
+[providers.__PRIMARY__.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+[providers.__SECONDARY__]
+type = "openai_chat"
+base_url = "http://secondary.invalid/v1"
+default_model = "chat-wire-model"
+auth = { type = "api_key", entries = [{ alias = "__SECONDARY__", env = "V3_OPENAI_CHAT_SECONDARY_KEY" }] }
+[providers.__SECONDARY__.models.chat-wire-model]
+wire_name = "chat-wire-model"
+aliases = ["chat-client-alias"]
+supports_streaming = true
+capabilities = ["text", "tools"]
+[route_groups.__SCOPE__.pools.chat_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }
+targets = [
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
+]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "__PRIMARY__", model = "chat-wire-model", key = "__PRIMARY__", priority = 2 },
+  { kind = "provider_model", provider = "__SECONDARY__", model = "chat-wire-model", key = "__SECONDARY__", priority = 1 }
+]
+"#
+    .replace("__SCOPE__", scope)
+    .replace("__PRIMARY__", &primary)
+    .replace("__SECONDARY__", &secondary);
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 

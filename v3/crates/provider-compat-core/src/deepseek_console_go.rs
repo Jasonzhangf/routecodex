@@ -197,10 +197,79 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
 /// Single request-side owner for DeepSeek V4/OpenCode Go 400 compatibility.
 /// Handles both Responses input history and projected OpenAI Chat messages.
 pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
+    apply_deepseek_function_call_arguments_compat(payload);
     apply_deepseek_v4_thinking_chat_compat(payload);
 }
 
-fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
+/// DeepSeek's Chat-compatible gateway requires every function-call argument
+/// string to decode to a JSON object. The canonical Chat/Responses projector
+/// must preserve malformed history verbatim for providers that can accept it,
+/// so this provider-private boundary uses the registered
+/// `v3.function_call.deepseek_raw_argument_wrapper.v1` string wrapper instead
+/// of rejecting the client request or inventing `{}`.
+pub fn apply_deepseek_function_call_arguments_compat(payload: &mut Value) {
+    if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            normalize_deepseek_chat_tool_calls(message);
+        }
+    }
+    if let Some(input) = payload.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            normalize_deepseek_responses_function_call(item);
+        }
+    }
+}
+
+fn normalize_deepseek_chat_tool_calls(message: &mut Value) {
+    let Some(tool_calls) = message
+        .as_object_mut()
+        .and_then(|message| message.get_mut("tool_calls"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for tool_call in tool_calls {
+        let Some(arguments) = tool_call
+            .as_object_mut()
+            .and_then(|tool_call| tool_call.get_mut("function"))
+            .and_then(Value::as_object_mut)
+            .and_then(|function| function.get_mut("arguments"))
+        else {
+            continue;
+        };
+        wrap_deepseek_malformed_object_arguments(arguments);
+    }
+}
+
+fn normalize_deepseek_responses_function_call(item: &mut Value) {
+    let Some(object) = item.as_object_mut() else {
+        return;
+    };
+    if object.get("type").and_then(Value::as_str) != Some("function_call") {
+        return;
+    }
+    if let Some(arguments) = object.get_mut("arguments") {
+        wrap_deepseek_malformed_object_arguments(arguments);
+    }
+}
+
+fn wrap_deepseek_malformed_object_arguments(arguments: &mut Value) {
+    let Value::String(raw) = arguments else {
+        return;
+    };
+    let is_object = serde_json::from_str::<Value>(raw)
+        .ok()
+        .is_some_and(|value| value.is_object());
+    if is_object {
+        return;
+    }
+    *arguments = Value::String(
+        serde_json::to_string(&json!({"input": raw}))
+            .expect("literal DeepSeek raw-argument wrapper must serialize"),
+    );
+}
+
+pub fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
     let thinking = payload
         .get("reasoning_effort")
         .and_then(Value::as_str)
@@ -320,6 +389,60 @@ mod tests {
 
         assert_eq!(body["tool_choice"], "required");
         assert!(body["messages"][0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn wraps_malformed_chat_function_arguments_without_changing_valid_objects() {
+        let raw = "{\"cmd\":\"one\"}{\"cmd\":\"two\"}";
+        let mut body = json!({
+            "model": "deepseek-v4.1-flash",
+            "messages": [
+                {"role":"assistant", "content":"", "tool_calls":[
+                    {"id":"call_bad", "type":"function", "function":{
+                        "name":"exec_command", "arguments":raw
+                    }},
+                    {"id":"call_good", "type":"function", "function":{
+                        "name":"exec_command", "arguments":"{\"cmd\":\"pwd\"}"
+                    }}
+                ]},
+                {"role":"tool", "tool_call_id":"call_bad", "content":"parse failed"}
+            ]
+        });
+
+        apply_deepseek_v4_request_compat(&mut body);
+
+        let arguments = &body["messages"][0]["tool_calls"];
+        assert_eq!(
+            arguments[0]["function"]["arguments"],
+            json!("{\"input\":\"{\\\"cmd\\\":\\\"one\\\"}{\\\"cmd\\\":\\\"two\\\"}\"}"),
+            "malformed history must cross DeepSeek as a legal object string"
+        );
+        assert_eq!(
+            arguments[1]["function"]["arguments"],
+            json!("{\"cmd\":\"pwd\"}"),
+            "valid object arguments must remain native"
+        );
+        assert_eq!(body["messages"][1]["tool_call_id"], "call_bad");
+    }
+
+    #[test]
+    fn wraps_malformed_responses_function_arguments_at_deepseek_boundary() {
+        let mut body = json!({
+            "model": "deepseek-v4.1-flash",
+            "input": [{
+                "type":"function_call",
+                "call_id":"call_bad",
+                "name":"exec_command",
+                "arguments":"not-json"
+            }]
+        });
+
+        apply_deepseek_v4_request_compat(&mut body);
+
+        assert_eq!(
+            body["input"][0]["arguments"],
+            json!("{\"input\":\"not-json\"}")
+        );
     }
 
     #[test]

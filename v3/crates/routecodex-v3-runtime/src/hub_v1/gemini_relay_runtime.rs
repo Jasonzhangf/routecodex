@@ -12,7 +12,7 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
     V3Transport13ResponsesHttpRequest,
@@ -437,7 +437,7 @@ fn build_v3_gemini_transport_09(
             ""
         }
     );
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
         request_id,
         target.provider_id,
         url_text,
@@ -446,6 +446,7 @@ fn build_v3_gemini_transport_09(
         body,
         Vec::new(),
         Some(Duration::from_millis(target.request_timeout_ms)),
+        target.concurrency_acquire_timeout_ms,
     )
     .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
 }

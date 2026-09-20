@@ -1,0 +1,62 @@
+{
+  "evidence_id": "v3-provider-cooldown-test-state-source-20260919",
+  "feature_id": "v3.provider_global_cooldown_persistence",
+  "candidate_commit": "169b6ff1457bdd527cceefe81c76850b43335d87",
+  "candidate_tree": "7efe8df23721b2ed50cfeb45c0b751d402a2ec56",
+  "base_commit": "c628a8298850e963e58b5ddf44d0e9c4239b2960",
+  "captured_at": "2026-09-19T15:34:00-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "rust_v3_provider_global_cooldown_persistence_test_fixture",
+    "paths": [
+      "v3/crates/routecodex-v3-runtime/tests/anthropic_relay_anthropic_provider_wire_integration.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture",
+      "result": "pass",
+      "tests": "8 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-global-cooldown-persistence",
+      "result": "pass",
+      "tests": "7 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-health-contract",
+      "result": "pass",
+      "tests": "14 + 27 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "HOME=<temporary-directory> CARGO_HOME=/Users/fanzhang/.cargo RUSTUP_HOME=/Users/fanzhang/.rustup CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_anthropic_provider_wire_integration -- --nocapture",
+      "result": "pass",
+      "tests": "8 passed; 0 failed",
+      "isolated_home_rc": 0,
+      "state_files": 0
+    }
+  ],
+  "notes": [
+    "The receipt binds source and gate execution to candidate commit 169b6ff14 and tree 7efe8df2.",
+    "The receipt commit that follows 169b6ff14 changes this evidence file only; the scoped test source remains unchanged.",
+    "The isolated HOME run preserved the real Cargo and Rustup homes, ran the target test twice-compatible binary, and created no files under the isolated HOME.",
+    "This is a test-fixture change only; it does not alter runtime behavior, so installed runtime replay is not applicable to this source receipt."
+  ]
+}

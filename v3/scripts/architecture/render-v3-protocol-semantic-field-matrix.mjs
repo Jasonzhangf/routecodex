@@ -13,6 +13,14 @@ const PROTOCOLS = [
   ['anthropic', 'Anthropic Messages'],
   ['gemini', 'Gemini'],
 ];
+const EXTRA_PROTOCOL_LABELS = {
+  deepseek_provider_compat: 'DeepSeek provider compatibility',
+};
+const PROTOCOL_MAPPING_COLUMNS = [
+  ['responses', 'Responses'],
+  ['anthropic', 'Anthropic'],
+  ['gemini', 'Gemini'],
+];
 const CLASSIFICATION_BUCKETS = [
   ['canonical_chat_fields', 'Canonical Chat fields'],
   ['protocol_specific_chat_extension_fields', 'Protocol-specific Chat extensions'],
@@ -409,6 +417,7 @@ function renderManualSemanticTranslationGroups(matrix) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return '<p class="muted">chat_semantic_translation_groups is missing.</p>';
   }
+  const mappingColumns = protocolMappingColumns(rows);
   const body = rows.map((row) => `<tr>
     <td class="standard-cell">
       <code>${escapeHtml(row?.standard_chat_field ?? 'missing')}</code>
@@ -423,14 +432,45 @@ function renderManualSemanticTranslationGroups(matrix) {
       ${renderShapeBranchCases(row)}
     </td>
     <td>${badge(row?.direction ?? 'missing')}<br>${badge(row?.current_impl ?? 'missing')}<br><span class="muted">${escapeHtml(row?.gap ?? '')}</span></td>
-    <td>${renderProtocolTransformCell(row?.protocol_mappings?.responses, 'Responses semantic group')}</td>
-    <td>${renderProtocolTransformCell(row?.protocol_mappings?.anthropic, 'Anthropic semantic group')}</td>
-    <td>${renderProtocolTransformCell(row?.protocol_mappings?.gemini, 'Gemini semantic group')}</td>
+    ${mappingColumns.map(([protocol, label]) => `<td>${renderProtocolMappingCell(row, protocol, `${label} semantic group`)}</td>`).join('')}
   </tr>`).join('\n');
   return `<div class="table-wrap"><table>
-    <thead><tr><th>OpenAI Chat field / extension</th><th>standard semantic meaning</th><th>direction / impl / gap</th><th>Responses semantic group</th><th>Anthropic semantic group</th><th>Gemini semantic group</th></tr></thead>
+    <thead><tr><th>OpenAI Chat field / extension</th><th>standard semantic meaning</th><th>direction / impl / gap</th>${mappingColumns.map(([, label]) => `<th>${escapeHtml(label)} semantic group</th>`).join('')}</tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
+}
+
+function protocolMappingColumns(rows) {
+  const extraProtocols = new Set();
+  for (const row of rows) {
+    for (const protocol of Object.keys(row?.protocol_mappings ?? {})) {
+      if (!PROTOCOLS.some(([known]) => known === protocol)) extraProtocols.add(protocol);
+    }
+  }
+  return [
+    ...PROTOCOL_MAPPING_COLUMNS,
+    ...[...extraProtocols].sort().map((protocol) => [
+      protocol,
+      EXTRA_PROTOCOL_LABELS[protocol] ?? protocol.replaceAll('_', ' '),
+    ]),
+  ];
+}
+
+function renderProtocolMappingCell(row, protocol, label) {
+  // Keep the canonical mapping expressions visible to the parity gate:
+  // renderProtocolTransformCell(row?.protocol_mappings?.responses, 'Responses semantic group')
+  // renderProtocolTransformCell(row?.protocol_mappings?.anthropic, 'Anthropic semantic group')
+  // renderProtocolTransformCell(row?.protocol_mappings?.gemini, 'Gemini semantic group')
+  switch (protocol) {
+    case 'responses':
+      return renderProtocolTransformCell(row?.protocol_mappings?.responses, label);
+    case 'anthropic':
+      return renderProtocolTransformCell(row?.protocol_mappings?.anthropic, label);
+    case 'gemini':
+      return renderProtocolTransformCell(row?.protocol_mappings?.gemini, label);
+    default:
+      return renderProtocolTransformCell(row?.protocol_mappings?.[protocol], label);
+  }
 }
 
 function renderShapeBranchCases(row) {

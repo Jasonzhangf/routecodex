@@ -1349,7 +1349,7 @@ chat_semantic_translation_groups:
     direction: request
     standard_semantic_meaning: Serialized JSON arguments for one model-emitted function call.
     chat_shape_rule: Chat function.arguments is the argument payload only. It must not be mapped to id/name/tool
-      declaration. Valid JSON projects as native target input; malformed raw text may use only the named Anthropic
+      declaration. Valid JSON projects as native target input; malformed raw text may use only a named target
       compatibility wrapper and must remain function-call semantics.
     protocol_mappings:
       responses:
@@ -1364,6 +1364,11 @@ chat_semantic_translation_groups:
         response_fields:
           - response.content[].input
         transform: Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.
+      deepseek_provider_compat:
+        request_fields:
+          - request.messages[].tool_calls[].function.arguments
+        response_fields: []
+        transform: Valid JSON object arguments remain native. Malformed historical raw argument text uses compatibility id v3.function_call.deepseek_raw_argument_wrapper.v1 with the exact raw text under the provider-local input field.
       gemini:
         request_fields:
           - request.contents[].parts[].functionCall.args
@@ -1379,6 +1384,10 @@ chat_semantic_translation_groups:
           target_semantic: Anthropic tool_use.input containing only the exact raw string under input
           projection_class: mapped_compatible_registered
           compatibility_id: v3.function_call.anthropic_raw_argument_wrapper.v1
+        - source_condition: DeepSeek provider target receives a historical function call with a string argument value that is invalid JSON
+          target_semantic: DeepSeek function.arguments containing only the exact raw string under input
+          projection_class: mapped_compatible_registered
+          compatibility_id: v3.function_call.deepseek_raw_argument_wrapper.v1
       negative:
         - forbidden_source: missing or non-string function arguments
           required_result: explicit codec error without empty-object repair
