@@ -1,8 +1,8 @@
 {
   "evidence_id": "v3-web-search-servertool-source-20260919",
   "feature_id": "v3.web_search_servertool_state_machine",
-  "source_candidate_commit": "59fa5b3e93d9c189f94b48fca2dbba5a1baf9ead",
-  "source_candidate_tree": "902ade97bc5da6acc943b41636ea6a2c2721542a",
+  "candidate_commit": "59fa5b3e93d9c189f94b48fca2dbba5a1baf9ead",
+  "candidate_tree": "902ade97bc5da6acc943b41636ea6a2c2721542a",
   "base_commit": "5d293375f487530a93bd84a47af9aaf2cd81fb05",
   "captured_at": "2026-09-19T12:04:07-07:00",
   "source_unchanged": true,
@@ -35,69 +35,9 @@
     "mainline_caller_flow": "pass; markdown and HTML review surfaces synced; binding_pending=4; locked chains=51; pending chains=22",
     "architecture_docs": "pass; docs=25; resources=179; edges=427"
   },
-  "integration_receipt": {
-    "source_candidate_commit": "3e2257bc7d32a4993f4797c15203d5c1b9622cf6",
-    "source_candidate_tree": "345e9c0155d6840d7be3943f72e034037be1f188",
-    "receipt_commit": "deb622ad59243a0fa8d1862127906a7869b34a38",
-    "captured_at": "2026-09-19T22:41:39-07:00",
-    "source_unchanged": true,
-    "artifact": {
-      "path": "v3/target/debug/rccv3",
-      "sha256": "a6d0743b29e5526d6e26dc612901af6a6b20aeaa854b1b910bb70b88e416bde3",
-      "bytes": 76883416
-    },
-    "gates": [
-      {
-        "command": "cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture",
-        "result": "pass",
-        "tests": "6 passed; 0 failed"
-      },
-      {
-        "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture",
-        "result": "pass",
-        "tests": "27 passed; 0 failed"
-      },
-      {
-        "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture",
-        "result": "pass",
-        "tests": "79 lib + 7 config + 1 readiness + 11 native replay passed; 0 failed"
-      },
-      {
-        "command": "npm run verify:v3-resource-map",
-        "result": "pass"
-      },
-      {
-        "command": "npm run verify:v3-mainline-caller-flow",
-        "result": "pass",
-        "notes": "Markdown and HTML review surfaces are synced."
-      },
-      {
-        "command": "npm run verify:v3-architecture-docs",
-        "result": "pass"
-      },
-      {
-        "command": "npm run verify:servertool-rust-only",
-        "result": "pass"
-      },
-      {
-        "command": "npm --prefix v3 run verify:v3-architecture-ci",
-        "result": "pass",
-        "tests": "39/39 sub-gates green"
-      },
-      {
-        "command": "npm --prefix v3 run build:v3-cli",
-        "result": "pass",
-        "artifact_sha256": "a6d0743b29e5526d6e26dc612901af6a6b20aeaa854b1b910bb70b88e416bde3",
-        "artifact_bytes": 76883416
-      }
-    ],
-    "notes": [
-      "The source receipt is historical evidence for the original source candidate.",
-      "The integration receipt binds the applicable source gates and rebuilt CLI artifact to the integration source candidate.",
-      "The receipt commit contains documentation only; it does not change the source candidate or the validated artifact.",
-      "This receipt does not claim merge, install, managed restart, health, or live replay."
-    ]
-  },
+  "notes": [
+    "Historical source provenance only. This file does not claim current candidate gate or artifact evidence. Current candidate verification is recorded in the independent review evidence."
+  ],
   "scope": {
     "owner": "v3.web_search_servertool_state_machine",
     "paths": [
