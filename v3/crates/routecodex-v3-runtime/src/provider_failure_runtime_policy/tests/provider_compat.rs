@@ -264,8 +264,8 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
 }
 
 #[tokio::test]
-async fn relay_upstream_invalid_request_error_excludes_provider_family_and_records_health() {
-    let scope = "relay_upstream_invalid_request_error";
+async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health_neutral() {
+    let scope = "relay_upstream_invalid_request_error_sibling";
     let manifest = provider_compat_sibling_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
@@ -308,23 +308,31 @@ async fn relay_upstream_invalid_request_error_excludes_provider_family_and_recor
         },
     )
     .await
-    .expect("upstream invalid-request error must follow provider-scoped health handling");
+    .expect("upstream invalid-request error must be request-local and reselect sibling");
 
+    let reselected = result
+        .retry_selected
+        .expect("invalid_request_error must reselect the sibling model");
+    assert_eq!(reselected.candidate.provider_id, "first");
+    assert_eq!(reselected.candidate.auth_alias, "key");
+    assert_eq!(reselected.candidate.model_id, "sibling");
     assert_eq!(
         failed_candidates,
-        BTreeSet::from([
-            "first:key:test".to_string(),
-            "first:key:sibling".to_string(),
-        ]),
-        "upstream provider errors must exclude every candidate in the provider family"
+        BTreeSet::from(["first:key:test".to_string()]),
+        "invalid_request_error must exclude only the exact failed candidate"
     );
-    assert_ne!(
+    assert_eq!(
         result.event.health_record.state,
         "request_local_provider_compat"
     );
-    assert_eq!(result.event.health_record.failure_count, 1);
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
+    assert_eq!(result.event.health_record.failure_count, 0);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert_eq!(result.event.action, "switch_provider");
+    assert_eq!(
+        result.event.next_provider_key.as_deref(),
+        Some("first:key:sibling")
+    );
+    assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }
