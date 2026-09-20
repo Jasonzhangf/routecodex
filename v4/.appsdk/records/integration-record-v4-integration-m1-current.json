@@ -13,6 +13,20 @@
   "queue_entry_id": "v4-layer-g",
   "required_gate_results": [
     {
+      "gate_id": "v4_current_tree_baseline_replay",
+      "producer": "cargo:v4_current_tree_baseline_replay",
+      "result": "pass",
+      "source_commit": "9845b4e59f45ba4905bc832d3e58306e99d75bec",
+      "tree_hash": "8c04629b70c1b1181be4beebb5f18d9fae266e61"
+    },
+    {
+      "gate_id": "v4_node_container_epoch_closure_audit",
+      "producer": "cargo:v4_node_container_epoch_closure_audit",
+      "result": "pass",
+      "source_commit": "9845b4e59f45ba4905bc832d3e58306e99d75bec",
+      "tree_hash": "8c04629b70c1b1181be4beebb5f18d9fae266e61"
+    },
+    {
       "gate_id": "v4_feature_layer_batches_boundary",
       "producer": "node:v4_feature_layer_batches_boundary",
       "result": "pass",
