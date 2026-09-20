@@ -36,8 +36,9 @@
     "architecture_docs": "pass; docs=25; resources=179; edges=427"
   },
   "integration_receipt": {
-    "candidate_commit": "3e2257bc7d32a4993f4797c15203d5c1b9622cf6",
-    "candidate_tree": "345e9c0155d6840d7be3943f72e034037be1f188",
+    "source_candidate_commit": "3e2257bc7d32a4993f4797c15203d5c1b9622cf6",
+    "source_candidate_tree": "345e9c0155d6840d7be3943f72e034037be1f188",
+    "receipt_commit": "deb622ad59243a0fa8d1862127906a7869b34a38",
     "captured_at": "2026-09-19T22:41:39-07:00",
     "source_unchanged": true,
     "artifact": {
@@ -92,7 +93,8 @@
     ],
     "notes": [
       "The source receipt is historical evidence for the original source candidate.",
-      "The integration receipt binds the applicable source gates and rebuilt CLI artifact to the current integration candidate.",
+      "The integration receipt binds the applicable source gates and rebuilt CLI artifact to the integration source candidate.",
+      "The receipt commit contains documentation only; it does not change the source candidate or the validated artifact.",
       "This receipt does not claim merge, install, managed restart, health, or live replay."
     ]
   },
