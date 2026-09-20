@@ -1,4 +1,8 @@
-# Candidate Gate Receipt
+# Historical Candidate Gate Receipt
+
+This file is historical evidence for an earlier candidate. It is not the
+current integration candidate receipt and must not be used to claim gates or
+artifact provenance for a later commit.
 
 - Candidate commit: `0d06a76a60a78a9f9dae172fe9ea6284d0d3c4a1`
 - Candidate tree: `66f8261efb779b04f892de774caf23253fc0df7c`
@@ -6,7 +10,7 @@
 - Preflight HEAD: `0d06a76a60a78a9f9dae172fe9ea6284d0d3c4a1` (exact match)
 - Preflight tree: `66f8261efb779b04f892de774caf23253fc0df7c` (exact match)
 - Preflight `git status --porcelain=v1 --untracked-files=no`: only this receipt was modified
-- Overall result: `PASS`
+- Historical candidate result: `PASS`
 
 This receipt records candidate source gates and the candidate artifact. It does
 not claim merge, install, managed restart, health, or live replay. Those
