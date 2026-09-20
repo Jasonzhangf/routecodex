@@ -620,6 +620,11 @@ assertRustTest(
   files.responsesRelayTests,
   'responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery',
 );
+assertRustTest(
+  text.responsesRelayTests,
+  files.responsesRelayTests,
+  'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+);
 for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',
   'provider_sse_requires_action_without_completed_is_terminal_missing',

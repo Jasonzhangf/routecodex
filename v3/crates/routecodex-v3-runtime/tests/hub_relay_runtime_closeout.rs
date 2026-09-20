@@ -1594,6 +1594,10 @@ async fn responses_relay_incomplete_exhaustion_keeps_typed_terminal_error() {
         !error_body.to_string().contains("partial-must-not-commit"),
         "partial incomplete output must not be committed: {error_body}"
     );
+    assert!(
+        error_body.get("usage").is_none(),
+        "failed attempt usage must stay on the runtime side-channel: {error_body}"
+    );
     assert_eq!(
         output.error_chain.as_deref(),
         Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
