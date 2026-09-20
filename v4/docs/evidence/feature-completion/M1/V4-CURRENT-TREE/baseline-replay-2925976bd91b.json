@@ -1,0 +1,38 @@
+{
+  "evidence_id": "baseline-replay-2925976bd91b",
+  "issue_id": "V4-CURRENT-TREE",
+  "experiment_id": "v4-current-tree-runtime-007-replay-2925976bd91b",
+  "phase": "baseline_reproduction",
+  "kind": "sample_replay",
+  "source_commit": "2925976bd91b68df112e9ee1394670e83f95aff4",
+  "execution_surface": "development_whitebox",
+  "scope": {
+    "feature_id": "V4-CURRENT-TREE",
+    "module_id": "routecodex-v4-runtime"
+  },
+  "producer": {
+    "adapter": "cargo",
+    "identity": "v4_current_tree_baseline_replay"
+  },
+  "command_argv": [
+    "cargo",
+    "test",
+    "-p",
+    "routecodex-v4-node-container",
+    "--test",
+    "l2_epoch",
+    "--manifest-path",
+    "Cargo.toml",
+    "--locked"
+  ],
+  "exit_status": 0,
+  "result": "pass",
+  "created_at": "2026-09-20T08:06:55.358Z",
+  "expires_at": "2026-09-27T08:06:55.358Z",
+  "input_hashes": [
+    "sha256:8ab634e61f4b37bc53874ea67a0e9660e8e55d57a1d2fb224e25464808837d2d",
+    "sha256:8f59205c4a57695cd864470e18871c84e198797f45673776b9deb935bf0f418f",
+    "sha256:b630f7e2917cca217d15c07735f51397ffc33baeb82cc9dd0c6d98053d1a8fc1"
+  ],
+  "scope_hash": "sha256:ad228658cede4011843473b1010e4bdd7115fd5a85dfbef344d3b88a877e9c67"
+}
