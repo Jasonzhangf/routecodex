@@ -547,11 +547,15 @@ fn insert_v3_deepseek_interleaved_tool_segment_reasoning(body: &mut Value) {
 }
 
 fn normalize_deepseek_thinking_tool_choice(body: &mut Value, target: &V3ResponsesProviderTarget) {
-    if matches!(target.provider_type.as_str(), "openai_chat" | "responses")
-        && (target.canonical_model_id == "deepseek-v4-flash"
-            || target.wire_model == "deepseek-v4-flash")
-        && v3_wire_payload_is_thinking_mode(body)
-    {
+    let is_deepseek_target = matches!(
+        target.compatibility_profile.as_deref(),
+        Some("chat:deepseek-max" | "responses:deepseek-console-go")
+    ) || target.canonical_model_id == "deepseek-v4-flash"
+        || target.wire_model == "deepseek-v4-flash";
+    if matches!(target.provider_type.as_str(), "openai_chat" | "responses") && is_deepseek_target {
+        // The argument wrapper is provider-boundary compatibility and must not
+        // depend on the unrelated thinking-mode gate.  In particular, the
+        // configured DeepSeek profile covers deepseek-v4.1-flash targets.
         provider_compat_core::apply_deepseek_v4_request_compat(body);
     }
 }

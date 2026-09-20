@@ -28,6 +28,14 @@ pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
     deepseek_console_go::apply_deepseek_v4_request_compat(payload)
 }
 
+pub fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
+    deepseek_console_go::apply_deepseek_v4_thinking_chat_compat(payload)
+}
+
+pub fn apply_deepseek_function_call_arguments_compat(payload: &mut Value) {
+    deepseek_console_go::apply_deepseek_function_call_arguments_compat(payload)
+}
+
 /// cc-sol direct responses reasoning/tag compatibility.
 pub fn apply_cc_sol_response_compat(payload: Value) -> Value {
     cc_sol::apply_response_compat(payload)
