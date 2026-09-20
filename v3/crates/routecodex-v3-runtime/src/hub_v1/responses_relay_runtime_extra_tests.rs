@@ -170,6 +170,37 @@ fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() 
 }
 
 #[test]
+fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_control_leak() {
+    let output = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
+            call_id: "call_ws_1".to_string(),
+            code: "search_unavailable".to_string(),
+            message: "controlled failure".to_string(),
+            retryable: true,
+        },
+        None,
+    );
+
+    assert_eq!(output.status, 599);
+    let body = match &output.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => {
+            panic!("typed web_search sidecar failure must project as JSON")
+        }
+    };
+    assert_eq!(body["error"]["code"], "search_unavailable");
+    assert_eq!(
+        body["error"]["message"],
+        "web_search hooks sidecar failed for call call_ws_1: controlled failure"
+    );
+    assert!(!body.to_string().contains("retryable"));
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+}
+
+#[test]
 fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(

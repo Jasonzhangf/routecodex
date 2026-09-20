@@ -11,11 +11,17 @@
 //! 返回客户端（必须被 Resp03 同轮拦截，进入本地搜索 hop 或显式 fail-fast）。
 
 use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_hooks::{ControlRequest, ControlResponse};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -26,6 +32,9 @@ use routecodex_v3_runtime::{
     V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
 };
 use serde_json::{json, Value};
+use servertool_core::web_search_contract::{
+    WebSearchHookOutcome, WebSearchResult, WebSearchResultStatus, WebSearchSource,
+};
 
 fn manifest_mode_b_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
@@ -70,6 +79,80 @@ struct WebSearchToolCallTransport {
     responses: Mutex<VecDeque<Value>>,
 }
 
+fn web_search_tool_call_response() -> Value {
+    json!({
+        "id": "msg_mm_ws_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "MiniMax-M3",
+        "content": [
+            {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
+             "input": {"query": "routecodex"}}
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 11, "output_tokens": 5}
+    })
+}
+
+fn test_socket_path(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("rcc-{label}-{}.sock", nonce))
+}
+
+fn serve_sources_only_result(
+    socket_path: PathBuf,
+) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
+    serve_web_search_result(
+        socket_path,
+        None,
+        vec![WebSearchSource {
+            ref_id: "source-1".to_string(),
+            url: Some("https://example.com".to_string()),
+            title: Some("Example".to_string()),
+        }],
+    )
+}
+
+fn serve_web_search_result(
+    socket_path: PathBuf,
+    content: Option<String>,
+    sources: Vec<WebSearchSource>,
+) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
+    let listener = UnixListener::bind(&socket_path).expect("bind hooks sidecar test socket");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept hooks sidecar request");
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().expect("clone hooks sidecar stream"))
+            .read_line(&mut line)
+            .expect("read hooks sidecar request");
+        let request: ControlRequest =
+            serde_json::from_str(line.trim()).expect("decode hooks sidecar request");
+        let ControlRequest::ExecuteWebSearch { request } = request else {
+            panic!("expected ExecuteWebSearch");
+        };
+        let response = ControlResponse::ok(json!({
+            "outcome": WebSearchHookOutcome::Completed(WebSearchResult {
+                call_id: request.call_id.clone(),
+                status: WebSearchResultStatus::Completed,
+                content,
+                sources,
+                metadata: None,
+                error: None,
+            })
+        }));
+        writeln!(
+            stream,
+            "{}",
+            serde_json::to_string(&response).expect("encode hooks sidecar response")
+        )
+        .expect("write hooks sidecar response");
+        *request
+    })
+}
+
 #[async_trait]
 impl ResponsesTransport for WebSearchToolCallTransport {
     async fn send(
@@ -96,38 +179,53 @@ impl ResponsesTransport for WebSearchToolCallTransport {
 }
 
 #[tokio::test]
-async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_call() {
-    // 红测：provider 返回 websearch tool call 时，响应不得以裸
-    // function_call(websearch) 返回客户端（Mode B 同轮拦截必须生效）。
+async fn responses_entry_mode_b_web_search_no_state_fails_without_provider_send() {
     let manifest = manifest_mode_b_websearch();
     let transport = WebSearchToolCallTransport {
-        responses: Mutex::new(VecDeque::from([
-            // 主请求：provider 返回 websearch tool call
-            json!({
-                "id": "msg_mm_ws_1",
-                "type": "message",
-                "role": "assistant",
+        responses: Mutex::new(VecDeque::from([web_search_tool_call_response()])),
+    };
+    let result =
+        routecodex_v3_runtime::execute_v3_responses_relay_runtime(&manifest, V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-mode-b-web-search-no-state".into(),
+            payload: json!({
                 "model": "MiniMax-M3",
-                "content": [
-                    {"type": "tool_use", "id": "call_ws_1", "name": "web_search",
-                     "input": {"query": "routecodex"}}
+                "input": [
+                    {"type": "web_search", "query": "routecodex"},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search routecodex"}]}
                 ],
-                "stop_reason": "tool_use",
-                "usage": {"input_tokens": 11, "output_tokens": 5}
+                "stream": false
             }),
-            // 本地搜索 hop 响应（web_search_backend=MiniMax-M3 的搜索结果）
-            json!({
-                "id": "msg_mm_hop_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "MiniMax-M3",
-                "content": [
-                    {"type": "text", "text": "RouteCodex 是协议路由代理。"}
-                ],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 8, "output_tokens": 12}
-            }),
-        ])),
+        }, &transport)
+        .await;
+
+    let error = result.expect_err("web-search-capable call without typed state must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("web_search execution state is unavailable"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        transport.responses.lock().unwrap().len(),
+        1,
+        "typed state validation must run before provider send"
+    );
+}
+
+#[tokio::test]
+async fn responses_entry_mode_b_web_search_missing_sidecar_fails_without_provider_reentry() {
+    // Provider只允许一次主请求响应。未配置 hooks sidecar socket 必须显式
+    // 失败；若旧 provider re-entry仍活跃，第二次 send会因队列为空直接失败。
+    let manifest = manifest_mode_b_websearch();
+    let transport = WebSearchToolCallTransport {
+        responses: Mutex::new(VecDeque::from([web_search_tool_call_response()])),
     };
     let server_tool_state = V3ResponsesRelayServerToolState::default();
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
@@ -166,21 +264,180 @@ async fn responses_entry_mode_b_web_search_call_must_not_return_bare_function_ca
     )
     .await;
 
-    let output = result.expect("responses relay runtime must not fail");
-    let body = match output.client_body {
-        V3ResponsesRelayClientBody::Json(value) => value,
-        _ => panic!("expected JSON relay output"),
+    let error = result.expect_err("missing hooks sidecar socket must fail explicitly");
+    assert!(
+        error
+            .to_string()
+            .contains("web_search hooks sidecar socket is not configured"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        transport.responses.lock().unwrap().is_empty(),
+        "the single main provider response must be consumed exactly once"
+    );
+}
+
+#[tokio::test]
+async fn responses_entry_mode_b_web_search_projects_sources_only_sidecar_result() {
+    let manifest = manifest_mode_b_websearch();
+    let transport = WebSearchToolCallTransport {
+        responses: Mutex::new(VecDeque::from([web_search_tool_call_response()])),
     };
-    let items = body
-        .get("output")
-        .and_then(Value::as_array)
-        .expect("output array");
-    for item in items {
-        let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
-        assert_ne!(
-            (kind, item.get("name").and_then(Value::as_str).unwrap_or("")),
-            ("function_call", "websearch"),
-            "Mode B web_search tool call must be intercepted, not returned as bare requires_action: {item}"
-        );
-    }
+    let socket_path = test_socket_path("sources-only");
+    let sidecar = serve_sources_only_result(socket_path.clone());
+    let server_tool_state = V3ResponsesRelayServerToolState::default()
+        .with_hooks_sidecar_socket(Some(socket_path.clone()));
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let scope = V3ResponsesRelayServerToolScope::new(
+        "/v1/responses",
+        "session-mode-b-web-search",
+        "conversation-mode-b-web-search",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-mode-b-web-search-sources-only".into(),
+            payload: json!({
+                "model": "MiniMax-M3",
+                "input": [
+                    {"type": "web_search", "query": "routecodex"},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search routecodex"}]}
+                ],
+                "stream": false
+            }),
+        },
+        &transport,
+        &provider_health,
+        &server_tool_state,
+        scope,
+    )
+    .await
+    .expect("sources-only sidecar result must project");
+
+    let request = sidecar.join().expect("join hooks sidecar");
+    let _ = std::fs::remove_file(&socket_path);
+    assert_eq!(request.call_id, "call_ws_1");
+    assert_eq!(request.query, "routecodex");
+    assert!(
+        transport.responses.lock().unwrap().is_empty(),
+        "the single main provider response must be consumed exactly once"
+    );
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("expected JSON relay output");
+    };
+    let items = body["output"].as_array().expect("output array");
+    let call = items
+        .iter()
+        .find(|item| item["type"] == "web_search_call")
+        .expect("projected web_search_call");
+    let pair = items
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("paired function_call_output");
+    assert_eq!(call["id"], "web_search_call_ws_1");
+    assert_eq!(call["results"][0]["ref_id"], "source-1");
+    assert_eq!(call["results"][0]["title"], "Example");
+    assert_eq!(call["results"][0]["url"], "https://example.com");
+    assert_eq!(pair["call_id"], "call_ws_1");
+    assert_eq!(pair["output"]["type"], "web_search_tool_result");
+    assert_eq!(pair["output"]["results"], call["results"]);
+    assert!(call.get("phase").is_none());
+    assert!(pair.get("scope_key").is_none());
+}
+
+#[tokio::test]
+async fn responses_entry_mode_b_web_search_projects_text_and_sources_sidecar_result() {
+    let manifest = manifest_mode_b_websearch();
+    let transport = WebSearchToolCallTransport {
+        responses: Mutex::new(VecDeque::from([web_search_tool_call_response()])),
+    };
+    let socket_path = test_socket_path("text-and-sources");
+    let sidecar = serve_web_search_result(
+        socket_path.clone(),
+        Some("RouteCodex summary".to_string()),
+        vec![WebSearchSource {
+            ref_id: "source-1".to_string(),
+            url: Some("https://example.com".to_string()),
+            title: Some("Example".to_string()),
+        }],
+    );
+    let server_tool_state = V3ResponsesRelayServerToolState::default()
+        .with_hooks_sidecar_socket(Some(socket_path.clone()));
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let scope = V3ResponsesRelayServerToolScope::new(
+        "/v1/responses",
+        "session-mode-b-web-search-mixed",
+        "conversation-mode-b-web-search-mixed",
+        5555,
+        "controlled",
+    );
+
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-mode-b-web-search-text-and-sources".into(),
+            payload: json!({
+                "model": "MiniMax-M3",
+                "input": [
+                    {"type": "web_search", "query": "routecodex"},
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "search routecodex"}]}
+                ],
+                "stream": false
+            }),
+        },
+        &transport,
+        &provider_health,
+        &server_tool_state,
+        scope,
+    )
+    .await
+    .expect("text and sources sidecar result must project");
+
+    let request = sidecar.join().expect("join hooks sidecar");
+    let _ = std::fs::remove_file(&socket_path);
+    assert_eq!(request.call_id, "call_ws_1");
+    assert_eq!(request.query, "routecodex");
+    assert!(
+        transport.responses.lock().unwrap().is_empty(),
+        "the single main provider response must be consumed exactly once"
+    );
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("expected JSON relay output");
+    };
+    let items = body["output"].as_array().expect("output array");
+    let call = items
+        .iter()
+        .find(|item| item["type"] == "web_search_call")
+        .expect("projected web_search_call");
+    let pair = items
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("paired function_call_output");
+    assert_eq!(call["id"], "web_search_call_ws_1");
+    assert_eq!(call["results"].as_array().expect("results").len(), 2);
+    assert_eq!(call["results"][0]["ref_id"], "call_ws_1");
+    assert_eq!(call["results"][0]["text"], "RouteCodex summary");
+    assert_eq!(call["results"][1]["ref_id"], "source-1");
+    assert_eq!(pair["call_id"], "call_ws_1");
+    assert_eq!(pair["output"]["type"], "web_search_tool_result");
+    assert_eq!(pair["output"]["results"], call["results"]);
+    assert!(call.get("phase").is_none());
+    assert!(pair.get("scope_key").is_none());
 }

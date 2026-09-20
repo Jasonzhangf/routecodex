@@ -72,6 +72,9 @@ pub enum ControlRequest {
         event: Box<HookEvent>,
         state: Box<HookState>,
     },
+    ExecuteWebSearch {
+        request: Box<servertool_core::web_search_contract::WebSearchHookRequest>,
+    },
     ScheduleUpsert {
         schedule: Box<ScheduledMessage>,
     },
@@ -197,6 +200,10 @@ pub fn handle_control_request<T: AppServerTransport>(
                 Err(error) => ControlResponse::err(error.to_string()),
             }
         }
+        ControlRequest::ExecuteWebSearch { request } => match core.execute_web_search(&request) {
+            Ok(outcome) => ControlResponse::ok(json!({ "outcome": outcome })),
+            Err(error) => ControlResponse::err(error.to_string()),
+        },
         ControlRequest::ScheduleUpsert { schedule } => match core.upsert_schedule(*schedule) {
             Ok(()) => match core.persist_state() {
                 Ok(()) => ControlResponse::ok(json!({ "scheduled": true })),
@@ -282,6 +289,7 @@ pub struct ControlServer {
     socket_path: std::path::PathBuf,
     socket_identity: ControlSocketIdentity,
     core: Arc<Mutex<HooksSidecarCore<AnyAppServerTransport>>>,
+    web_search_execution: Arc<Mutex<()>>,
 }
 
 impl ControlServer {
@@ -306,6 +314,7 @@ impl ControlServer {
                 )
             })?,
             core: Arc::new(Mutex::new(core)),
+            web_search_execution: Arc::new(Mutex::new(())),
         })
     }
 
@@ -393,6 +402,7 @@ impl ControlServer {
                 )
             })?,
             core: Arc::new(Mutex::new(core)),
+            web_search_execution: Arc::new(Mutex::new(())),
         })
     }
 
@@ -428,12 +438,15 @@ impl ControlServer {
                         continue;
                     }
                     let core = Arc::clone(&self.core);
+                    let web_search_execution = Arc::clone(&self.web_search_execution);
                     let running = Arc::clone(&running);
-                    std::thread::spawn(move || match serve_connection(&core, &mut stream) {
-                        Ok(true) => {}
-                        Ok(false) => running.store(false, Ordering::Relaxed),
-                        Err(error) => {
-                            eprintln!("rccv3-hooksd control connection failed: {error}")
+                    std::thread::spawn(move || {
+                        match serve_connection(&core, &web_search_execution, &mut stream) {
+                            Ok(true) => {}
+                            Ok(false) => running.store(false, Ordering::Relaxed),
+                            Err(error) => {
+                                eprintln!("rccv3-hooksd control connection failed: {error}")
+                            }
                         }
                     });
                 }
@@ -473,6 +486,7 @@ fn remove_owned_control_socket(
 
 fn serve_connection<T: AppServerTransport>(
     core: &Arc<Mutex<HooksSidecarCore<T>>>,
+    web_search_execution: &Arc<Mutex<()>>,
     stream: &mut UnixStream,
 ) -> std::io::Result<bool> {
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -497,13 +511,57 @@ fn serve_connection<T: AppServerTransport>(
                 continue;
             }
         };
-        let mut core = core.lock().expect("hooks sidecar core mutex poisoned");
-        let response = handle_control_request(&mut core, request.clone());
-        drop(core);
+        let response = match &request {
+            ControlRequest::ExecuteWebSearch { request } => {
+                execute_web_search_outside_core(core, web_search_execution, request)
+            }
+            _ => {
+                let mut core = core.lock().expect("hooks sidecar core mutex poisoned");
+                handle_control_request(&mut core, request.clone())
+            }
+        };
         write_control_response(stream, response)?;
         if matches!(request, ControlRequest::Shutdown) {
             return Ok(false);
         }
+    }
+}
+
+fn execute_web_search_outside_core<T: AppServerTransport>(
+    core: &Arc<Mutex<HooksSidecarCore<T>>>,
+    web_search_execution: &Mutex<()>,
+    request: &servertool_core::web_search_contract::WebSearchHookRequest,
+) -> ControlResponse {
+    let _execution = web_search_execution
+        .lock()
+        .expect("web search execution mutex poisoned");
+    // Adapter execution can block on an external process. Check the adapter
+    // out only while it runs so Health and Shutdown are not blocked by it.
+    let mut adapter = {
+        let mut core = core.lock().expect("hooks sidecar core mutex poisoned");
+        match core.web_search_adapter.take() {
+            Some(adapter) => adapter,
+            None => {
+                return web_search_response(core.execute_web_search(request));
+            }
+        }
+    };
+    let outcome = adapter.execute(request);
+    core.lock()
+        .expect("hooks sidecar core mutex poisoned")
+        .web_search_adapter = Some(adapter);
+    web_search_response(outcome)
+}
+
+fn web_search_response(
+    outcome: Result<
+        servertool_core::web_search_contract::WebSearchHookOutcome,
+        WebSearchAdapterError,
+    >,
+) -> ControlResponse {
+    match outcome {
+        Ok(outcome) => ControlResponse::ok(json!({ "outcome": outcome })),
+        Err(error) => ControlResponse::err(error.to_string()),
     }
 }
 

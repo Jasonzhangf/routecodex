@@ -44,6 +44,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
@@ -80,8 +81,8 @@ const cases = [
   },
   {
     name: 'Internal web search canonicalization is collapsed into the client inbound error variant',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
-    from: 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(\n                "servertool followup canonicalization failed: {error}"\n            ))',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
+    from: 'WebSearchSidecarControlError::Message(format!(\n            "web_search hooks sidecar task failed: {error}"\n        ))',
     to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
     diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
   },
@@ -983,8 +984,16 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-protocol-parity-red-'));
   try {
     for (const file of files) copyFileInto(root, file);
-    mkdirSync(resolve(root, 'node_modules'), { recursive: true });
-    symlinkSync(yamlPackage, resolve(root, 'node_modules/yaml'), 'dir');
+    const localNodeModules = resolve(repo, 'v3/node_modules');
+    const nodeModules = existsSync(localNodeModules)
+      ? localNodeModules
+      : findAncestorNodeModules(repo);
+    if (nodeModules) {
+      symlinkSync(nodeModules, resolve(root, 'node_modules'), 'dir');
+    } else {
+      mkdirSync(resolve(root, 'node_modules'), { recursive: true });
+      symlinkSync(yamlPackage, resolve(root, 'node_modules/yaml'), 'dir');
+    }
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(testCase.from)) throw new Error(`${testCase.name}: mutation source missing`);
@@ -1016,4 +1025,13 @@ function copyFileInto(root, file) {
   if (!existsSync(source)) throw new Error(`missing source ${file}`);
   mkdirSync(dirname(target), { recursive: true });
   cpSync(source, target);
+}
+
+function findAncestorNodeModules(start) {
+  for (let current = start; ; current = dirname(current)) {
+    const candidate = resolve(current, 'node_modules');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(current);
+    if (parent === current) return null;
+  }
 }

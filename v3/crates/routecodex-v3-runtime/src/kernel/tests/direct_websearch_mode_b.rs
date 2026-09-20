@@ -86,7 +86,9 @@ async fn direct_mode_b_websearch_next_round_pair_verifies_and_completes() {
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &WebSearchHopTransport,
+        &WebSearchHopTransport {
+            sends: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        },
     )
     .await;
     assert_eq!(output.client_payload.status, 200, "{output:?}");

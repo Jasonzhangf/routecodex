@@ -4,6 +4,7 @@ use routecodex_v3_hooks::{
 };
 use serde_json::Value;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::pin::Pin;
 use std::process::Stdio;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -21,6 +22,7 @@ const HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 const HOOKS_INSTALL_RECORD_RELATIVE: &str = ".codex/routecodex-hooks/install.json";
 pub(crate) const HOOKS_SIDECAR_PROCESS_FILE: &str = "hooks-sidecar.pid";
 const SIDECAR_START_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const HOOKS_READINESS_ADMISSION_TIMEOUT: Duration = Duration::from_secs(1);
 // Hooks are optional. Bound the wait for the supervisor task so a broken
 // sidecar cleanup can never hold the main lifecycle open indefinitely.
 const SIDECAR_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -102,6 +104,7 @@ pub(crate) struct V3HooksSidecarProcess {
 pub(crate) struct V3HooksSidecarSupervisor {
     instance_dir: PathBuf,
     stop_tx: Option<tokio::sync::watch::Sender<bool>>,
+    readiness_rx: Option<Pin<Box<tokio::sync::oneshot::Receiver<Option<String>>>>>,
     done_rx: tokio::sync::oneshot::Receiver<Result<(), V3LifecycleError>>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -110,6 +113,7 @@ impl V3HooksSidecarSupervisor {
     pub(crate) fn spawn(instance_dir: PathBuf, instance_id: String) -> Self {
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         let supervisor_stop_rx = stop_rx.clone();
+        let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         let task_instance_dir = instance_dir.clone();
         let task = tokio::spawn(async move {
@@ -118,6 +122,7 @@ impl V3HooksSidecarSupervisor {
                 instance_id,
                 stop_rx,
                 supervisor_stop_rx,
+                readiness_tx,
             )
             .await;
             let _ = done_tx.send(result);
@@ -125,6 +130,7 @@ impl V3HooksSidecarSupervisor {
         Self {
             instance_dir,
             stop_tx: Some(stop_tx),
+            readiness_rx: Some(Box::pin(readiness_rx)),
             done_rx,
             task,
         }
@@ -154,9 +160,101 @@ impl V3HooksSidecarSupervisor {
         Self {
             instance_dir: _instance_dir,
             stop_tx: Some(stop_tx),
+            readiness_rx: None,
             done_rx,
             task,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_readiness_for_test(
+        instance_dir: PathBuf,
+        readiness_rx: tokio::sync::oneshot::Receiver<Option<String>>,
+    ) -> Self {
+        let (stop_tx, _stop_rx) = tokio::sync::watch::channel(false);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = done_tx.send(Ok(()));
+        });
+        Self {
+            instance_dir,
+            stop_tx: Some(stop_tx),
+            readiness_rx: Some(Box::pin(readiness_rx)),
+            done_rx,
+            task,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_readiness(&mut self) -> Result<Option<String>, V3LifecycleError> {
+        let mut readiness_rx = self.readiness_rx.take().ok_or_else(|| {
+            V3LifecycleError::Validation(
+                "hooks sidecar readiness is unavailable for this supervisor".to_string(),
+            )
+        })?;
+        readiness_rx.as_mut().await.map_err(|_| {
+            V3LifecycleError::Validation(
+                "hooks sidecar supervisor exited before publishing readiness".to_string(),
+            )
+        })
+    }
+
+    pub(crate) async fn wait_for_readiness_or_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<Option<String>>, V3LifecycleError> {
+        let mut readiness_rx = self.readiness_rx.take().ok_or_else(|| {
+            V3LifecycleError::Validation(
+                "hooks sidecar readiness is unavailable for this supervisor".to_string(),
+            )
+        })?;
+        let readiness = tokio::select! {
+            readiness = readiness_rx.as_mut() => match readiness {
+                Ok(detail) => Some(detail),
+                Err(_) => {
+                    return Err(V3LifecycleError::Validation(
+                        "hooks sidecar supervisor exited before publishing readiness".to_string(),
+                    ));
+                }
+            },
+            _ = tokio::time::sleep(timeout) => None,
+        };
+        match readiness {
+            Some(detail) => Ok(Some(detail)),
+            None => {
+                self.readiness_rx = Some(readiness_rx);
+                Ok(None)
+            }
+        }
+    }
+
+    pub(crate) fn spawn_readiness_detail_publisher(
+        &mut self,
+        instance_dir: PathBuf,
+        instance_id: String,
+        start_nonce: String,
+    ) {
+        let Some(mut readiness_rx) = self.readiness_rx.take() else {
+            return;
+        };
+        tokio::spawn(async move {
+            let detail = match readiness_rx.as_mut().await {
+                Ok(detail) => detail,
+                Err(_) => Some(format!(
+                    "hooks sidecar unavailable: {}: hooks sidecar supervisor exited before publishing readiness",
+                    hooks_unavailable(HooksUnavailableReason::Crashed)
+                )),
+            };
+            if let Err(error) = write_running_status_if_current_detail_for_generation(
+                &instance_dir,
+                &instance_id,
+                Some(&start_nonce),
+                Some("hooks sidecar readiness pending"),
+                detail,
+            ) {
+                eprintln!("hooks sidecar readiness status write failed: {error}");
+            }
+        });
     }
 
     pub(crate) async fn stop(mut self) -> Result<(), V3LifecycleError> {
@@ -198,14 +296,11 @@ async fn run_managed_hooks_sidecar(
     instance_id: String,
     mut startup_stop_rx: tokio::sync::watch::Receiver<bool>,
     mut supervisor_stop_rx: tokio::sync::watch::Receiver<bool>,
+    readiness_tx: tokio::sync::oneshot::Sender<Option<String>>,
 ) -> Result<(), V3LifecycleError> {
     match start_managed_hooks_sidecar_cancelable(&instance_dir, Some(&mut startup_stop_rx)).await {
         Ok((Some(mut sidecar), detail)) => {
-            if let Err(status_error) =
-                write_hooks_running_status(&instance_dir, &instance_id, detail)
-            {
-                return stop_sidecar_after_primary_error(sidecar, status_error).await;
-            }
+            let _ = readiness_tx.send(detail);
             if let Some(control_socket_path) = sidecar.control_socket_path.as_deref() {
                 let control_socket_identity = sidecar.control_socket_identity;
                 tokio::select! {
@@ -238,21 +333,21 @@ async fn run_managed_hooks_sidecar(
             }
         }
         Ok((None, detail)) => {
-            if detail.is_some() && !*supervisor_stop_rx.borrow() {
-                if let Err(error) = write_hooks_running_status(&instance_dir, &instance_id, detail)
-                {
-                    return Err(error);
-                }
-            }
+            let _ = readiness_tx.send(detail);
             Ok(())
         }
-        Err(V3LifecycleError::HooksSidecarStartCancelled) => Ok(()),
+        Err(V3LifecycleError::HooksSidecarStartCancelled) => {
+            let _ = readiness_tx.send(None);
+            Ok(())
+        }
         Err(error) => {
             if *supervisor_stop_rx.borrow() {
+                let _ = readiness_tx.send(None);
                 return Err(error);
             }
             let detail = Some(format!("hooks sidecar unavailable: {error}"));
-            write_hooks_running_status(&instance_dir, &instance_id, detail)
+            let _ = readiness_tx.send(detail);
+            Ok(())
         }
     }
 }
@@ -370,18 +465,6 @@ fn sidecar_control_socket_identity_matches(
     };
     let current_identity = codexapp_socket_identity(&metadata);
     current_identity.is_socket && current_identity == expected_identity
-}
-
-async fn stop_sidecar_after_primary_error(
-    sidecar: V3HooksSidecarProcess,
-    primary_error: V3LifecycleError,
-) -> Result<(), V3LifecycleError> {
-    match sidecar.stop().await {
-        Ok(()) => Err(primary_error),
-        Err(cleanup_error) => Err(V3LifecycleError::Validation(format!(
-            "{primary_error}; hooks sidecar cleanup failed: {cleanup_error}"
-        ))),
-    }
 }
 
 async fn wait_for_sidecar_stop(stop_rx: &mut tokio::sync::watch::Receiver<bool>) {

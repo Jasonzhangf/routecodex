@@ -768,6 +768,7 @@ impl V3HubRespChatProcess03Governed {
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
     web_search_transition: Option<V3WebSearchCenterState>,
+    web_search_hook_outcome: V3WebSearchHookOutcome,
 }
 
 impl V3HubRespChatProcess03Outcome {
@@ -776,12 +777,21 @@ impl V3HubRespChatProcess03Outcome {
     ) -> (
         V3HubRespChatProcess03Governed,
         Option<V3WebSearchCenterState>,
+        V3WebSearchHookOutcome,
     ) {
-        (self.data, self.web_search_transition)
+        (
+            self.data,
+            self.web_search_transition,
+            self.web_search_hook_outcome,
+        )
     }
 
     pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
         self.web_search_transition.as_ref()
+    }
+
+    pub fn web_search_hook_outcome(&self) -> &V3WebSearchHookOutcome {
+        &self.web_search_hook_outcome
     }
 }
 
@@ -979,6 +989,8 @@ pub enum V3HubRelayResponseError {
     MissingWebSearchActivation,
     #[error("web_search ServerTool state transition failed at Resp03: {reason}")]
     WebSearchStateTransitionFailed { reason: String },
+    #[error("web_search typed hook contract failed at Resp03: {reason}")]
+    WebSearchHookContractFailed { reason: String },
     #[error("provider response status is required")]
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
@@ -1108,10 +1120,12 @@ fn govern_v3_hub_relay_response(
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
     let mut web_search_center_state = None;
+    let mut web_search_hook_outcome = V3WebSearchHookOutcome::NotApplicable;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
             let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
             web_search_center_state = tool_call_hook.web_search_state;
+            web_search_hook_outcome = tool_call_hook.web_search_hook_outcome;
             let mut input = if tool_call_hook.intercepted {
                 tool_call_hook.input
             } else {
@@ -1152,6 +1166,7 @@ fn govern_v3_hub_relay_response(
             servertool_action,
         },
         web_search_transition: web_search_center_state,
+        web_search_hook_outcome,
     })
 }
 

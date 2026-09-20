@@ -38,6 +38,33 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+
+  - resource_id: v3.hooks.control_socket.runtime_carrier
+    resource_kind: typed_control_path_carrier
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-server
+    owner_node: spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    identity: [socketPath]
+    allowed_writers:
+      - spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket
+    allowed_readers:
+      - V3ResponsesRelayServerToolState
+      - V3ResponsesDirectServerToolState
+      - execute_web_search_through_hooks_sidecar
+    forbidden_writers:
+      - request.normal_payload
+      - response.client_payload
+      - provider.wire_payload
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_sidecar -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_mode_b_web_search_integration -- --nocapture
+      - npm run verify:v3-resource-map
+      - npm run verify:v3-mainline-caller-flow
   - resource_id: v3.hooks.native_appserver_transport
     resource_kind: native_codex_transport
     lifecycle: v3.rcc_internal_hooks_sidecar
@@ -1664,6 +1691,65 @@ resources:
       - npm run verify:v3-resource-map
       - npm run verify:v3-mainline-caller-flow
       - npm run verify:v3-architecture-docs
+
+  - resource_id: v3.web_search.hook_request
+    resource_kind: typed_hook_request
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-runtime
+    owner_node: WebSearchHookRequest
+    identity: [requestId, callId, sessionId, conversationId, entryEndpoint, deadlineUnixMs]
+    allowed_writers:
+      - build_v3_web_search_hook_request
+      - build_v3_web_search_hook_request_from_value
+    allowed_readers:
+      - ControlRequest::ExecuteWebSearch
+      - WebSearchAdapter::execute
+      - CommandWebSearchAdapter::execute
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-virtual-router
+      - routecodex-v3-target
+      - routecodex-v3-provider-responses
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+      - v3.debug.payload_budget
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p servertool-core web_search_contract -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib web_search_hook_ -- --nocapture
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
+
+  - resource_id: v3.web_search.hook_outcome
+    resource_kind: typed_hook_result
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-hooks
+    owner_node: WebSearchHookOutcome
+    identity: [callId, status, errorCode, sourceRefs]
+    allowed_writers:
+      - WebSearchAdapter::execute
+      - CommandWebSearchAdapter::execute
+    allowed_readers:
+      - handle_control_request
+      - HooksSidecarCore::execute_web_search
+    forbidden_writers:
+      - routecodex-v3-server
+      - routecodex-v3-sse
+      - routecodex-v3-virtual-router
+      - routecodex-v3-target
+      - routecodex-v3-provider-responses
+      - v3.hub.provider_wire_payload
+      - v3.response.client_payload
+      - v3.debug.payload_budget
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
+    required_gates:
+      - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-hooks -- --nocapture
 
 
   - resource_id: v3.server.request_identity

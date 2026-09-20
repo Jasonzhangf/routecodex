@@ -545,7 +545,7 @@ fn project_json_response(
             .with_tool_thinking_enabled(tool_thinking_enabled),
     )?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, _) = resp03.into_parts();
+    let (resp03, _, _) = resp03.into_parts();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();

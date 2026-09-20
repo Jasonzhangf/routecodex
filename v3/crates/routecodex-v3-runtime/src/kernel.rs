@@ -354,7 +354,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         {
                             V3TargetSelectionAfterRescue::Selected(value) => value,
                             V3TargetSelectionAfterRescue::Failed(source) => {
-                                return error_output(source, trace, &hook_registry)
+                                return error_output(source, trace, &hook_registry);
                             }
                             V3TargetSelectionAfterRescue::Exhausted(error) => {
                                 return error_output(
@@ -1073,34 +1073,44 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     {
                         state
                     } else {
-                        let backend_binding =
-                            crate::hub_v1::resolve_request_web_search_backend_binding(
-                                manifest,
-                                &standardized.body,
+                        let Some(server_tool_scope) = server_tool_scope.as_ref() else {
+                            return error_output(
+                                runtime_source(
+                                    "V3DirectWebSearchResp02RuntimeControlUpdated",
+                                    "web_search execution scope is unavailable",
+                                ),
+                                trace,
+                                &hook_registry,
                             );
-                        match crate::hub_v1::execute_local_web_search_hop(
-                            manifest,
-                            &standardized.server_id,
-                            &direct_failure_session_scope,
-                            &provider_health,
-                            backend_binding.as_deref(),
-                            &state,
-                            transport,
+                        };
+                        match crate::hub_v1::execute_web_search_through_hooks_sidecar(
+                            server_tool_state
+                                .as_deref()
+                                .and_then(V3ResponsesDirectServerToolState::hooks_sidecar_socket),
                             &standardized.request_id,
-                            true,
+                            server_tool_scope,
+                            &request_execution_control,
+                            &state,
                         )
                         .await
                         {
                             Ok(captured) => captured,
                             Err(error) => {
-                                return error_output(
-                                    runtime_source(
+                                let source = match error {
+                                    crate::hub_v1::V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
+                                        call_id,
+                                        code,
+                                        message,
+                                        retryable: _,
+                                    } => crate::hub_v1::web_search_sidecar_failure_source(
+                                        &call_id, code, &message,
+                                    ),
+                                    error => runtime_source(
                                         "V3DirectWebSearchResp02RuntimeControlUpdated",
                                         error,
                                     ),
-                                    trace,
-                                    &hook_registry,
-                                )
+                                };
+                                return error_output(source, trace, &hook_registry);
                             }
                         }
                     };

@@ -358,6 +358,35 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     admin_webui: Option<V3AdminWebuiManifest>,
     admin_config_path: Option<std::path::PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
+        manifest,
+        admin_webui,
+        admin_config_path,
+        None,
+    )
+    .await
+}
+
+pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
+    manifest: V3Config05ManifestPublished,
+    admin_webui: Option<V3AdminWebuiManifest>,
+    admin_config_path: Option<std::path::PathBuf>,
+    hooks_sidecar_socket: Option<PathBuf>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    if hooks_sidecar_socket.is_none()
+        && manifest.providers.values().any(|provider| {
+            provider.models.values().any(|model| {
+                model
+                    .web_search_execution_mode
+                    .is_metadata_center_local_search()
+            })
+        })
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "web_search metadata_center_local_search requires a hooks sidecar socket",
+        ));
+    }
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
@@ -365,8 +394,13 @@ pub async fn spawn_v3_server_aggregate_with_admin(
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
     let debug =
         build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
-    let responses_direct_server_tool_state = Arc::new(V3ResponsesDirectServerToolState::default());
-    let responses_relay_server_tool_state = Arc::new(V3ResponsesRelayServerToolState::default());
+    let responses_direct_server_tool_state = Arc::new(
+        V3ResponsesDirectServerToolState::default()
+            .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),
+    );
+    let responses_relay_server_tool_state = Arc::new(
+        V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
+    );
     let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
         &manifest,
     ));

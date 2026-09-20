@@ -539,7 +539,7 @@ fn responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order()
         resp03.finalized_payload()["output"][1]["call_id"],
         "call_sse"
     );
-    let (resp03, _) = resp03.into_parts();
+    let (resp03, _, _) = resp03.into_parts();
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
     assert_eq!(

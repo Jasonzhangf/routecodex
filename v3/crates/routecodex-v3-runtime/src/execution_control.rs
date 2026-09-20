@@ -129,6 +129,36 @@ impl V3RequestExecutionControl {
         self.attempt_budget.clone()
     }
 
+    pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
+        let now = Instant::now();
+        if now >= self.attempt_budget.inner.deadline {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(
+                "request execution deadline has expired".to_string(),
+            ));
+        }
+        let remaining = self.attempt_budget.inner.deadline.duration_since(now);
+        let now_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| {
+                V3AttemptStoreError::InvalidAttemptState(format!(
+                    "system clock is before the Unix epoch: {error}"
+                ))
+            })?
+            .as_millis();
+        u64::try_from(now_unix_ms)
+            .ok()
+            .and_then(|now_unix_ms| {
+                u64::try_from(remaining.as_millis())
+                    .ok()
+                    .and_then(|remaining_ms| now_unix_ms.checked_add(remaining_ms))
+            })
+            .ok_or_else(|| {
+                V3AttemptStoreError::InvalidAttemptState(
+                    "request execution deadline overflowed Unix milliseconds".to_string(),
+                )
+            })
+    }
+
     #[cfg(test)]
     pub(crate) fn transport_attempts(&self) -> usize {
         self.attempt_budget.transport_attempts()

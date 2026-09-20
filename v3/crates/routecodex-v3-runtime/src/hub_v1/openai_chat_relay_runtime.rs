@@ -441,7 +441,7 @@ fn project_json_response(
     }
     let resp03 = hooks.govern(resp02, &response_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, web_search_transition) = resp03.into_parts();
+    let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();
     // Mode B 拦截后必须同轮投影：websearch call 已剥离，若 transition 存在
     // 说明 Resp03 拦截了搜索调用但当前 Chat 入口尚无结果投影路径——禁止
     // 静默剥离（fail-fast），由后续响应侧 hop/投影工程补全。

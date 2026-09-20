@@ -300,6 +300,250 @@ async fn stopping_supervisor_during_slow_startup_is_bounded_and_cleans_owned_sta
 
 #[tokio::test]
 #[cfg(unix)]
+async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-deferred-readiness-instance";
+    let start_nonce = "generation-1";
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: start_nonce.to_string(),
+        },
+    )
+    .unwrap();
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some("hooks sidecar readiness pending".to_string()),
+    )
+    .unwrap();
+
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    let admission_started = tokio::time::Instant::now();
+    let admission = supervisor
+        .wait_for_readiness_or_timeout(Duration::from_millis(100))
+        .await
+        .unwrap();
+    assert!(admission.is_none());
+    assert!(
+        admission_started.elapsed() < Duration::from_secs(1),
+        "readiness admission must stay bounded: {:?}",
+        admission_started.elapsed()
+    );
+    assert_eq!(
+        read_live_status_detail(&instance_dir, instance_id).unwrap(),
+        Some("hooks sidecar readiness pending".to_string())
+    );
+
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        start_nonce.to_string(),
+    );
+    readiness_tx
+        .send(Some(
+            "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
+                .to_string(),
+        ))
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, instance_id).unwrap();
+        if detail.as_deref().is_some_and(|detail| {
+            detail.contains("hooks sidecar unavailable:")
+                && detail.contains("hooks_unavailable:crashed")
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "deferred readiness detail was not published: {detail:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Stopped,
+        Some("main stop complete".to_string()),
+    )
+    .unwrap();
+    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Stopped);
+    assert_eq!(status.detail.as_deref(), Some("main stop complete"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-readiness-race-instance";
+    let start_nonce = "generation-1";
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: start_nonce.to_string(),
+        },
+    )
+    .unwrap();
+    let crash_detail =
+        "hooks sidecar unavailable: hooks_unavailable:crashed: hooks sidecar exited after readiness";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some(crash_detail.to_string()),
+    )
+    .unwrap();
+
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        start_nonce.to_string(),
+    );
+    readiness_tx
+        .send(Some(
+            "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
+                .to_string(),
+        ))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Running);
+    assert_eq!(status.detail.as_deref(), Some(crash_detail));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn stale_generation_readiness_does_not_overwrite_new_generation_detail() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-readiness-generation-race-instance";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some("hooks sidecar readiness pending".to_string()),
+    )
+    .unwrap();
+
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: "generation-1".to_string(),
+        },
+    )
+    .unwrap();
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        "generation-1".to_string(),
+    );
+
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: "generation-2".to_string(),
+        },
+    )
+    .unwrap();
+    readiness_tx
+        .send(Some("stale generation detail".to_string()))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    assert_eq!(
+        read_live_status_detail(&instance_dir, instance_id).unwrap(),
+        Some("hooks sidecar readiness pending".to_string())
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        bin_directory.join("rccv3-hooksd"),
+        format!(
+            "#!/bin/sh\nsleep 1\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n"
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
+        .unwrap()
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "bin_directory": bin_directory,
+            "install_root": root.path(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let mut supervisor = V3HooksSidecarSupervisor::spawn(
+        instance_dir.clone(),
+        "hooks-readiness-barrier-instance".to_string(),
+    );
+    {
+        let readiness_future = supervisor.wait_for_readiness();
+        tokio::pin!(readiness_future);
+        let pending = tokio::time::timeout(Duration::from_millis(250), &mut readiness_future).await;
+        assert!(
+            pending.is_err(),
+            "readiness must remain pending until the sidecar protocol reports ready"
+        );
+        let readiness = tokio::time::timeout(Duration::from_secs(3), &mut readiness_future)
+            .await
+            .expect("supervisor readiness must complete")
+            .unwrap();
+        assert!(readiness.is_none());
+    }
+    supervisor.stop().await.unwrap();
+    std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn supervisor_timeout_force_reaps_owned_group_and_record() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();

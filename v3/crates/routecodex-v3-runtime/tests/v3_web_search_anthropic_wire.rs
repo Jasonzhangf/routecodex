@@ -6,15 +6,27 @@
 
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use routecodex_v3_hooks::{ControlRequest, ControlResponse};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::hub_v1::{
-    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime,
+    execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state,
+    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState,
 };
 use serde_json::{json, Value};
+use servertool_core::web_search_contract::{
+    WebSearchHookOutcome, WebSearchResult, WebSearchResultStatus,
+};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 struct WireCaptureTransport(Arc<Mutex<Vec<Value>>>);
 #[async_trait]
@@ -191,11 +203,10 @@ async fn anthropic_wire_keeps_hosted_web_search_without_exec_command_and_project
     }
 }
 
-/// 搜索 hop 干净上下文红测：主模型返回 web_search call（无 hosted tool_result）
-/// → 触发本地搜索 hop；断言搜索请求 wire 的工具列表仅 hosted web_search、
-/// 上下文干净（无历史/无其他工具）、引导提示简单（"search the web: <query>"）。
+/// Mode B 本地搜索执行：主模型返回 web_search call（无 hosted tool_result）
+/// → runtime 通过 typed hooks sidecar 执行一次搜索；断言没有第二 provider
+/// attempt，且 sidecar 收到 call_id/query 配对的 typed request。
 struct SearchHopWireCaptureTransport {
-    captures: Arc<Mutex<Vec<Value>>>,
     sends: Arc<Mutex<usize>>,
 }
 #[async_trait]
@@ -205,20 +216,11 @@ impl ResponsesTransport for SearchHopWireCaptureTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let mut sends = self.sends.lock().unwrap();
-        let is_search_hop = *sends > 0;
         *sends += 1;
-        if is_search_hop {
-            self.captures.lock().unwrap().push(request.body().clone());
-        }
-        let body = if is_search_hop {
-            // 搜索 hop 响应：anthropic 文本结果。
-            br#"{"id":"resp_search","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"search result text"}],"stop_reason":"end_turn"}"#
-                .to_vec()
-        } else {
-            // 主模型响应：web_search call，无 hosted tool_result（走本地搜索 hop）。
+        // 主模型响应：web_search call，无 hosted tool_result（走 typed sidecar）。
+        let body =
             br#"{"id":"resp_main","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"tool_use","id":"call_s1","name":"web_search","input":{"query":"rust latest version"}}],"stop_reason":"tool_use"}"#
-                .to_vec()
-        };
+                .to_vec();
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id().to_string(),
             request.provider_id().to_string(),
@@ -232,11 +234,66 @@ impl ResponsesTransport for SearchHopWireCaptureTransport {
     }
 }
 
+fn test_socket_path(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("rcc-{label}-{nonce}.sock"))
+}
+
+fn serve_completed_search(
+    socket_path: PathBuf,
+) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
+    let listener = UnixListener::bind(&socket_path).expect("bind typed sidecar test socket");
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept typed sidecar request");
+        let mut line = String::new();
+        BufReader::new(stream.try_clone().expect("clone typed sidecar stream"))
+            .read_line(&mut line)
+            .expect("read typed sidecar request");
+        let request: ControlRequest =
+            serde_json::from_str(line.trim()).expect("decode typed sidecar request");
+        let ControlRequest::ExecuteWebSearch { request } = request else {
+            panic!("expected ExecuteWebSearch");
+        };
+        let response = ControlResponse::ok(json!({
+            "outcome": WebSearchHookOutcome::Completed(WebSearchResult {
+                call_id: request.call_id.clone(),
+                status: WebSearchResultStatus::Completed,
+                content: Some("search result text".to_string()),
+                sources: Vec::new(),
+                metadata: None,
+                error: None,
+            })
+        }));
+        writeln!(
+            stream,
+            "{}",
+            serde_json::to_string(&response).expect("encode typed sidecar response")
+        )
+        .expect("write typed sidecar response");
+        *request
+    })
+}
+
 #[tokio::test]
-async fn search_hop_wire_is_clean_hosted_web_search_only() {
+async fn search_hop_uses_typed_sidecar_without_provider_reentry() {
     let manifest = anthropic_mode_b_manifest();
-    let captures = Arc::new(Mutex::new(Vec::new()));
-    let output = execute_v3_responses_relay_runtime(
+    let sends = Arc::new(Mutex::new(0));
+    let socket_path = test_socket_path("ws");
+    let sidecar = serve_completed_search(socket_path.clone());
+    let server_tool_state = V3ResponsesRelayServerToolState::default()
+        .with_hooks_sidecar_socket(Some(socket_path.clone()));
+    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest(&manifest);
+    let scope = V3ResponsesRelayServerToolScope::new(
+        "/v1/responses",
+        "session-ws-anthropic",
+        "conversation-ws-anthropic",
+        5555,
+        "chatwire",
+    );
+    let output = execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "chatwire".into(),
@@ -254,60 +311,45 @@ async fn search_hop_wire_is_clean_hosted_web_search_only() {
             }),
         },
         &SearchHopWireCaptureTransport {
-            captures: captures.clone(),
-            sends: std::sync::Arc::new(std::sync::Mutex::new(0)),
+            sends: sends.clone(),
         },
+        &provider_health,
+        &server_tool_state,
+        scope,
     )
     .await
     .expect("relay runtime must execute");
+    let request = sidecar.join().expect("join typed sidecar worker");
+    let _ = std::fs::remove_file(&socket_path);
     assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(
+        *sends.lock().unwrap(),
+        1,
+        "typed sidecar execution must not issue a second provider attempt"
+    );
+    assert_eq!(request.call_id, "call_s1");
+    assert_eq!(request.query, "rust latest version");
     // 客户端响应：hosted web_search_call 投影 + 原 call_id 配对。
     match output.client_body {
         V3ResponsesRelayClientBody::Json(value) => {
-            eprintln!(
-                "SEARCH_HOP_CLIENT={}",
-                serde_json::to_string(&value).unwrap()
-            );
             let out = value["output"].as_array().expect("client output array");
             let call = out
                 .iter()
                 .find(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
-                .expect("hosted web_search_call projected after local search hop");
+                .expect("hosted web_search_call projected after typed sidecar result");
             assert_eq!(call["action"]["query"], "rust latest version");
-            assert!(out.iter().any(
-                |item| item.get("type").and_then(Value::as_str) == Some("function_call_output")
-            ));
+            assert_eq!(call["results"][0]["text"], "search result text");
+            let paired = out
+                .iter()
+                .find(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                })
+                .expect("paired function_call_output");
+            assert_eq!(paired["call_id"], "call_s1");
+            assert_eq!(paired["output"], "search result text");
+            assert!(call.get("phase").is_none());
+            assert!(paired.get("scope_key").is_none());
         }
         _ => panic!("JSON client body expected"),
     }
-    // 搜索 hop wire：工具列表仅 hosted web_search、上下文干净、引导简单。
-    let wires = captures.lock().unwrap();
-    assert_eq!(wires.len(), 1, "exactly one search hop wire expected");
-    let wire = &wires[0];
-    let tools = wire.get("tools").and_then(Value::as_array).expect("tools");
-    assert_eq!(
-        tools.len(),
-        1,
-        "search hop must expose only web_search tool"
-    );
-    assert_eq!(tools[0]["type"], "web_search_20250305");
-    assert_eq!(tools[0]["name"], "web_search");
-    let input = wire["messages"].as_array().expect("anthropic messages");
-    assert_eq!(
-        input.len(),
-        1,
-        "search hop context must be clean (single message)"
-    );
-    let text = input[0]["content"]
-        .as_str()
-        .or_else(|| input[0]["content"][0]["text"].as_str())
-        .expect("guided text");
-    assert!(
-        text.starts_with("search the web:"),
-        "search hop guidance must be simple, got: {text}"
-    );
-    assert!(
-        wire.get("web_search_options").is_none(),
-        "search hop must not carry residual web_search_options"
-    );
 }

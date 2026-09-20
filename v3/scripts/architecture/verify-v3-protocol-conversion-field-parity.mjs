@@ -35,6 +35,7 @@ const paths = {
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
   responsesRelayTypes: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs',
   webSearchHop: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs',
+  webSearchSidecar: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
@@ -115,11 +116,12 @@ const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModu
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
 requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
-requireText(text.webSearchHop, `${paths.webSearchHop}::internal_hop_error`, 'V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(format!(');
+requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error`, 'WebSearchSidecarControlError::Message(format!(');
+requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
 forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
-forbid(text.webSearchHop, `${paths.webSearchHop}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
 for (const phrase of [
   'request.reasoning_effort',

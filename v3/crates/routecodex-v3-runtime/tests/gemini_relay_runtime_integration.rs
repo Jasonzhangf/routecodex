@@ -6,11 +6,14 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeError, V3GeminiRelayRuntimeInput,
+    V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn ensure_gemini_relay_test_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
@@ -31,6 +34,41 @@ fn ensure_gemini_relay_test_state_dir() {
             state_dir.join("provider-cooldowns.json"),
         );
     });
+}
+
+async fn serve_one_gemini_probe(
+    listener: TcpListener,
+    status_line: &'static str,
+    body: &'static str,
+) -> String {
+    let (mut socket, _) = listener
+        .accept()
+        .await
+        .expect("provider probe listener must accept one request");
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
+            .await
+            .expect("provider probe request headers must arrive")
+            .expect("provider probe request must be readable");
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response = format!(
+        "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .expect("provider probe response must be writable");
+    String::from_utf8_lossy(&request).into_owned()
 }
 
 #[path = "support/hub_v1_fixture.rs"]
@@ -791,9 +829,6 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 #[tokio::test]
 async fn uncommitted_sse_failure_enters_error_chain_and_provider_cooldown() {
     let server_id = "gemini_gate_failure";
-    let manifest = manifest_for_action_gate_scope(server_id);
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let cases = [
         (
             "malformed",
@@ -827,6 +862,26 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         ),
     ];
     for (case, chunks) in cases {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("provider probe listener must bind");
+        let base_url = format!(
+            "http://{}/v1beta",
+            listener
+                .local_addr()
+                .expect("provider probe listener address")
+        );
+        let mut manifest = manifest_for_action_gate_scope(server_id);
+        let provider = manifest
+            .providers
+            .get_mut(server_id)
+            .expect("probe provider must exist");
+        provider.base_url = base_url;
+        provider.auth.entries[0].env = Some("V3_GEMINI_GATE_FAILURE_PROBE_KEY".into());
+        std::env::set_var("V3_GEMINI_GATE_FAILURE_PROBE_KEY", "routecodex-test-key");
+
+        let provider_health =
+            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
         let failing = StaticSseTransport {
             chunks: Mutex::new(Some(chunks)),
         };
@@ -913,6 +968,11 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
         }
         let held_manifest = manifest.clone();
         let held_health = provider_health.runtime_health();
+        let probe_server = tokio::spawn(serve_one_gemini_probe(
+            listener,
+            "200 OK",
+            r#"{"candidates":[]}"#,
+        ));
         let held = tokio::spawn(async move {
             execute_v3_gemini_relay_runtime_with_provider_health(
                 &held_manifest,
@@ -936,21 +996,27 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             )
             .await
         });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            !held.is_finished(),
-            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
-        );
-
-        // provider cooldown 与 model-key health 都需要各自成功 probe；成功 probe
-        // 发布 availability generation 后，被 hold 的 fresh 请求继续执行。
-        revive_cooled_provider(&provider_health, server_id).await;
-        let revived = tokio::time::timeout(Duration::from_secs(2), held)
+        // A failed bounded rescue pass must terminate the request instead of
+        // leaving the session waiting for an unbounded future recovery.
+        let terminal = tokio::time::timeout(Duration::from_secs(2), held)
             .await
-            .expect("held request must wake after provider recovery")
-            .expect("held request task must not panic")
-            .expect("probe-revived provider must accept the held request");
-        assert_eq!(revived.status, 200);
+            .expect("bounded rescue pass must not leave the request hanging")
+            .expect("held request task must not panic");
+        let probe_request = tokio::time::timeout(Duration::from_secs(2), probe_server)
+            .await
+            .expect("failed rescue probe must reach the local provider listener")
+            .expect("provider probe task must not panic");
+        assert!(
+            probe_request.starts_with("POST /v1beta/models/gemini-wire:generateContent HTTP/1.1"),
+            "failed rescue probe must use the Gemini provider endpoint: {probe_request:?}"
+        );
+        assert!(
+            matches!(
+                terminal,
+                Err(V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. })
+            ),
+            "failed rescue probes must project terminal pool exhaustion: {terminal:?}"
+        );
     }
 }
 
