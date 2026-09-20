@@ -1,6 +1,6 @@
 use routecodex_v4_lifecycle::{
-    release_unmanaged_listener, repair_stale, status_managed, LifecycleError, ManagedAction,
-    ManagedControlPlane, ManagedInstanceRecord, V4LifecyclePaths,
+    release_unmanaged_listener, repair_stale, status_managed, CordisSocketIdentity, LifecycleError,
+    ManagedAction, ManagedControlPlane, ManagedInstanceRecord, V4LifecyclePaths,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ fn record() -> ManagedInstanceRecord {
         runtime_identity: "rccv4".to_string(),
         pid: std::process::id(),
         generation_nonce: 1,
+        cordis_socket_identity: None,
         config_path: "/tmp/config.v4.toml".to_string(),
         manifest_path: "/tmp/manifest.json".to_string(),
         manifest_digest: "sha256:test".to_string(),
@@ -75,6 +76,34 @@ fn existing_record_or_socket_fails_fast_without_silent_cleanup() {
 }
 
 #[test]
+fn cordis_socket_witness_round_trips_and_rejects_zero_identity() {
+    let paths = V4LifecyclePaths::for_state_root(test_root("cordis-witness"));
+    let mut record = record();
+    record.cordis_socket_identity = Some(CordisSocketIdentity {
+        pid: 12345,
+        start_time: 99,
+        device: 7,
+        inode: 11,
+    });
+    let control = ManagedControlPlane::bind(paths.clone(), record.clone()).expect("bind");
+    let loaded = routecodex_v4_lifecycle::read_record(&paths)
+        .expect("read record")
+        .expect("record");
+    assert_eq!(loaded.cordis_socket_identity, record.cordis_socket_identity);
+    control.clear_record().expect("clear");
+    drop(control);
+
+    record.cordis_socket_identity = Some(CordisSocketIdentity {
+        pid: 1,
+        start_time: 0,
+        device: 0,
+        inode: 1,
+    });
+    assert!(ManagedControlPlane::bind(paths.clone(), record).is_err());
+    fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
+}
+
+#[test]
 fn repair_stale_removes_dead_instance_record_and_socket() {
     let paths = V4LifecyclePaths::for_state_root(test_root("repair"));
     paths.prepare().expect("prepare");
@@ -95,12 +124,18 @@ fn repair_stale_removes_dead_instance_record_and_socket() {
 }
 
 #[test]
-fn repair_stale_removes_socket_only_after_owner_probe_fails() {
+fn repair_stale_refuses_unwitnessed_control_socket() {
     let paths = V4LifecyclePaths::for_state_root(test_root("socket-only"));
     paths.prepare().expect("prepare");
     std::os::unix::net::UnixListener::bind(&paths.control_socket).expect("socket");
-    repair_stale(&paths).expect("repair socket-only stale state");
-    assert!(!paths.control_socket.exists());
+    assert!(matches!(
+        repair_stale(&paths),
+        Err(LifecycleError::StaleState)
+    ));
+    assert!(
+        paths.control_socket.exists(),
+        "unwitnessed control socket must not be removed"
+    );
     fs::remove_dir_all(&paths.state_root).expect("cleanup exact test root");
 }
 

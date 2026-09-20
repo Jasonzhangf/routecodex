@@ -467,6 +467,8 @@ export function runFeatureLayerBatchRedFixtures({
       name: 'unwired integration references merge truth stores',
       expected: ['INTEGRATION_RESOURCE_REFS'],
       mutate(input) {
+        input.manifest.integration.wiring_started = false;
+        input.manifest.integration.wiring_edges = [];
         input.manifest.integration.resource_refs = {
           merge_queue_state: '.appsdk/records/merge-queue-state.json',
           integration_candidate: '.appsdk/records/integration-record-v4-integration-m1-current.json',

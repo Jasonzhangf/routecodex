@@ -99,10 +99,21 @@ pub struct ManagedInstanceRecord {
     pub runtime_identity: String,
     pub pid: u32,
     pub generation_nonce: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cordis_socket_identity: Option<CordisSocketIdentity>,
     pub config_path: String,
     pub manifest_path: String,
     pub manifest_digest: String,
     pub listeners: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CordisSocketIdentity {
+    pub pid: u32,
+    pub start_time: u64,
+    pub device: u64,
+    pub inode: u64,
 }
 
 impl ManagedInstanceRecord {
@@ -110,6 +121,15 @@ impl ManagedInstanceRecord {
         if self.runtime_identity != RUNTIME_IDENTITY
             || self.pid == 0
             || self.generation_nonce == 0
+            || self
+                .cordis_socket_identity
+                .as_ref()
+                .is_some_and(|identity| {
+                    identity.pid == 0
+                        || identity.start_time == 0
+                        || identity.device == 0
+                        || identity.inode == 0
+                })
             || self.config_path.is_empty()
             || self.manifest_path.is_empty()
             || self.manifest_digest.is_empty()
@@ -281,16 +301,11 @@ pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
         if !paths.control_socket.exists() {
             return Err(LifecycleError::NotRunning);
         }
-        // A child can die after unlinking instance.json but before its socket
-        // pathname is removed. Probe the canonical socket first; a responsive
-        // owner is never touched, while an unresponsive socket is disposable
-        // stale lifecycle state and may be removed by this explicit repair.
-        if request_control(paths, "status").is_ok() {
-            return Err(LifecycleError::AlreadyManaged);
-        }
-        fs::remove_file(&paths.control_socket)
-            .map_err(|error| io_error(&paths.control_socket, error))?;
-        return Ok(());
+        // Without an instance record there is no owner witness for this
+        // pathname. A failed protocol probe cannot distinguish a stale V4
+        // socket from a foreign or temporarily unresponsive owner, so fail
+        // closed and require explicit operator cleanup.
+        return Err(LifecycleError::StaleState);
     }
     let record = record.expect("checked above");
     if request_control(paths, "status").is_ok() {
@@ -301,12 +316,112 @@ pub fn repair_stale(paths: &V4LifecyclePaths) -> Result<(), LifecycleError> {
     if process_alive {
         return Err(LifecycleError::AlreadyManaged);
     }
+    if let Some(identity) = record.cordis_socket_identity {
+        release_stale_cordis_host(paths, identity)?;
+    }
     fs::remove_file(&paths.record_path).map_err(|error| io_error(&paths.record_path, error))?;
     if paths.control_socket.exists() {
         fs::remove_file(&paths.control_socket)
             .map_err(|error| io_error(&paths.control_socket, error))?;
     }
     Ok(())
+}
+
+pub fn release_stale_cordis_host(
+    paths: &V4LifecyclePaths,
+    identity: CordisSocketIdentity,
+) -> Result<(), LifecycleError> {
+    let socket = paths.state_root.join("cordis.sock");
+    let current = fs::symlink_metadata(&socket).ok().map(|metadata| {
+        use std::os::unix::fs::MetadataExt;
+        CordisSocketIdentity {
+            pid: identity.pid,
+            start_time: identity.start_time,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    });
+    if current != Some(identity) {
+        return Ok(());
+    }
+    let process_alive = unsafe { libc::kill(identity.pid as libc::pid_t, 0) == 0 }
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    if !process_alive {
+        if fs::symlink_metadata(&socket).is_ok() {
+            fs::remove_file(&socket).map_err(|error| io_error(&socket, error))?;
+        }
+        return Ok(());
+    }
+    if process_start_time(identity.pid) != Some(identity.start_time) {
+        return Err(LifecycleError::AlreadyManaged);
+    }
+    if unsafe { libc::kill(identity.pid as libc::pid_t, libc::SIGTERM) } == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(io_error(&socket, error));
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        let alive = unsafe { libc::kill(identity.pid as libc::pid_t, 0) == 0 }
+            || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+        if !alive {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let alive = unsafe { libc::kill(identity.pid as libc::pid_t, 0) == 0 }
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH);
+    if alive {
+        return Err(LifecycleError::CommandTimeout(
+            Duration::from_secs(2).as_millis() as u64,
+        ));
+    }
+    if fs::symlink_metadata(&socket).is_ok() {
+        fs::remove_file(&socket).map_err(|error| io_error(&socket, error))?;
+    }
+    Ok(())
+}
+
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    if pid == 0 || pid > libc::pid_t::MAX as u32 {
+        return None;
+    }
+    process_start_time_platform(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn process_start_time_platform(pid: u32) -> Option<u64> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::pid_t,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if read != size {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    (info.pbi_start_tvsec > 0)
+        .then_some(info.pbi_start_tvsec.saturating_mul(1_000_000) + info.pbi_start_tvusec)
+}
+
+#[cfg(target_os = "linux")]
+fn process_start_time_platform(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let (_, fields) = stat.rsplit_once(") ")?;
+    let start_time = fields.split_whitespace().nth(19)?;
+    start_time.parse().ok().filter(|value| *value != 0)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_start_time_platform(_pid: u32) -> Option<u64> {
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -772,9 +887,14 @@ fn io_error(path: &Path, error: impl std::fmt::Display) -> LifecycleError {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_bounded_command, LifecycleError};
+    use super::{
+        process_start_time, release_stale_cordis_host, run_bounded_command, CordisSocketIdentity,
+        LifecycleError, V4LifecyclePaths,
+    };
     use std::fs;
+    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
+    use std::process::{Command, Stdio};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -828,5 +948,57 @@ mod tests {
         assert_eq!(output.status.code(), Some(7));
         assert_eq!(output.stdout, b"complete-output");
         assert!(output.stderr.is_empty());
+    }
+
+    #[test]
+    fn stale_repair_refuses_socket_record_with_mismatched_process_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "routecodex-v4-stale-identity-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let paths = V4LifecyclePaths::for_state_root(root.clone());
+        paths.prepare().expect("prepare lifecycle paths");
+        let socket = root.join("cordis.sock");
+        let mut owner = Command::new("node")
+            .args([
+                "-e",
+                "const net=require('net');const fs=require('fs');const path=process.env.TEST_SOCKET;try{fs.unlinkSync(path)}catch{};net.createServer(()=>{}).listen(path);setInterval(()=>{},1000);",
+            ])
+            .env("TEST_SOCKET", &socket)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn socket owner");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !socket.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(socket.exists(), "socket owner must become ready");
+        let metadata = fs::symlink_metadata(&socket).expect("socket metadata");
+        let start_time = process_start_time(owner.id()).expect("socket owner start time");
+        let identity = CordisSocketIdentity {
+            pid: owner.id(),
+            start_time: start_time + 1,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        };
+
+        assert!(matches!(
+            release_stale_cordis_host(&paths, identity),
+            Err(LifecycleError::AlreadyManaged)
+        ));
+
+        assert!(
+            socket.exists(),
+            "mismatched process generation must not unlink socket"
+        );
+        assert!(
+            owner.try_wait().expect("owner status").is_none(),
+            "mismatched process generation must not signal the socket owner"
+        );
+        owner.kill().expect("terminate exact test owner");
+        owner.wait().expect("reap exact test owner");
+        fs::remove_dir_all(root).expect("cleanup exact test root");
     }
 }
