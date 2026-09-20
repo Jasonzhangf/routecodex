@@ -564,6 +564,45 @@ mod tests {
     }
 
     #[test]
+    fn wire_maps_multi_agent_tool_names_in_chat_history_before_provider_validation() {
+        let mut chat_target = target();
+        chat_target.provider_type = "openai_chat".into();
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "name": "multi_agent_v1.spawn_agent",
+                    "input": {}
+                }],
+                "tool_calls": [{
+                    "id": "call-agent",
+                    "type": "function",
+                    "function": {
+                        "name": "multi_agent_v1.spawn_agent",
+                        "arguments": "{}"
+                    }
+                }]
+            }]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-multi-agent-tool-name",
+            chat_target,
+            body,
+        )
+        .expect("multi-agent history names must be normalized before provider validation");
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["name"],
+            "multi_agent_v1__spawn_agent"
+        );
+        assert_eq!(
+            wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+            "multi_agent_v1__spawn_agent"
+        );
+    }
+
+    #[test]
     fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
