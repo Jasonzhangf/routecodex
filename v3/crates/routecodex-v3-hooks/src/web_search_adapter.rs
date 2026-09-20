@@ -129,6 +129,7 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
         let mut stdout_bytes = Vec::new();
         let mut stderr_bytes = Vec::new();
         let mut exit_status = None;
+        let mut stdin_error = None;
         loop {
             let mut pipe_progress = false;
             if stdin_open && payload_offset < payload.len() {
@@ -146,10 +147,9 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
                     Ok(written) => payload_offset += written,
                     Err(error) if error.kind() == ErrorKind::WouldBlock => {}
                     Err(error) => {
-                        terminate_child(&mut child);
-                        return Err(WebSearchAdapterError::Unavailable(format!(
-                            "web_search subagent stdin failed: {error}"
-                        )));
+                        stdin_open = false;
+                        drop(stdin.take());
+                        stdin_error = Some(error);
                     }
                 }
             }
@@ -205,6 +205,11 @@ impl WebSearchAdapter for CommandWebSearchAdapter {
             if !pipe_progress {
                 std::thread::sleep(Duration::from_millis(5));
             }
+        }
+        if let Some(error) = stdin_error {
+            return Err(WebSearchAdapterError::Unavailable(format!(
+                "web_search subagent stdin failed: {error}"
+            )));
         }
         let status = exit_status.ok_or_else(|| {
             WebSearchAdapterError::Unavailable(
