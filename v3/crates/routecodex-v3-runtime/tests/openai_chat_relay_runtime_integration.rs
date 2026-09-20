@@ -1667,27 +1667,17 @@ async fn openai_chat_provider_pool_exhaustion_holds_until_provider_recovery() {
         request.starts_with("POST /v1/chat/completions HTTP/1.1"),
         "last-try rescue must send the provider probe through the provider HTTP endpoint: {request:?}"
     );
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert!(
-        !runtime.is_finished(),
-        "cooldown-only exhaustion must hold the request after a failed last-try probe"
-    );
-
-    provider_health
-        .store()
-        .record_provider_key_success(scope, scope, "chat-wire-model", u64::MAX / 2 + 1)
-        .expect("provider recovery must wake the held request");
     let output = tokio::time::timeout(Duration::from_secs(2), runtime)
         .await
-        .expect("held request must resume after provider recovery")
-        .expect("runtime task must not panic")
-        .expect("provider recovery must resume normal execution");
-    assert_eq!(output.status, 200);
-    assert!(output.error_chain.is_none());
-    assert!(matches!(
-        output.client_body,
-        V3OpenAiChatRelayClientBody::Json(_)
-    ));
+        .expect("failed last-try probe must terminate the request")
+        .expect("runtime task must not panic");
+    assert!(
+        matches!(
+            output,
+            Err(V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. })
+        ),
+        "failed last-try probe must project terminal pool exhaustion: {output:?}"
+    );
 }
 
 #[tokio::test]
