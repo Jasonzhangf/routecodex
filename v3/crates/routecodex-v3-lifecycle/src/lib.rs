@@ -977,8 +977,12 @@ impl V3ManagedLifecycle {
         let handle = Some(handle);
         let mut hooks_sidecar =
             V3HooksSidecarSupervisor::spawn(instance_dir.clone(), declaration.instance_id.clone());
-        let hooks_sidecar_detail = match hooks_sidecar.wait_for_readiness().await {
-            Ok(detail) => detail,
+        let hooks_sidecar_detail = match hooks_sidecar
+            .wait_for_readiness_or_timeout(HOOKS_READINESS_ADMISSION_TIMEOUT)
+            .await
+        {
+            Ok(Some(detail)) => detail,
+            Ok(None) => Some("hooks sidecar readiness pending".to_string()),
             Err(error) => {
                 return control_plane::fail_managed_runtime_with_hooks_cleanup(
                     &instance_dir,
@@ -1005,6 +1009,10 @@ impl V3ManagedLifecycle {
             )
             .await;
         }
+        hooks_sidecar.spawn_readiness_detail_publisher(
+            instance_dir.clone(),
+            declaration.instance_id.clone(),
+        );
         return control_plane::run_managed_control_loop(
             &instance_dir,
             &declaration,

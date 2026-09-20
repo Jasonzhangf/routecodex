@@ -178,6 +178,15 @@ pub(crate) fn write_running_status_if_current(
     instance_id: &str,
     detail: Option<String>,
 ) -> Result<(), V3LifecycleError> {
+    write_running_status_if_current_detail(instance_dir, instance_id, None, detail)
+}
+
+pub(crate) fn write_running_status_if_current_detail(
+    instance_dir: &Path,
+    instance_id: &str,
+    expected_detail: Option<&str>,
+    detail: Option<String>,
+) -> Result<(), V3LifecycleError> {
     let _lock = acquire_status_file_lock(instance_dir)?;
     let status_path = instance_dir.join("status.json");
     if status_path.exists() {
@@ -190,6 +199,11 @@ pub(crate) fn write_running_status_if_current(
         if status.state != V3ManagedRunState::Running {
             return Ok(());
         }
+        if expected_detail.is_some_and(|expected| status.detail.as_deref() != Some(expected)) {
+            return Ok(());
+        }
+    } else if expected_detail.is_some() {
+        return Ok(());
     }
     write_status_unlocked(
         instance_dir,

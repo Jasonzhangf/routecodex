@@ -300,6 +300,109 @@ async fn stopping_supervisor_during_slow_startup_is_bounded_and_cleans_owned_sta
 
 #[tokio::test]
 #[cfg(unix)]
+async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-deferred-readiness-instance";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some("hooks sidecar readiness pending".to_string()),
+    )
+    .unwrap();
+
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    let admission_started = tokio::time::Instant::now();
+    let admission = supervisor
+        .wait_for_readiness_or_timeout(Duration::from_millis(100))
+        .await
+        .unwrap();
+    assert!(admission.is_none());
+    assert!(
+        admission_started.elapsed() < Duration::from_secs(1),
+        "readiness admission must stay bounded: {:?}",
+        admission_started.elapsed()
+    );
+    assert_eq!(
+        read_live_status_detail(&instance_dir, instance_id).unwrap(),
+        Some("hooks sidecar readiness pending".to_string())
+    );
+
+    supervisor.spawn_readiness_detail_publisher(instance_dir.clone(), instance_id.to_string());
+    readiness_tx
+        .send(Some(
+            "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
+                .to_string(),
+        ))
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, instance_id).unwrap();
+        if detail.as_deref().is_some_and(|detail| {
+            detail.contains("hooks sidecar unavailable:")
+                && detail.contains("hooks_unavailable:crashed")
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "deferred readiness detail was not published: {detail:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Stopped,
+        Some("main stop complete".to_string()),
+    )
+    .unwrap();
+    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Stopped);
+    assert_eq!(status.detail.as_deref(), Some("main stop complete"));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-readiness-race-instance";
+    let crash_detail =
+        "hooks sidecar unavailable: hooks_unavailable:crashed: hooks sidecar exited after readiness";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some(crash_detail.to_string()),
+    )
+    .unwrap();
+
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    supervisor.spawn_readiness_detail_publisher(instance_dir.clone(), instance_id.to_string());
+    readiness_tx
+        .send(Some(
+            "hooks sidecar unavailable: hooks_unavailable:crashed: readiness task failed"
+                .to_string(),
+        ))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Running);
+    assert_eq!(status.detail.as_deref(), Some(crash_detail));
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn supervisor_readiness_is_a_pending_barrier_until_protocol_ready() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
