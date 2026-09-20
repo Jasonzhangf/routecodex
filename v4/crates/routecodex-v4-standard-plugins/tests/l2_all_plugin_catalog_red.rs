@@ -8,10 +8,8 @@
 //! excluding them from production would turn `EXCLUDED_PLUGINS` into the
 //! "green" mechanism, so this file requires physical removal instead.
 
-use routecodex_v4_standard_plugins::{
-    compile_production_execution_plans, standard_plugins,
-};
 use routecodex_v4_skeleton::SkeletonPlan;
+use routecodex_v4_standard_plugins::{compile_production_execution_plans, standard_plugins};
 use std::fs;
 
 const SUPERSEDED_PLUGINS: &[&str] = &[
@@ -51,11 +49,8 @@ fn superseded_plugins_are_absent_from_catalog() {
 
 #[test]
 fn production_compiler_has_no_exclusion_filter() {
-    let source = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/lib.rs"
-    ))
-    .expect("standard plugins source readable");
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("standard plugins source readable");
     assert!(
         !source.contains("EXCLUDED_PLUGINS"),
         "production compiler must not carry an exclusion list"

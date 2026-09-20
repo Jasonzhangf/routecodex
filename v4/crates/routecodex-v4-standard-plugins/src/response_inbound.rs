@@ -563,7 +563,7 @@ pub fn decode_direct_provider_sse_frame(
         other => {
             return Err(format!(
                 "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
-            ))
+            ));
         }
     };
     let text = std::str::from_utf8(frame)
@@ -613,7 +613,7 @@ pub fn decode_direct_provider_sse_frame(
         other => {
             return Err(format!(
                 "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
-            ))
+            ));
         }
     };
     Ok(DecodedProviderSseFrame {
@@ -634,7 +634,7 @@ pub fn decode_provider_sse_frame(
         other => {
             return Err(format!(
                 "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
-            ))
+            ));
         }
     };
     let normalized =

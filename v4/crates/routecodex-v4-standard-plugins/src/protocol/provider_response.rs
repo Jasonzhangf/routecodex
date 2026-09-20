@@ -322,18 +322,13 @@ fn normalize_openai_sse_event(value: &Value) -> Result<Vec<Value>, String> {
             .filter(|reason| !reason.is_empty())
         {
             let (status, incomplete_reason) = match finish_reason {
-                "stop" | "tool_calls" | "function_call" => {
-                    ("completed", None)
-                }
-                "length" => (
-                    "incomplete",
-                    Some("max_output_tokens"),
-                ),
+                "stop" | "tool_calls" | "function_call" => ("completed", None),
+                "length" => ("incomplete", Some("max_output_tokens")),
                 "content_filter" => ("incomplete", Some("content_filter")),
                 other => {
                     return Err(format!(
                         "OpenAI Chat SSE finish_reason is unsupported: {other}"
-                    ))
+                    ));
                 }
             };
             let mut response = json!({
@@ -404,6 +399,115 @@ pub fn normalize_provider_sse_frame_for_relay(
     normalize_provider_sse_frame_with_lane(protocol, frame, true)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderSseTerminalDisposition {
+    Continue,
+    Completed,
+    Incomplete { reason: String },
+    Failed { message: String },
+}
+
+/// Classify one complete provider SSE frame at the protocol owner boundary.
+/// Runtime orchestration consumes this typed result instead of inspecting raw
+/// payload bytes for terminal/error semantics.
+pub fn classify_provider_sse_terminal(
+    protocol: &str,
+    frame: &[u8],
+) -> Result<ProviderSseTerminalDisposition, String> {
+    let normalized = normalize_provider_sse_frame_for_relay(protocol, frame)?;
+    let text = std::str::from_utf8(&normalized)
+        .map_err(|error| format!("provider SSE frame is not UTF-8: {error}"))?;
+    let mut terminal: ProviderSseTerminalDisposition = ProviderSseTerminalDisposition::Continue;
+    let mut current_event: Option<String> = None;
+    let mut current_data: Option<String> = None;
+    for raw_line in text.split('\n') {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if line.is_empty() {
+            if let Some(data) = current_data.as_deref() {
+                if let Some(disposition) =
+                    classify_provider_sse_event(current_event.as_deref(), data)
+                {
+                    merge_provider_sse_terminal(&mut terminal, disposition);
+                }
+            }
+            current_event = None;
+            current_data = None;
+            continue;
+        }
+        if let Some(event) = line.strip_prefix("event:") {
+            current_event = Some(event.trim().to_string());
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            let mut value = data.trim_start().to_string();
+            if let Some(prior) = current_data.take() {
+                value = format!("{prior}\n{value}");
+            }
+            current_data = Some(value);
+        }
+    }
+    Ok(terminal)
+}
+
+fn merge_provider_sse_terminal(
+    current: &mut ProviderSseTerminalDisposition,
+    next: ProviderSseTerminalDisposition,
+) {
+    match (&*current, &next) {
+        (ProviderSseTerminalDisposition::Continue, _) => *current = next,
+        (_, ProviderSseTerminalDisposition::Continue) => {}
+        (ProviderSseTerminalDisposition::Completed, ProviderSseTerminalDisposition::Completed) => {}
+        (ProviderSseTerminalDisposition::Completed, _) => {}
+        (
+            ProviderSseTerminalDisposition::Incomplete { .. }
+            | ProviderSseTerminalDisposition::Failed { .. },
+            _,
+        ) => {}
+    }
+}
+
+fn classify_provider_sse_event(
+    event: Option<&str>,
+    data: &str,
+) -> Option<ProviderSseTerminalDisposition> {
+    let semantic: Value = match serde_json::from_str(data) {
+        Ok(value) => value,
+        Err(_) => return None,
+    };
+    let response = semantic.get("response").unwrap_or(&semantic);
+    let status = response.get("status").and_then(Value::as_str);
+    let event = event.unwrap_or_default();
+    if event == "response.incomplete" || status == Some("incomplete") {
+        let reason = response
+            .pointer("/incomplete_details/reason")
+            .or_else(|| semantic.pointer("/incomplete_details/reason"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+            .unwrap_or("unknown");
+        return Some(ProviderSseTerminalDisposition::Incomplete {
+            reason: reason.to_string(),
+        });
+    }
+    if status == Some("completed") {
+        return Some(ProviderSseTerminalDisposition::Completed);
+    }
+    if event == "response.failed" {
+        let message = response
+            .pointer("/error/message")
+            .or_else(|| semantic.pointer("/error/message"))
+            .and_then(Value::as_str)
+            .unwrap_or("provider response failed");
+        return Some(ProviderSseTerminalDisposition::Failed {
+            message: message.to_string(),
+        });
+    }
+    if event == "response.completed" {
+        return Some(ProviderSseTerminalDisposition::Completed);
+    }
+    None
+}
+
 fn normalize_provider_sse_frame_with_lane(
     protocol: &str,
     frame: &[u8],
@@ -412,10 +516,19 @@ fn normalize_provider_sse_frame_with_lane(
     let text = std::str::from_utf8(frame).map_err(|error| format!("provider_sse_utf8: {error}"))?;
     let mut output = Vec::new();
     let mut current_event: Option<String> = None;
+    let mut current_data: Vec<String> = Vec::new();
     for line in text.lines() {
         let line = line.strip_suffix('\r').unwrap_or(line);
         if line.is_empty() {
+            normalize_provider_sse_data_event(
+                protocol,
+                current_event.as_deref(),
+                &current_data,
+                allow_relay_instructions,
+                &mut output,
+            )?;
             current_event = None;
+            current_data.clear();
             continue;
         }
         if let Some(event) = line.strip_prefix("event:") {
@@ -425,61 +538,71 @@ fn normalize_provider_sse_frame_with_lane(
         let Some(data) = line.strip_prefix("data:") else {
             continue;
         };
-        let data = data.trim();
-        if data == "[DONE]" {
-            output.extend_from_slice(
-                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
-            );
-            continue;
-        }
-        let value: Value = serde_json::from_str(data)
-            .map_err(|error| format!("provider_sse_malformed: {error}"))?;
-        let mut events = match protocol {
-            "openai" | "chat" => normalize_openai_sse_event(&value)?,
-            "anthropic" => normalize_anthropic_sse_event(&value).into_iter().collect(),
-            "responses" => vec![normalize_responses_response(
-                &consume_responses_sse_extra_fields(&value)?,
-                None,
-                allow_relay_instructions,
-            )?],
-            other => return Err(format!(
-                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
-            )),
-        };
-        if protocol == "responses" {
-            for event in &mut events {
-                let Some(event_object) = event.as_object_mut() else {
-                    continue;
-                };
-                if !event_object.contains_key("type") {
-                    if let Some(event_name) = current_event
-                        .as_ref()
-                        .filter(|name| !name.trim().is_empty())
-                    {
-                        event_object.insert("type".to_string(), Value::String(event_name.clone()));
-                    }
-                }
-            }
-        }
-        for event in events {
-            let event_type = event
-                .get("type")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    "provider Responses SSE event object must contain type after event-name normalization"
-                        .to_string()
-                })?;
-            output.extend_from_slice(
-                format!(
-                    "event: {event_type}\ndata: {}\n\n",
-                    serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())
-                )
-                .as_bytes(),
-            );
-        }
+        current_data.push(data.trim_start().to_string());
     }
     if output.is_empty() {
         return Err("provider_sse_empty: provider SSE frame contained no data event".to_string());
     }
     Ok(output)
+}
+
+fn normalize_provider_sse_data_event(
+    protocol: &str,
+    event_name: Option<&str>,
+    data_lines: &[String],
+    allow_relay_instructions: bool,
+    output: &mut Vec<u8>,
+) -> Result<(), String> {
+    if data_lines.is_empty() {
+        return Ok(());
+    }
+    let data = data_lines.join("\n");
+    if data.trim() == "[DONE]" {
+        output.extend_from_slice(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+        );
+        return Ok(());
+    }
+    let value: Value =
+        serde_json::from_str(&data).map_err(|error| format!("provider_sse_malformed: {error}"))?;
+    let mut events = match protocol {
+        "openai" | "chat" => normalize_openai_sse_event(&value)?,
+        "anthropic" => normalize_anthropic_sse_event(&value).into_iter().collect(),
+        "responses" => vec![normalize_responses_response(
+            &consume_responses_sse_extra_fields(&value)?,
+            None,
+            allow_relay_instructions,
+        )?],
+        other => {
+            return Err(format!(
+                "provider_protocol_unsupported: provider protocol {other} has no SSE normalizer"
+            ));
+        }
+    };
+    if protocol == "responses" {
+        for event in &mut events {
+            let Some(event_object) = event.as_object_mut() else {
+                continue;
+            };
+            if !event_object.contains_key("type") {
+                if let Some(event_name) = event_name.filter(|name| !name.trim().is_empty()) {
+                    event_object.insert("type".to_string(), Value::String(event_name.to_string()));
+                }
+            }
+        }
+    }
+    for event in events {
+        let event_type = event.get("type").and_then(Value::as_str).ok_or_else(|| {
+            "provider Responses SSE event object must contain type after event-name normalization"
+                .to_string()
+        })?;
+        output.extend_from_slice(
+            format!(
+                "event: {event_type}\ndata: {}\n\n",
+                serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())
+            )
+            .as_bytes(),
+        );
+    }
+    Ok(())
 }

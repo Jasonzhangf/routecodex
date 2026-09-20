@@ -14,8 +14,14 @@ fn execute(
     plugin_id: &str,
     control: Value,
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
-    let plan = compile_standard_plan(node_id, "request_execution", "request", position, &[plugin_id])
-        .expect("routing plan compiles");
+    let plan = compile_standard_plan(
+        node_id,
+        "request_execution",
+        "request",
+        position,
+        &[plugin_id],
+    )
+    .expect("routing plan compiles");
     let hash = plan.plan_hash();
     let bindings = PlanBindings {
         graph_hash: hash.clone(),
@@ -52,7 +58,12 @@ fn positive_route_facts_producer_writes_typed_control() {
     .expect("route facts producer executes");
     assert_eq!(output.control["route_facts"], json!({"keyless": true}));
     assert!(
-        output.data.as_object().unwrap().get("route_facts").is_none(),
+        output
+            .data
+            .as_object()
+            .unwrap()
+            .get("route_facts")
+            .is_none(),
         "route facts must never enter data"
     );
 }
@@ -95,10 +106,17 @@ fn positive_route_facts_consumer_accepts_typed_facts_without_selecting_target() 
     )
     .expect("route facts consumer executes");
     assert_eq!(output.control["route_facts"], json!({"keyless": true}));
-    assert!(output.control.get("target_selection").is_none(),
-        "route-facts consumer must not own target selection");
     assert!(
-        output.data.as_object().unwrap().get("target_selection").is_none(),
+        output.control.get("target_selection").is_none(),
+        "route-facts consumer must not own target selection"
+    );
+    assert!(
+        output
+            .data
+            .as_object()
+            .unwrap()
+            .get("target_selection")
+            .is_none(),
         "target selection must never enter data"
     );
 }

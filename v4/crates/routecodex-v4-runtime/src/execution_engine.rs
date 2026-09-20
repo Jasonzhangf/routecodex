@@ -61,8 +61,8 @@ pub struct NodeExecutionFrame {
 
 impl NodeExecutionFrame {
     pub fn new(data: Value, control: Value) -> Self {
-        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
-            .expect("JSON data must be encodable");
+        let shared_data =
+            crate::ImmutableDataCarrier::from_value(&data).expect("JSON data must be encodable");
         Self {
             data,
             control,
@@ -76,8 +76,8 @@ impl NodeExecutionFrame {
     }
 
     pub fn with_information(data: Value, control: Value, information: Value) -> Self {
-        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
-            .expect("JSON data must be encodable");
+        let shared_data =
+            crate::ImmutableDataCarrier::from_value(&data).expect("JSON data must be encodable");
         Self {
             data,
             control,
@@ -96,8 +96,8 @@ impl NodeExecutionFrame {
         information: Value,
         events: Vec<DiagnosticFact>,
     ) -> Self {
-        let shared_data = crate::ImmutableDataCarrier::from_value(&data)
-            .expect("JSON data must be encodable");
+        let shared_data =
+            crate::ImmutableDataCarrier::from_value(&data).expect("JSON data must be encodable");
         Self {
             data,
             control,
@@ -138,8 +138,12 @@ impl NodeExecutionFrame {
 
     pub fn shares_immutable_carriers_with(&self, other: &Self) -> bool {
         self.shared_data.shares_storage_with(&other.shared_data)
-            && self.shared_information.shares_storage_with(&other.shared_information)
-            && self.shared_diagnostic.shares_storage_with(&other.shared_diagnostic)
+            && self
+                .shared_information
+                .shares_storage_with(&other.shared_information)
+            && self
+                .shared_diagnostic
+                .shares_storage_with(&other.shared_diagnostic)
     }
 
     pub fn shared_data(&self) -> &crate::ImmutableDataCarrier {
@@ -198,11 +202,22 @@ impl NodeOutcome {
                     "branch edge_id must not be empty".to_string(),
                 ));
             }
-            Self::Continue { data, control, information, .. }
-            | Self::Branch { data, control, information, .. } => {
+            Self::Continue {
+                data,
+                control,
+                information,
+                ..
+            }
+            | Self::Branch {
+                data,
+                control,
+                information,
+                ..
+            } => {
                 if !data.is_object() || !control.is_object() || !information.is_object() {
                     return Err(ExecutionError::InvalidOutcome(
-                        "continue/branch data, control and information must be JSON objects".to_string(),
+                        "continue/branch data, control and information must be JSON objects"
+                            .to_string(),
                     ));
                 }
             }

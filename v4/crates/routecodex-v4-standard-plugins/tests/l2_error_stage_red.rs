@@ -51,10 +51,34 @@ fn chain_input() -> Value {
 #[test]
 fn positive_error_stages_advance_typed_chain() {
     let stages = [
-        ("V4Error02HostCaptured", "error_source", 2, "v4.std.error.host_capture", "host_captured"),
-        ("V4Error03RuntimeClassified", "error_classify", 3, "v4.std.error.runtime_classify", "runtime_classified"),
-        ("V4Error04RouterPolicyApplied", "error_policy", 4, "v4.std.error.router_policy", "router_policy_applied"),
-        ("V4Error05ExecutionDecision", "error_decision", 5, "v4.std.error.execution_decision", "execution_decision"),
+        (
+            "V4Error02HostCaptured",
+            "error_source",
+            2,
+            "v4.std.error.host_capture",
+            "host_captured",
+        ),
+        (
+            "V4Error03RuntimeClassified",
+            "error_classify",
+            3,
+            "v4.std.error.runtime_classify",
+            "runtime_classified",
+        ),
+        (
+            "V4Error04RouterPolicyApplied",
+            "error_policy",
+            4,
+            "v4.std.error.router_policy",
+            "router_policy_applied",
+        ),
+        (
+            "V4Error05ExecutionDecision",
+            "error_decision",
+            5,
+            "v4.std.error.execution_decision",
+            "execution_decision",
+        ),
     ];
     for (node_id, role_id, position, plugin_id, expected_stage) in stages {
         let output = execute(node_id, role_id, position, plugin_id, chain_input())
@@ -65,7 +89,12 @@ fn positive_error_stages_advance_typed_chain() {
             "{plugin_id} must set stage {expected_stage}"
         );
         assert!(
-            output.data.as_object().unwrap().get("error_chain").is_none(),
+            output
+                .data
+                .as_object()
+                .unwrap()
+                .get("error_chain")
+                .is_none(),
             "error chain must never enter data"
         );
     }
@@ -74,10 +103,30 @@ fn positive_error_stages_advance_typed_chain() {
 #[test]
 fn negative_error_stages_fail_without_typed_chain_resource() {
     for (node_id, role_id, position, plugin_id) in [
-        ("V4Error02HostCaptured", "error_source", 2, "v4.std.error.host_capture"),
-        ("V4Error03RuntimeClassified", "error_classify", 3, "v4.std.error.runtime_classify"),
-        ("V4Error04RouterPolicyApplied", "error_policy", 4, "v4.std.error.router_policy"),
-        ("V4Error05ExecutionDecision", "error_decision", 5, "v4.std.error.execution_decision"),
+        (
+            "V4Error02HostCaptured",
+            "error_source",
+            2,
+            "v4.std.error.host_capture",
+        ),
+        (
+            "V4Error03RuntimeClassified",
+            "error_classify",
+            3,
+            "v4.std.error.runtime_classify",
+        ),
+        (
+            "V4Error04RouterPolicyApplied",
+            "error_policy",
+            4,
+            "v4.std.error.router_policy",
+        ),
+        (
+            "V4Error05ExecutionDecision",
+            "error_decision",
+            5,
+            "v4.std.error.execution_decision",
+        ),
     ] {
         let error = execute(node_id, role_id, position, plugin_id, json!({}))
             .expect_err("error stage requires existing typed error chain");

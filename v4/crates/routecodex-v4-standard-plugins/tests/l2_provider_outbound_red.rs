@@ -98,7 +98,9 @@ fn positive_provider_transport_validate_preserves_wire_and_emits_fact() {
     assert_eq!(output.data, payload);
     let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
     assert!(
-        kinds.iter().any(|k| *k == "node.provider_transport_validated"),
+        kinds
+            .iter()
+            .any(|k| *k == "node.provider_transport_validated"),
         "transport validate must emit diagnostic: {kinds:?}"
     );
 }

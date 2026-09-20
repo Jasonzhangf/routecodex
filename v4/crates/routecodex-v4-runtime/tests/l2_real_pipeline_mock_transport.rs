@@ -79,7 +79,10 @@ fn positive_keyless_fixture_carries_fixture_identity_through_request_chain() {
         serde_json::from_str(&first.provider_wire).expect("provider wire must be JSON");
     assert_eq!(provider_wire["model"], "mock-model");
     assert!(provider_wire.get("requestId").is_none());
-    assert!(!first.continuation_committed, "runtime owns no local continuation");
+    assert!(
+        !first.continuation_committed,
+        "runtime owns no local continuation"
+    );
     assert_eq!(first.continuation_owner, "relay");
     assert_eq!(first.fixture_method, "POST");
     assert_eq!(first.fixture_path, "/v1/chat/completions");
@@ -168,7 +171,10 @@ fn positive_responses_direct_operator_accepted() {
     );
     assert_eq!(report.fixture_path, "/v1/responses");
     assert_eq!(report.fixture_model, "responses-model");
-    assert!(!report.continuation_committed, "runtime owns no local continuation");
+    assert!(
+        !report.continuation_committed,
+        "runtime owns no local continuation"
+    );
     assert_eq!(report.continuation_owner, "direct");
 }
 
@@ -380,9 +386,7 @@ fn red_malformed_provider_frame_flows_error_chain_with_real_scope() {
         error.fault_code
     );
     assert!(
-        error
-            .client_projection_message
-            .contains("expected ident"),
+        error.client_projection_message.contains("expected ident"),
         "client projection must carry the raw parse reason: {:?}",
         error.client_projection_message
     );

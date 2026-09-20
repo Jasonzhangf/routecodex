@@ -14,17 +14,27 @@ fn execute(
     plugin_id: &str,
     data: Value,
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
-    execute_with_transport(plugin_id, data, None)
+    execute_with_transport(plugin_id, data, None, json!({}))
 }
 
 fn execute_sse(
     plugin_id: &str,
     frame: &[u8],
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
+    let information = if plugin_id == "v4.std.direct.response.sse_frame_boundary" {
+        json!({"provider_protocol": "openai-responses"})
+    } else {
+        json!({
+            "provider_protocol": "openai-responses",
+            "client_protocol": "openai-chat",
+            "execution_lane": "relay"
+        })
+    };
     execute_with_transport(
         plugin_id,
         json!({}),
         Some(SharedTransportCarrier::from_shared_bytes(Arc::from(frame))),
+        information,
     )
 }
 
@@ -32,6 +42,7 @@ fn execute_with_transport(
     plugin_id: &str,
     data: Value,
     transport: Option<SharedTransportCarrier>,
+    information: Value,
 ) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
     let (node_id, chain_id) = if plugin_id == "v4.std.direct.response.sse_frame_boundary" {
         ("V4DirectResp01ProviderRaw", "direct_response")
@@ -46,8 +57,7 @@ fn execute_with_transport(
         manifest_hash: hash.clone(),
         loaded_plan_hash: hash.clone(),
     };
-    let mut container = NodeContainer::declare(node_id, plan, bindings)
-        .expect("binding passes");
+    let mut container = NodeContainer::declare(node_id, plan, bindings).expect("binding passes");
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();
@@ -56,7 +66,7 @@ fn execute_with_transport(
         NodeExecutionInput {
             data,
             control: json!({}),
-            information: json!({}),
+            information,
             transport,
         },
         &StandardHandleRegistry::new(),
@@ -89,7 +99,7 @@ fn negative_provider_raw_validate_rejects_non_object() {
 fn positive_provider_sse_boundary_decodes_continue_frame() {
     let frame = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
     let output = execute_sse("v4.std.response.sse_frame_boundary", frame)
-    .expect("SSE frame boundary decodes");
+        .expect("SSE frame boundary decodes");
     assert_eq!(output.data["type"], json!("response.output_text.delta"));
     assert_eq!(output.data["delta"], json!("hi"));
     let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
@@ -103,7 +113,7 @@ fn positive_provider_sse_boundary_decodes_continue_frame() {
 fn negative_provider_sse_boundary_rejects_malformed_frame() {
     let frame = b"event: response.output_text.delta\ndata: {bad}\n\n";
     let error = execute_sse("v4.std.response.sse_frame_boundary", frame)
-    .expect_err("malformed SSE frame must fail fast");
+        .expect_err("malformed SSE frame must fail fast");
     assert!(matches!(
         error,
         NodeContainerError::Bridge(routecodex_v4_cordis_bridge::BridgeError::HandleError { .. })
@@ -114,7 +124,7 @@ fn negative_provider_sse_boundary_rejects_malformed_frame() {
 fn positive_direct_sse_boundary_decodes_frame_without_relay_semantics() {
     let frame = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n\n";
     let output = execute_sse("v4.std.direct.response.sse_frame_boundary", frame)
-    .expect("direct SSE boundary decodes");
+        .expect("direct SSE boundary decodes");
     assert_eq!(output.data["type"], json!("response.completed"));
     let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
     assert!(

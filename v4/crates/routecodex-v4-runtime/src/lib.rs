@@ -2527,6 +2527,18 @@ impl SkeletonRuntime {
         } else {
             "relay_request"
         };
+        let (entry_protocol, execution_lane) = if chain_id == "direct_request" {
+            ("responses", "direct")
+        } else {
+            ("chat", "relay")
+        };
+        let route_facts = TargetSelectionRequest::new(
+            None,
+            fixture.model.clone(),
+            entry_protocol,
+            execution_lane,
+        )
+        .to_route_facts_value();
         let result = self.execute_path(
             chain_id,
             request_id,
@@ -2550,6 +2562,9 @@ impl SkeletonRuntime {
                 );
                 ctx.information.provider_protocol = Some("openai-responses".to_string());
                 ctx.information.model = Some(fixture.model.clone());
+                ctx.control.route_facts = Some(
+                    serde_json::to_string(&route_facts).expect("route facts are serializable"),
+                );
             },
             None,
         );

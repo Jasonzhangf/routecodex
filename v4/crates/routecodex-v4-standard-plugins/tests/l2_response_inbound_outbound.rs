@@ -6,7 +6,8 @@ use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput, SharedTranspo
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::{compile_node_plan, PlanError};
 use routecodex_v4_standard_plugins::protocol::provider_response::{
-    normalize_provider_response, normalize_provider_sse_frame,
+    classify_provider_sse_terminal, normalize_provider_response, normalize_provider_sse_frame,
+    ProviderSseTerminalDisposition,
 };
 use routecodex_v4_standard_plugins::response_inbound::{
     decode_direct_provider_sse_frame, decode_provider_sse_frame, ProviderSseEventDisposition,
@@ -943,6 +944,25 @@ fn provider_sse_codec_classifies_continue_complete_and_failure() {
         failed.disposition,
         ProviderSseEventDisposition::Failed {
             message: "upstream failed".to_string(),
+        }
+    );
+}
+
+#[test]
+fn provider_sse_terminal_classifier_joins_multiline_data_with_newline() {
+    let disposition = classify_provider_sse_terminal(
+        "responses",
+        br#"event: response.incomplete
+data: {"type":"response.incomplete",
+data: "response":{"id":"resp_incomplete","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}
+
+"#,
+    )
+    .expect("multiline terminal frame must be classified");
+    assert_eq!(
+        disposition,
+        ProviderSseTerminalDisposition::Incomplete {
+            reason: "max_output_tokens".to_string(),
         }
     );
 }

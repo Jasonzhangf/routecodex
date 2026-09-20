@@ -82,7 +82,10 @@ fn positive_blackbox_execute_standard_plan_through_node_container() {
     // stay in the control side channel.
     let data = output.data.as_object().expect("data is object");
     assert_eq!(data["messages"][0]["content"], json!("hello"));
-    assert!(data.get("governance").is_none(), "governance state never enters data");
+    assert!(
+        data.get("governance").is_none(),
+        "governance state never enters data"
+    );
     assert!(data.get("control").is_none(), "control never enters data");
     assert!(
         data.get("metadata_center").is_none(),

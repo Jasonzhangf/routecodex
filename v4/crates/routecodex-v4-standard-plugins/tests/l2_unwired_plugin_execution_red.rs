@@ -9,11 +9,11 @@
 use routecodex_v4_cordis_bridge::{BridgeError, NodeExecutionInput};
 use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindings};
 use routecodex_v4_plugin_plan::NodePluginPlan;
+use routecodex_v4_skeleton::SkeletonPlan;
 use routecodex_v4_standard_plugins::{
-    compile_standard_plan, compile_production_execution_plans, standard_plugins,
+    compile_production_execution_plans, compile_standard_plan, standard_plugins,
     StandardHandleRegistry,
 };
-use routecodex_v4_skeleton::SkeletonPlan;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::fs;
@@ -125,8 +125,7 @@ fn every_unwired_plugin_has_a_typed_handle() {
 
 #[test]
 fn ineligible_unwired_plugins_must_not_appear_in_production_plans() {
-    let ineligible = [
-    ];
+    let ineligible = [];
     let in_production = production_plan_ids();
     let leaks: Vec<&&str> = ineligible
         .iter()

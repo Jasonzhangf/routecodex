@@ -120,8 +120,7 @@ pub(crate) fn direct_response_passthrough(ctx: &mut ExecCtx<'_>) -> Result<(), S
     // Transport already supplies the raw provider body as the data-plane
     // object. This hook validates protocol identity, consumes Responses-only
     // provider diagnostics, and does not unwrap a synthetic HTTP envelope.
-    ctx.write_data(value)
-        .map_err(|error| error.to_string())
+    ctx.write_data(value).map_err(|error| error.to_string())
 }
 
 pub(crate) fn direct_request_wire_validate(ctx: &mut ExecCtx<'_>) -> Result<(), String> {

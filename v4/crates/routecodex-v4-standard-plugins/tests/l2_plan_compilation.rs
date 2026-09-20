@@ -159,8 +159,14 @@ fn positive_responses_direct_console_observers_are_bound() {
     .expect("direct Responses response console plan compiles");
     assert!(request.verify());
     assert!(response.verify());
-    assert_eq!(request.entries[0].plugin_id, "v4.std.diagnostic.direct_request_payload_console_render");
-    assert_eq!(response.entries[0].plugin_id, "v4.std.diagnostic.direct_response_payload_console_render");
+    assert_eq!(
+        request.entries[0].plugin_id,
+        "v4.std.diagnostic.direct_request_payload_console_render"
+    );
+    assert_eq!(
+        response.entries[0].plugin_id,
+        "v4.std.diagnostic.direct_response_payload_console_render"
+    );
 }
 
 #[test]

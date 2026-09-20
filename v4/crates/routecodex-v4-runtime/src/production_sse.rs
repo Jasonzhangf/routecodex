@@ -11,11 +11,13 @@ use crate::{
 };
 use routecodex_v4_provider::{NativeProviderResponseStream, ProviderResponseStream};
 use routecodex_v4_server::{HttpRequest, ResponseStream};
+use routecodex_v4_standard_plugins::protocol::provider_response::{
+    classify_provider_sse_terminal, ProviderSseTerminalDisposition,
+};
 use routecodex_v4_standard_plugins::sse_transport::{
     production_transport_pair, SseEgressPlugin, SseIngressPlugin, SseTransportError,
     SseTransportFrame,
 };
-use routecodex_v4_standard_plugins::protocol::provider_response::normalize_provider_sse_frame_for_relay;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
@@ -86,7 +88,10 @@ impl NativeProviderSseSource {
     /// product error policy can inspect complete bytes before any client
     /// egress. Sealing at the terminal (not TCP EOF) preserves the declared
     /// full-attempt boundary without waiting for transport close.
-    pub fn read_attempt_until_terminal(&mut self, protocol: &str) -> Result<Vec<u8>, String> {
+    pub fn read_attempt_until_terminal(
+        &mut self,
+        protocol: &str,
+    ) -> Result<(Vec<u8>, ProviderSseTerminalDisposition), String> {
         let protocol = match protocol {
             "openai_chat" | "openai-chat" | "openai" => "chat",
             "openai-responses" | "openai_responses" => "responses",
@@ -101,20 +106,61 @@ impl NativeProviderSseSource {
                 .block_on(self.stream.next_chunk())
                 .map_err(|error| error.to_string())?;
             let Some(bytes) = bytes else {
-                return Ok(attempt);
+                return Ok((
+                    attempt,
+                    ProviderSseTerminalDisposition::Failed {
+                        message: "provider SSE ended without a protocol terminal".to_string(),
+                    },
+                ));
             };
             extend_bounded_attempt(&mut attempt, &bytes)?;
             attempt.extend_from_slice(&bytes);
             let frames = ingress
                 .push_chunk(&bytes, std::time::Instant::now())
                 .map_err(|error| format!("{error:?}"))?;
-            for frame in frames {
-                if provider_sse_frame_is_terminal(protocol, frame.as_bytes())? {
-                    return Ok(attempt);
+            for (index, frame) in frames.iter().enumerate() {
+                let disposition = classify_provider_sse_terminal(protocol, frame.as_bytes())?;
+                if !matches!(disposition, ProviderSseTerminalDisposition::Continue) {
+                    if frames_after_terminal(&mut ingress, &frames, index)? {
+                        return Err(
+                            "provider emitted a frame after its protocol terminal".to_string()
+                        );
+                    }
+                    return Ok((attempt, disposition));
                 }
             }
         }
     }
+}
+
+fn frames_after_terminal(
+    ingress: &mut SseIngressPlugin,
+    frames: &[SseTransportFrame],
+    terminal_index: usize,
+) -> Result<bool, String> {
+    if terminal_index + 1 < frames.len() {
+        return Ok(true);
+    }
+    let terminal = frames
+        .get(terminal_index)
+        .ok_or_else(|| "provider terminal frame is not in the framed attempt".to_string())?;
+    let terminal_end = terminal
+        .as_bytes()
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|position| position + 2)
+        .or_else(|| {
+            terminal
+                .as_bytes()
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|position| position + 4)
+        })
+        .ok_or_else(|| "provider terminal frame has no complete frame boundary".to_string())?;
+    let trailing = ingress
+        .push_chunk(&terminal.as_bytes()[terminal_end..], std::time::Instant::now())
+        .map_err(|error| format!("{error:?}"))?;
+    Ok(!trailing.is_empty() || ingress.finish().is_err())
 }
 
 fn extend_bounded_attempt(attempt: &mut Vec<u8>, bytes: &[u8]) -> Result<(), String> {
@@ -126,24 +172,9 @@ fn extend_bounded_attempt(attempt: &mut Vec<u8>, bytes: &[u8]) -> Result<(), Str
 }
 
 /// True when a complete provider SSE frame carries the protocol terminal
-/// event. Provider semantics come from the protocol owner's normalizer; the
-/// runtime only asks whether the attempt may be sealed before transport close.
-fn provider_sse_frame_is_terminal(protocol: &str, frame: &[u8]) -> Result<bool, String> {
-    let normalized = normalize_provider_sse_frame_for_relay(protocol, frame)
-        .map_err(|error| error.to_string())?;
-    let text = std::str::from_utf8(&normalized).map_err(|error| error.to_string())?;
-    Ok(text.lines().any(|line| {
-        line.strip_prefix("event:")
-            .map(str::trim)
-            .is_some_and(|event| {
-                matches!(
-                    event,
-                    "response.completed" | "response.incomplete" | "response.failed"
-                )
-            })
-    }))
-}
-
+/// event. Provider semantics come from the protocol owner's typed classifier;
+/// the runtime only asks whether the attempt may be sealed before transport
+/// close.
 impl ProviderSseSource for NativeProviderSseSource {
     fn read_chunk(&mut self, chunk: &mut [u8]) -> Result<usize, String> {
         if !self.pending.is_empty() {
@@ -433,13 +464,177 @@ impl<S: ProviderSseSource> ResponseStream for SseTransportDriver<S> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extend_bounded_attempt, MAX_PROVIDER_ATTEMPT_BYTES};
+    use super::{
+        extend_bounded_attempt, frames_after_terminal, production_transport_pair,
+        NativeProviderSseSource, ProviderSseSource, MAX_PROVIDER_ATTEMPT_BYTES,
+    };
+    use routecodex_v4_provider::NativeProviderTransport;
+    use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn bounded_attempt_rejects_growth_past_limit() {
         let mut attempt = vec![0u8; MAX_PROVIDER_ATTEMPT_BYTES];
         extend_bounded_attempt(&mut attempt, &[]).expect("exact limit is allowed");
-        let error = extend_bounded_attempt(&mut attempt, &[0]).expect_err("one byte past limit fails");
+        let error =
+            extend_bounded_attempt(&mut attempt, &[0]).expect_err("one byte past limit fails");
         assert_eq!(error, "provider SSE attempt exceeded bounded staging");
+    }
+
+    #[test]
+    fn frames_after_terminal_reject_same_chunk_trailing_frame() {
+        let (mut ingress, _) =
+            production_transport_pair(std::time::Instant::now()).expect("transport pair");
+        let frames = ingress
+            .push_chunk(
+                concat!(
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+                    "event: response.output_text.delta\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"late\"}\n\n",
+                )
+                .as_bytes(),
+                std::time::Instant::now(),
+            )
+            .expect("complete frames");
+        assert!(frames_after_terminal(&mut ingress, &frames, 0).expect("trailing frame result"));
+    }
+
+    #[test]
+    fn frames_after_terminal_reject_partial_same_chunk_trailing_bytes() {
+        let (mut ingress, _) =
+            production_transport_pair(std::time::Instant::now()).expect("transport pair");
+        let frames = ingress
+            .push_chunk(
+                concat!(
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+                    "event: response.output_text.delta\n",
+                )
+                .as_bytes(),
+                std::time::Instant::now(),
+            )
+            .expect("terminal frame");
+        assert!(frames_after_terminal(&mut ingress, &frames, 0).expect("trailing bytes result"));
+    }
+
+    #[test]
+    fn frames_after_terminal_accept_terminal_without_trailing_bytes() {
+        let (mut ingress, _) =
+            production_transport_pair(std::time::Instant::now()).expect("transport pair");
+        let frames = ingress
+            .push_chunk(
+                concat!(
+                    "event: response.completed\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{}}\n\n",
+                )
+                .as_bytes(),
+                std::time::Instant::now(),
+            )
+            .expect("terminal frame");
+        assert!(!frames_after_terminal(&mut ingress, &frames, 0).expect("clean terminal result"));
+    }
+
+    #[test]
+    fn cancelled_attempt_does_not_drain_provider_until_terminal() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let address = provider.local_addr().expect("provider address");
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n",
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: keep-alive\r\n\r\n{:x}\r\n{}\r\n",
+                body.len(),
+                body
+            )
+            .expect("provider headers and first frame");
+            stream.flush().expect("provider first frame flush");
+            std::thread::sleep(Duration::from_secs(2));
+            let terminal = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"late\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n",
+            );
+            let _ = write!(
+                stream,
+                "{:x}\r\n{}\r\n0\r\n\r\n",
+                terminal.len(),
+                terminal
+            );
+        });
+        let config = std::env::temp_dir().join(format!(
+            "v4-provider-cancel-attempt-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{address}"
+defaultModel = "mock-model"
+type = "responses"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let cancellation = CancellationToken::new();
+        let transport =
+            NativeProviderTransport::new(Duration::from_secs(5), 1024 * 1024).expect("transport");
+        let stream = runtime
+            .block_on(transport.send_streaming(
+                config.to_str().expect("provider config path"),
+                "responses",
+                "responses",
+                &json!({"stream": true}),
+                cancellation.clone(),
+            ))
+            .expect("provider stream");
+        let mut source =
+            NativeProviderSseSource::new(stream, cancellation.clone(), runtime.handle().clone());
+        let mut first = [0u8; 8192];
+        assert!(
+            ProviderSseSource::read_chunk(&mut source, &mut first).expect("first chunk") > 0
+        );
+        cancellation.cancel();
+        let started = std::time::Instant::now();
+        let error = source
+            .read_attempt_until_terminal("responses")
+            .expect_err("cancelled attempt must fail");
+        assert_eq!(
+            error,
+            "provider_transport_cancelled: provider stream cancelled"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "cancellation must not wait for the provider terminal"
+        );
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(config).ok();
     }
 }

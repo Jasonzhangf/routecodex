@@ -657,6 +657,35 @@ impl ProductErrorPolicyPort {
     ) -> Option<ProductErrorDecision> {
         evaluate_product_error_policy(product, provider_id, status, response_body)
     }
+
+    pub fn evaluate_semantic_failure(
+        product: &RuntimeProductConfig,
+        provider_id: &str,
+        response_body: &str,
+        reason_code: &str,
+    ) -> Option<ProductErrorDecision> {
+        let mut decision = if let Some(decision) =
+            evaluate_product_error_policy(product, provider_id, 200, response_body)
+        {
+            decision
+        } else if product.default_error_path.is_empty() {
+            return None;
+        } else {
+            decision_from_actions(
+                "default",
+                product.default_error_path.as_slice(),
+                Some(reason_code.to_string()),
+                200,
+            )
+        };
+        if decision.retry {
+            // Provider semantic failures never grant a production same-
+            // candidate retry, regardless of the configured compatibility
+            // retry_mode. The configured mode remains observable.
+            decision.execution_action = ProductErrorExecutionAction::Reselect;
+        }
+        Some(decision)
+    }
 }
 
 /// Apply the compiled product error policy. This produces typed control facts
@@ -705,6 +734,20 @@ fn evaluate_product_error_policy(
         ),
         None => return None,
     };
+    Some(decision_from_actions(
+        &policy_id,
+        actions,
+        reason_code,
+        status,
+    ))
+}
+
+fn decision_from_actions(
+    policy_id: &str,
+    actions: &[RuntimeProductPolicyAction],
+    reason_code: Option<String>,
+    status: u16,
+) -> ProductErrorDecision {
     let retry_mode = actions
         .iter()
         .find(|action| action.step == "wait_retry")
@@ -739,8 +782,8 @@ fn evaluate_product_error_policy(
             }
         }
     };
-    Some(ProductErrorDecision {
-        policy_id,
+    ProductErrorDecision {
+        policy_id: policy_id.to_string(),
         retry: matches!(
             retry_mode,
             Some(
@@ -774,7 +817,7 @@ fn evaluate_product_error_policy(
                     .flatten()
             })
         }),
-    })
+    }
 }
 
 fn has_step(actions: &[RuntimeProductPolicyAction], step: &str) -> bool {

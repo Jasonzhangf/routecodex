@@ -18,8 +18,8 @@ fn production_contract() -> Value {
         "{}/../../contracts/skeleton-plan.contract.json",
         env!("CARGO_MANIFEST_DIR")
     );
-    let text = fs::read_to_string(&path)
-        .expect("skeleton plan contract must be readable from v4 root");
+    let text =
+        fs::read_to_string(&path).expect("skeleton plan contract must be readable from v4 root");
     serde_json::from_str(&text).expect("skeleton plan contract must parse as JSON")
 }
 
@@ -111,8 +111,7 @@ fn every_compiled_production_entry_has_a_runtime_handle() {
         &serde_json::to_string(&contract).expect("contract serializes"),
     )
     .expect("production skeleton compiles");
-    let compiled = compile_production_execution_plans(&skeleton)
-        .expect("production plans compile");
+    let compiled = compile_production_execution_plans(&skeleton).expect("production plans compile");
     let registry = StandardHandleRegistry::new();
     let mut missing = Vec::new();
     for plan in compiled.plans {
@@ -122,7 +121,10 @@ fn every_compiled_production_entry_has_a_runtime_handle() {
             }
         }
     }
-    assert!(missing.is_empty(), "compiled production entries lack handles: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "compiled production entries lack handles: {missing:?}"
+    );
 }
 
 #[test]
@@ -132,15 +134,21 @@ fn compiled_production_plans_cover_every_runtime_node() {
         &serde_json::to_string(&contract).expect("contract serializes"),
     )
     .expect("production skeleton compiles");
-    let compiled = compile_production_execution_plans(&skeleton)
-        .expect("production plans compile");
+    let compiled = compile_production_execution_plans(&skeleton).expect("production plans compile");
     let expected_nodes = skeleton
         .chains
         .iter()
-        .filter(|chain| matches!(
-            chain.chain_id.as_str(),
-            "direct_request" | "direct_response" | "relay_request" | "relay_response" | "error" | "control"
-        ))
+        .filter(|chain| {
+            matches!(
+                chain.chain_id.as_str(),
+                "direct_request"
+                    | "direct_response"
+                    | "relay_request"
+                    | "relay_response"
+                    | "error"
+                    | "control"
+            )
+        })
         .map(|chain| chain.nodes.len())
         .sum::<usize>();
     assert_eq!(compiled.plans.len(), expected_nodes);
@@ -150,7 +158,10 @@ fn compiled_production_plans_cover_every_runtime_node() {
         .flat_map(|plan| plan.entries.iter().map(|entry| entry.plugin_id.as_str()))
         .filter(|plugin_id| plugin_id.starts_with("v4.std."))
         .count();
-    assert!(bound_plugins > 2, "production wiring must not collapse to two plugin entries");
+    assert!(
+        bound_plugins > 2,
+        "production wiring must not collapse to two plugin entries"
+    );
 }
 
 #[test]
@@ -160,8 +171,7 @@ fn request_chat_process_has_executable_governance_handle() {
         &serde_json::to_string(&contract).expect("contract serializes"),
     )
     .expect("production skeleton compiles");
-    let compiled = compile_production_execution_plans(&skeleton)
-        .expect("production plans compile");
+    let compiled = compile_production_execution_plans(&skeleton).expect("production plans compile");
     let plan = compiled
         .plans
         .iter()
@@ -170,7 +180,10 @@ fn request_chat_process_has_executable_governance_handle() {
     assert!(
         plan.entries.iter().any(|entry| {
             entry.plugin_id == "v4.std.chat_process.request_governance"
-                && !matches!(entry.effect, routecodex_v4_plugin_contract::PluginEffect::DiagnosticOnly)
+                && !matches!(
+                    entry.effect,
+                    routecodex_v4_plugin_contract::PluginEffect::DiagnosticOnly
+                )
         }),
         "request Chat Process must execute governance through its plugin handle"
     );

@@ -316,11 +316,7 @@ fn relay_request_projects_responses_sampling_tool_choice_and_format_fields() {
 #[test]
 fn relay_request_rejects_malformed_responses_tool_choice_and_response_format() {
     for (field, value, expected) in [
-        (
-            "tool_choice",
-            json!({"type":"function"}),
-            "tool_choice",
-        ),
+        ("tool_choice", json!({"type":"function"}), "tool_choice"),
         (
             "response_format",
             json!({"type":"json_schema","json_schema":{"schema":{"type":"object"}}}),

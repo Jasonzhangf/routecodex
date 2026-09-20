@@ -3,19 +3,17 @@
 //! --source-deps routecodex-v4-skeleton).
 
 use routecodex_v4_base_node::Scope;
+use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
 use routecodex_v4_cordis_bridge::{
     compile_node, execute_plan, BridgeError, HandleRegistry, NodeExecutionInput, PluginHandle,
 };
-use routecodex_v4_control::{ControlError, ControlSignal, ControlSignalKind, MetadataOperation};
 use routecodex_v4_error::{DecisionAction, ErrorChain, ErrorStage, ExecutionDecision, RetryPolicy};
 use routecodex_v4_plugin_contract::{
     NodePluginDescriptor, NodeSelector, PluginEffect, PluginKind, PluginPhase, ResourceAxis,
     ResourceEntry, ResourceRegistry,
 };
 use routecodex_v4_plugin_plan::AuthoringPlugin;
-use routecodex_v4_router::{
-    TargetSelectionHandle, TARGET_SELECTION_PLUGIN_ID,
-};
+use routecodex_v4_router::{TargetSelectionHandle, TARGET_SELECTION_PLUGIN_ID};
 use routecodex_v4_runtime::{
     assert_no_control_leak, bind_scope_via_bridge, execution_binding, project_runtime_fault,
     project_runtime_fault_with_policy, release_scope_via_bridge, select_relay_operator,
@@ -898,8 +896,10 @@ fn target_selection_uses_requested_model_not_information_wire_model() {
     let mut product = support::test_product();
     product.providers[0].models[5].aliases = vec!["client-pin".to_string()];
     let plan = target_selection_node_plan();
-    let registry = RouterTestRegistry::new()
-        .register(TARGET_SELECTION_PLUGIN_ID, TargetSelectionHandle::new(product));
+    let registry = RouterTestRegistry::new().register(
+        TARGET_SELECTION_PLUGIN_ID,
+        TargetSelectionHandle::new(product),
+    );
     let output = execute_plan(
         &plan,
         NodeExecutionInput {
@@ -1347,6 +1347,42 @@ fn sse_transport_seals_terminal_without_consuming_trailing_provider_frame() {
 }
 
 #[test]
+fn sse_transport_accepts_multiline_terminal_data() {
+    let runtime = active_runtime();
+    let timing = V4RuntimeTimingSummary::new();
+    timing.start_request();
+    timing.begin_external().expect("external attempt starts");
+    let mut driver = sse_driver_with_source(
+        runtime,
+        "r-sse-multiline-terminal",
+        ScriptedProviderSource::new(vec![
+            concat!(
+                "event: response.incomplete\n",
+                "data: {\"type\":\"response.incomplete\",\n",
+                "data: \"response\":{\"id\":\"resp_incomplete\",\"model\":\"m\",\"status\":\"incomplete\",",
+                "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n",
+            )
+            .as_bytes()
+            .to_vec(),
+        ]),
+        timing,
+    );
+
+    let mut client_bytes = Vec::new();
+    let mut chunk = Vec::new();
+    while driver
+        .next_chunk(&mut chunk)
+        .expect("multiline stream chunk")
+    {
+        client_bytes.extend_from_slice(&chunk);
+        chunk.clear();
+    }
+    let text = String::from_utf8(client_bytes).expect("client SSE is UTF-8");
+    assert!(text.contains("response.incomplete"), "{text}");
+    assert!(!text.contains("provider_sse_malformed"), "{text}");
+}
+
+#[test]
 fn direct_sse_transport_consumes_provider_diagnostics_before_direct_raw() {
     let runtime = active_runtime();
     let timing = V4RuntimeTimingSummary::new();
@@ -1391,11 +1427,16 @@ fn direct_sse_transport_rejects_unknown_provider_control_fields() {
 
     let mut chunk = Vec::new();
     assert!(
-        driver.next_chunk(&mut chunk).expect("failure frame is committed"),
+        driver
+            .next_chunk(&mut chunk)
+            .expect("failure frame is committed"),
         "failure must project one client frame"
     );
     let text = String::from_utf8_lossy(&chunk);
-    assert!(text.contains("provider_response_control_envelope"), "{text}");
+    assert!(
+        text.contains("provider_response_control_envelope"),
+        "{text}"
+    );
     assert!(!text.contains("response.completed"), "{text}");
 }
 
@@ -1417,11 +1458,11 @@ fn sse_transport_records_non_overlapping_provider_phase_timing() {
     let mut chunk = Vec::new();
     assert!(driver.next_chunk(&mut chunk).expect("terminal chunk"));
     let snapshot = timing.request_snapshot().expect("terminal timing snapshot");
-    assert!(
-        snapshot.phases_ms.provider_read_ms >= 15,
+    assert!(snapshot.phases_ms.provider_read_ms >= 15, "{snapshot:?}");
+    assert_eq!(
+        snapshot.phases_ms.provider_sse_framing_ms, 0,
         "{snapshot:?}"
     );
-    assert_eq!(snapshot.phases_ms.provider_sse_framing_ms, 0, "{snapshot:?}");
     assert_eq!(snapshot.phases_ms.response_processing_ms, 0, "{snapshot:?}");
 }
 
@@ -1551,10 +1592,7 @@ fn responses_client_accepts_openai_chat_provider_sse_and_preserves_items() {
             ),
         )
         .expect("Chat provider finish_reason must be retained");
-    assert!(matches!(
-        finish,
-        ResponseStreamDisposition::Continue { .. }
-    ));
+    assert!(matches!(finish, ResponseStreamDisposition::Continue { .. }));
 
     let usage = processor
         .process_frame(
@@ -1564,10 +1602,7 @@ fn responses_client_accepts_openai_chat_provider_sse_and_preserves_items() {
             ),
         )
         .expect("Chat provider usage-only closeout must remain non-terminal");
-    assert!(matches!(
-        usage,
-        ResponseStreamDisposition::Continue { .. }
-    ));
+    assert!(matches!(usage, ResponseStreamDisposition::Continue { .. }));
 
     let terminal = processor
         .process_frame(&runtime, transport_frame(b"data: [DONE]\n\n"))
@@ -1649,10 +1684,7 @@ fn direct_chat_sse_finish_usage_and_done_reach_client_frame() {
     }
 
     let disposition = processor
-        .process_frame(
-            &runtime,
-            transport_frame(b"data: [DONE]\n\n"),
-        )
+        .process_frame(&runtime, transport_frame(b"data: [DONE]\n\n"))
         .expect("direct Chat [DONE] must close through the registered client path");
     let ResponseStreamDisposition::Terminal { frame } = disposition else {
         panic!("[DONE] must be terminal");

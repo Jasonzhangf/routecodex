@@ -9,7 +9,9 @@ use routecodex_v4_node_container::{NodeContainer, NodeContainerError, PlanBindin
 use routecodex_v4_standard_plugins::{compile_standard_plan, StandardHandleRegistry};
 use serde_json::{json, Value};
 
-fn execute(data: Value) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
+fn execute(
+    data: Value,
+) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutput, NodeContainerError> {
     let plan = compile_standard_plan(
         "V4ServerReqInbound01ClientRaw",
         "request_inbound",
@@ -24,12 +26,8 @@ fn execute(data: Value) -> Result<routecodex_v4_cordis_bridge::NodeExecutionOutp
         manifest_hash: hash.clone(),
         loaded_plan_hash: hash.clone(),
     };
-    let mut container = NodeContainer::declare(
-        "V4ServerReqInbound01ClientRaw",
-        plan,
-        bindings,
-    )
-    .expect("binding passes");
+    let mut container = NodeContainer::declare("V4ServerReqInbound01ClientRaw", plan, bindings)
+        .expect("binding passes");
     container.context_created().unwrap();
     container.plugins_mounted().unwrap();
     container.publish().unwrap();

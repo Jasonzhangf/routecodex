@@ -7,9 +7,13 @@ use routecodex_v4_node_container::{
     ExecutionEpochBundle, ExecutionEpochIdentity, ExecutionEpochNode, NodeContainer, PlanBindings,
     ZERO_BASE_MANIFEST_HASH,
 };
-use routecodex_v4_router::{TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID};
+use routecodex_v4_router::{
+    TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+};
 use routecodex_v4_runtime::SkeletonRuntime;
-use routecodex_v4_standard_plugins::{compile_standard_plan, standard_descriptors, StandardHandleRegistry};
+use routecodex_v4_standard_plugins::{
+    compile_standard_plan, standard_descriptors, StandardHandleRegistry,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -134,21 +138,17 @@ pub fn active_runtime(contract_json: &str) -> SkeletonRuntime {
     let plan = runtime.plan();
     let descriptors = standard_descriptors();
     let mut nodes = Vec::new();
-    for chain in plan
-        .chains
-        .iter()
-        .filter(|chain| {
-            matches!(
-                chain.chain_id.as_str(),
-                "direct_request"
-                    | "direct_response"
-                    | "relay_request"
-                    | "relay_response"
-                    | "error"
-                    | "control"
-            )
-        })
-    {
+    for chain in plan.chains.iter().filter(|chain| {
+        matches!(
+            chain.chain_id.as_str(),
+            "direct_request"
+                | "direct_response"
+                | "relay_request"
+                | "relay_response"
+                | "error"
+                | "control"
+        )
+    }) {
         for node in &chain.nodes {
             let plugin_ids = descriptors
                 .iter()

@@ -408,7 +408,9 @@ impl V4RuntimeTimingState {
         Ok(true)
     }
 
-    pub fn finish_runtime(&mut self) -> Result<routecodex_v4_server::RequestTimingSnapshot, String> {
+    pub fn finish_runtime(
+        &mut self,
+    ) -> Result<routecodex_v4_server::RequestTimingSnapshot, String> {
         if self.summary.is_some() {
             return Err("V4 Runtime timing is already terminal".to_string());
         }
@@ -434,9 +436,7 @@ impl V4RuntimeTimingState {
                     self.total_micros("provider_transport_open"),
                 ),
                 provider_read_ms: micros_to_ms(self.total_micros("provider_read")),
-                provider_sse_framing_ms: micros_to_ms(
-                    self.total_micros("provider_sse_framing"),
-                ),
+                provider_sse_framing_ms: micros_to_ms(self.total_micros("provider_sse_framing")),
                 response_processing_ms: micros_to_ms(self.total_micros("response_processing")),
             },
         };

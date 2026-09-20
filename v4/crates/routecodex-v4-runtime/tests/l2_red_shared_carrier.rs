@@ -1,6 +1,9 @@
 #![cfg(feature = "red-fixtures")]
 
-use routecodex_v4_runtime::{ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier, NodeServiceRegistry};
+use routecodex_v4_runtime::{
+    ImmutableDataCarrier, ImmutableDiagnosticCarrier, ImmutableInformationCarrier,
+    NodeServiceRegistry,
+};
 
 #[test]
 fn adjacent_nodes_share_immutable_carriers_and_reject_stale_services() {

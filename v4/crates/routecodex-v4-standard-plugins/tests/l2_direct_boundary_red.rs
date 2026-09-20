@@ -101,7 +101,9 @@ fn positive_direct_response_client_validate_preserves_payload_and_emits_fact() {
     assert_eq!(output.data, payload);
     let kinds: Vec<&str> = output.diagnostics.iter().map(|f| f.kind.as_str()).collect();
     assert!(
-        kinds.iter().any(|k| *k == "direct.response.client_validated"),
+        kinds
+            .iter()
+            .any(|k| *k == "direct.response.client_validated"),
         "direct client validator must emit diagnostic: {kinds:?}"
     );
 }
@@ -244,8 +246,7 @@ fn positive_direct_chat_terminal_emits_done_without_fake_semantic_object() {
         output
             .diagnostics
             .iter()
-            .any(|fact| fact.kind == "client_sse_frame"
-                && fact.message == "data: [DONE]\n\n"),
+            .any(|fact| fact.kind == "client_sse_frame" && fact.message == "data: [DONE]\n\n"),
         "direct Chat terminal must emit the protocol DONE frame"
     );
 }

@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+pub mod boundary;
 pub mod chat_process;
 pub mod chat_to_responses;
-pub mod boundary;
 pub mod contracts;
 pub mod control;
 pub mod diagnostic;
@@ -405,7 +405,9 @@ pub fn standard_allowed_writes() -> Vec<String> {
 /// cannot read another node's data or a wire payload through the M5 surface.
 pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
     match node_id {
-        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        "V4Error02HostCaptured"
+        | "V4Error03RuntimeClassified"
+        | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
         "V4ProviderRespInbound01Raw" => vec![
             "v4.response.provider_raw".to_string(),
@@ -523,17 +525,19 @@ pub fn standard_node_allowed_reads(node_id: &str) -> Vec<String> {
 /// facts never enter a normal data or wire resource.
 pub fn standard_node_allowed_writes(node_id: &str) -> Vec<String> {
     match node_id {
-        "V4Error02HostCaptured" | "V4Error03RuntimeClassified" | "V4Error04RouterPolicyApplied"
+        "V4Error02HostCaptured"
+        | "V4Error03RuntimeClassified"
+        | "V4Error04RouterPolicyApplied"
         | "V4Error05ExecutionDecision" => vec!["v4.control.error_chain".to_string()],
         "V4DirectReq02RelayContainer" => vec!["v4.direct.request.provider_wire".to_string()],
         "V4DirectResp02RelayContainer" => vec!["v4.direct.response.client_payload".to_string()],
         "V4HubReqOutbound06ProviderSemantic" => vec!["v4.request.provider_semantic".to_string()],
         "V4HubReqInbound02Normalized" => {
             vec!["v4.control.request_admission_facts".to_string()]
-        },
+        }
         "V4DirectReq01ClientProtocol" => {
             vec!["v4.control.request_admission_facts".to_string()]
-        },
+        }
         "V4ProviderRespInbound01Raw" => vec![
             "v4.response.provider_raw".to_string(),
             "v4.control.stream_terminal".to_string(),
@@ -1167,10 +1171,7 @@ fn chat_process_payload_console(ctx: &mut ExecCtx<'_>, direction: &str) -> Resul
             return Err("empty response payload requires terminal stream truth".to_string());
         }
     }
-    let payload_stream = ctx
-        .read_data()
-        .get("stream")
-        .and_then(Value::as_bool);
+    let payload_stream = ctx.read_data().get("stream").and_then(Value::as_bool);
     let admission_stream = if direction == "request" && payload_stream.is_none() {
         ctx.read_control_resource("v4.control.request_admission_facts")
             .map_err(|error| error.to_string())?
@@ -1492,10 +1493,7 @@ impl StandardHandleRegistry {
             ("v4.std.error.runtime_classify", error_runtime_classify),
             ("v4.std.error.router_policy", error_router_policy),
             ("v4.std.error.execution_decision", error_execution_decision),
-            (
-                "v4.std.provider.wire_build",
-                request_plugins::wire_build,
-            ),
+            ("v4.std.provider.wire_build", request_plugins::wire_build),
             (
                 "v4.std.chat_process.response_governance",
                 response_governance,

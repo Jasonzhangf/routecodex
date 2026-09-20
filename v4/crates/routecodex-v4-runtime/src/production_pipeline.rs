@@ -21,6 +21,7 @@ use routecodex_v4_router::{
 };
 use routecodex_v4_server::{HttpRequest, HttpResponse};
 use routecodex_v4_standard_plugins::diagnostic;
+use routecodex_v4_standard_plugins::protocol::provider_response::ProviderSseTerminalDisposition;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -245,7 +246,10 @@ fn project_provider_fault_with_typed_policy(
     if let Err(error) = runtime.execute_error_plan_with_lease(&fault, lease) {
         return HttpResponse::error(
             500,
-            format!("error skeleton execution failed for {}: {error}", fault.code),
+            format!(
+                "error skeleton execution failed for {}: {error}",
+                fault.code
+            ),
         );
     }
     let decision = provider_policy_execution_decision(&policy, &fault.code);
@@ -451,10 +455,9 @@ fn dispatch_request(
             status,
         )
     })?;
-    continuation_owner =
-        crate::select_execution_lane(entry_protocol, &target.protocol)
-            .map_err(|fault| project_fault(request, fault, 400))?
-            .to_string();
+    continuation_owner = crate::select_execution_lane(entry_protocol, &target.protocol)
+        .map_err(|fault| project_fault(request, fault, 400))?
+        .to_string();
     if admission.has_previous_response_id && continuation_owner == "relay" {
         return Err(project_fault(
             request,
@@ -657,13 +660,12 @@ fn dispatch_request(
         }
     };
     let mut same_candidate_retries = BTreeMap::<String, u64>::new();
-    let mut next_attempt = |
-        current: &SelectedTarget,
-        policy: &ProductErrorDecision,
-        _status: u16,
-        response_body: &str,
-        stream: bool,
-    | -> Result<(SelectedTarget, Value), HttpResponse> {
+    let mut next_attempt = |current: &SelectedTarget,
+                            policy: &ProductErrorDecision,
+                            _status: u16,
+                            response_body: &str,
+                            stream: bool|
+     -> Result<(SelectedTarget, Value), HttpResponse> {
         let can_retry_same = policy.execution_action == ProductErrorExecutionAction::RetrySame
             && policy.failure_threshold > 1;
         let candidate = if can_retry_same {
@@ -672,10 +674,8 @@ fn dispatch_request(
                 .copied()
                 .unwrap_or(0);
             if retries_done < policy.failure_threshold.saturating_sub(1) {
-                same_candidate_retries.insert(
-                    current.provider_id.clone(),
-                    retries_done.saturating_add(1),
-                );
+                same_candidate_retries
+                    .insert(current.provider_id.clone(), retries_done.saturating_add(1));
                 current.clone()
             } else {
                 if !unavailable_provider_ids
@@ -696,8 +696,7 @@ fn dispatch_request(
                             500,
                         )
                     })?;
-                    runtime_guard
-                    .execute_target_selection_with_lease(
+                    runtime_guard.execute_target_selection_with_lease(
                         &request_lease,
                         request.port,
                         session_scope,
@@ -941,159 +940,258 @@ fn dispatch_request(
                 continue;
             }
 
-            // A compiled product policy may match this status either through a
-            // declared error policy or the default error path. Only then does
-            // the runtime need complete attempt bytes before client commit.
-            let product_policy_candidate = manifest.product.as_ref().is_some_and(|product| {
-                let status_matches = |policy: &routecodex_v4_config::RuntimeProductErrorPolicy| {
-                    policy
-                        .scope_provider_id
-                        .as_deref()
-                        .map_or(true, |scope| scope == target.provider_id)
-                        && policy
-                            .match_status
-                            .map_or(true, |expected| expected == stream.status())
-                };
-                let declared = product.error_policies.iter().any(status_matches);
-                let default_applies =
-                    stream.status() >= 400 && !product.default_error_path.is_empty();
-                declared || default_applies
-            });
-            if product_policy_candidate {
-                let bytes = match stream.read_attempt_until_terminal(&target.protocol) {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        let _ = request_timing.finish_external_if_active();
-                        return Err(project_upstream_fault(
-                            request,
-                            RuntimeFault::new(
-                                "provider_response_read",
-                                format!("provider success body read failed: {error}"),
-                            )
-                            .with_status(stream.status()),
-                            stream.status(),
-                            manifest.product.as_ref(),
-                            &target.provider_id,
-                            "",
-                        ));
-                    }
-                };
-                response_body = String::from_utf8_lossy(&bytes).into_owned();
-                buffered_provider_body = Some(bytes);
-                if let Some(policy) = manifest.product.as_ref().and_then(|product| {
-                    ProductErrorPolicyPort::evaluate(
-                        product,
-                        &target.provider_id,
+            // A provider attempt is sealed at its protocol terminal before any
+            // client frame is committed. This boundary is unconditional; the
+            // product error policy only decides what to do after the terminal.
+            let (bytes, disposition) = match stream.read_attempt_until_terminal(&target.protocol) {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = request_timing.finish_external_if_active();
+                    return Err(project_upstream_fault(
+                        request,
+                        RuntimeFault::new(
+                            "provider_response_read",
+                            format!("provider success body read failed: {error}"),
+                        )
+                        .with_status(stream.status()),
                         stream.status(),
-                        &response_body,
-                    )
-                }) {
-                    record_provider_failure(
+                        manifest.product.as_ref(),
                         &target.provider_id,
-                        policy.cooldown,
-                        policy.failure_threshold,
-                    )?;
-                    if !policy.retry {
-                        let _ = request_timing.finish_external_if_active();
-                        return Err(project_upstream_fault(
-                            request,
-                            RuntimeFault::new(
-                                "provider_http_error",
-                                format!("upstream provider returned HTTP {}", stream.status()),
-                            )
-                            .with_status(stream.status()),
-                            stream.status(),
-                            manifest.product.as_ref(),
+                        "",
+                    ));
+                }
+            };
+            response_body = String::from_utf8_lossy(&bytes).into_owned();
+            buffered_provider_body = Some(bytes);
+            let matched_policy = match &disposition {
+                ProviderSseTerminalDisposition::Incomplete { .. } => None,
+                ProviderSseTerminalDisposition::Failed { message } => {
+                    manifest.product.as_ref().and_then(|product| {
+                        ProductErrorPolicyPort::evaluate_semantic_failure(
+                            product,
                             &target.provider_id,
                             &response_body,
-                        ));
-                    }
-                    if policy.backoff_ms > 0 {
-                        std::thread::sleep(std::time::Duration::from_millis(policy.backoff_ms));
-                    }
+                            &format!("provider_response_failed_{message}"),
+                        )
+                    })
+                }
+                ProviderSseTerminalDisposition::Completed => {
+                    manifest.product.as_ref().and_then(|product| {
+                        ProductErrorPolicyPort::evaluate(
+                            product,
+                            &target.provider_id,
+                            stream.status(),
+                            &response_body,
+                        )
+                    })
+                }
+                ProviderSseTerminalDisposition::Continue => None,
+            };
+            if matches!(disposition, ProviderSseTerminalDisposition::Failed { .. }) {
+                let Some(policy) = matched_policy else {
+                    let ProviderSseTerminalDisposition::Failed { message } = &disposition else {
+                        unreachable!();
+                    };
                     let _ = request_timing.finish_external_if_active();
-                    let (candidate, retry_body) = next_attempt(
-                        &target,
-                        &policy,
-                        stream.status(),
+                    return Err(project_fault(
+                        request,
+                        RuntimeFault::new("provider_response_failed", message.clone()),
+                        599,
+                    ));
+                };
+                record_provider_failure(
+                    &target.provider_id,
+                    policy.cooldown,
+                    policy.failure_threshold,
+                )?;
+                if !policy.retry {
+                    let _ = request_timing.finish_external_if_active();
+                    let status = policy
+                        .project_status
+                        .filter(|status| !(200..300).contains(status))
+                        .unwrap_or(599);
+                    return Err(project_upstream_fault(
+                        request,
+                        RuntimeFault::new("provider_response_failed", "provider response failed")
+                            .with_status(status),
+                        status,
+                        manifest.product.as_ref(),
+                        &target.provider_id,
                         &response_body,
-                        true,
-                    )?;
-                    buffered_provider_body = None;
-                    response_body.clear();
-                    target = candidate;
-                    stream = match execute_transport(&target, &retry_body, true).map_err(|error| {
-                        project_upstream_fault(
+                    ));
+                }
+                if policy.backoff_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(policy.backoff_ms));
+                }
+                let _ = request_timing.finish_external_if_active();
+                let (candidate, retry_body) =
+                    next_attempt(&target, &policy, stream.status(), &response_body, true)?;
+                buffered_provider_body = None;
+                response_body.clear();
+                target = candidate;
+                stream = match execute_transport(&target, &retry_body, true).map_err(|error| {
+                    project_upstream_fault(
+                        request,
+                        RuntimeFault::new(&error.code, error.message),
+                        error.status.unwrap_or(502),
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
+                    )
+                })? {
+                    ProviderTransportResult::Stream(_) => {
+                        let _ = request_timing.finish_external_if_active();
+                        return Err(project_upstream_fault(
                             request,
-                            RuntimeFault::new(&error.code, error.message),
-                            error.status.unwrap_or(502),
+                            RuntimeFault::new(
+                                "provider_transport_shape",
+                                "streaming transport returned blocking response",
+                            ),
+                            502,
                             manifest.product.as_ref(),
                             &target.provider_id,
                             "",
+                        ));
+                    }
+                    ProviderTransportResult::NativeStream(stream) => NativeProviderSseSource::new(
+                        stream,
+                        request_cancellation
+                            .clone()
+                            .unwrap_or_else(CancellationToken::new),
+                        match provider_runtime.clone() {
+                            Some(runtime) => runtime,
+                            None => {
+                                let _ = request_timing.finish_external_if_active();
+                                return Err(project_upstream_fault(
+                                        request,
+                                        RuntimeFault::new(
+                                            "provider_async_runtime",
+                                            "streaming provider transport requires an explicit async runtime handle",
+                                        ),
+                                        502,
+                                        manifest.product.as_ref(),
+                                        &target.provider_id,
+                                        "",
+                                    ));
+                            }
+                        },
+                    ),
+                    ProviderTransportResult::Response(_) => {
+                        let _ = request_timing.finish_external_if_active();
+                        return Err(project_upstream_fault(
+                            request,
+                            RuntimeFault::new(
+                                "provider_transport_shape",
+                                "stream transport returned non-stream response",
+                            ),
+                            502,
+                            manifest.product.as_ref(),
+                            &target.provider_id,
+                            "",
+                        ));
+                    }
+                };
+                continue;
+            }
+            if disposition == ProviderSseTerminalDisposition::Completed && stream.status() >= 400 {
+                let Some(policy) = matched_policy else {
+                    unreachable!("provider HTTP error must match the compiled policy");
+                };
+                record_provider_failure(
+                    &target.provider_id,
+                    policy.cooldown,
+                    policy.failure_threshold,
+                )?;
+                if !policy.retry {
+                    let _ = request_timing.finish_external_if_active();
+                    return Err(project_upstream_fault(
+                        request,
+                        RuntimeFault::new(
+                            "provider_http_error",
+                            format!("upstream provider returned HTTP {}", stream.status()),
                         )
-                    })? {
-                        ProviderTransportResult::Stream(_) => {
-                            let _ = request_timing.finish_external_if_active();
-                            return Err(project_upstream_fault(
-                                request,
-                                RuntimeFault::new(
-                                    "provider_transport_shape",
-                                    "streaming transport returned blocking response",
-                                ),
-                                502,
-                                manifest.product.as_ref(),
-                                &target.provider_id,
-                                "",
-                            ));
-                        }
-                        ProviderTransportResult::NativeStream(stream) => {
-                            NativeProviderSseSource::new(
-                                stream,
-                                request_cancellation
-                                    .clone()
-                                    .unwrap_or_else(CancellationToken::new),
-                                match provider_runtime.clone() {
-                                    Some(runtime) => runtime,
-                                    None => {
-                                        let _ = request_timing.finish_external_if_active();
-                                        return Err(project_upstream_fault(
-                                            request,
-                                            RuntimeFault::new(
-                                                "provider_async_runtime",
-                                                "streaming provider transport requires an explicit async runtime handle",
-                                            ),
-                                            502,
-                                            manifest.product.as_ref(),
-                                            &target.provider_id,
-                                            "",
-                                        ));
-                                    }
-                                },
-                            )
-                        }
-                        ProviderTransportResult::Response(_) => {
-                            let _ = request_timing.finish_external_if_active();
-                            return Err(project_upstream_fault(
-                                request,
-                                RuntimeFault::new(
-                                    "provider_transport_shape",
-                                    "stream transport returned non-stream response",
-                                ),
-                                502,
-                                manifest.product.as_ref(),
-                                &target.provider_id,
-                                "",
-                            ));
-                        }
-                    };
-                    continue;
+                        .with_status(stream.status()),
+                        stream.status(),
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        &response_body,
+                    ));
                 }
-            } else {
+                if policy.backoff_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(policy.backoff_ms));
+                }
+                let _ = request_timing.finish_external_if_active();
+                let (candidate, retry_body) =
+                    next_attempt(&target, &policy, stream.status(), &response_body, true)?;
                 buffered_provider_body = None;
                 response_body.clear();
-                if stream.status() >= 400 {
-                    let _ = request_timing.finish_external_if_active();
-                }
+                target = candidate;
+                stream = match execute_transport(&target, &retry_body, true).map_err(|error| {
+                    project_upstream_fault(
+                        request,
+                        RuntimeFault::new(&error.code, error.message),
+                        error.status.unwrap_or(502),
+                        manifest.product.as_ref(),
+                        &target.provider_id,
+                        "",
+                    )
+                })? {
+                    ProviderTransportResult::Stream(_) => {
+                        let _ = request_timing.finish_external_if_active();
+                        return Err(project_upstream_fault(
+                            request,
+                            RuntimeFault::new(
+                                "provider_transport_shape",
+                                "streaming transport returned blocking response",
+                            ),
+                            502,
+                            manifest.product.as_ref(),
+                            &target.provider_id,
+                            "",
+                        ));
+                    }
+                    ProviderTransportResult::NativeStream(stream) => NativeProviderSseSource::new(
+                        stream,
+                        request_cancellation
+                            .clone()
+                            .unwrap_or_else(CancellationToken::new),
+                        match provider_runtime.clone() {
+                            Some(runtime) => runtime,
+                            None => {
+                                let _ = request_timing.finish_external_if_active();
+                                return Err(project_upstream_fault(
+                                        request,
+                                        RuntimeFault::new(
+                                            "provider_async_runtime",
+                                            "streaming provider transport requires an explicit async runtime handle",
+                                        ),
+                                        502,
+                                        manifest.product.as_ref(),
+                                        &target.provider_id,
+                                        "",
+                                    ));
+                            }
+                        },
+                    ),
+                    ProviderTransportResult::Response(_) => {
+                        let _ = request_timing.finish_external_if_active();
+                        return Err(project_upstream_fault(
+                            request,
+                            RuntimeFault::new(
+                                "provider_transport_shape",
+                                "stream transport returned non-stream response",
+                            ),
+                            502,
+                            manifest.product.as_ref(),
+                            &target.provider_id,
+                            "",
+                        ));
+                    }
+                };
+                continue;
+            }
+            if disposition == ProviderSseTerminalDisposition::Completed {
+                break;
             }
             break;
         }
@@ -1129,13 +1227,12 @@ fn dispatch_request(
                 502,
             ));
         }
-        let response_source: Box<dyn ProviderSseSource> = if let Some(bytes) =
-            buffered_provider_body.take()
-        {
-            Box::new(BufferedProviderSseSource::new(bytes))
-        } else {
-            Box::new(stream)
-        };
+        let response_source: Box<dyn ProviderSseSource> =
+            if let Some(bytes) = buffered_provider_body.take() {
+                Box::new(BufferedProviderSseSource::new(bytes))
+            } else {
+                Box::new(stream)
+            };
         let client_status = if (200..300).contains(&status) {
             200
         } else {
@@ -1343,9 +1440,9 @@ fn dispatch_request(
         )
     }
     .map_err(|fault| project_fault(request, fault, 502))?;
-    request_timing
-        .finish_runtime()
-        .map_err(|message| project_fault(request, RuntimeFault::new("runtime_timing", message), 598))?;
+    request_timing.finish_runtime().map_err(|message| {
+        project_fault(request, RuntimeFault::new("runtime_timing", message), 598)
+    })?;
     let frame = report.client_frame.ok_or_else(|| {
         project_fault(
             request,
@@ -1530,7 +1627,8 @@ mod tests {
     use routecodex_v4_provider::V4Availability01SessionScoped;
     use routecodex_v4_router::{
         ProductErrorDecision, ProductErrorExecutionAction, ProductErrorPolicyPort,
-        TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID, TARGET_SELECTION_PLUGIN_ID,
+        ProductErrorRetryMode, TargetSelectionHandle, DIRECT_TARGET_SELECTION_PLUGIN_ID,
+        TARGET_SELECTION_PLUGIN_ID,
     };
     use routecodex_v4_server::HttpRequest;
     use routecodex_v4_standard_plugins::StandardHandleRegistry;
@@ -1712,7 +1810,8 @@ mod tests {
             let (mut stream, _) = provider.accept().expect("provider accepts");
             let mut request = [0u8; 8192];
             let _ = stream.read(&mut request);
-            let body = br#"{"id":"resp_timing","object":"response","model":"mock-model","output":[]}"#;
+            let body =
+                br#"{"id":"resp_timing","object":"response","model":"mock-model","output":[]}"#;
             write!(
                 stream,
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
@@ -1958,9 +2057,7 @@ priority = 1
                 body.len()
             )
             .expect("provider headers");
-            stream
-                .write_all(body.as_bytes())
-                .expect("provider body");
+            stream.write_all(body.as_bytes()).expect("provider body");
         });
         let provider_config = std::env::temp_dir().join(format!(
             "v4-provider-streaming-200-policy-{}-{}.toml",
@@ -2070,9 +2167,7 @@ wire_name = "mock-model"
                 body.len()
             )
             .expect("provider headers");
-            stream
-                .write_all(body.as_bytes())
-                .expect("provider body");
+            stream.write_all(body.as_bytes()).expect("provider body");
         });
         let provider_config = std::env::temp_dir().join(format!(
             "v4-provider-streaming-200-nonmatch-{}-{}.toml",
@@ -2159,41 +2254,57 @@ wire_name = "mock-model"
     }
 
     #[test]
-    fn streaming_policy_retry_does_not_reuse_buffered_provider_body() {
+    fn streaming_semantic_policy_reselect_does_not_reuse_buffered_provider_body() {
         let first_provider = TcpListener::bind("127.0.0.1:0").expect("first provider listener");
         let first_address = first_provider.local_addr().expect("first provider address");
-        let attempts_seen = Arc::new(AtomicUsize::new(0));
-        let attempts_seen_by_provider = Arc::clone(&attempts_seen);
+        let first_attempts = Arc::new(AtomicUsize::new(0));
+        let first_attempts_by_provider = Arc::clone(&first_attempts);
         let first_thread = std::thread::spawn(move || {
-            for attempt in 0..2 {
-                attempts_seen_by_provider.fetch_add(1, Ordering::SeqCst);
-                let (mut stream, _) = first_provider.accept().expect("first provider accepts");
-                let mut request = [0u8; 8192];
-                let _ = stream.read(&mut request);
-                let body = if attempt == 0 {
-                    concat!(
-                        "event: response.failed\n",
-                        "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"Type invalid, should be set\"}}}\n\n"
-                    )
-                } else {
-                    concat!(
-                        "event: response.completed\n",
-                        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
-                    )
-                };
-                write!(
-                    stream,
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                    body.len()
-                )
-                .expect("first provider headers");
-                stream
-                    .write_all(body.as_bytes())
-                    .expect("first provider body");
-            }
+            let (mut stream, _) = first_provider.accept().expect("first provider accepts");
+            first_attempts_by_provider.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.failed\n",
+                "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"Type invalid, should be set\"}}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("first provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("first provider body");
+        });
+        let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
+        let second_attempts = Arc::new(AtomicUsize::new(0));
+        let second_attempts_by_provider = Arc::clone(&second_attempts);
+        let second_thread = std::thread::spawn(move || {
+            let (mut stream, _) = second_provider.accept().expect("second provider accepts");
+            second_attempts_by_provider.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("second provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("second provider body");
         });
         let first_config = std::env::temp_dir().join(format!(
-            "v4-provider-stale-buffer-first-{}-{}.toml",
+            "v4-provider-semantic-reselect-first-{}-{}.toml",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2221,8 +2332,38 @@ wire_name = "mock-model"
             ),
         )
         .expect("provider config");
-        let mut manifest = runtime_manifest_with_provider_config(
+        let second_config = std::env::temp_dir().join(format!(
+            "v4-provider-semantic-reselect-second-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &second_config,
+            format!(
+                r#"
+providerId = "second"
+
+[provider]
+baseURL = "http://{second_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("second provider config");
+        let mut manifest = runtime_manifest_with_two_provider_configs(
             first_config.to_str().expect("first provider config path"),
+            second_config.to_str().expect("second provider config path"),
         );
         let product = manifest.product.as_mut().expect("product config");
         product.error_policies = vec![routecodex_v4_config::RuntimeProductErrorPolicy {
@@ -2295,19 +2436,28 @@ wire_name = "mock-model"
             ),
         };
         assert_eq!(response.status, 200);
-        assert_eq!(
-            attempts_seen.load(Ordering::SeqCst),
-            2,
-            "semantic policy must execute a second provider attempt"
-        );
         let mut stream = response.stream.take().expect("retry success stream");
         let mut chunk = Vec::new();
-        assert!(stream.next_chunk(&mut chunk).expect("retry client SSE chunk"));
+        assert!(stream
+            .next_chunk(&mut chunk)
+            .expect("retry client SSE chunk"));
         let body = String::from_utf8_lossy(&chunk);
         assert!(body.contains("resp_retry"), "{body}");
         assert!(!body.contains("resp_failed"), "{body}");
+        assert_eq!(
+            first_attempts.load(Ordering::SeqCst),
+            1,
+            "explicit semantic policy retry_same must not reuse the failed provider"
+        );
+        assert_eq!(
+            second_attempts.load(Ordering::SeqCst),
+            1,
+            "explicit semantic policy retry_same must reselect"
+        );
         first_thread.join().expect("first provider thread");
+        second_thread.join().expect("second provider thread");
         std::fs::remove_file(first_config).ok();
+        std::fs::remove_file(second_config).ok();
     }
 
     #[test]
@@ -2552,7 +2702,9 @@ wire_name = "mock-model"
                 .expect("first provider retry body");
         });
         let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
-        let second_address = second_provider.local_addr().expect("second provider address");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
         let first_config = std::env::temp_dir().join(format!(
             "v4-provider-retry-first-{}-{}.toml",
             std::process::id(),
@@ -2688,7 +2840,9 @@ wire_name = "mock-model"
             );
         });
         let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
-        let second_address = second_provider.local_addr().expect("second provider address");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
         let second_thread = std::thread::spawn(move || {
             let (mut stream, _) = second_provider.accept().expect("second provider accepts");
             let mut request = [0u8; 8192];
@@ -2703,7 +2857,9 @@ wire_name = "mock-model"
                 body.len()
             )
             .expect("second provider headers");
-            stream.write_all(body.as_bytes()).expect("second provider body");
+            stream
+                .write_all(body.as_bytes())
+                .expect("second provider body");
         });
         let first_config = std::env::temp_dir().join(format!(
             "v4-provider-503-first-{}-{}.toml",
@@ -2810,6 +2966,387 @@ wire_name = "mock-model"
     }
 
     #[test]
+    fn streaming_incomplete_projects_v3_length_terminal() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let provider_address = provider.local_addr().expect("provider address");
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+                "event: response.incomplete\n",
+                "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("provider headers");
+            stream.write_all(body.as_bytes()).expect("provider body");
+        });
+        let provider_config = std::env::temp_dir().join(format!(
+            "v4-provider-incomplete-v3-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &provider_config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{provider_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let manifest = runtime_manifest_with_provider_config(
+            provider_config.to_str().expect("provider config path"),
+        );
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","stream":true}"#.to_vec(),
+            request_id: "production-incomplete-v3".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let provider_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let mut response = match dispatch_with_request_cancellation(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+            None,
+            None,
+            Some(provider_runtime.handle().clone()),
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "incomplete terminal dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
+        let mut stream = response.stream.take().expect("incomplete terminal stream");
+        let mut body = Vec::new();
+        while stream
+            .next_chunk(&mut body)
+            .expect("incomplete terminal chunk")
+        {}
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("\"total_tokens\":5"), "{body}");
+        assert!(body.contains("response.incomplete"), "{body}");
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(provider_config).ok();
+    }
+
+    #[test]
+    fn streaming_incomplete_without_product_policy_projects_v3_length_terminal() {
+        let provider = TcpListener::bind("127.0.0.1:0").expect("provider listener");
+        let provider_address = provider.local_addr().expect("provider address");
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_by_provider = Arc::clone(&attempts);
+        let provider_thread = std::thread::spawn(move || {
+            let (mut stream, _) = provider.accept().expect("provider accepts");
+            attempts_by_provider.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial-must-not-commit\"}\n\n",
+                "event: response.incomplete\n",
+                "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("provider headers");
+            stream.write_all(body.as_bytes()).expect("provider body");
+        });
+        let provider_config = std::env::temp_dir().join(format!(
+            "v4-provider-incomplete-no-policy-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &provider_config,
+            format!(
+                r#"
+providerId = "mock"
+
+[provider]
+baseURL = "http://{provider_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("provider config");
+        let manifest = runtime_manifest_with_provider_config(
+            provider_config.to_str().expect("provider config path"),
+        );
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","stream":true}"#.to_vec(),
+            request_id: "production-incomplete-no-policy".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+        let provider_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let mut response = match dispatch_with_request_cancellation(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+            None,
+            None,
+            Some(provider_runtime.handle().clone()),
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "incomplete terminal dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
+        let mut stream = response.stream.take().expect("incomplete terminal stream");
+        let mut body = Vec::new();
+        while stream
+            .next_chunk(&mut body)
+            .expect("incomplete terminal chunk")
+        {}
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("response.incomplete"), "{body}");
+        assert!(body.contains("partial-must-not-commit"), "{body}");
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "incomplete terminal must not trigger a provider retry"
+        );
+        provider_thread.join().expect("provider thread");
+        std::fs::remove_file(provider_config).ok();
+    }
+
+    #[test]
+    fn streaming_provider_eof_without_terminal_reselects_before_client_projection() {
+        let first_provider = TcpListener::bind("127.0.0.1:0").expect("first provider listener");
+        let first_address = first_provider.local_addr().expect("first provider address");
+        let first_attempts = Arc::new(AtomicUsize::new(0));
+        let first_attempts_by_provider = Arc::clone(&first_attempts);
+        let first_thread = std::thread::spawn(move || {
+            let (mut stream, _) = first_provider.accept().expect("first provider accepts");
+            first_attempts_by_provider.fetch_add(1, Ordering::SeqCst);
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial-must-not-commit\"}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("first provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("first provider body");
+        });
+        let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
+        let second_thread = std::thread::spawn(move || {
+            let (mut stream, _) = second_provider.accept().expect("second provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_success\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("second provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("second provider body");
+        });
+        let first_config = std::env::temp_dir().join(format!(
+            "v4-provider-eof-first-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let second_config = std::env::temp_dir().join(format!(
+            "v4-provider-eof-second-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::write(
+            &first_config,
+            format!(
+                r#"
+providerId = "first"
+
+[provider]
+baseURL = "http://{first_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("first provider config");
+        std::fs::write(
+            &second_config,
+            format!(
+                r#"
+providerId = "second"
+
+[provider]
+baseURL = "http://{second_address}"
+defaultModel = "mock-model"
+type = "responses"
+responsesContinuation = "direct"
+
+[provider.auth]
+apiKey = "test-key"
+
+[provider.models.mock-model]
+wire_name = "mock-model"
+"#
+            ),
+        )
+        .expect("second provider config");
+        let manifest = runtime_manifest_with_two_provider_configs(
+            first_config.to_str().expect("first provider config path"),
+            second_config.to_str().expect("second provider config path"),
+        );
+        let runtime = Arc::new(Mutex::new(runtime_from_manifest(&manifest)));
+        let availability = Arc::new(Mutex::new(V4Availability01SessionScoped::new()));
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            headers: Vec::new(),
+            body: br#"{"model":"mock-model","input":"hello","stream":true}"#.to_vec(),
+            request_id: "production-eof-reselect".to_string(),
+            server_id: "rccv4".to_string(),
+            port: 5520,
+        };
+
+        let provider_runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("provider runtime");
+        let mut response = match dispatch_with_request_cancellation(
+            &manifest,
+            &runtime,
+            &availability,
+            &request,
+            "responses",
+            "direct",
+            None,
+            None,
+            Some(provider_runtime.handle().clone()),
+        ) {
+            Ok(response) => response,
+            Err(response) => panic!(
+                "EOF reselect dispatch failed with {}: {}",
+                response.status,
+                String::from_utf8_lossy(&response.body)
+            ),
+        };
+        assert_eq!(response.status, 200);
+        let mut stream = response.stream.take().expect("EOF reselect stream");
+        let mut chunk = Vec::new();
+        assert!(
+            stream.next_chunk(&mut chunk).expect("EOF reselect chunk"),
+            "EOF reselect stream must produce a client frame"
+        );
+        let body = String::from_utf8_lossy(&chunk);
+        assert!(
+            body.contains("resp_success"),
+            "missing success response: {body}; first_attempts={}",
+            first_attempts.load(Ordering::SeqCst)
+        );
+        assert!(!body.contains("partial-must-not-commit"), "{body}");
+        assert_eq!(
+            first_attempts.load(Ordering::SeqCst),
+            1,
+            "EOF without terminal must not retry the same provider"
+        );
+        first_thread.join().expect("first provider thread");
+        second_thread.join().expect("second provider thread");
+        std::fs::remove_file(first_config).ok();
+        std::fs::remove_file(second_config).ok();
+    }
+
+    #[test]
     fn streaming_retry_same_max_attempts_one_reselects_without_same_provider_retry() {
         let first_provider = TcpListener::bind("127.0.0.1:0").expect("first provider listener");
         let first_address = first_provider.local_addr().expect("first provider address");
@@ -2861,38 +3398,26 @@ wire_name = "mock-model"
             }
         });
         let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
-        let second_address = second_provider.local_addr().expect("second provider address");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
         let second_thread = std::thread::spawn(move || {
-            second_provider
-                .set_nonblocking(true)
-                .expect("second provider nonblocking");
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while std::time::Instant::now() < deadline {
-                match second_provider.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut request = [0u8; 8192];
-                        let _ = stream.read(&mut request);
-                        let body = concat!(
-                            "event: response.completed\n",
-                            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_budget_one_reselect\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
-                        );
-                        write!(
-                            stream,
-                            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                            body.len()
-                        )
-                        .expect("second provider headers");
-                        stream
-                            .write_all(body.as_bytes())
-                            .expect("second provider body");
-                        return;
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                    }
-                    Err(error) => panic!("second provider accept failed: {error}"),
-                }
-            }
+            let (mut stream, _) = second_provider.accept().expect("second provider accepts");
+            let mut request = [0u8; 8192];
+            let _ = stream.read(&mut request);
+            let body = concat!(
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_budget_one_reselect\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"mock-model\",\"output\":[]}}\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("second provider headers");
+            stream
+                .write_all(body.as_bytes())
+                .expect("second provider body");
         });
         let first_config = std::env::temp_dir().join(format!(
             "v4-provider-budget-one-first-{}-{}.toml",
@@ -3026,7 +3551,9 @@ wire_name = "mock-model"
             stream.write_all(body).expect("first provider body");
         });
         let second_provider = TcpListener::bind("127.0.0.1:0").expect("second provider listener");
-        let second_address = second_provider.local_addr().expect("second provider address");
+        let second_address = second_provider
+            .local_addr()
+            .expect("second provider address");
         let second_thread = std::thread::spawn(move || {
             let (mut stream, _) = second_provider.accept().expect("second provider accepts");
             let mut request = [0u8; 8192];
@@ -3291,7 +3818,7 @@ provider_id = "first"
 config_path = "{first_config_path}"
 protocol = "responses"
 wire_model = "mock-model"
-priority = 1
+priority = 2
 entry_models = ["mock-model"]
 
 [[providers]]
@@ -3299,7 +3826,7 @@ provider_id = "second"
 config_path = "{second_config_path}"
 protocol = "responses"
 wire_model = "mock-model"
-priority = 2
+priority = 1
 entry_models = ["mock-model"]
 
 [[routes]]
@@ -3344,12 +3871,12 @@ selection = "priority"
 [[product.route_groups.pools.targets]]
 provider_id = "first"
 model_id = "mock-model"
-priority = 1
+priority = 2
 
 [[product.route_groups.pools.targets]]
 provider_id = "second"
 model_id = "mock-model"
-priority = 2
+priority = 1
 "#
             ),
             None,
@@ -3417,7 +3944,9 @@ priority = 1
         manifest
     }
 
-    fn runtime_manifest_with_provider_config_and_200_project(config_path: &str) -> RuntimeConfigManifest {
+    fn runtime_manifest_with_provider_config_and_200_project(
+        config_path: &str,
+    ) -> RuntimeConfigManifest {
         let manifest = compile_runtime_config(
             &format!(
                 r#"
@@ -3485,7 +4014,9 @@ priority = 1
             None,
         )
         .expect("streaming-200 semantic policy runtime config compiles");
-        manifest.verify().expect("streaming-200 semantic policy manifest verifies");
+        manifest
+            .verify()
+            .expect("streaming-200 semantic policy manifest verifies");
         manifest
     }
 
