@@ -10,9 +10,10 @@ use routecodex_v4_config::{
 };
 use routecodex_v4_cordis_bridge::{HandleRegistry, PluginHandle};
 use routecodex_v4_lifecycle::{
-    exec_managed_restart, release_for_foreground, repair_stale, request_restart, request_stop,
-    start_managed, status_managed, LifecycleError, ManagedAction, ManagedControlPlane,
-    ManagedInstanceRecord, ManagedSpawnOptions, V4LifecyclePaths,
+    exec_managed_restart, process_start_time, release_for_foreground, repair_stale,
+    request_restart, request_stop, start_managed, status_managed, CordisSocketIdentity,
+    LifecycleError, ManagedAction, ManagedControlPlane, ManagedInstanceRecord, ManagedSpawnOptions,
+    V4LifecyclePaths,
 };
 use routecodex_v4_node_container::ExecutionEpochSnapshot;
 use routecodex_v4_provider::{
@@ -32,6 +33,7 @@ use routecodex_v4_standard_plugins::StandardHandleRegistry;
 use serde_json::Value;
 use std::future::Future;
 use std::io::{Read, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
@@ -415,6 +417,7 @@ fn start(intent: StartIntent) -> Result<String, String> {
     let config = config_path(ConfigPathIntent {
         config: intent.config,
     })?;
+    let external_cordis_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some();
     if intent.foreground {
         let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
         print_startup(&manifest);
@@ -426,13 +429,31 @@ fn start(intent: StartIntent) -> Result<String, String> {
     }
     let (config, manifest, paths) = compile_for_lifecycle(Some(config))?;
     print_startup(&manifest);
-    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
+    repair_stale_before_admission(&paths)?;
+    let managed_running = matches!(
+        status_managed(&paths),
+        Ok(status) if status.state == "running"
+    );
+    if managed_running {
+        if external_cordis_socket {
+            preflight_cordis_admission(&manifest)?;
+        } else {
+            preflight_owned_cordis_replacement(&paths.manifest_path, &manifest)?;
+        }
+        release_for_foreground(&paths, Duration::from_secs(15))
+            .map_err(|error| error.to_string())?;
+    }
+    let mut cordis = CordisHostGuard::new(
+        ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
+        &paths,
+    );
     if routecodex_v4_lifecycle::read_record(&paths)
         .map_err(|error| error.to_string())?
         .is_none()
     {
         release_unmanaged_listeners(&manifest)?;
     }
+    handoff_cordis_to_child(&mut cordis, external_cordis_socket)?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let record = start_managed(
         &paths,
@@ -449,6 +470,26 @@ fn start(intent: StartIntent) -> Result<String, String> {
         record.listeners.join(",")
     );
     Ok(format_status("running", &record))
+}
+
+/// Hand off Cordis ownership before the launcher exits.
+///
+/// The managed child creates its own host when no socket was supplied by the
+/// operator. A launcher-owned host used only for admission is stopped now, and
+/// the consumed socket variable is cleared so the child cannot mistake it for
+/// an external host it does not own.
+fn handoff_cordis_to_child(
+    cordis: &mut CordisHostGuard,
+    external_socket: bool,
+) -> Result<(), String> {
+    if external_socket {
+        return Ok(());
+    }
+    if cordis.owns_child() {
+        cordis.cleanup()?;
+    }
+    std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+    Ok(())
 }
 
 /// Validate the complete external Cordis admission before taking over a
@@ -470,10 +511,55 @@ fn ensure_cordis_admission(
     manifest_path: &Path,
     manifest: &RuntimeConfigManifest,
     paths: &V4LifecyclePaths,
-) -> Result<Option<Child>, String> {
-    let child = ensure_cordis_host_socket(manifest_path, paths)?;
-    preflight_cordis_admission(manifest)?;
-    Ok(child)
+) -> Result<OwnedCordisHost, String> {
+    let mut host = ensure_cordis_host_socket(manifest_path, manifest, paths)?;
+    if let Err(error) = preflight_cordis_admission(manifest) {
+        if let Err(cleanup_error) = cleanup_owned_cordis(
+            &mut host.child,
+            &paths.state_root.join("cordis.sock"),
+            host.identity,
+        ) {
+            return Err(format!("{error}; Cordis cleanup failed: {cleanup_error}"));
+        }
+        return Err(error);
+    }
+    Ok(host)
+}
+
+fn preflight_owned_cordis_replacement(
+    manifest_path: &Path,
+    manifest: &RuntimeConfigManifest,
+) -> Result<(), String> {
+    let previous_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET");
+    // Unix-domain socket paths on macOS are limited to roughly 100 bytes.
+    // Keep the isolated Cordis preflight root short even when TMPDIR is long.
+    let root = PathBuf::from("/tmp").join(format!(
+        "rccv4-cp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    let paths = V4LifecyclePaths::for_state_root(root.clone());
+    paths.prepare().map_err(|error| error.to_string())?;
+    let socket = root.join("cordis.sock");
+    let result = (|| {
+        let mut host = ensure_cordis_host_socket(manifest_path, manifest, &paths)?;
+        cleanup_owned_cordis(&mut host.child, &socket, host.identity)
+    })();
+    match previous_socket {
+        Some(value) => std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", value),
+        None => std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET"),
+    }
+    let cleanup = std::fs::remove_dir_all(&root);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("Cordis preflight cleanup failed: {error}"))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn status(intent: ConfigPathIntent) -> Result<String, String> {
@@ -498,15 +584,19 @@ fn repair_stale_state(intent: ConfigPathIntent) -> Result<String, String> {
 }
 
 fn restart(intent: RestartIntent) -> Result<String, String> {
+    let external_cordis_socket = std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some();
     let (config, manifest, paths) = compile_for_lifecycle(intent.config)?;
-    // Admission must succeed before restart can stop the currently healthy
-    // child. This preserves the managed instance on Cordis failure.
-    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
+    repair_stale_before_admission(&paths)?;
     let timeout = Duration::from_millis(intent.timeout_ms);
     match request_restart(&paths, &manifest.manifest_digest, timeout) {
         Ok(record) => Ok(format_status("restarted", &record)),
         Err(LifecycleError::NotRunning) => {
+            let mut cordis = CordisHostGuard::new(
+                ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
+                &paths,
+            );
             release_unmanaged_listeners(&manifest)?;
+            handoff_cordis_to_child(&mut cordis, external_cordis_socket)?;
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
             let record = start_managed(
                 &paths,
@@ -521,6 +611,34 @@ fn restart(intent: RestartIntent) -> Result<String, String> {
         }
         Err(error) => Err(error.to_string()),
     }
+}
+
+fn repair_stale_before_admission(paths: &V4LifecyclePaths) -> Result<(), String> {
+    match status_managed(paths) {
+        Ok(status) if status.state == "stale" => match status.record {
+            Some(record) if !process_is_alive(record.pid) => {
+                repair_stale(paths).map_err(|error| error.to_string())
+            }
+            _ => Ok(()),
+        },
+        Ok(_) => Ok(()),
+        Err(LifecycleError::StaleState) => {
+            let record =
+                routecodex_v4_lifecycle::read_record(paths).map_err(|error| error.to_string())?;
+            match record {
+                Some(record) if !process_is_alive(record.pid) => {
+                    repair_stale(paths).map_err(|error| error.to_string())
+                }
+                _ => Ok(()),
+            }
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn process_is_alive(pid: u32) -> bool {
+    (unsafe { libc::kill(pid as libc::pid_t, 0) == 0 })
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// Apply V3-compatible takeover only to exact, unmanaged rccv4 listeners.
@@ -562,8 +680,20 @@ fn server_start(intent: ServerStartIntent) -> Result<String, String> {
     let manifest = compile_runtime_config_file(&config).map_err(|error| error.to_string())?;
     print_startup(&manifest);
     let paths = V4LifecyclePaths::resolve().map_err(|error| error.to_string())?;
-    let _cordis_child = ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?;
-    run_foreground(manifest)?;
+    let mut cordis = CordisHostGuard::new(
+        ensure_cordis_admission(&paths.manifest_path, &manifest, &paths)?,
+        &paths,
+    );
+    let result = run_foreground(manifest);
+    let cleanup = cordis.cleanup();
+    match (result, cleanup) {
+        (Err(error), Err(cleanup_error)) => {
+            Err(format!("{error}; Cordis cleanup failed: {cleanup_error}"))
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+        (Ok(()), Ok(())) => Ok(()),
+    }?;
     Ok("state=stopped identity=rccv4 foreground=true".to_string())
 }
 
@@ -583,12 +713,44 @@ fn print_startup(manifest: &RuntimeConfigManifest) {
     let _ = std::io::stdout().flush();
 }
 
+fn socket_identity(
+    socket: &Path,
+    pid: Option<u32>,
+) -> Result<Option<CordisSocketIdentity>, String> {
+    match socket_metadata(socket)? {
+        Some((device, inode)) => Ok(pid.map(|pid| CordisSocketIdentity {
+            pid,
+            start_time: process_start_time(pid).unwrap_or(0),
+            device,
+            inode,
+        })),
+        None => Ok(None),
+    }
+}
+
+fn socket_metadata(socket: &Path) -> Result<Option<(u64, u64)>, String> {
+    match std::fs::symlink_metadata(socket) {
+        Ok(metadata) => Ok(Some((metadata.dev(), metadata.ino()))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("Cordis socket metadata failed: {error}")),
+    }
+}
+
+struct OwnedCordisHost {
+    child: Option<Child>,
+    identity: Option<CordisSocketIdentity>,
+}
+
 fn ensure_cordis_host_socket(
     manifest_path: &std::path::Path,
+    manifest: &RuntimeConfigManifest,
     paths: &V4LifecyclePaths,
-) -> Result<Option<Child>, String> {
+) -> Result<OwnedCordisHost, String> {
     if std::env::var_os("RCCV4_CORDIS_HOST_SOCKET").is_some() {
-        return Ok(None);
+        return Ok(OwnedCordisHost {
+            child: None,
+            identity: None,
+        });
     }
     let socket = paths.state_root.join("cordis.sock");
     let runner = std::env::var_os("RCCV4_CORDIS_HOST_RUNNER")
@@ -604,8 +766,21 @@ fn ensure_cordis_host_socket(
     if socket.exists() {
         match std::os::unix::net::UnixStream::connect(&socket) {
             Ok(_) => {
-                std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
-                return Ok(None);
+                let owned = routecodex_v4_lifecycle::read_record(paths)
+                    .map_err(|error| error.to_string())?
+                    .and_then(|record| record.cordis_socket_identity);
+                let identity = socket_identity(&socket, owned.map(|identity| identity.pid))?;
+                if identity.is_some() && identity == owned {
+                    std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
+                    return Ok(OwnedCordisHost {
+                        child: None,
+                        identity,
+                    });
+                }
+                return Err(format!(
+                    "Cordis socket {} is already in use; set RCCV4_CORDIS_HOST_SOCKET to adopt it explicitly",
+                    socket.display()
+                ));
             }
             Err(_) => std::fs::remove_file(&socket)
                 .map_err(|error| format!("Cordis stale socket cleanup failed: {error}"))?,
@@ -622,15 +797,162 @@ fn ensure_cordis_host_socket(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("Cordis host spawn failed: {error}"))?;
+    let mut child = Some(child);
+    let mut identity = None;
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
         if socket.exists() {
+            identity = match socket_identity(&socket, child.as_ref().map(Child::id)) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+                    if let Err(cleanup_error) = cleanup_owned_cordis(&mut child, &socket, identity)
+                    {
+                        return Err(format!("{error}; Cordis cleanup failed: {cleanup_error}"));
+                    }
+                    return Err(error);
+                }
+            };
             std::env::set_var("RCCV4_CORDIS_HOST_SOCKET", &socket);
-            return Ok(Some(child));
+            match preflight_cordis_admission(manifest) {
+                Ok(()) => {
+                    let identity = match socket_identity(&socket, child.as_ref().map(Child::id)) {
+                        Ok(identity) => identity,
+                        Err(error) => {
+                            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+                            if let Err(cleanup_error) =
+                                cleanup_owned_cordis(&mut child, &socket, identity)
+                            {
+                                return Err(format!(
+                                    "{error}; Cordis cleanup failed: {cleanup_error}"
+                                ));
+                            }
+                            return Err(error);
+                        }
+                    };
+                    return Ok(OwnedCordisHost { child, identity });
+                }
+                Err(error) if error.contains("socket connect failed") => {}
+                Err(error) => {
+                    std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+                    if let Err(cleanup_error) = cleanup_owned_cordis(&mut child, &socket, identity)
+                    {
+                        return Err(format!("{error}; Cordis cleanup failed: {cleanup_error}"));
+                    }
+                    return Err(error);
+                }
+            }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+    std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+    if let Err(cleanup_error) = cleanup_owned_cordis(&mut child, &socket, identity) {
+        return Err(format!(
+            "Cordis host socket did not become ready; cleanup failed: {cleanup_error}"
+        ));
+    }
     Err("Cordis host socket did not become ready".to_string())
+}
+
+struct CordisHostGuard {
+    child: Option<Child>,
+    socket: PathBuf,
+    identity: Option<CordisSocketIdentity>,
+}
+
+impl CordisHostGuard {
+    fn new(host: OwnedCordisHost, paths: &V4LifecyclePaths) -> Self {
+        Self {
+            child: host.child,
+            socket: paths.state_root.join("cordis.sock"),
+            identity: host.identity,
+        }
+    }
+
+    fn owns_child(&self) -> bool {
+        self.child.is_some()
+    }
+
+    fn cleanup(&mut self) -> Result<(), String> {
+        cleanup_owned_cordis(&mut self.child, &self.socket, self.identity)
+    }
+}
+
+impl Drop for CordisHostGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.cleanup() {
+            eprintln!("rccv4: Cordis cleanup failed: {error}");
+        }
+    }
+}
+
+fn cleanup_owned_cordis(
+    child: &mut Option<Child>,
+    socket: &Path,
+    identity: Option<CordisSocketIdentity>,
+) -> Result<(), String> {
+    if child.is_none() {
+        return Ok(());
+    }
+    terminate_cordis_child(child)?;
+    let Some(identity) = identity else {
+        return Ok(());
+    };
+    // The live Child handle proves ownership of this process and its cleanup.
+    // Re-resolving start_time after termination can only fail because the PID
+    // is already gone, so compare the still-observable socket identity here.
+    match socket_metadata(socket)? {
+        Some((device, inode)) if (device, inode) == (identity.device, identity.inode) => {
+            match std::fs::remove_file(socket) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(format!("Cordis socket cleanup failed: {error}")),
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
+fn terminate_cordis_child(child: &mut Option<Child>) -> Result<(), String> {
+    let Some(handle) = child.as_mut() else {
+        return Ok(());
+    };
+    let result = (|| -> Result<(), String> {
+        match handle.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {}
+            Err(error) => return Err(format!("Cordis child status failed: {error}")),
+        }
+        if let Err(error) = handle.kill() {
+            let status = handle.try_wait().map_err(|status_error| {
+                format!("Cordis child status after kill failed: {status_error}")
+            })?;
+            if status.is_none() {
+                return Err(format!("Cordis child kill failed: {error}"));
+            }
+            return Ok(());
+        }
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match handle.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Ok(None) => {
+                    return Err(format!(
+                        "Cordis child {} did not exit within cleanup timeout",
+                        handle.id()
+                    ));
+                }
+                Err(error) => return Err(format!("Cordis child wait failed: {error}")),
+            }
+        }
+    })();
+    if result.is_ok() {
+        child.take();
+    }
+    result
 }
 
 fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
@@ -640,7 +962,11 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     if paths.manifest_path != intent.manifest {
         return Err("managed manifest path does not match V4 lifecycle owner".to_string());
     }
-    let mut cordis_child = ensure_cordis_host_socket(&intent.manifest, &paths)?;
+    let mut cordis_child = CordisHostGuard::new(
+        ensure_cordis_host_socket(&intent.manifest, &manifest, &paths)?,
+        &paths,
+    );
+    let cordis_socket_identity = cordis_child.identity;
     let record = ManagedInstanceRecord {
         runtime_identity: manifest.runtime_identity.clone(),
         pid: std::process::id(),
@@ -648,6 +974,7 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|error| error.to_string())?
             .as_nanos(),
+        cordis_socket_identity,
         config_path: intent.config.display().to_string(),
         manifest_path: intent.manifest.display().to_string(),
         manifest_digest: manifest.manifest_digest.clone(),
@@ -687,13 +1014,19 @@ fn run_managed_child(intent: ManagedChildIntent) -> Result<(), String> {
     };
     stop.store(true, Ordering::Release);
     join_servers_for_shutdown(handles)?;
-    control.clear_record().map_err(|error| error.to_string())?;
-    if let Some(mut child) = cordis_child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
+    let owned_cordis = cordis_child.owns_child();
+    let cordis_cleanup = cordis_child.cleanup();
+    let record_cleanup = control.clear_record().map_err(|error| error.to_string());
     drop(control);
+    record_cleanup?;
+    cordis_cleanup?;
     if action == ManagedAction::Restart {
+        // The replacement image must create and own its own host. Leaving the
+        // consumed socket variable set would make it treat the just-retired
+        // host as externally provided and skip admission entirely.
+        if owned_cordis {
+            std::env::remove_var("RCCV4_CORDIS_HOST_SOCKET");
+        }
         // macOS may retain the just-closed TCP listener briefly after the
         // shutdown join. Give the kernel a bounded handoff window before the
         // exec image binds the same aggregate listener again.

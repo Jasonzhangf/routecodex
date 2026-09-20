@@ -375,7 +375,15 @@ export function createGitTruth({ repoRoot, v4Root, readStagedIndex = false }) {
     const result = git([
       'status', '--porcelain=v2', '-z', '--untracked-files=all', '--', ...roots,
     ]);
-    return result.stdout.length === 0;
+    if (result.stdout.length === 0) return true;
+    if (!readStagedIndex) return false;
+    const unstaged = git([
+      'diff', '--quiet', '--', ...roots,
+    ], { allowFailure: true });
+    const untracked = git([
+      'ls-files', '--others', '--exclude-standard', '-z', '--', ...roots,
+    ], { allowFailure: true });
+    return unstaged.status === 0 && untracked.stdout.length === 0;
   }
 
   function cargoGraph(commit = null) {
