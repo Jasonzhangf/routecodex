@@ -5025,7 +5025,7 @@ chains:
     callee_symbol: apply_v3_web_search_request_hook_at_req04
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
     binding_kind: typed_runtime_node
-    behavior_gap: As-Is hook activates the local web_search surface from the current request; a typed WebSearchHookRequest cannot be constructed from current scope/deadline sources until the Phase 3 adapter binds those fields.
+    behavior_gap: As-Is hook activates the local web_search surface from the current request; the typed WebSearchHookRequest is constructed by build_v3_web_search_hook_request from the bound scope/deadline sources and dispatched by execute_web_search_through_hooks_sidecar. The remaining gap is route evidence for the sidecar-backed execution path.
     owner_feature_id: v3.web_search_servertool_state_machine
     resource_flow:
       consumes:

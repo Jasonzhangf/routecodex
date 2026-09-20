@@ -238,6 +238,55 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn metadata_center_local_search_manifest(
+    port_a: u16,
+    port_b: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
+[providers.test.models.test]
+capabilities = ["web_search"]
+web_search_execution_mode = "metadata_center_local_search"
+web_search_backend = "search.backend"
+[providers.search]
+type = "responses"
+base_url = "http://127.0.0.1:9/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
+[providers.search.models.backend]
+[debug]
+log_console = false
+snapshots = false
+dry_run = false
+retention = {{ raw_requests = 4, raw_responses = 4, events = 128 }}
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn p6_manifest(
     port_a: u16,
     port_b: u16,
@@ -1377,6 +1426,24 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
         );
     }
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn aggregate_rejects_metadata_center_local_search_without_hooks_sidecar_socket() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let error = spawn_v3_server_aggregate(metadata_center_local_search_manifest(
+        free_port(),
+        free_port(),
+    ))
+    .await
+    .expect_err("Mode B must not start without a hooks sidecar socket");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert!(
+        error
+            .to_string()
+            .contains("requires a hooks sidecar socket"),
+        "unexpected startup error: {error}"
+    );
 }
 
 #[tokio::test]

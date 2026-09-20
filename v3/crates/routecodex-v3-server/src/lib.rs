@@ -373,6 +373,20 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    if hooks_sidecar_socket.is_none()
+        && manifest.providers.values().any(|provider| {
+            provider.models.values().any(|model| {
+                model
+                    .web_search_execution_mode
+                    .is_metadata_center_local_search()
+            })
+        })
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "web_search metadata_center_local_search requires a hooks sidecar socket",
+        ));
+    }
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
