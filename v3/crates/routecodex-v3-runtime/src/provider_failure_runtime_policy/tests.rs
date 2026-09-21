@@ -318,7 +318,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
-    let cases = [(401, 2), (403, 2), (429, 3), (500, 3), (502, 3), (599, 3)];
+    let cases = [(401, 1), (403, 1), (429, 1), (500, 1), (502, 1), (599, 1)];
     for (status, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
@@ -347,13 +347,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 .expect("runtime provider failure policy should record");
             assert_eq!(record.failure_count, attempt + 1);
             assert_eq!(
-                record.state,
-                if attempt + 1 == threshold {
-                    "cooldown"
-                } else {
-                    "healthy"
-                },
-                "status {status} event state must match global key health"
+                record.state, "cooldown",
+                "status {status} must cool immediately"
             );
         }
         assert!(
@@ -361,7 +356,7 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
                 .store()
                 .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
                 .available,
-            "status {status} must block only after its declared threshold"
+            "status {status} must block after its first provider failure"
         );
     }
 
@@ -372,8 +367,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
         "runtime-policy-negative",
     )
     .expect("failure session scope");
-    // 统一错误模型：400/请求形失败同样计入全局健康，连续 3 次进入全局冷却。
-    for attempt in 0..3 {
+    // 统一错误模型：400/请求形失败同样计入全局健康，首次失败进入全局冷却。
+    for attempt in 0..1 {
         health
             .record_provider_failure_record_with_policy(
                 None,
@@ -402,9 +397,8 @@ fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
             )
             .available;
         assert_eq!(
-            available,
-            attempt < 2,
-            "attempt {attempt} availability must match the 3-strike threshold"
+            available, false,
+            "attempt {attempt} availability must be blocked immediately"
         );
     }
 }

@@ -25,17 +25,27 @@ strip_client_response_id = true
 
 [error]
 provider_error_default_path = [
-  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 3, backoff_ms = 0 },
-  { step = "cooldown", scope = "provider_model", duration_ms = 900000, provider_global_failure = false },
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 5000, provider_global_failure = false },
   { step = "project", status = 503, reason_code = "provider_failure", message_mode = "code_only" },
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "cc_anthropic_response_body_decode"
+scope = { provider_id = "cc-anthropic" }
+match = { http_status = 502, content_contains_any = ["error decoding response body"] }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
+  { step = "cooldown", scope = "provider_model", duration_ms = 5000 },
+  { step = "project", status = 503, reason_code = "cc_anthropic_response_body_decode", message_mode = "code_only" },
 ]
 
 [[error.provider_error_action_policy]]
 policy_id = "account_http_401_two_errors"
 match = { http_status = 401 }
 path = [
-  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
-  { step = "cooldown", scope = "auth_key", duration_ms = 18000000 },
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 5000 },
   { step = "project", status = 502, reason_code = "provider_account_http_401", message_mode = "code_only" },
 ]
 
@@ -43,8 +53,8 @@ path = [
 policy_id = "account_http_403_two_errors"
 match = { http_status = 403 }
 path = [
-  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 2, backoff_ms = 1000 },
-  { step = "cooldown", scope = "auth_key", duration_ms = 3600000 },
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 0 },
+  { step = "cooldown", scope = "auth_key", duration_ms = 5000 },
   { step = "project", status = 502, reason_code = "provider_account_http_403", message_mode = "code_only" },
 ]
 
@@ -222,12 +232,14 @@ port = 8777
   transient_stages = ["provider.sse_decode", "provider.sse_stream", "provider.transport_transient", "V3ProviderResp14Raw", "V3ProviderRespInbound01Raw", "V3ProviderReqOutbound09TransportRequest", "V3Transport13ResponsesHttpRequest"]
   transient_wait_ms = [1000, 3000, 5000]
   recoverable_http_statuses = [429, 500, 502]
-  recoverable_failure_threshold = 3
-  recoverable_cooldown_ms = 900000
+  recoverable_failure_threshold = 1
+  recoverable_cooldown_ms = 5000
+  # Legacy provider-specific health caps remain separate from the shared
+  # aggressive ladder; the typed provider action starts at 5s.
   recoverable_probe_interval_ms = 900000
   unrecoverable_http_statuses = [401, 402, 403, 503]
-  unrecoverable_failure_threshold = 2
-  unrecoverable_cooldown_ms = 3600000
+  unrecoverable_failure_threshold = 1
+  unrecoverable_cooldown_ms = 5000
   unrecoverable_probe_interval_ms = 1800000
 
 # WebUI observability persistence guard: one persisted row must stay bounded.

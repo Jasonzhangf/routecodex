@@ -1,3 +1,10 @@
+# 2026-09-21 - Provider failures use an aggressive adaptive cooldown ladder
+
+- Every typed provider transport/runtime failure immediately excludes the exact provider+auth key+model from later candidate selection; `switch_provider` is only request-local recovery, not the health fix.
+- Cooldown and recovery probe timing is provider-owned and adaptive: 5s → 10s → 30s → 60s → 120s → 900s → 1800s. Continuous failures and failed probes advance the per-identity ladder; a successful semantic probe resets it to 5s. Failure-rate bands may advance the ladder after a meaningful sample.
+- For `cc-anthropic` `error decoding response body`, the internal policy remains provider-scoped by `cc-anthropic`, matches HTTP 502 body-read diagnostics, and enters exact auth-key/model health isolation after the first failure; the shared ladder, not a fixed 15-minute delay, controls recovery probing.
+- Required evidence: red/green policy regression, mapped health/cooldown gates, merged-main rebuild/install/restart, and same-entry live replay. A provider switch is recovery evidence, not root-cause closure.
+
 ## 2026-07-25 - V3 Responses Relay accepts known reasoning summary SSE events
 - Verified root cause: Responses Relay provider SSE codec rejected `response.reasoning_summary_part.added` / related known OpenAI Responses reasoning events as unsupported, which entered provider failure policy and triggered switch/cooldown.
 - Durable rule: known Responses reasoning summary/content/content_part events must materialize into terminal output items at `responses_relay_runtime` provider event codec; unknown `response.*` events still fail-fast. Do not convert known reasoning summary events into provider failure or silent discard.
