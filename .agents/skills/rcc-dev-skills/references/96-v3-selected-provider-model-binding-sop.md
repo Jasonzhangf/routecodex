@@ -13,8 +13,8 @@ model divergence, retry candidate model leakage, or upstream "model not configur
   provider id, then resolves the model id or alias inside that provider.
 - Unknown provider prefix falls back to normal routing. Known provider with an
   unknown model fails without pool fallback.
-- V4 parity lives in `routecodex-v4-router::resolve_direct_provider_model`;
-  do not bypass it with headers, payload fields, or per-provider suffix hacks.
+- Do not bypass direct-pin resolution with headers, payload fields, or
+  per-provider suffix hacks.
 
 ## Evidence order
 
