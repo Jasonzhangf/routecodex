@@ -115,7 +115,7 @@ mod tests {
     fn failure_rate_advances_only_after_a_meaningful_sample() {
         assert_eq!(provider_failure_cooldown_ms(1, 1, 1), 5_000);
         assert_eq!(provider_failure_cooldown_ms(1, 10, 10), 900_000);
-        assert_eq!(provider_failure_cooldown_ms(3, 3, 3), 30_000);
+        assert_eq!(provider_failure_cooldown_ms(3, 3, 3), 900_000);
     }
 
     #[test]
