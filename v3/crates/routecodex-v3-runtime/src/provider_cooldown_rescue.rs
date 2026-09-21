@@ -9,9 +9,13 @@ impl V3ProviderFailureRuntimeHealth {
         &self,
         manifest: &V3Config05ManifestPublished,
         candidates: &[V3TargetCandidate],
+        now_ms: u64,
     ) -> Result<(), String> {
         let mut identities = BTreeSet::new();
-        let mut probes = Vec::new();
+        let mut permit_identities = BTreeSet::new();
+        let mut probes: Vec<
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>,
+        > = Vec::new();
         for candidate in candidates {
             let identity = (
                 &candidate.provider_id,
@@ -21,62 +25,81 @@ impl V3ProviderFailureRuntimeHealth {
             if !identities.insert(identity) {
                 continue;
             }
-            let permit = self
+            let mut permits = self
                 .store
-                .acquire_provider_cooldown_rescue_probe(
+                .acquire_provider_cooldown_rescue_probes(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
                 )
                 .map_err(|error| error.to_string())?;
-            let health = self.clone();
             let provider_id = candidate.provider_id.clone();
             let auth_alias = candidate.auth_alias.clone();
             let model_id = candidate.model_id.clone();
-            let target = permit
-                .as_ref()
-                .map(|_| {
-                    build_v3_provider_global_probe_target(
-                        manifest,
+            permits.extend(
+                self.store
+                    .acquire_provider_cooldown_probes_if_due(
                         &provider_id,
                         Some(&auth_alias),
                         Some(&model_id),
+                        now_ms,
                     )
-                })
-                .transpose();
-            probes.push(async move {
-                let Some(permit) = permit else {
-                    return health
+                    .map_err(|error| error.to_string())?,
+            );
+            if permits.is_empty() {
+                let health = self.clone();
+                probes.push(Box::pin(async move {
+                    health
                         .store
-                        .wait_for_provider_cooldown_probe_completion(
+                        .wait_for_provider_cooldown_probe_completions(
                             &provider_id,
                             Some(&auth_alias),
                             Some(&model_id),
                         )
                         .await
-                        .map_err(|error| error.to_string());
-                };
+                        .map_err(|error| error.to_string())
+                }));
+                continue;
+            }
+            for permit in permits {
+                let permit_identity = (
+                    permit.provider_id().to_string(),
+                    permit.auth_alias().map(str::to_string),
+                    permit.model_id().map(str::to_string),
+                );
+                if !permit_identities.insert(permit_identity) {
+                    continue;
+                }
+                let health = self.clone();
+                let target = build_v3_provider_global_probe_target(
+                    manifest,
+                    permit.provider_id(),
+                    permit.auth_alias(),
+                    permit.model_id(),
+                )
+                .map_err(|error| error.to_string());
+                probes.push(Box::pin(async move {
+                let permit_provider_id = permit.provider_id().to_string();
+                let permit_auth_alias = permit.auth_alias().map(str::to_string);
+                let permit_model_id = permit.model_id().map(str::to_string);
                 let cancellation = V3ProviderProbeCancellationGuard {
                     store: health.store.clone(),
-                    provider_id: provider_id.clone(),
-                    auth_alias: Some(auth_alias.clone()),
-                    model_id: Some(model_id.clone()),
+                    provider_id: permit_provider_id.clone(),
+                    auth_alias: permit_auth_alias.clone(),
+                    model_id: permit_model_id.clone(),
                     expected_generation: permit.expected_generation(),
                 };
                 let result = match target {
-                    Ok(Some(target)) => probe_v3_provider_global_target(target).await,
-                    Ok(None) => Err(V3ProviderHealthProbeFailure::Internal(format!(
-                        "provider cooldown rescue probe target missing for {provider_id}:{auth_alias}"
-                    ))),
+                    Ok(target) => probe_v3_provider_global_target(target).await,
                     Err(error) => Err(V3ProviderHealthProbeFailure::Internal(error)),
                 };
                 let completion = match result {
                     Ok(()) => health
                         .store
                         .complete_provider_cooldown_probe_success_at_generation(
-                            &provider_id,
-                            Some(&auth_alias),
-                            Some(&model_id),
+                            &permit_provider_id,
+                            permit_auth_alias.as_deref(),
+                            permit_model_id.as_deref(),
                             v3_relay_provider_policy_now_epoch_ms()?,
                             Some(permit.expected_generation()),
                         )
@@ -85,9 +108,9 @@ impl V3ProviderFailureRuntimeHealth {
                         health
                             .store
                             .complete_provider_cooldown_probe_failure_at_generation(
-                                &provider_id,
-                                Some(&auth_alias),
-                                Some(&model_id),
+                                &permit_provider_id,
+                                permit_auth_alias.as_deref(),
+                                permit_model_id.as_deref(),
                                 v3_relay_provider_policy_now_epoch_ms()?,
                                 Some(permit.expected_generation()),
                             )
@@ -97,7 +120,8 @@ impl V3ProviderFailureRuntimeHealth {
                 };
                 drop(cancellation);
                 completion
-            });
+                }));
+            }
         }
         for result in futures_util::future::join_all(probes).await {
             result?;
@@ -109,8 +133,9 @@ impl V3ProviderFailureRuntimeHealth {
         &self,
         manifest: &V3Config05ManifestPublished,
         expanded: &V3Target09CandidateSetExpanded,
+        now_ms: u64,
     ) -> Result<(), String> {
-        self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates)
+        self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates, now_ms)
             .await
     }
 }
@@ -254,7 +279,11 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
             };
             if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
                 if let Err(error) = provider_health
-                    .run_cooldown_rescue_probes_for_candidates(manifest, &rescue_candidates)
+                    .run_cooldown_rescue_probes_for_candidates(
+                        manifest,
+                        &rescue_candidates,
+                        now_ms,
+                    )
                     .await
                 {
                     return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
@@ -294,85 +323,126 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
     }
-    let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-        Ok(now_ms) => now_ms,
-        Err(error) => {
-            return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-                "V3ProviderCooldownRescueProbe",
-                "target_exhaustion_rescue_clock_failed",
-                error,
-            ))
-        }
-    };
-    let observed_generation = provider_health.store.availability_generation();
-    let retry_availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut selection = select_v3_target_with_session_then_global(
-        &target,
-        expanded.clone(),
-        &retry_availability,
-        provider_health,
-        request_local_excluded_candidates,
-        retry_now_ms,
-        0,
-    );
-    if provider_health.store.availability_generation() != observed_generation {
-        // Health can change concurrently with the first post-probe read. Re-read
-        // once immediately, but never wait for a later availability generation.
-        selection = select_v3_target_with_session_then_global(
+    loop {
+        let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+            Ok(now_ms) => now_ms,
+            Err(error) => {
+                return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                    "V3ProviderCooldownRescueProbe",
+                    "target_exhaustion_rescue_clock_failed",
+                    error,
+                ))
+            }
+        };
+        let observed_generation = provider_health.store.availability_generation();
+        let retry_availability = provider_health.session_bound_availability(failure_session_scope);
+        let exhaustion = match select_v3_target_with_session_then_global(
             &target,
             expanded.clone(),
-            &provider_health.session_bound_availability(failure_session_scope),
+            &retry_availability,
             provider_health,
             request_local_excluded_candidates,
             retry_now_ms,
             0,
-        );
-    }
-    let exhaustion = match selection {
-        Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
-        Err(exhausted) => exhausted,
-    };
-    if !v3_exhaustion_is_cooldown_only(
-        &expanded,
-        request_local_excluded_candidates,
-        failure_session_scope,
-        provider_health,
-        retry_now_ms,
-    ) {
-        return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
-    }
-    if let Err(error) = provider_health
-        .run_exhaustion_rescue_probes(manifest, &expanded)
-        .await
-    {
-        return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
-            "V3ProviderCooldownRescueProbe",
-            "target_exhaustion_rescue_probe_failed",
-            error,
-        ));
-    }
-    let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
-        Ok(now_ms) => now_ms,
-        Err(error) => {
+        ) {
+            Ok(selected) => return V3TargetSelectionAfterRescue::Selected(selected),
+            Err(exhausted) => exhausted,
+        };
+        if provider_health.store.availability_generation() != observed_generation {
+            continue;
+        }
+        if !v3_exhaustion_is_cooldown_only(
+            &expanded,
+            request_local_excluded_candidates,
+            failure_session_scope,
+            provider_health,
+            retry_now_ms,
+        ) {
+            return V3TargetSelectionAfterRescue::Exhausted(exhaustion);
+        }
+        if let Err(error) = provider_health
+            .run_exhaustion_rescue_probes(manifest, &expanded, retry_now_ms)
+            .await
+        {
             return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
                 "V3ProviderCooldownRescueProbe",
-                "target_exhaustion_rescue_clock_failed",
+                "target_exhaustion_rescue_probe_failed",
                 error,
-            ))
+            ));
         }
-    };
-    match select_v3_target_with_session_then_global(
-        &target,
-        expanded,
-        &provider_health.session_bound_availability(failure_session_scope),
-        provider_health,
-        request_local_excluded_candidates,
-        retry_now_ms,
-        deterministic_sample,
-    ) {
-        Ok(selected) => V3TargetSelectionAfterRescue::Selected(selected),
-        Err(exhausted) => V3TargetSelectionAfterRescue::Exhausted(exhausted),
+        if provider_health.store.availability_generation() != observed_generation {
+            continue;
+        }
+        let wait_result = match next_provider_cooldown_probe_deadline(
+            &expanded,
+            request_local_excluded_candidates,
+            provider_health,
+        ) {
+            Ok(Some(deadline_ms)) => {
+                let now_ms = match v3_relay_provider_policy_now_epoch_ms() {
+                    Ok(now_ms) => now_ms,
+                    Err(error) => {
+                        return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                            "V3ProviderCooldownRescueProbe",
+                            "target_exhaustion_rescue_clock_failed",
+                            error,
+                        ))
+                    }
+                };
+                let sleep_ms = deadline_ms.saturating_sub(now_ms);
+                if sleep_ms == 0 {
+                    Ok(())
+                } else {
+                    tokio::select! {
+                        result = provider_health.store.wait_for_availability_change(observed_generation) => {
+                            result.map(|_| ()).map_err(|error| error.to_string())
+                        }
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)) => Ok(()),
+                    }
+                }
+            }
+            Ok(None) => provider_health
+                .store
+                .wait_for_availability_change(observed_generation)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = wait_result {
+            return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
+                "V3ProviderCooldownRescueProbe",
+                "target_exhaustion_rescue_wait_failed",
+                error,
+            ));
+        }
     }
+}
+
+fn next_provider_cooldown_probe_deadline(
+    expanded: &V3Target09CandidateSetExpanded,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+) -> Result<Option<u64>, String> {
+    let mut deadline_ms: Option<u64> = None;
+    for candidate in expanded.candidates.iter().filter(|candidate| {
+        !request_local_excluded_candidates.contains(&v3_relay_provider_candidate_key(candidate))
+    }) {
+        let next = provider_health
+            .store
+            .provider_cooldown_probe_next_deadline_ms(
+                &candidate.provider_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+            )
+            .map_err(|error| error.to_string())?;
+        deadline_ms = match (deadline_ms, next) {
+            (Some(current), Some(next)) => Some(current.min(next)),
+            (None, next) => next,
+            (current, None) => current,
+        };
+    }
+    Ok(deadline_ms)
 }
 
 fn v3_exhaustion_is_cooldown_only(
@@ -404,6 +474,15 @@ fn v3_availability_is_cooldown_recovery_only(
     projection: &V3ProviderAvailabilityProjection,
 ) -> bool {
     !projection.available
-        && projection.blocked_scopes.len() == 1
-        && projection.blocked_scopes[0] == "provider_cooldown_probe_pending"
+        && projection
+            .blocked_scopes
+            .iter()
+            .all(|scope| {
+                scope == "provider_cooldown_probe_pending"
+                    || scope.starts_with(&format!("auth_key:{}:", projection.provider_id))
+            })
+        && projection
+            .blocked_scopes
+            .iter()
+            .any(|scope| scope == "provider_cooldown_probe_pending")
 }
