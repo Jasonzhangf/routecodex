@@ -17,9 +17,9 @@ business files. In a live Codex App Server Agent it also invokes official
 `collab init` once; Collab starts/reuses its daemon, evaluates the available
 App Server capability for the current Codex sessionID, registers the current peer
 through the server-selected transport, and arms the default finite
-`direct-message` subscription. Do not run `collab init`, `collab whoami`, or a
-manual ordinary-message subscription afterward. Use `new` only for an empty
-destination.
+`direct-message` subscription. Do not run `collab init`, `collab whoami`, or
+any other registration command afterward; read `collab context` once. Use
+`new` only for an empty destination.
 
 `appsdk prepare` is a hard gate. First invocation writes `.appsdk-prepare.json`
 with `status: "draft"`. `appsdk init` rejects an unconfirmed preparation with
@@ -93,10 +93,8 @@ appsdk init .
 appsdk guide status
 appsdk verify
 collab context
-collab status --all
-collab who
 collab master promote --approval "<user approval text>"
-collab master status
+collab context
 ```
 
 Do not promote while a live master already exists. `appsdk init` alone never
@@ -109,18 +107,17 @@ Ordinary peer initialization, after the project already has
 
 ```bash
 cd /abs/path/project
+collab context
+# if the project is unregistered:
 appsdk init .
 collab context
-collab status --all
-collab who
-collab worker status <peer-id>
-collab notify status
 ```
 
 The peer must observe its own identity, liveness, presence, transport and
 worker role. Do not run a second `collab init`, do not promote itself, do not
 register a long-horizon goal, and do not fabricate a worker role from
-`appsdk init` output.
+`appsdk init` output. Execution work requires the same `appsdk bug intake`
+contract and returned `issue_id`; read-only conversation does not.
 
 Long-horizon master scheduling is a separate, master-only step. Create the
 plan file first, then register and verify:
@@ -261,6 +258,30 @@ ownership, build, and protection boundaries are carried forward.
 The new reset record has `mode: "fresh_init"` and proves the reset operation
 only. It does not inherit old PASS, review, delivery, or freeze claims.
 
+Before choosing this route, install the reviewed current AppSDK and Collab
+versions globally and use only those installed binaries and Skills for the
+inventory. Do not read, replay, or interpret old local control history to make
+the old baseline compatible. The current version is the only reset baseline:
+missing SDK-owned fields are refilled, legacy SDK pins/migration witnesses are
+ignored, and old local control state is removed only through the canonical
+owner.
+
+The replacement order is:
+
+1. Install the reviewed AppSDK and Collab binaries/Skills.
+2. Inspect with the newly installed commands and record the exact old control
+   roots and owner.
+3. Retire or migrate Collab through the Collab owner.
+4. Reset AppSDK through the AppSDK owner in a clean non-main worktree.
+5. Validate the new baseline only. Do not import old PASS, receipts, review,
+   install, restart, or delivery evidence.
+
+If a legacy user-local Collab binary pair is proven by its own version
+response, removal requires explicit user authorization naming the exact binary
+paths. After the canonical pair is installed, remove only those authorized,
+verified paths. Never remove `~/.appsdk`, `~/.collab`, project
+`.agent-collab/`, or business source as part of binary cleanup.
+
 The lower-level `appsdk reset-governance --discard-legacy` command remains
 available and uses the same transactional reset owner. Neither command
 authorizes manual deletion or hand-editing of version/hash/ReviewRecord, and
@@ -324,7 +345,6 @@ git status --short --branch
 git worktree list
 find .appsdk .appsdk-control .agent-collab -maxdepth 3 -print 2>/dev/null
 collab migrate inspect
-collab status --all
 collab context
 ```
 
@@ -363,12 +383,25 @@ only after journal/mailbox/task/identity continuity passes. If the result is
 and resolve it through Collab's canonical owner; do not continue to the AppSDK
 reset as if the whole operation passed.
 
-There is no supported project-level command that deletes and recreates
-`.agent-collab/`. Never manually delete it, edit its JSON/JSONL, clear its
-mailbox, copy identity tokens, or start a second daemon. A project that has no
-valid Collab state to preserve still needs an explicit Collab retirement or
-fresh-registration decision from the Collab owner; AppSDK must not make that
-decision for it.
+When the operator explicitly authorizes abandoning the old Collab epoch
+instead of preserving it, use the single offline reset owner:
+
+```bash
+collab down
+collab reset --discard-legacy --approval "<explicit user authorization>"
+collab up
+collab init
+collab context
+```
+
+`collab reset` archives the exact `.agent-collab/` and `.agent-collab-v2/`
+bytes, removes only Collab-owned project control state and stale routes, and
+rebuilds the current empty baseline. It never removes `.appsdk/` or
+`.appsdk-control/` and records `delivery_verified: false`. Never manually
+delete `.agent-collab/`, edit its JSON/JSONL, clear its mailbox, copy identity
+tokens, or start a second daemon. A project that has no valid Collab state to
+preserve still needs this explicit Collab retirement or the migration
+decision; AppSDK must not make that decision for it.
 
 ### 3. AppSDK reset
 

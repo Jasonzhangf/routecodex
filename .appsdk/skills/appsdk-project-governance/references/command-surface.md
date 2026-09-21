@@ -25,10 +25,13 @@ appsdk goal subscribe --goal <file.md> --interval <interval>
                                        master-only long-horizon registration
 appsdk goal status --json              verify goal subscription state
 appsdk longhorizon show --json         read long-horizon role/task state
+appsdk bug intake --input <json>       deduplicate/classify execution work and return issue_id
 appsdk bug list -q <kw> --json         query bug backlog
 appsdk bug new -t <title> -m <body> -l <labels>
                                        create a bug record
+appsdk bug list ... --upstream         inspect upstream AppSDK defects
 appsdk bug new --upstream ...          report an AppSDK defect upstream
+appsdk bug show ... --upstream         read an upstream AppSDK defect
 appsdk bug show <id> --json            read a bug record
 appsdk bug close <id> -m <solution> --receipt-id <receipt>
                                        close a bug with solution evidence
@@ -49,11 +52,7 @@ project-memory reentry [project] --run <run-id>
 
 ```text
 collab init                            register this peer once through AppSDK or standalone
-collab context                         read current peer/role contract
-collab status --all                    read server summary and worker/task state
-collab who                             list registered peers/liveness
-collab worker status <peer-id>         inspect one peer's identity/liveness/transport
-collab notify status                   inspect own subscriptions
+collab context                         read current peer state and authority
 collab sendmessage --to <peer> --subject <topic> "<body>"
                                        send one durable ordinary message
 collab recv                            consume delivered notifications
@@ -77,9 +76,25 @@ collab migrate inspect                 read-only migration/retirement inspection
 collab migrate plan                    prepare migration/retirement snapshot
 collab migrate apply                   freeze admission and persist snapshot
 collab migrate verify                  verify migration/retirement continuity
+collab reset --discard-legacy --approval "<text>"
+                                       retire/rebuild Collab-owned local control plane
 collab down                            controlled daemon stop
 collab up                              controlled daemon start
 collab worker recover                  rebind/recover worker identity after restart
+```
+
+The commands below are diagnostic-only. They are not initialization steps and
+must not be chained after `collab context` during normal setup. The explicit
+stale-daemon recovery procedure in
+[`init-prompts.md`](init-prompts.md#stale-daemon-socket-or-lock) is the only
+exception: there, preserve the exact failure, then use `collab status --all`
+before the controlled `collab up` and final `collab context`.
+
+```text
+collab status --all                    server summary and worker/task state
+collab who                             registered peers and liveness
+collab worker status <peer-id>         one peer's identity/liveness/transport
+collab notify status                   own subscriptions
 ```
 
 ## Do not guess
