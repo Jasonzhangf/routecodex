@@ -422,6 +422,13 @@ pub(crate) fn build_v3_gemini_transport_09(
         V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
         V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
     };
+    // The selected wire model is encoded in the Gemini URL path, never in the
+    // provider body: the shared selected-model binding inserts `model` into the
+    // payload for protocols that carry it in the body, so drop it here.
+    let mut body = body;
+    if let Some(object) = body.as_object_mut() {
+        object.remove("model");
+    }
     let endpoint = match stream_intent {
         V3ResponsesStreamIntent::Json => "generateContent",
         V3ResponsesStreamIntent::Sse => "streamGenerateContent",
