@@ -613,6 +613,17 @@ input::placeholder { color: var(--muted); }
 
 .filter-search input { width: 100%; }
 
+/* Inline how-to for the rail: the filter model is OR-within / AND-across, which
+   is not guessable from three checkbox lists alone. */
+.filter-help {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.filter-help em { font-style: normal; font-weight: 600; color: var(--label); }
+
 .filter-group { margin-bottom: 16px; }
 
 .filter-group h3 {
@@ -620,16 +631,9 @@ input::placeholder { color: var(--muted); }
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--label);
   margin: 0 0 6px;
   font-weight: 600;
-}
-
-.filter-group .layer {
-  border-radius: 5px;
-  padding: 1px 6px;
-  font-size: 11px;
-  background: color-mix(in srgb, var(--amb-label), transparent 90%);
 }
 
 .filter-clear {
@@ -734,6 +738,20 @@ input::placeholder { color: var(--muted); }
   padding: 6px 13px;
   border-radius: 9px;
   cursor: pointer;
+}
+
+/* Tabs carry a label plus a count badge; without an explicit flex context the
+   two inline spans would run together ("All ports0"). */
+.port-tab, .tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.port-tab .count, .tab-btn .tab-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
 }
 
 .port-tab[aria-selected="true"], .tab-btn.active, .sub-tab-btn.active {
@@ -865,6 +883,16 @@ input::placeholder { color: var(--muted); }
 .selection-bar .n { color: var(--accent); font-weight: 650; }
 
 .empty-state { padding: 30px 0; text-align: center; color: var(--muted); }
+
+.empty-state h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: var(--label);
+}
+
+.empty-state p { margin: 0; font-size: 13px; }
+
+.empty-state .btn { margin-left: 8px; vertical-align: baseline; }
 
 /* ---------- routes page ---------- */
 
