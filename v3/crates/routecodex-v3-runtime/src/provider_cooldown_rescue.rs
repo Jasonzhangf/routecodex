@@ -12,7 +12,10 @@ impl V3ProviderFailureRuntimeHealth {
         now_ms: u64,
     ) -> Result<(), String> {
         let mut identities = BTreeSet::new();
-        let mut probes = Vec::new();
+        let mut permit_identities = BTreeSet::new();
+        let mut probes: Vec<
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>,
+        > = Vec::new();
         for candidate in candidates {
             let identity = (
                 &candidate.provider_id,
@@ -22,53 +25,60 @@ impl V3ProviderFailureRuntimeHealth {
             if !identities.insert(identity) {
                 continue;
             }
-            let rescue_permit = self
+            let mut permits = self
                 .store
-                .acquire_provider_cooldown_rescue_probe(
+                .acquire_provider_cooldown_rescue_probes(
                     &candidate.provider_id,
                     Some(&candidate.auth_alias),
                     Some(&candidate.model_id),
                 )
                 .map_err(|error| error.to_string())?;
-            let permit = match rescue_permit {
-                Some(permit) => Some(permit),
-                None => self
-                    .store
-                    .acquire_provider_cooldown_probe_if_due(
-                        &candidate.provider_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        now_ms,
-                    )
-                    .map_err(|error| error.to_string())?,
-            };
-            let health = self.clone();
             let provider_id = candidate.provider_id.clone();
             let auth_alias = candidate.auth_alias.clone();
             let model_id = candidate.model_id.clone();
-            let target = permit
-                .as_ref()
-                .map(|permit| {
-                    build_v3_provider_global_probe_target(
-                        manifest,
-                        permit.provider_id(),
-                        permit.auth_alias(),
-                        permit.model_id(),
+            permits.extend(
+                self.store
+                    .acquire_provider_cooldown_probes_if_due(
+                        &provider_id,
+                        Some(&auth_alias),
+                        Some(&model_id),
+                        now_ms,
                     )
-                })
-                .transpose();
-            probes.push(async move {
-                let Some(permit) = permit else {
-                    return health
+                    .map_err(|error| error.to_string())?,
+            );
+            if permits.is_empty() {
+                let health = self.clone();
+                probes.push(Box::pin(async move {
+                    health
                         .store
-                        .wait_for_provider_cooldown_probe_completion(
+                        .wait_for_provider_cooldown_probe_completions(
                             &provider_id,
                             Some(&auth_alias),
                             Some(&model_id),
                         )
                         .await
-                        .map_err(|error| error.to_string());
-                };
+                        .map_err(|error| error.to_string())
+                }));
+                continue;
+            }
+            for permit in permits {
+                let permit_identity = (
+                    permit.provider_id().to_string(),
+                    permit.auth_alias().map(str::to_string),
+                    permit.model_id().map(str::to_string),
+                );
+                if !permit_identities.insert(permit_identity) {
+                    continue;
+                }
+                let health = self.clone();
+                let target = build_v3_provider_global_probe_target(
+                    manifest,
+                    permit.provider_id(),
+                    permit.auth_alias(),
+                    permit.model_id(),
+                )
+                .map_err(|error| error.to_string());
+                probes.push(Box::pin(async move {
                 let permit_provider_id = permit.provider_id().to_string();
                 let permit_auth_alias = permit.auth_alias().map(str::to_string);
                 let permit_model_id = permit.model_id().map(str::to_string);
@@ -80,10 +90,7 @@ impl V3ProviderFailureRuntimeHealth {
                     expected_generation: permit.expected_generation(),
                 };
                 let result = match target {
-                    Ok(Some(target)) => probe_v3_provider_global_target(target).await,
-                    Ok(None) => Err(V3ProviderHealthProbeFailure::Internal(format!(
-                        "provider cooldown rescue probe target missing for {provider_id}:{auth_alias}"
-                    ))),
+                    Ok(target) => probe_v3_provider_global_target(target).await,
                     Err(error) => Err(V3ProviderHealthProbeFailure::Internal(error)),
                 };
                 let completion = match result {
@@ -113,7 +120,8 @@ impl V3ProviderFailureRuntimeHealth {
                 };
                 drop(cancellation);
                 completion
-            });
+                }));
+            }
         }
         for result in futures_util::future::join_all(probes).await {
             result?;

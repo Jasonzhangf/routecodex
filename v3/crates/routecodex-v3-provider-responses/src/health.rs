@@ -10,8 +10,9 @@ use crate::probe_backoff::{
     adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
-    provider_cooldown_probe_key, resolve_provider_cooldown_probe_key, V3ProviderCooldownProbeKey,
-    V3ProviderCooldownProbeState, V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
+    provider_cooldown_probe_key, provider_cooldown_probe_keys_for_candidate,
+    V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
+    V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
 use persistence::{
     legacy_provider_cooldown_state_path_for_manifest, persist_cooldown_state,
@@ -911,13 +912,25 @@ impl V3ProviderHealthStore {
         self.acquire_provider_cooldown_probe_at(provider_id, auth_alias, model_id, None)
     }
 
+    pub fn acquire_provider_cooldown_rescue_probes(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<Vec<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
+        self.acquire_provider_cooldown_rescue_probes_impl(provider_id, auth_alias, model_id)
+    }
+
     pub fn acquire_provider_cooldown_rescue_probe(
         &self,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
     ) -> Result<Option<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
-        self.acquire_provider_cooldown_rescue_probe_impl(provider_id, auth_alias, model_id)
+        Ok(self
+            .acquire_provider_cooldown_rescue_probes(provider_id, auth_alias, model_id)?
+            .into_iter()
+            .next())
     }
 
     /// 并发耗尽请求等待同一 key 的单飞 probe 收口，不重复发送 probe。
@@ -927,32 +940,48 @@ impl V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
     ) -> Result<(), V3ProviderHealthError> {
+        self.wait_for_provider_cooldown_probe_completions(provider_id, auth_alias, model_id)
+            .await
+    }
+
+    pub async fn wait_for_provider_cooldown_probe_completions(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<(), V3ProviderHealthError> {
         loop {
-            let mut completion = {
+            let completions = {
                 let state = self
                     .state
                     .read()
                     .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-                let key = resolve_provider_cooldown_probe_key(
+                provider_cooldown_probe_keys_for_candidate(
                     &state.provider_cooldown_probes,
                     provider_id,
                     auth_alias,
                     model_id,
-                );
-                state
-                    .provider_cooldown_probes
-                    .get(&key)
-                    .filter(|probe_state| probe_state.probe_in_flight)
-                    .map(|probe_state| probe_state.completion.subscribe())
+                )
+                .into_iter()
+                .filter_map(|key| {
+                    state
+                        .provider_cooldown_probes
+                        .get(&key)
+                        .filter(|probe_state| probe_state.probe_in_flight)
+                        .map(|probe_state| probe_state.completion.subscribe())
+                })
+                .collect::<Vec<_>>()
             };
-            let Some(mut completion) = completion.take() else {
+            if completions.is_empty() {
                 return Ok(());
-            };
-            if !*completion.borrow_and_update() {
-                completion
-                    .changed()
-                    .await
-                    .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+            }
+            for mut completion in completions {
+                if !*completion.borrow_and_update() {
+                    completion
+                        .changed()
+                        .await
+                        .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+                }
             }
         }
     }
@@ -995,12 +1024,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let completion = complete_provider_probe_success_at_generation(
             &mut state,
             &key,
@@ -1041,12 +1065,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let Some(existing_probe) = state.provider_cooldown_probes.get(&key) else {
             return Ok(());
         };

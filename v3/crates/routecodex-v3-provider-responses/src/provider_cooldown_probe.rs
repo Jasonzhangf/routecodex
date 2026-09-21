@@ -48,21 +48,22 @@ pub fn provider_cooldown_probe_key(
     }
 }
 
-pub(crate) fn resolve_provider_cooldown_probe_key(
+pub(crate) fn provider_cooldown_probe_keys_for_candidate(
     probes: &BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
     provider_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
-) -> V3ProviderCooldownProbeKey {
+) -> Vec<V3ProviderCooldownProbeKey> {
+    let mut keys = Vec::with_capacity(2);
     let exact = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
     if probes.contains_key(&exact) {
-        return exact;
+        keys.push(exact);
     }
     if model_id.is_some() {
         let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
         if probes.contains_key(&auth_key) {
-            return auth_key;
+            keys.push(auth_key);
         }
     }
-    exact
+    keys
 }

@@ -686,6 +686,165 @@ async fn auth_key_cooldown_holds_selection_until_probe_recovery() {
 }
 
 #[tokio::test]
+async fn model_and_auth_key_cooldown_probes_both_must_recover() {
+    let server_id = "model_and_auth_key_cooldown_with_provider_probe";
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "model-and-auth-key-probe")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    let first = expanded.candidates[0].clone();
+    let second = expanded.candidates[1].clone();
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    put_auth_key_in_cooldown(&health, &failure_session_scope, "first", "key1", 20_001);
+    put_auth_key_in_cooldown(&health, &failure_session_scope, "second", "key1", 20_001);
+
+    let first_permits = health
+        .store
+        .acquire_provider_cooldown_rescue_probes(
+            &first.provider_id,
+            Some(&first.auth_alias),
+            Some(&first.model_id),
+        )
+        .expect("first candidate rescue probes");
+    assert_eq!(
+        first_permits.len(),
+        2,
+        "the first pass must acquire both model and auth-key probes for the first candidate"
+    );
+    let first_model_permit = first_permits
+        .iter()
+        .find(|permit| permit.model_id().is_some())
+        .expect("first model probe");
+    let first_auth_key_permit = first_permits
+        .iter()
+        .find(|permit| permit.model_id().is_none())
+        .expect("first auth-key probe");
+    let second_permits = health
+        .store
+        .acquire_provider_cooldown_rescue_probes(
+            &second.provider_id,
+            Some(&second.auth_alias),
+            Some(&second.model_id),
+        )
+        .expect("second candidate rescue probes");
+    let second_model_permit = second_permits
+        .iter()
+        .find(|permit| permit.model_id().is_some())
+        .expect("second model probe");
+    let second_auth_key_permit = second_permits
+        .iter()
+        .find(|permit| permit.model_id().is_none())
+        .expect("second auth-key probe");
+
+    let selection = tokio::spawn({
+        let health = health.clone();
+        let failure_session_scope = failure_session_scope.clone();
+        async move {
+            select_v3_expanded_target_with_exhaustion_rescue(
+                &manifest,
+                expanded,
+                &failure_session_scope,
+                &health,
+                &BTreeSet::new(),
+                25_001,
+                0,
+                true,
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !selection.is_finished(),
+        "coexisting model and auth-key cooldown must hold for both probes"
+    );
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            first_model_permit.provider_id(),
+            first_model_permit.auth_alias(),
+            first_model_permit.model_id(),
+            25_001,
+            Some(first_model_permit.expected_generation()),
+        )
+        .expect("first model probe success");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !selection.is_finished(),
+        "the shared auth-key cooldown must keep selection held after model recovery"
+    );
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            first_auth_key_permit.provider_id(),
+            first_auth_key_permit.auth_alias(),
+            first_auth_key_permit.model_id(),
+            25_001,
+            Some(first_auth_key_permit.expected_generation()),
+        )
+        .expect("auth-key probe success");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !selection.is_finished(),
+        "the second candidate's model probe must also recover"
+    );
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            second_model_permit.provider_id(),
+            second_model_permit.auth_alias(),
+            second_model_permit.model_id(),
+            25_001,
+            Some(second_model_permit.expected_generation()),
+        )
+        .expect("second model probe success");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !selection.is_finished(),
+        "the second candidate's auth-key probe must also recover"
+    );
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            second_auth_key_permit.provider_id(),
+            second_auth_key_permit.auth_alias(),
+            second_auth_key_permit.model_id(),
+            25_001,
+            Some(second_auth_key_permit.expected_generation()),
+        )
+        .expect("second auth-key probe success");
+
+    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
+        .await
+        .expect("both model and auth-key probes must release the held request")
+        .expect("selection task must not panic");
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Selected(_)),
+        "only recovery of both applicable cooldown identities may resume selection"
+    );
+}
+
+#[tokio::test]
 async fn later_tier_selection_probes_preceding_cooled_candidate_before_fallback() {
     let server_id = "later_tier_probe";
     let mut manifest = global_pool_alive_manifest(server_id);

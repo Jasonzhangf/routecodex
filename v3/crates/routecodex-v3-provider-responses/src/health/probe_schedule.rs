@@ -1,6 +1,8 @@
 use super::{persistence, V3ProviderHealthError, V3ProviderHealthStore};
 use crate::key_health::V3ProviderHealthProbePermit;
-use crate::provider_cooldown_probe::resolve_provider_cooldown_probe_key;
+use crate::provider_cooldown_probe::{
+    provider_cooldown_probe_key, provider_cooldown_probe_keys_for_candidate,
+};
 use persistence::persist_cooldown_state;
 
 impl V3ProviderHealthStore {
@@ -54,16 +56,20 @@ impl V3ProviderHealthStore {
             .state
             .read()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
+        Ok(provider_cooldown_probe_keys_for_candidate(
             &state.provider_cooldown_probes,
             provider_id,
             auth_alias,
             model_id,
-        );
-        Ok(state
-            .provider_cooldown_probes
-            .get(&key)
-            .and_then(|probe_state| probe_state.next_probe_at_ms))
+        )
+        .into_iter()
+        .filter_map(|key| {
+            state
+                .provider_cooldown_probes
+                .get(&key)
+                .and_then(|probe_state| probe_state.next_probe_at_ms)
+        })
+        .min())
     }
 
     pub fn has_provider_cooldown_probe_pending(
@@ -96,7 +102,20 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         now_ms: u64,
     ) -> Result<Option<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
-        self.acquire_provider_cooldown_probe_at(provider_id, auth_alias, model_id, Some(now_ms))
+        Ok(self
+            .acquire_provider_cooldown_probes_if_due(provider_id, auth_alias, model_id, now_ms)?
+            .into_iter()
+            .next())
+    }
+
+    pub fn acquire_provider_cooldown_probes_if_due(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<Vec<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
+        self.acquire_provider_cooldown_probes_at(provider_id, auth_alias, model_id, Some(now_ms))
     }
 
     pub(super) fn acquire_provider_cooldown_probe_at(
@@ -106,82 +125,112 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         due_at_or_before_ms: Option<u64>,
     ) -> Result<Option<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
-        let mut state = self
-            .state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
-        let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
-            return Ok(None);
-        };
-        if probe_state.probe_in_flight
-            || probe_state.blocked_until_ms.is_none()
-            || probe_state.next_probe_at_ms.is_none()
-            || due_at_or_before_ms.is_some_and(|now_ms| {
-                probe_state
-                    .next_probe_at_ms
-                    .is_some_and(|next_probe_at_ms| next_probe_at_ms > now_ms)
-            })
-        {
-            return Ok(None);
-        }
-        probe_state.probe_in_flight = true;
-        probe_state.completion.send_replace(false);
-        let expected_generation = state
-            .adaptive_history
-            .get(&key)
-            .map_or(0, |history| history.score_generation);
-        persist_cooldown_state(state);
-        Ok(Some(V3ProviderHealthProbePermit::new(
-            provider_id.to_string(),
-            auth_alias.map(str::to_string),
-            key.model_id.clone(),
-            expected_generation,
-        )))
+        Ok(self
+            .acquire_provider_cooldown_probes_at(
+                provider_id,
+                auth_alias,
+                model_id,
+                due_at_or_before_ms,
+            )?
+            .into_iter()
+            .next())
     }
 
-    /// 完整候选集耗尽时，每个 cooldown generation 只允许一次强制自救 probe。
-    pub(super) fn acquire_provider_cooldown_rescue_probe_impl(
+    fn acquire_provider_cooldown_probes_at(
         &self,
         provider_id: &str,
         auth_alias: Option<&str>,
         model_id: Option<&str>,
-    ) -> Result<Option<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
+        due_at_or_before_ms: Option<u64>,
+    ) -> Result<Vec<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
+        let keys = provider_cooldown_probe_keys_for_candidate(
             &state.provider_cooldown_probes,
             provider_id,
             auth_alias,
             model_id,
         );
-        let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
-            return Ok(None);
-        };
-        if probe_state.probe_in_flight || probe_state.rescue_probe_attempted {
-            return Ok(None);
+        let mut permits = Vec::new();
+        for key in keys {
+            let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
+                continue;
+            };
+            if probe_state.probe_in_flight
+                || probe_state.blocked_until_ms.is_none()
+                || probe_state.next_probe_at_ms.is_none()
+                || due_at_or_before_ms.is_some_and(|now_ms| {
+                    probe_state
+                        .next_probe_at_ms
+                        .is_some_and(|next_probe_at_ms| next_probe_at_ms > now_ms)
+                })
+            {
+                continue;
+            }
+            probe_state.probe_in_flight = true;
+            probe_state.completion.send_replace(false);
+            let expected_generation = state
+                .adaptive_history
+                .get(&key)
+                .map_or(0, |history| history.score_generation);
+            permits.push(V3ProviderHealthProbePermit::new(
+                key.provider_id.clone(),
+                key.auth_alias.clone(),
+                key.model_id.clone(),
+                expected_generation,
+            ));
         }
-        probe_state.probe_in_flight = true;
-        probe_state.rescue_probe_attempted = true;
-        probe_state.completion.send_replace(false);
-        let expected_generation = state
-            .adaptive_history
-            .get(&key)
-            .map_or(0, |history| history.score_generation);
-        persist_cooldown_state(state);
-        Ok(Some(V3ProviderHealthProbePermit::new(
-            provider_id.to_string(),
-            auth_alias.map(str::to_string),
-            key.model_id.clone(),
-            expected_generation,
-        )))
+        if !permits.is_empty() {
+            persist_cooldown_state(state);
+        }
+        Ok(permits)
+    }
+
+    /// 完整候选集耗尽时，每个 cooldown generation 只允许一次强制自救 probe。
+    pub(super) fn acquire_provider_cooldown_rescue_probes_impl(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<Vec<V3ProviderHealthProbePermit>, V3ProviderHealthError> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        let keys = provider_cooldown_probe_keys_for_candidate(
+            &state.provider_cooldown_probes,
+            provider_id,
+            auth_alias,
+            model_id,
+        );
+        let mut permits = Vec::new();
+        for key in keys {
+            let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) else {
+                continue;
+            };
+            if probe_state.probe_in_flight || probe_state.rescue_probe_attempted {
+                continue;
+            }
+            probe_state.probe_in_flight = true;
+            probe_state.rescue_probe_attempted = true;
+            probe_state.completion.send_replace(false);
+            let expected_generation = state
+                .adaptive_history
+                .get(&key)
+                .map_or(0, |history| history.score_generation);
+            permits.push(V3ProviderHealthProbePermit::new(
+                key.provider_id.clone(),
+                key.auth_alias.clone(),
+                key.model_id.clone(),
+                expected_generation,
+            ));
+        }
+        if !permits.is_empty() {
+            persist_cooldown_state(state);
+        }
+        Ok(permits)
     }
 
     /// Cancel an abandoned probe without touching a newer cooldown
@@ -198,12 +247,7 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        let key = resolve_provider_cooldown_probe_key(
-            &state.provider_cooldown_probes,
-            provider_id,
-            auth_alias,
-            model_id,
-        );
+        let key = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
         let current_generation = state
             .adaptive_history
             .get(&key)
