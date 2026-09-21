@@ -1,11 +1,11 @@
 {
   "evidence_id": "v3-provider-cooldown-hold-recovery-source-20260921",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "ae1af2eb83ccfddfde9933a66620338bcfc32f5d",
-  "candidate_tree": "af3205d7c2942ba3fa81fd1670ecb7f5e83ee937",
+  "candidate_commit": "b8beea4454ec90f8facf91a1cb5dec521ea68275",
+  "candidate_tree": "183b528b42c75baedb0c137712fdecf1108aebdb",
   "base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
   "integration_base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
-  "captured_at": "2026-09-20T22:42:30-07:00",
+  "captured_at": "2026-09-21T00:04:23-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
@@ -18,7 +18,8 @@
       "v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs",
       "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
       "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs",
-      "v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs"
+      "v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs",
+      "v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs"
     ]
   },
   "gates": [
@@ -100,6 +101,11 @@
       "command": "npm run test:v3-gemini-relay-runtime-integration",
       "result": "pass",
       "tests": "Gemini 20 passed; server controlled 1 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_provider_pool_exhaustion_holds_between_failed_and_successful_rescue_probes -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
     }
   ],
   "controlled_replay": {
@@ -118,7 +124,8 @@
     ]
   },
   "notes": [
-    "This receipt binds source and gate execution to candidate commit ae1af2eb83ccfddfde9933a66620338bcfc32f5d and tree af3205d7c.",
+    "This receipt binds source and gate execution to candidate commit b8beea4454ec90f8facf91a1cb5dec521ea68275 and tree 183b528b4.",
+    "The OpenAI Chat integration fixture now verifies a failed rescue probe keeps the request held and the next due probe resumes it through normal provider transport.",
     "The receipt commit changes this evidence file only; the scoped source and test paths remain unchanged.",
     "This is candidate source and controlled replay evidence. It does not claim merge, install, managed restart, listener health, or production live replay."
   ]
