@@ -161,7 +161,11 @@ pub(crate) fn request_local_provider_failure_scope(
     error_type: Option<&str>,
 ) -> V3RequestLocalProviderFailureScope {
     let request_local_compat = source_stage == "ProviderReqCompat06ProviderCompat"
-        || error_type == Some("provider_request_compat_error");
+        || error_type == Some("provider_request_compat_error")
+        // Provider semantic invalid-request responses describe this request,
+        // not provider health. Relay may surface them as a runtime 502 after
+        // decoding an HTTP-200 SSE error event, so status alone is insufficient.
+        || error_type == Some("invalid_request_error");
     if request_local_compat {
         V3RequestLocalProviderFailureScope::Candidate
     } else {

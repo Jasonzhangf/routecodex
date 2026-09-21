@@ -7,34 +7,38 @@
 - Failure: `kdns:key2:deepseek-v4.1-flash` returned an HTTP-200 SSE error frame
   with `error.type=invalid_request_error` and upstream text `403 request
   illegal (code 11140)`.
-- Before the fix, `request_local_provider_failure_scope()` treated
-  `invalid_request_error` as local provider compat. The provider family was
-  not excluded and provider health/cooldown was not updated.
+- The request-local invalid-request classification must remain candidate
+  scoped: the failed model is excluded, but sibling models in the same provider
+  family remain eligible and provider health/cooldown is not mutated.
 
 ## Owner And Change
 
 - Owner: `v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs`
   `request_local_provider_failure_scope()`.
-- Only `ProviderReqCompat06ProviderCompat` and
-  `provider_request_compat_error` remain candidate-local and health-neutral.
-- Upstream response-stage failures, including
-  `V3ProviderRespInbound01Raw/invalid_request_error`, are provider scoped.
+- `ProviderReqCompat06ProviderCompat`, `provider_request_compat_error`, and
+  `invalid_request_error` remain candidate-local and health-neutral.
+- Provider transport and genuine provider-health failures remain
+  provider-scoped.
 
 ## Verification
 
-Red evidence before the source fix:
+The first candidate widened `invalid_request_error` to provider scope and the
+workspace gate exposed the regression:
 
 ```text
-left:  {"first:key:test"}
-right: {"first:key:sibling", "first:key:test"}
+goaichat_glm_http400_switches_sibling_model_client_never_400_or_502_json FAILED
+goaichat_glm_http400_switches_sibling_model_client_never_400_or_502_sse FAILED
+left: 502
+right: 502
 ```
 
-Green evidence on the candidate:
+Green evidence after the correction:
 
 - Focused regression:
-  `relay_upstream_invalid_request_error_excludes_provider_family_and_records_health`
+  `relay_upstream_invalid_request_error_keeps_same_provider_sibling_health_neutral`
   PASS 1/1.
-- Provider compat tests PASS 5/5.
+- GLM400 JSON/SSE isolation tests PASS 2/2.
+- Provider failure policy tests PASS 50/50.
 - `npm run test:v3-provider-action-gate` PASS.
 - `npm run verify:v3-provider-action-gate` PASS.
 - `npm run test:v3-provider-action-gate-red-fixtures` PASS (54 mutations
