@@ -4525,6 +4525,8 @@ features:
   - V3ProviderHealthStore::record_provider_failure_in_session_with_policy
   - V3ProviderHealthStore::record_provider_key_success
   - V3ProviderHealthStore::acquire_provider_cooldown_probe
+  - V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due
+  - V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation
   - V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation
   - V3ProviderHealthStore::cooldown_entries
@@ -4537,7 +4539,9 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
+  - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
@@ -4552,6 +4556,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
+  - v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-error/src/subscription.rs
   - v3/crates/routecodex-v3-config/src

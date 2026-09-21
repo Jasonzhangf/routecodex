@@ -3,6 +3,8 @@
 //! 冷却到期后后台 probe 循环消费 `V3ProviderHealthStore` 的 probe API；
 //! 类型与 key 构造保持独立模块，避免 health.rs 超过文件尺寸门限。
 
+use std::collections::BTreeMap;
+
 /// 首次复活探针间隔（probe backoff ladder 第 0 档：5s）。
 /// 重启只重置 probe 历史，下一次冷却仍从 5s 档开始。
 pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 5_000;
@@ -44,4 +46,23 @@ pub fn provider_cooldown_probe_key(
         auth_alias: auth_alias.map(str::to_string),
         model_id: model_id.map(str::to_string),
     }
+}
+
+pub(crate) fn resolve_provider_cooldown_probe_key(
+    probes: &BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
+    provider_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> V3ProviderCooldownProbeKey {
+    let exact = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+    if probes.contains_key(&exact) {
+        return exact;
+    }
+    if model_id.is_some() {
+        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        if probes.contains_key(&auth_key) {
+            return auth_key;
+        }
+    }
+    exact
 }
