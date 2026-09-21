@@ -1,0 +1,125 @@
+{
+  "evidence_id": "v3-provider-cooldown-hold-recovery-source-20260921",
+  "feature_id": "v3.provider_global_subscription_probe",
+  "candidate_commit": "c2d8fab2fb62df7ae2315489e78c5771204a6ddc",
+  "candidate_tree": "a84cddc0248b47c884ca441f9edd161630ac8649",
+  "base_commit": "31596c43adb6052b0daf79586ff0681f6c57bd91",
+  "integration_base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
+  "captured_at": "2026-09-20T22:10:01-07:00",
+  "source_unchanged": true,
+  "scope": {
+    "owner": "rust_v3_provider_adaptive_health_lifecycle",
+    "paths": [
+      "docs/architecture/v3-function-map.yml",
+      "docs/architecture/v3-resource-operation-map.yml",
+      "v3/crates/routecodex-v3-provider-responses/src/health.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/health_tests.rs",
+      "v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs",
+      "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
+      "v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs",
+      "v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs"
+    ]
+  },
+  "gates": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "cwd": "v3",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    },
+    {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-architecture-docs",
+      "result": "pass",
+      "tests": "docs: 25; resources: 179; edges: 427"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
+      "result": "pass",
+      "tests": "12 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture",
+      "result": "pass"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture",
+      "result": "pass",
+      "tests": "7 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture",
+      "result": "pass",
+      "tests": "8 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture",
+      "result": "pass",
+      "tests": "55 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-health-contract",
+      "result": "pass",
+      "tests": "14 + 27 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-session-cooldown-red-fixtures",
+      "result": "pass",
+      "tests": "30 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-provider-action-gate",
+      "result": "pass"
+    },
+    {
+      "command": "cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features",
+      "result": "pass"
+    },
+    {
+      "command": "npm run test:v3-gemini-relay-runtime-integration",
+      "result": "pass",
+      "tests": "Gemini 20 passed; server controlled 1 passed; 0 failed"
+    }
+  ],
+  "controlled_replay": {
+    "surface": "v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs",
+    "result": "pass",
+    "behavior": "cooldown-only exhaustion remains held, a successful provider probe revives the provider, and the original held request resumes through the Gemini provider endpoint"
+  },
+  "live_boundary": {
+    "status": "pending_merged_main_install_restart_replay",
+    "required": [
+      "Merge the reviewed candidate into main and record the resulting main SHA and tree.",
+      "Rebuild and install rccv3 from the merged main.",
+      "Restart the managed V3 instance through the official lifecycle command.",
+      "Verify every configured listener health endpoint and loaded runtime version.",
+      "Replay the original cooldown-exhaustion and probe-recovery flow through the real V3 entrypoint."
+    ]
+  },
+  "notes": [
+    "This receipt binds source and gate execution to candidate commit c2d8fab2f and tree a84cddc0.",
+    "The receipt commit that follows c2d8fab2f changes this evidence file only; the scoped source and test paths remain unchanged.",
+    "This is candidate source and controlled replay evidence. It does not claim merge, install, managed restart, listener health, or production live replay."
+  ]
+}

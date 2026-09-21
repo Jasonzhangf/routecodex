@@ -6,8 +6,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_gemini_relay_runtime, execute_v3_gemini_relay_runtime_with_provider_health,
-    V3GeminiRelayClientBody, V3GeminiRelayRuntimeError, V3GeminiRelayRuntimeInput,
-    V3ResponsesRelayProviderHealthHandle,
+    V3GeminiRelayClientBody, V3GeminiRelayRuntimeInput, V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -996,27 +995,26 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             )
             .await
         });
-        // A failed bounded rescue pass must terminate the request instead of
-        // leaving the session waiting for an unbounded future recovery.
-        let terminal = tokio::time::timeout(Duration::from_secs(2), held)
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !held.is_finished(),
+            "{case} cooldown-only exhaustion must hold until a rescue probe succeeds"
+        );
+        revive_cooled_provider(&provider_health, server_id).await;
+        let revived = tokio::time::timeout(Duration::from_secs(2), held)
             .await
-            .expect("bounded rescue pass must not leave the request hanging")
-            .expect("held request task must not panic");
+            .expect("held request must wake after provider recovery")
+            .expect("held request task must not panic")
+            .expect("probe-revived provider must accept the held request");
         let probe_request = tokio::time::timeout(Duration::from_secs(2), probe_server)
             .await
-            .expect("failed rescue probe must reach the local provider listener")
+            .expect("rescue probe must reach the local provider listener")
             .expect("provider probe task must not panic");
         assert!(
             probe_request.starts_with("POST /v1beta/models/gemini-wire:generateContent HTTP/1.1"),
-            "failed rescue probe must use the Gemini provider endpoint: {probe_request:?}"
+            "rescue probe must use the Gemini provider endpoint: {probe_request:?}"
         );
-        assert!(
-            matches!(
-                terminal,
-                Err(V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. })
-            ),
-            "failed rescue probes must project terminal pool exhaustion: {terminal:?}"
-        );
+        assert_eq!(revived.status, 200);
     }
 }
 
