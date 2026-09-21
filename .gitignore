@@ -67,6 +67,8 @@ scripts/demo-*.mjs
 # Local memsearch notes
 memory/
 !sharedmodule/llmswitch-core/src/servertool/handlers/memory/
+!.appsdk/contracts/memory/
+!v3/.appsdk/contracts/memory/
 
 # Local development files
 CACHE.md
