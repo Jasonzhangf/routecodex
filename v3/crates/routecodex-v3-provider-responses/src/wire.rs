@@ -551,14 +551,21 @@ fn normalize_deepseek_thinking_tool_choice(body: &mut Value, target: &V3Response
     let is_deepseek_target = matches!(
         target.compatibility_profile.as_deref(),
         Some("chat:deepseek-max" | "responses:deepseek-console-go")
-    ) || target.canonical_model_id == "deepseek-v4-flash"
-        || target.wire_model == "deepseek-v4-flash";
+    ) || is_v3_deepseek_v4_compat_model(&target.canonical_model_id)
+        || is_v3_deepseek_v4_compat_model(&target.wire_model);
     if matches!(target.provider_type.as_str(), "openai_chat" | "responses") && is_deepseek_target {
         // The argument wrapper is provider-boundary compatibility and must not
         // depend on the unrelated thinking-mode gate.  In particular, the
         // configured DeepSeek profile covers deepseek-v4.1-flash targets.
         provider_compat_core::apply_deepseek_v4_request_compat(body);
     }
+}
+
+fn is_v3_deepseek_v4_compat_model(model_id: &str) -> bool {
+    matches!(
+        model_id.trim().to_ascii_lowercase().as_str(),
+        "deepseek-v4-flash" | "deepseek-v4.1-flash"
+    )
 }
 
 /// One configured Responses target rejects a native `tool_search_output` whose result is an empty array,
