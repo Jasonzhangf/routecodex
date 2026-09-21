@@ -1,11 +1,6 @@
 ---
 name: appsdk-migration
-description: >
-  Migrate an existing AppSDK and Collab installation to one reviewed version,
-  preserving business and protected state while safely resetting an explicitly
-  authorized legacy control plane. Use for version upgrades, daemon
-  migrations, identity rebinding, and authorized legacy resets; do not use for
-  ordinary feature development or unapproved deletion.
+description: "Migrate an existing AppSDK and Collab installation to one reviewed version, preserving business and protected state while safely resetting an explicitly authorized legacy control plane. Use for version upgrades, daemon migrations, identity rebinding, and authorized legacy resets; do not use for ordinary feature development or unapproved deletion."
 ---
 
 # AppSDK migration
@@ -30,6 +25,14 @@ the canonical `appsdk reset-governance --discard-legacy` operation. Read those
 Skills before acting; do not copy their state machines into this one. For the
 project-level preserve/reset choices, also read
 [`bootstrap-migration.md`](../appsdk-project-governance/references/bootstrap-migration.md).
+
+The two clean-epoch owners are independent. Use `collab migrate` when the
+Collab journal is replayable; use `collab reset --discard-legacy --approval
+"<user text>"` only when the operator authorizes abandoning the old Collab
+epoch. Use `appsdk init <project> --fresh --discard-legacy` or the lower-level
+`appsdk reset-governance <project> --discard-legacy` only for the AppSDK-owned
+project control plane. A reset record proves reset only; it never proves
+delivery, review, install, restart, or live communication.
 
 ## Invariants
 
@@ -102,7 +105,6 @@ versions, with the usual Collab sequence:
 
 ```sh
 collab migrate inspect
-collab status --all
 collab context
 ```
 
@@ -174,6 +176,21 @@ forward. It removes the remaining AppSDK-owned control state,
 staging baseline. It records `mode: "fresh_init"`. Ordinary `appsdk init`
 remains non-destructive; the lower-level reset command uses the same
 transactional owner. A rejected fresh-init must leave the old state untouched.
+
+The Collab-owned project control plane uses a separate reset owner:
+
+```sh
+collab down
+collab reset --discard-legacy --approval "<explicit user authorization>"
+collab up
+collab init
+```
+
+It archives the exact `.agent-collab/` and `.agent-collab-v2/` bytes, removes
+only Collab-owned control state and stale routes, and rebuilds the current
+empty baseline with `delivery_verified: false`. It never removes `.appsdk/` or
+`.appsdk-control/`; never manually delete either owner's state or start a
+second daemon.
 
 The canonical transition contract is `contracts/transitions/zone-transition.manifest.json`.
 The historical `contracts/transitions/zone-transition-manifest.json` path remains
@@ -288,8 +305,6 @@ initialization or rebind operation once in that runtime, then inspect:
 
 ```sh
 collab context
-collab whoami
-collab status --all
 ```
 
 The evidence must bind the durable peer ID to the live runtime, selected
