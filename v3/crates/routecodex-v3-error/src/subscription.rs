@@ -31,8 +31,8 @@ pub struct V3ProviderFailureAction {
     pub score_delta_milli: i32,
     pub failure_threshold: u32,
     pub cooldown_ms: u64,
-    /// Whether the typed HTTP policy permits the extended 1h/3h probe ladder.
-    /// Only HTTP 401, 402, 403, and 503 set this flag.
+    /// Retained as a typed compatibility field; all provider classes now use
+    /// the shared aggressive cooldown/probe ladder.
     pub long_probe_backoff: bool,
 }
 
@@ -43,8 +43,8 @@ impl V3ProviderFailureAction {
             recovery: V3ProviderRecoveryKind::RecoverableCounted,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
-            failure_threshold: 0,
-            cooldown_ms: 15 * 60_000,
+            failure_threshold: 1,
+            cooldown_ms: 5_000,
             long_probe_backoff: false,
         }
     }
@@ -76,19 +76,11 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
-    // 全局健康，连续达到阈值即进入全局冷却，由后台探活或真实成功恢复。
+    // 全局健康，首次 provider failure 即进入共享冷却，由后台探活或真实成功恢复。
     if matches!(status, Some(401 | 402 | 403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
-        let cooldown_ms = if matches!(status, Some(401 | 402 | 403)) {
-            classified
-                .provider_global_cooldown_ms
-                .unwrap_or(60 * 60_000)
-        } else {
-            // Long probe cadence is reserved for the explicit HTTP policy
-            // statuses. Code-only failures still use the ordinary 15m cap.
-            15 * 60_000
-        };
+        let cooldown_ms = 5_000;
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
@@ -181,19 +173,19 @@ pub fn build_v3_provider_global_failure_policy(
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
         401 | 403 | 503 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 2,
-            cooldown_ms: 60 * 60_000,
-            probe_interval_ms: 60 * 60_000,
+            failure_threshold: 1,
+            cooldown_ms: 5_000,
+            probe_interval_ms: 5_000,
         }),
         402 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 3,
-            cooldown_ms: 60 * 60_000,
-            probe_interval_ms: 60 * 60_000,
+            failure_threshold: 1,
+            cooldown_ms: 5_000,
+            probe_interval_ms: 5_000,
         }),
         429 | 500..=502 | 504..=599 => Some(V3ProviderGlobalFailurePolicy {
-            failure_threshold: 3,
-            cooldown_ms: 15 * 60_000,
-            probe_interval_ms: 15 * 60_000,
+            failure_threshold: 1,
+            cooldown_ms: 5_000,
+            probe_interval_ms: 5_000,
         }),
         _ => None,
     }
@@ -258,8 +250,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 2);
-        assert_eq!(action.cooldown_ms, 60 * 60_000);
+        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.cooldown_ms, 5_000);
         assert!(action.long_probe_backoff);
 
         let ordinary = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -267,8 +259,8 @@ mod tests {
             "provider_connect_failed",
             500,
         ));
-        assert_eq!(ordinary.failure_threshold, 3);
-        assert_eq!(ordinary.cooldown_ms, 15 * 60_000);
+        assert_eq!(ordinary.failure_threshold, 1);
+        assert_eq!(ordinary.cooldown_ms, 5_000);
         assert!(!ordinary.long_probe_backoff);
 
         let payment_required = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -281,7 +273,7 @@ mod tests {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(payment_required.failure_threshold, 0);
-        assert_eq!(payment_required.cooldown_ms, 60 * 60_000);
+        assert_eq!(payment_required.cooldown_ms, 5_000);
         assert!(payment_required.long_probe_backoff);
         let fingerprint = build_v3_provider_global_error_fingerprint(402)
             .expect("402 fingerprint classification must not fail")
@@ -320,7 +312,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 1);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -330,7 +322,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 1);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -340,7 +332,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 1);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -349,7 +341,7 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 3);
+        assert_eq!(action.failure_threshold, 1);
     }
 
     #[test]

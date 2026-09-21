@@ -137,14 +137,8 @@ fn failures_in_other_session_share_provider_key_cooldown() {
                 100 + index as u64,
             )
             .unwrap();
-        assert_eq!(
-            record.state,
-            if index >= 2 { "cooldown" } else { "healthy" }
-        );
-        assert_eq!(
-            record.failure_count,
-            if index == 3 { 3 } else { (index + 1) as u32 }
-        );
+        assert_eq!(record.state, "cooldown");
+        assert_eq!(record.failure_count, 1);
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
@@ -198,7 +192,7 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         )
         .unwrap();
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(3_600_101));
+    assert_eq!(second.cooldown_until_ms, Some(10_101));
     assert_eq!(
         store.provider_cooldown_probe_keys_due(5_101).unwrap(),
         vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
@@ -587,10 +581,7 @@ fn cooldown_reupsert_preserves_in_flight_probe_single_flight() {
 #[test]
 fn failure_count_is_provider_key_scoped_for_default_policy() {
     let store = V3ProviderHealthStore::default();
-    for (index, session_id) in ["session-a", "session-b", "session-b"]
-        .into_iter()
-        .enumerate()
-    {
+    for session_id in ["session-a", "session-b", "session-b"] {
         let record = store
             .record_provider_failure_in_session(
                 &session(session_id),
@@ -601,11 +592,8 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(
-            record.state,
-            if index >= 2 { "cooldown" } else { "healthy" }
-        );
-        assert_eq!(record.failure_count, (index + 1) as u32);
+        assert_eq!(record.state, "cooldown");
+        assert_eq!(record.failure_count, 1);
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(

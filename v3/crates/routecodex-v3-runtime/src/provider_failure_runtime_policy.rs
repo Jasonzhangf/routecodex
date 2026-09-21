@@ -1,19 +1,16 @@
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use routecodex_v3_config::internal::{
-    classify_v3_internal_provider_error, v3_internal_error_handling,
-};
 use routecodex_v3_config::{
     V3Config05ManifestPublished, V3ProviderDispositionStepManifest,
-    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope, V3ProviderErrorRetryMode,
+    V3ProviderErrorActionPolicyManifest, V3ProviderErrorActionScope,
 };
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
     build_v3_error_02_classified_from_v3_error_01,
     build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_failure_policy,
-    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error02Classified,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
+    is_v3_provider_pool_exhausted, V3Error01SourceRaised, V3Error05ExecutionDecision,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
@@ -111,10 +108,9 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// internal.toml 全局错误策略表的落地点：401/403/503 → 连续 2 次×1h；402 → 连续 3 次×1h；
-/// 429/其余 5xx → 连续 3 次×15m；其余 provider 失败沿用 typed 分类结果并按默认
-/// recoverable 阈值（3）计数。任何失败连续达到阈值即进入全局冷却，
-/// 由后台探活（先密后稀阶梯）或真实成功恢复。
+/// internal.toml 全局错误策略表的落地点：所有 provider failure 首次即进入
+/// provider/key/model 冷却。冷却和探测时长由 provider health 的共享动态阶梯
+/// 决定；真实成功或成功 probe 清零，失败 probe 继续推进阶梯。
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -131,8 +127,8 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
     }
     if action.failure_threshold == 0 {
         action.failure_threshold = match action.recovery {
-            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 2,
-            V3ProviderRecoveryKind::RecoverableCounted => 3,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 1,
+            V3ProviderRecoveryKind::RecoverableCounted => 1,
             _ => 0,
         };
     }
@@ -935,7 +931,7 @@ impl V3ProviderFailureRuntimeHealth {
     ) -> Result<(), String> {
         // Post-commit SSE failures are provider-health events. They share the
         // same recoverable score/cooldown policy as pre-commit SSE failures.
-        // 统一错误模型：无状态码上下文时按默认 recoverable 阈值（3）盖章。
+        // 统一错误模型：无状态码上下文时也进入默认 provider cooldown。
         let action = apply_v3_internal_provider_failure_policy(
             V3ProviderFailureAction::recoverable(_error_family),
             "",
@@ -1533,16 +1529,10 @@ fn provider_failure_policy_from_error_policy_directive(
     policy: &V3ProviderErrorActionPolicyManifest,
     status: u16,
 ) -> Result<Option<V3ProviderFailurePolicy>, String> {
-    let failure_threshold = policy
-        .path
-        .iter()
-        .find_map(|step| match step {
-            V3ProviderDispositionStepManifest::WaitRetry { max_attempts, .. } => {
-                Some((*max_attempts).max(1))
-            }
-            _ => None,
-        })
-        .unwrap_or(1);
+    // Retry count controls request-local candidate traversal; it must not
+    // delay provider health isolation. Every matched provider failure enters
+    // the provider health ladder on its first occurrence.
+    let failure_threshold = 1;
     let Some(cooldown) = policy.path.iter().find_map(|step| match step {
         V3ProviderDispositionStepManifest::Cooldown {
             scope,
@@ -1565,9 +1555,7 @@ fn provider_failure_policy_from_error_policy_directive(
         failure_threshold,
         cooldown_ms: duration_ms.unwrap_or(1),
         probe_interval_ms: 5_000,
-        max_probe_interval_ms: Some(
-            duration_ms.unwrap_or(v3_internal_error_handling().unrecoverable_probe_interval_ms),
-        ),
+        max_probe_interval_ms: None,
         long_probe_backoff: matches!(status, 401 | 402 | 403 | 503),
         until_restart: until_restart.unwrap_or(false),
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,

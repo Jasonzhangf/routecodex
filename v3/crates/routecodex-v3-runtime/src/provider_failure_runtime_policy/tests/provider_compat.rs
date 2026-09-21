@@ -255,7 +255,7 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
         "request_local_provider_compat"
     );
     assert_eq!(result.event.health_record.failure_count, 1);
-    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert!(result.event.health_record.cooldown_until_ms.is_some());
     assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
     assert!(result.retry_selected.is_none());
     assert!(result.terminal_projection.is_some());

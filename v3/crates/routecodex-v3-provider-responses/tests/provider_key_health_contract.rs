@@ -89,7 +89,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
 }
 
 #[test]
-fn recoverable_failures_lower_score_then_cool_at_zero() {
+fn recoverable_failure_cools_immediately_without_changing_score_contract() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -98,34 +98,18 @@ fn recoverable_failures_lower_score_then_cool_at_zero() {
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    assert!(first.available);
-
-    let second = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
-        .expect("second failure");
-    assert_eq!(second.score_milli, 90);
-    assert!(!second.cooldown);
-
-    for now_ms in 102..120 {
-        store
-            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
-            .expect("recoverable failure");
-    }
-    let twentieth = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 120)
-        .expect("twentieth failure");
-    assert_eq!(twentieth.score_milli, 0);
-    assert!(twentieth.cooldown);
-    assert!(!twentieth.available);
+    assert!(!first.available);
+    assert!(first.cooldown);
+    assert_eq!(first.cooldown_until_ms, Some(5_100));
 }
 
 #[test]
-fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
+fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
     let store = V3ProviderHealthStore::default();
     let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
         .expect("session scope");
     let policy = V3ProviderFailurePolicy {
-        failure_threshold: 3,
+        failure_threshold: 1,
         cooldown_ms: 60_000,
         probe_interval_ms: 60_000,
         max_probe_interval_ms: None,
@@ -133,7 +117,7 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
         until_restart: false,
         cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
     };
-    for now_ms in 100..120 {
+    for now_ms in 100..=100 {
         store
             .record_provider_failure_in_session_with_policy(
                 &session,
@@ -148,12 +132,12 @@ fn fixed_probe_ladder_starts_at_30s_after_three_same_key_failures() {
     }
 
     assert!(store
-        .provider_cooldown_probe_keys_due(60_101)
+        .provider_cooldown_probe_keys_due(5_099)
         .expect("probe due query")
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(60_102)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("probe due query"),
         vec![("provider-a".into(), Some("key-a".into()), None,)]
     );
@@ -314,7 +298,7 @@ fn health_score_uses_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn one_502_does_not_enter_cooldown() {
+fn one_502_enters_cooldown_immediately() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
@@ -328,7 +312,7 @@ fn one_502_does_not_enter_cooldown() {
             101,
         )
         .expect("502 failure");
-    assert!(!result.cooldown);
+    assert!(result.cooldown);
     assert_eq!(
         store
             .scheduling_projection("p", "k", "m", 100, 1, 102)
