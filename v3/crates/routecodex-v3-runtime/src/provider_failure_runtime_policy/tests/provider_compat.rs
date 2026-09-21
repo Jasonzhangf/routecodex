@@ -264,6 +264,80 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
 }
 
 #[tokio::test]
+async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health_neutral() {
+    let scope = "relay_upstream_invalid_request_error_sibling";
+    let manifest = provider_compat_sibling_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the first model"),
+    };
+    let target = V3TargetInterpreter::default();
+    let captured_target_09 = target
+        .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
+        .expect("capture Target09 before execution");
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&captured_target_09),
+        failure_session_scope: test_provider_failure_scope(
+            scope,
+            scope,
+            "session-upstream-invalid-request-error",
+        )
+        .expect("test failure session scope"),
+        provider_health: &health,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        502,
+        Some("invalid_request_error".to_string()),
+        "DeepSeek chat completion failed with 403: request illegal (code 11140)".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+        },
+    )
+    .await
+    .expect("upstream invalid-request error must be request-local and reselect sibling");
+
+    let reselected = result
+        .retry_selected
+        .expect("invalid_request_error must reselect the sibling model");
+    assert_eq!(reselected.candidate.provider_id, "first");
+    assert_eq!(reselected.candidate.auth_alias, "key");
+    assert_eq!(reselected.candidate.model_id, "sibling");
+    assert_eq!(
+        failed_candidates,
+        BTreeSet::from(["first:key:test".to_string()]),
+        "invalid_request_error must exclude only the exact failed candidate"
+    );
+    assert_eq!(
+        result.event.health_record.state,
+        "request_local_provider_compat"
+    );
+    assert_eq!(result.event.health_record.failure_count, 0);
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    assert_eq!(result.event.action, "switch_provider");
+    assert_eq!(
+        result.event.next_provider_key.as_deref(),
+        Some("first:key:sibling")
+    );
+    assert!(result.terminal_projection.is_none());
+    assert!(same_candidate_retries.is_empty());
+    assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+}
+
+#[tokio::test]
 async fn relay_provider_failure_projects_target_expansion_error() {
     let scope = "relay_provider_expansion_failure";
     let mut manifest = global_pool_alive_manifest(scope);
@@ -328,62 +402,4 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         "captured_target_plan_expansion_failed"
     );
     assert_eq!(failed_candidates.len(), 1);
-}
-
-#[tokio::test]
-async fn provider_invalid_request_error_is_health_neutral_even_when_wrapped_as_502() {
-    let manifest = target_resolution_manifest("invalid_request_health_neutral");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected = match resolve_target(
-        &manifest,
-        "invalid_request_health_neutral",
-        &BTreeSet::new(),
-        &health,
-    ) {
-        V3RelayProviderTargetResolution::Selected(selected) => selected,
-        _ => panic!("valid fixture must select a provider"),
-    };
-    let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
-    let mut trace = Vec::new();
-    let context = V3RelayProviderFailurePolicyContext {
-        manifest: &manifest,
-        captured_target_09: None,
-        failure_session_scope: test_provider_failure_scope(
-            "invalid_request_health_neutral",
-            "invalid_request_health_neutral",
-            "session-invalid-request",
-        )
-        .expect("test failure session scope"),
-        provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-        deterministic_sample: 0,
-    };
-    let mut state = V3RelayProviderFailurePolicyState {
-        failed_candidates: &mut failed_candidates,
-        same_candidate_retries: &mut same_candidate_retries,
-        trace: &mut trace,
-    };
-
-    let result = run_v3_relay_provider_failure_policy(
-        &context,
-        selected,
-        "V3ProviderRespInbound01Raw",
-        502,
-        Some("invalid_request_error".to_string()),
-        "provider response event: prompt is too long".to_string(),
-        None,
-        &mut state,
-    )
-    .await
-    .expect("invalid request must be handled without provider health mutation");
-
-    assert_eq!(
-        result.event.health_record.state,
-        "request_local_provider_compat"
-    );
-    assert_eq!(result.event.health_record.failure_count, 0);
-    assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    assert!(result.retry_selected.is_none());
-    assert!(state.same_candidate_retries.is_empty());
 }

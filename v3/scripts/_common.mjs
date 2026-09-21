@@ -42,8 +42,15 @@ function killProcessGroup(pid, signal) {
 
 export async function run(command, args, options = {}) {
   const baseEnv = options.env ?? process.env;
-  const env = { ...baseEnv, TMPDIR: v3TempDir, TMP: v3TempDir, TEMP: v3TempDir };
-  mkdirSync(v3TempDir, { recursive: true });
+  const env = { ...baseEnv };
+  if (options.tempDir === false) {
+    delete env.TMPDIR;
+    delete env.TMP;
+    delete env.TEMP;
+  } else {
+    Object.assign(env, { TMPDIR: v3TempDir, TMP: v3TempDir, TEMP: v3TempDir });
+    mkdirSync(v3TempDir, { recursive: true });
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   const label = `${command} ${args.join(' ')}`;
   const child = spawn(command, args, {

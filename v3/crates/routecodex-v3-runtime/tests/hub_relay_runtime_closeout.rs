@@ -1095,6 +1095,10 @@ struct ResponsesMalformedJsonThenSuccessTransport {
     captures: Mutex<Vec<(String, Value)>>,
 }
 
+struct ResponsesIncompleteExhaustionTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
 #[async_trait]
 impl ResponsesTransport for ResponsesMalformedJsonThenSuccessTransport {
     async fn send(
@@ -1132,6 +1136,37 @@ impl ResponsesTransport for ResponsesMalformedJsonThenSuccessTransport {
                 "usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}
             }))
             .unwrap(),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for ResponsesIncompleteExhaustionTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .unwrap()
+            .push(request.provider_id().to_string());
+        let frames = vec![
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial-must-not-commit\"}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_exhaustion\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
+            ),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
         ))
     }
 }
@@ -1513,6 +1548,71 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0].0, "limited");
     assert_eq!(captures[1].0, "minimax");
+}
+
+#[tokio::test]
+async fn responses_relay_incomplete_exhaustion_keeps_typed_terminal_error() {
+    let server_id = "responses_incomplete_exhaustion";
+    let manifest = responses_reselect_manifest_for_scope(server_id);
+    let transport = ResponsesIncompleteExhaustionTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-incomplete-exhaustion".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"all providers incomplete",
+                "stream":false
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("provider exhaustion must project a typed terminal error");
+
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        ["limited", "minimax"]
+    );
+    let error_body = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected typed JSON error body"),
+    };
+    assert_eq!(error_body["error"]["code"], "network_error");
+    assert_eq!(error_body["error"]["message"], "network error");
+    assert!(
+        !error_body.to_string().contains("partial-must-not-commit"),
+        "partial incomplete output must not be committed: {error_body}"
+    );
+    assert!(
+        error_body.get("usage").is_none(),
+        "failed attempt usage must stay on the runtime side-channel: {error_body}"
+    );
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+    let usage = output
+        .stream_observation
+        .as_ref()
+        .expect("terminal incomplete failure must retain the final attempt observation")
+        .snapshot()
+        .expect("terminal incomplete failure observation must be readable")
+        .usage
+        .expect("terminal incomplete failure must retain provider usage");
+    assert_eq!(usage.input_tokens, Some(10));
+    assert_eq!(usage.output_tokens, Some(2));
+    assert_eq!(usage.total_tokens, Some(12));
 }
 
 #[tokio::test]

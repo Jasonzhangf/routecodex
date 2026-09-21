@@ -139,6 +139,65 @@ struct AnthropicCyberRefusalJsonTransport {
     attempts: Mutex<usize>,
 }
 
+struct AnthropicIncompleteExhaustionTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicIncompleteExhaustionTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .unwrap()
+            .push(request.provider_id().to_string());
+        let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_incomplete_exhaustion","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":10}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial-must-not-commit"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":2}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()),
+        ];
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
+}
+
 #[async_trait]
 impl ResponsesTransport for AnthropicCyberRefusalJsonTransport {
     async fn send(
@@ -653,6 +712,70 @@ async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation
     assert!(failure
         .message
         .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_incomplete_exhaustion_keeps_typed_terminal_error() {
+    let transport = AnthropicIncompleteExhaustionTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &anthropic_incomplete_exhaustion_manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "anthropic_incomplete_exhaustion".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-incomplete-exhaustion".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"all Anthropic providers incomplete",
+                "stream":false,
+                "max_output_tokens":16
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("Anthropic provider exhaustion must project a typed terminal error");
+
+    assert_eq!(output.status, 502);
+    let mut attempted_provider_ids = transport.provider_ids.lock().unwrap().clone();
+    attempted_provider_ids.sort();
+    assert_eq!(
+        attempted_provider_ids,
+        [
+            "anthropic_incomplete_primary",
+            "anthropic_incomplete_secondary"
+        ]
+    );
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("expected typed JSON error body")
+    };
+    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(body["error"]["message"], "network error");
+    assert!(
+        !body.to_string().contains("partial-must-not-commit"),
+        "partial incomplete output must not be committed: {body}"
+    );
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+    let usage = output
+        .stream_observation
+        .as_ref()
+        .expect("terminal incomplete failure must retain the final attempt observation")
+        .snapshot()
+        .expect("terminal incomplete failure observation must be readable")
+        .usage
+        .expect("terminal incomplete failure must retain provider usage");
+    assert_eq!(usage.input_tokens, Some(10));
+    assert_eq!(usage.output_tokens, Some(2));
+    assert_eq!(usage.total_tokens, Some(12));
 }
 
 #[tokio::test]
@@ -1190,6 +1313,66 @@ capabilities = ["text", "tools", "reasoning", "vision", "longcontext"]
 [route_groups.gateway_priority_5555.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn anthropic_incomplete_exhaustion_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
+    compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(
+            r#"
+version = 3
+
+[servers.anthropic_incomplete_exhaustion]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "anthropic_incomplete_exhaustion"
+endpoints = ["responses"]
+
+[servers.anthropic_incomplete_exhaustion.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[providers.anthropic_incomplete_primary]
+type = "anthropic"
+base_url = "http://anthropic-incomplete-primary.invalid/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ANTHROPIC_INCOMPLETE_PRIMARY_KEY" }] }
+
+[providers.anthropic_incomplete_primary.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[providers.anthropic_incomplete_secondary]
+type = "anthropic"
+base_url = "http://anthropic-incomplete-secondary.invalid/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ANTHROPIC_INCOMPLETE_SECONDARY_KEY" }] }
+
+[providers.anthropic_incomplete_secondary.models."MiniMax-M3"]
+wire_name = "MiniMax-M3"
+supports_streaming = true
+capabilities = ["text", "tools", "reasoning"]
+
+[route_groups.anthropic_incomplete_exhaustion.pools.client_responses]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
+targets = [
+  { kind = "provider_model", provider = "anthropic_incomplete_primary", model = "MiniMax-M3", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "anthropic_incomplete_secondary", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
+
+[route_groups.anthropic_incomplete_exhaustion.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "anthropic_incomplete_primary", model = "MiniMax-M3", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "anthropic_incomplete_secondary", model = "MiniMax-M3", key = "key1", priority = 2 }
+]
 "#,
         )
         .unwrap(),

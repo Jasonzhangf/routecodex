@@ -282,6 +282,9 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
         };
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
     })?;
+    observation
+        .record_provider_event_json(&anthropic_message)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     if let Some(failure) = classify_v3_provider_terminal_admission(
         V3HubProviderWireProtocol::Anthropic,
         &anthropic_message,

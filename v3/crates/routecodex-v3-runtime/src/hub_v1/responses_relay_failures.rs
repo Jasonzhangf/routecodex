@@ -420,6 +420,14 @@ pub(crate) fn provider_failure_output(
     mut trace: Vec<&'static str>,
     _candidates_remaining: usize,
 ) -> V3ResponsesRelayRuntimeOutput {
+    provider_failure_output_with_observation(failure, trace, None)
+}
+
+pub(crate) fn provider_failure_output_with_observation(
+    failure: V3ResponsesRelayProviderFailure,
+    mut trace: Vec<&'static str>,
+    stream_observation: Option<V3RuntimeStreamObservation>,
+) -> V3ResponsesRelayRuntimeOutput {
     let projected = failure
         .terminal_projection
         .expect("terminal Responses provider failure must carry typed Error06 projection");
@@ -440,7 +448,7 @@ pub(crate) fn provider_failure_output(
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
         observability,
-        stream_observation: None,
+        stream_observation,
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,

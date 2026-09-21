@@ -203,6 +203,32 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         store.provider_cooldown_probe_keys_due(5_101).unwrap(),
         vec![("provider-a".to_string(), Some("key-a".to_string()), None,)]
     );
+    assert_eq!(
+        store
+            .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key-a"), Some("gpt-5.5"),)
+            .unwrap(),
+        Some(5_101),
+        "a model candidate must resolve the auth-key probe deadline"
+    );
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_101)
+        .unwrap()
+        .expect("a model candidate must acquire the due auth-key probe");
+    assert_eq!(permit.auth_alias(), Some("key-a"));
+    assert_eq!(
+        permit.model_id(),
+        None,
+        "the auth-key probe permit must retain the model-less probe identity"
+    );
+    store
+        .complete_provider_cooldown_probe_failure_at_generation(
+            permit.provider_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+            5_101,
+            Some(permit.expected_generation()),
+        )
+        .unwrap();
     assert!(
         !store
             .availability_for_session(

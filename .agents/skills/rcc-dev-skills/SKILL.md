@@ -56,6 +56,10 @@ historical-finding policy here.
 | continuation cache | `references/97-continuation-cache-compliance.md` |
 | provider request/error | `references/98-provider-request-dryrun-and-request-error-debug.md` |
 
+For an explicit provider/model pin, set the client request `model` to
+`<provider_id>.<model_id>` (for example `kdns.deepseek-v4.1-flash`); this is
+`provider.model` direct-pin syntax, not route-config `provider/model`.
+
 ## Report
 
 Report goal, owner, first divergence, changed paths, red/green evidence, mapped gates, installed runtime evidence, review result, remaining gap, and next transition. State why edited owner is unique and which adjacent layers were ruled out.

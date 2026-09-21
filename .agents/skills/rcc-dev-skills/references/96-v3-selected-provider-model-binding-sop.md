@@ -5,6 +5,17 @@
 Use this SOP for wrong provider model, alias leakage, model-specific compatibility, Direct/Relay
 model divergence, retry candidate model leakage, or upstream "model not configured" errors.
 
+## Client input syntax
+
+- `provider.model` is the standard direct-pin route input. Example:
+  `kdns.deepseek-v4.1-flash`.
+- It splits on the first `.`, resolves the leading segment against an enabled
+  provider id, then resolves the model id or alias inside that provider.
+- Unknown provider prefix falls back to normal routing. Known provider with an
+  unknown model fails without pool fallback.
+- Do not bypass direct-pin resolution with headers, payload fields, or
+  per-provider suffix hacks.
+
 ## Evidence order
 
 1. Inspect canonical `ports/<port>/<requestId>/request.json`.

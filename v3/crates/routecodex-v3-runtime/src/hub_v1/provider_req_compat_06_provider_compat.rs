@@ -319,8 +319,8 @@ fn normalize_deepseek_thinking_tool_choice(
     let is_deepseek_target = matches!(
         selected.compatibility_profile.as_deref(),
         Some("chat:deepseek-max" | "responses:deepseek-console-go")
-    ) || selected.model_id == "deepseek-v4-flash"
-        || selected.wire_model == "deepseek-v4-flash";
+    ) || is_v3_deepseek_v4_compat_model(&selected.model_id)
+        || is_v3_deepseek_v4_compat_model(&selected.wire_model);
     if matches!(
         provider_protocol,
         V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Responses
@@ -328,6 +328,13 @@ fn normalize_deepseek_thinking_tool_choice(
     {
         provider_compat_core::apply_deepseek_v4_request_compat(payload);
     }
+}
+
+fn is_v3_deepseek_v4_compat_model(model_id: &str) -> bool {
+    matches!(
+        model_id.trim().to_ascii_lowercase().as_str(),
+        "deepseek-v4-flash" | "deepseek-v4.1-flash"
+    )
 }
 
 #[cfg(test)]
@@ -603,6 +610,48 @@ mod tests {
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("DeepSeek v4.1 must receive provider-local argument compatibility");
+        let payload = req_compat.provider_semantic_payload();
+        let wire_arguments = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("DeepSeek function arguments must remain a string");
+        let parsed: serde_json::Value = serde_json::from_str(wire_arguments)
+            .expect("DeepSeek function arguments must be valid JSON");
+        assert_eq!(parsed["input"], "{\"cmd\":\"one\"}{\"cmd\":\"two\"}");
+        assert_eq!(payload["messages"][1]["tool_call_id"], "call_bad");
+    }
+
+    #[test]
+    fn openai_chat_profile_with_deepseek_v41_wraps_malformed_history_arguments() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_bad",
+                        "type":"function",
+                        "function":{
+                            "name":"exec_command",
+                            "arguments":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
+                        }
+                    }]
+                }, {
+                    "role":"tool",
+                    "tool_call_id":"call_bad",
+                    "content":"failed to parse function arguments"
+                }]
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("chat:openai DeepSeek v4.1 must receive provider-local argument compatibility");
         let payload = req_compat.provider_semantic_payload();
         let wire_arguments = payload["messages"][0]["tool_calls"][0]["function"]["arguments"]
             .as_str()
