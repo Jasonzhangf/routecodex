@@ -1,5 +1,7 @@
 # V3 Provider Key Health Scoring and Cooldown Implementation Plan
 
+> 2026-09-21 policy amendment: current delivery supersedes the older threshold/fixed-cadence examples below. Every typed provider failure immediately cools the exact provider+auth key+model identity. The provider-owned cooldown/probe ladder is `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, meaningful failure-rate bands may advance it, and successful semantic probe resets it to 5s. Probe failure is an expected nonblocking state and never prevents listener startup or affects other sessions.
+
 状态：source-controlled runtime pending live replay
 
 实现设计真源：
@@ -16,20 +18,20 @@
 /goal
 按 docs/design/v3-provider-health-scoring-cooldown-design.md 实现 V3 Provider-owned key 级健康治理，并按本计划完成验证与交付。
 
-硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。健康分基于 configured priority，范围 0..150；正常 HTTP 响应 +1；可恢复错误（含 502）-5；401/403 -20；带阈值按连击阈值，无阈值可恢复按 score=0，无阈值不可恢复立即 cooldown。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 恢复到 configured priority。priority 数字越大越优先，只有最高可用 priority 的完全相同桶参与调度；health 只在同桶内作为权重信号，score 不决定 availability。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
+硬约束：Error 唯一生成 typed failure action；Provider health 唯一修改 score、streak、cooldown、probe；Target 只读 scheduling projection；Virtual Router 不读写 health。健康分基于 configured priority，范围 0..150；正常 HTTP 响应 +1；可恢复错误（含 502）-5；401/403 -20；每个 typed provider failure 立即 cooldown，连续失败和有意义的失败率选择 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s 阶梯。cooldown 必须持久化，重启只允许 probe；probe failure 保持 blocked，probe success 恢复到 configured priority。priority 数字越大越优先，只有最高可用 priority 的完全相同桶参与调度；health 只在同桶内作为权重信号，score 不决定 availability。控制状态不得进入 provider/client normal payload；禁止 fallback、silent strip、请求侧 cleanup、VR re-entry 和第二套 scheduler。
 
 执行顺序：先更新并验证 resource/function/mainline/verification map、wiki/manifest；再实现 classification/action、key health、persistence/probe、scheduling projection、runtime 接线；随后跑 red/green 正反测试、fmt/clippy/build 和全部架构 gate；最后 global install、一次聚合 restart、全部成员 health、真实旧样本 replay、AGY Review、evidence/handoff、精准 commit/push、MEMORY 收口。任何 gate、在线验证或 Review 未通过，不得宣称完成。
 
-完成信号：所有 owner/edge/gate 绑定真实 symbol；502/401/403 计分、score=0 cooldown、success/probe、100-call window、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、AGY Review PASS 全部记录在 evidence 中。
+完成信号：所有 owner/edge/gate 绑定真实 symbol；502/401/403 计分、首错 cooldown、5s 首探、阶梯推进、成功 probe 恢复、100-call window、scope isolation、persistence failure、priority-first/same-priority scheduling、payload isolation 和 no-VR-reentry 均有证据；global install、restart、health、online replay、AGY Review PASS 全部记录在 evidence 中。
 ```
 
 ## 1. 目标与验收标准
 
-实现 Provider-owned key health state：错误分类驱动 recovery action；带阈值按连击阈值，无阈值可恢复按 score=0，无阈值不可恢复立即进入持久化 global cooldown；重启只允许 probe 恢复；success/failure 更新 key score；按较大的 configured priority 优先调度，health weight 只在同 priority bucket 内生效，score 不决定 availability。
+实现 Provider-owned key health state：错误分类驱动 recovery action；每个 typed provider failure 立即进入持久化 global cooldown，连续失败/失败率驱动 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s 阶梯；重启只允许 probe 恢复；success/failure 更新 key score；按较大的 configured priority 优先调度，health weight 只在同 priority bucket 内生效，score 不决定 availability。
 
 验收：
 
-- 相同 key 的每次 recoverable failure（含 502）扣 5，带阈值按连击阈值，无阈值可恢复只有 score 到 0 才 cooldown；401/403 每次扣 20；
+- 相同 key 的每次 recoverable failure（含 502）扣 5，并立即 cooldown；连续失败和有意义的失败率推进动态阶梯；401/403 每次扣 20；
 - 不同 key/session/model 不错误合并；
 - irrecoverable action 直接进入正确 global scope；
 - cooldown 在 restart 后仍阻断，probe failure 不恢复，probe success 才恢复；
@@ -190,7 +192,7 @@
 4. global install；
 5. `routecodex restart --port <locator-port>` 一次；
 6. 验证全部成员 `/health`；
-7. 真实旧样本 replay：502/401/403 score 变化、阈值 cooldown、restart probe fail/success、same-priority key distribution；
+7. 真实旧样本 replay：502/401/403 score 变化、首错 cooldown、动态 probe fail/success 阶梯、same-priority key distribution；
 8. 检查 runtime logs/canonical sample evidence；
 9. AGY Review；
 10. 仅在 review PASS 后精准 commit/push。
@@ -202,7 +204,7 @@
 | Area | Positive | Negative |
 | --- | --- | --- |
 | Classification | action matches class/recovery | caller/store cannot reclassify |
-| Recoverable | each failure -5, threshold cooldown (or score=0 when thresholdless) | one 502 never cooldown |
+| Recoverable | each failure -5, immediate cooldown, adaptive 5s -> 30m ladder | one 502 remains isolated and cannot be selected again |
 | Irrecoverable | immediate scoped global cooldown | not same-provider retry |
 | Success | score rises, streak resets | success cannot bypass active global cooldown |
 | Probe | success re-admits at recovery floor | failure keeps blocked/reschedules |

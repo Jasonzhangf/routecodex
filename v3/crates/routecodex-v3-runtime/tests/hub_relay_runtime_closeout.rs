@@ -1459,7 +1459,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
     );
     assert_eq!(
         observability.unavailable_candidates,
-        vec!["limited:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()]
+        vec!["limited:key1:gpt-5.5:availability(provider_key_health_cooldown|provider_cooldown_probe_pending|provider_cooldown_probe_pending|request_local_provider_failure)".to_string()]
     );
     assert_eq!(
         observability
@@ -1542,7 +1542,7 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         Some("minimax:key1:MiniMax-M3")
     );
     assert_eq!(provider_event.failure_count, 1);
-    assert_eq!(provider_event.health_state, "healthy");
+    assert_eq!(provider_event.health_state, "cooldown");
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -1729,7 +1729,7 @@ async fn responses_relay_provider_duplicate_tool_identity_projects_typed_error_a
 }
 
 #[tokio::test]
-async fn responses_relay_shared_health_cools_provider_key_after_three_cross_request_failures() {
+async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_requests() {
     let server_id = "responses_shared_health";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let provider_health =
@@ -1744,13 +1744,53 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
     )
     .expect("test provider failure session scope");
 
-    for turn in 0..3 {
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: failure_session_scope.clone(),
+            request_id: "req-responses-context-reselect-first".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same large payload",
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 3,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("successful reroute must keep provider failure observability");
+    assert_eq!(
+        observability.provider_key.as_deref(),
+        Some("minimax:key1:MiniMax-M3")
+    );
+    assert_eq!(observability.provider_failure_events.len(), 1);
+    assert_eq!(observability.provider_failure_events[0].failure_count, 1);
+    assert_eq!(
+        observability.provider_failure_events[0].health_state,
+        "cooldown"
+    );
+    assert!(observability.provider_failure_events[0]
+        .cooldown_until_ms
+        .is_some());
+
+    for turn in 1..=3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: failure_session_scope.clone(),
-                request_id: format!("req-responses-context-reselect-{turn}"),
+                request_id: format!("req-responses-context-reselect-cooled-{turn}"),
                 payload: json!({
                     "model":"client-responses",
                     "input":"same large payload",
@@ -1766,82 +1806,26 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         .await
         .unwrap();
         assert_eq!(output.status, 200);
-        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-        assert_eq!(
-            output
-                .observability
-                .as_ref()
-                .and_then(|observability| observability.provider_key.as_deref()),
-            Some("minimax:key1:MiniMax-M3")
-        );
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
         let observability = output
             .observability
             .as_ref()
-            .expect("successful reroute must keep provider failure observability");
-        assert_eq!(observability.provider_failure_events.len(), 1);
+            .expect("cooled provider run must keep route observability");
         assert_eq!(
-            observability.provider_failure_events[0].action,
-            "switch_provider"
+            observability.provider_key.as_deref(),
+            Some("minimax:key1:MiniMax-M3")
         );
-        assert_eq!(
-            observability.provider_failure_events[0].wait_ms,
-            Some(1_000)
+        assert_eq!(observability.attempts, Some(1));
+        assert!(observability
+            .unavailable_candidates
+            .iter()
+            .any(|candidate| candidate.starts_with("limited:key1:gpt-5.5:availability(")));
+        assert!(
+            observability.provider_failure_events.is_empty(),
+            "cooled provider must be skipped before network send; observed events: {:?}",
+            observability.provider_failure_events
         );
-        assert_eq!(
-            observability.provider_failure_events[0].failure_count,
-            turn + 1
-        );
-        if turn == 2 {
-            assert_eq!(
-                observability.provider_failure_events[0].health_state,
-                "cooldown"
-            );
-            assert!(observability.provider_failure_events[0]
-                .cooldown_until_ms
-                .is_some());
-        }
     }
-
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-        &manifest,
-        V3ResponsesRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope,
-            request_id: "req-responses-context-reselect-cooled".into(),
-            payload: json!({
-                "model":"client-responses",
-                "input":"same large payload",
-                "stream":false
-            }),
-        },
-        &transport,
-        &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 3,
-        },
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(output.status, 200);
-    let observability = output
-        .observability
-        .as_ref()
-        .expect("cooled provider run must keep route observability");
-    assert_eq!(
-        observability.provider_key.as_deref(),
-        Some("minimax:key1:MiniMax-M3")
-    );
-    assert_eq!(observability.attempts, Some(1));
-    assert!(observability
-        .unavailable_candidates
-        .iter()
-        .any(|candidate| candidate.starts_with("limited:key1:gpt-5.5:availability(")));
-    assert!(
-        observability.provider_failure_events.is_empty(),
-        "cooled provider must be skipped before network send; observed events: {:?}",
-        observability.provider_failure_events
-    );
 
     let captures = transport.captures.lock().unwrap();
     let provider_sequence: Vec<&str> = captures
@@ -1850,7 +1834,7 @@ async fn responses_relay_shared_health_cools_provider_key_after_three_cross_requ
         .collect();
     assert_eq!(
         provider_sequence,
-        vec!["limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"]
+        vec!["limited", "minimax", "minimax", "minimax", "minimax"]
     );
 }
 
@@ -2336,34 +2320,26 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
 }
 
 #[test]
-fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
-    let store = V3ProviderHealthStore::from_manifest(&responses_single_limited_manifest());
+fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
+    let store = V3ProviderHealthStore::from_manifest_without_persistence(
+        &responses_single_limited_manifest(),
+    );
     let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
         "test-server",
         "test-group",
         "provider-key-cooldown",
     )
     .expect("test provider failure session scope");
-    for (index, now_ms) in [1_000, 2_000, 3_000].into_iter().enumerate() {
-        let record = store
-            .record_provider_failure_in_session(
-                &failure_session_scope,
-                "limited",
-                Some("key1"),
-                Some("gpt-5.5"),
-                Some(&format!("controlled failure {}", index + 1)),
-                now_ms,
-            )
-            .unwrap();
-        if index < 2 {
-            assert_eq!(record.state, "healthy");
-            assert_eq!(record.cooldown_until_ms, None);
-        } else {
-            assert_eq!(record.state, "cooldown");
-            assert_eq!(record.failure_count, 3);
-            assert_eq!(record.cooldown_until_ms, Some(903_000));
-        }
-    }
+
+    store
+        .record_provider_stream_failure_in_provider_scope(
+            "limited",
+            Some("key1"),
+            Some("gpt-5.5"),
+            "controlled failure",
+            1_000,
+        )
+        .unwrap();
     assert!(
         !store
             .availability_for_session(
@@ -2371,37 +2347,68 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
                 "limited",
                 Some("key1"),
                 Some("gpt-5.5"),
-                902_999
+                5_999,
             )
             .available
     );
-    // 冷却到期不自动恢复：待探期（probe 间隔内）仍不可用，恢复唯一路径是
-    // 后台 probe 通过（probe_interval = 15min，写入于 3_000）。
-    assert!(
-        !store
-            .availability_for_session(
-                &failure_session_scope,
-                "limited",
-                Some("key1"),
-                Some("gpt-5.5"),
-                903_000
-            )
-            .available,
-        "expired cooldown must stay excluded until probe passes"
-    );
     assert!(
         store
-            .provider_cooldown_probe_keys_due(903_000)
-            .unwrap()
-            .contains(&("limited".to_string(), Some("key1".to_string()), None)),
-        "cooled provider must be probe-due after cooldown expiry"
+            .availability("limited", Some("key1"), Some("other-model"), 5_999)
+            .available
+    );
+
+    let exact_key = (
+        "limited".to_string(),
+        Some("key1".to_string()),
+        Some("gpt-5.5".to_string()),
     );
     assert!(store
-        .acquire_provider_cooldown_probe("limited", Some("key1"), None)
+        .provider_cooldown_probe_keys_due(6_000)
+        .unwrap()
+        .contains(&exact_key));
+    assert!(store
+        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
         .unwrap()
         .is_some());
     store
-        .complete_provider_cooldown_probe_success("limited", Some("key1"), None)
+        .complete_provider_cooldown_probe_failure("limited", Some("key1"), Some("gpt-5.5"), 6_000)
+        .unwrap();
+    assert!(store
+        .provider_cooldown_probe_keys_due(15_999)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .provider_cooldown_probe_keys_due(16_000)
+        .unwrap()
+        .contains(&exact_key));
+
+    assert!(store
+        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap()
+        .is_some());
+    store
+        .complete_provider_cooldown_probe_failure("limited", Some("key1"), Some("gpt-5.5"), 16_000)
+        .unwrap();
+    assert!(store
+        .provider_cooldown_probe_keys_due(45_999)
+        .unwrap()
+        .is_empty());
+    assert!(store
+        .provider_cooldown_probe_keys_due(46_000)
+        .unwrap()
+        .contains(&exact_key));
+
+    assert!(store
+        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
+        .unwrap()
+        .is_some());
+    store
+        .complete_provider_cooldown_probe_success_at(
+            "limited",
+            Some("key1"),
+            Some("gpt-5.5"),
+            46_000,
+        )
         .unwrap();
     assert!(
         store
@@ -2410,22 +2417,24 @@ fn provider_key_three_failures_cool_for_fifteen_minutes_and_probe_recovers() {
                 "limited",
                 Some("key1"),
                 Some("gpt-5.5"),
-                903_001
+                46_001,
             )
-            .available,
-        "probe success must revive the cooled provider"
-    );
-    // 未达冷却阈值的 key/model 组合不受影响（无 provider 级冷却）。
-    assert!(
-        store
-            .availability("limited", Some("key1"), Some("other-model"), 3_001)
             .available
     );
-    assert!(
-        store
-            .availability("limited", Some("other-key"), Some("gpt-5.5"), 3_001)
-            .available
-    );
+
+    store
+        .record_provider_stream_failure_in_provider_scope(
+            "limited",
+            Some("key1"),
+            Some("gpt-5.5"),
+            "fast recovery failed again",
+            50_000,
+        )
+        .unwrap();
+    assert!(store
+        .provider_cooldown_probe_keys_due(55_000)
+        .unwrap()
+        .contains(&exact_key));
 }
 
 #[tokio::test]

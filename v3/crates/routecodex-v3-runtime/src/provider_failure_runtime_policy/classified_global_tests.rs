@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_applies_typed_recoverable_and_unrecoverable_thresholds() {
+fn classified_global_health_cools_each_provider_failure_immediately() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -25,33 +25,8 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
     .expect("failure session scope");
 
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    for attempt in 0..2 {
-        let classified =
-            classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-        recoverable_health
-            .record_provider_global_health_for_classified_error(
-                &scope,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                &classified,
-                10_000 + attempt as u64,
-            )
-            .expect("classified recoverable failure should record");
-        assert!(
-            recoverable_health
-                .store()
-                .availability_for_session(
-                    &scope,
-                    "first",
-                    Some("key1"),
-                    Some("gpt-test"),
-                    10_000 + attempt as u64,
-                )
-                .available,
-            "429 must remain available before configured recoverable threshold"
-        );
-    }
+    let classified =
+        classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
     recoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -59,15 +34,15 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
             Some("key1"),
             Some("gpt-test"),
             &classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429),
-            10_002,
+            10_000,
         )
-        .expect("classified 429 threshold failure should record");
+        .expect("classified 429 failure should record");
     assert!(
         !recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_002,)
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
             .available,
-        "429 must block after configured recoverable threshold"
+        "429 must block after its first provider failure"
     );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -83,7 +58,7 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
         action_401.recovery,
         V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
     );
-    assert_eq!(action_401.failure_threshold, 2);
+    assert_eq!(action_401.failure_threshold, 1);
     unrecoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -95,11 +70,11 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
         )
         .expect("classified unrecoverable failure should record");
     assert!(
-        unrecoverable_health
+        !unrecoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
             .available,
-        "401 must remain available before configured unrecoverable threshold"
+        "401 must be blocked after its first provider failure"
     );
     unrecoverable_health
         .record_provider_global_health_for_classified_error(
@@ -110,7 +85,7 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
             &classified_401,
             10_001,
         )
-        .expect("classified 401 threshold failure should record");
+        .expect("repeated classified 401 failure should remain isolated");
     let second_401 = unrecoverable_health.store().availability_for_session(
         &scope,
         "first",
@@ -120,13 +95,13 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
     );
     assert!(
         !second_401.available,
-        "401 must block after configured unrecoverable threshold: {second_401:?}"
+        "401 must remain blocked while cooldown is active: {second_401:?}"
     );
 
     let payment_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified_402 =
         classified_provider_error("V3ProviderRespInbound01Raw", "payment_required", 402);
-    for now_ms in [20_000, 20_001, 20_002] {
+    for now_ms in [20_000] {
         payment_health
             .record_provider_global_health_for_classified_error(
                 &scope,
@@ -141,9 +116,9 @@ fn classified_global_health_applies_typed_recoverable_and_unrecoverable_threshol
     assert!(
         !payment_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_002)
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
             .available,
-        "402 must reach global health and cool after its typed threshold"
+        "402 must reach global health and cool after its first failure"
     );
 }
 
@@ -170,7 +145,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn recoverable_http_429_blocks_after_configured_global_threshold() {
+fn recoverable_http_429_blocks_after_first_global_failure() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -191,7 +166,7 @@ fn recoverable_http_429_blocks_after_configured_global_threshold() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    for attempt in 0..3 {
+    for attempt in 0..1 {
         let now_ms = 10_000 + attempt as u64;
         health
             .record_provider_failure_record_with_policy(
@@ -215,16 +190,9 @@ fn recoverable_http_429_blocks_after_configured_global_threshold() {
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
         let available = projection.available;
-        if attempt < 2 {
-            assert!(
-                available,
-                "provider must remain available before the 429 threshold is reached; attempt={attempt}, available={available:?}"
-            );
-        } else {
-            assert!(
-                !available,
-                "provider must be excluded after the configured 429 threshold; attempt={attempt}, available={available:?}"
-            );
-        }
+        assert!(
+            !available,
+            "provider must be excluded after the first 429; attempt={attempt}, available={available:?}"
+        );
     }
 }

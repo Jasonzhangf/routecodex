@@ -1,5 +1,7 @@
 # V3 Provider Key Health Scoring and Cooldown Design
 
+> 2026-09-21 policy amendment: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. Every typed provider failure immediately cools the exact provider+auth key+model identity. Recovery uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while successful semantic probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
+
 状态：design / source-controlled runtime pending live replay
 
 基线：`main` / `origin/main` at `dfbfa79f2` (`test(v3): lock session cooldown isolation`)
@@ -430,8 +432,8 @@ HealthNeutral
 
 - classification produces exactly one recovery kind;
 - irrecoverable action immediately creates global cooldown;
-- one recoverable failure (including 502) subtracts 5 and does not by itself cooldown;
-- a thresholded recoverable action cools only after its consecutive failure threshold; a thresholdless recoverable action cools when the rolling score reaches 0;
+- every typed provider failure immediately cools the exact provider+auth key+model identity;
+- recoverable failures still subtract 5 from the score, while continuous failure streak and meaningful failure-rate bands choose the adaptive 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s cooldown/probe step;
 - health-neutral event changes neither score nor streak;
 - success adds +1 in the rolling score epoch and clears failure streak;
 - score clamps at 0/150;

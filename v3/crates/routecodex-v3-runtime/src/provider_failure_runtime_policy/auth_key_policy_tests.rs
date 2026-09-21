@@ -12,12 +12,12 @@ http_status = 401
 [[error.provider_error_action_policy.path]]
 step = "wait_retry"
 retry_mode = "reselect_before_client_projection"
-max_attempts = 2
-backoff_ms = 1000
+max_attempts = 1
+backoff_ms = 0
 [[error.provider_error_action_policy.path]]
 step = "cooldown"
 scope = "auth_key"
-duration_ms = 18000000
+duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
 status = 502
@@ -31,12 +31,12 @@ http_status = 403
 [[error.provider_error_action_policy.path]]
 step = "wait_retry"
 retry_mode = "reselect_before_client_projection"
-max_attempts = 2
-backoff_ms = 1000
+max_attempts = 1
+backoff_ms = 0
 [[error.provider_error_action_policy.path]]
 step = "cooldown"
 scope = "auth_key"
-duration_ms = 900000
+duration_ms = 5000
 [[error.provider_error_action_policy.path]]
 step = "project"
 status = 502
@@ -67,7 +67,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
 }
 
 #[test]
-fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
+fn runtime_policy_blocks_account_errors_on_first_failure() {
     let manifest = account_threshold_manifest();
     for status in [401, 403] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -99,11 +99,8 @@ fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
                     100 + index,
                 )
                 .unwrap();
-            assert_eq!(
-                record.state,
-                if index == 1 { "cooldown" } else { "healthy" }
-            );
-            assert_eq!(record.failure_count, (index + 1) as u32);
+            assert_eq!(record.state, "cooldown");
+            assert_eq!(record.failure_count, index as u32 + 1);
         }
         assert!(
             !health
@@ -143,11 +140,8 @@ fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
                 200 + index,
             )
             .unwrap();
-        assert_eq!(
-            record.state,
-            if index == 2 { "cooldown" } else { "healthy" }
-        );
-        assert_eq!(record.failure_count, (index + 1) as u32);
+        assert_eq!(record.state, "cooldown");
+        assert_eq!(record.failure_count, index as u32 + 1);
     }
     assert!(
         !other_health
@@ -159,7 +153,7 @@ fn runtime_policy_blocks_account_errors_after_two_consecutive_failures() {
 }
 
 #[test]
-fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge() {
+fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() {
     let manifest = account_threshold_manifest();
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -196,14 +190,15 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
             100,
         )
         .expect("first 401 should be recorded by the runtime policy bridge");
-    assert_eq!(first.state, "healthy");
+    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.failure_count, 1);
     assert!(
-        health
+        !health
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 100)
             .expect("first-401 scheduling projection")
             .available,
-        "first 401 must not block the key before the configured two-strike threshold"
+        "first 401 must immediately block the key"
     );
 
     let second = health
@@ -224,19 +219,19 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
         )
         .expect("second 401 should be recorded by the runtime policy bridge");
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.failure_count, 2);
-    assert_eq!(second.cooldown_until_ms, Some(18_000_101));
+    assert_eq!(second.failure_count, 1);
+    assert_eq!(second.cooldown_until_ms, Some(5_100));
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(5_099)
             .expect("probe interval query"),
         Vec::new()
     );
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("probe interval query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
     );
@@ -246,7 +241,7 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 102)
             .expect("second-401 scheduling projection")
             .available,
-        "401 auth key must be unavailable to scheduling after two failures"
+        "401 auth key must be unavailable to scheduling after one failure"
     );
     assert!(
         !health
@@ -281,7 +276,7 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     );
     assert!(
         !availability.available,
-        "401 auth key must be blocked after two failures: {availability:?}"
+        "401 auth key must be blocked after one failure: {availability:?}"
     );
     assert!(availability
         .blocked_scopes
@@ -290,14 +285,14 @@ fn account_http_401_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("provider cooldown probe query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
     );
 }
 
 #[test]
-fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge() {
+fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bridge() {
     let manifest = account_threshold_manifest();
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -335,11 +330,8 @@ fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
                 now_ms,
             )
             .expect("403 should be recorded by the runtime policy bridge");
-        assert_eq!(record.failure_count, (now_ms - 99) as u32);
-        assert_eq!(
-            record.state,
-            if now_ms == 101 { "cooldown" } else { "healthy" }
-        );
+        assert_eq!(record.failure_count, 1);
+        assert_eq!(record.state, "cooldown");
     }
     assert_eq!(
         health
@@ -352,8 +344,95 @@ fn account_http_403_policy_blocks_auth_key_after_two_failures_in_runtime_bridge(
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("403 probe due query"),
         vec![("primary".to_string(), Some("key1".to_string()), None,)]
+    );
+}
+
+#[test]
+fn anthropic_response_body_decode_failure_cools_only_failed_model_on_first_failure() {
+    let mut authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+[servers.test]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "test"
+endpoints = ["responses"]
+[providers.cc-anthropic]
+type = "anthropic"
+base_url = "http://anthropic.invalid/v1"
+default_model = "opus-5"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "ANTHROPIC_KEY" }] }
+[providers.cc-anthropic.models.opus-5]
+wire_name = "claude-opus-5"
+capabilities = ["text", "tools", "reasoning"]
+[providers.cc-anthropic.models.sonnet-5]
+wire_name = "claude-sonnet-5"
+capabilities = ["text", "tools", "reasoning"]
+[route_groups.test.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "cc-anthropic", model = "opus-5", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "cc-anthropic", model = "sonnet-5", key = "key1", priority = 1 },
+]
+"#,
+    )
+    .expect("test provider authoring");
+    authoring.error = routecodex_v3_config::internal::v3_internal_user_config_authoring().error;
+    let manifest = compile_v3_config_05_manifest(authoring)
+        .expect("internal provider failure policy must compile");
+    let policy = find_matching_provider_error_policy(
+        &manifest,
+        "cc-anthropic",
+        Some("anthropic"),
+        Some("opus-5"),
+        502,
+        Some("provider_runtime_error"),
+        "provider cc-anthropic response body failed: error decoding response body",
+    )
+    .expect("Anthropic response body decode policy must match");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let session = test_provider_failure_scope(
+        "routecodex_v3_4444",
+        "gateway_priority_4444",
+        "anthropic-body-decode-policy",
+    )
+    .expect("failure session scope");
+
+    let record = health
+        .record_provider_failure_record_with_policy(
+            Some(policy),
+            &manifest,
+            &session,
+            "cc-anthropic",
+            Some("anthropic"),
+            Some("key1"),
+            Some("opus-5"),
+            Some("error decoding response body"),
+            "V3ProviderRespInbound01Raw",
+            502,
+            Some("provider_runtime_error"),
+            "provider cc-anthropic response body failed: error decoding response body",
+            100,
+        )
+        .expect("first Anthropic body decode failure must be recorded");
+
+    assert_eq!(record.state, "cooldown");
+    assert_eq!(record.failure_count, 1);
+    assert!(
+        !health
+            .store()
+            .scheduling_projection("cc-anthropic", "key1", "opus-5", 100, 1, 101)
+            .expect("Anthropic scheduling projection")
+            .available
+    );
+    assert!(
+        health
+            .store()
+            .scheduling_projection("cc-anthropic", "key1", "sonnet-5", 100, 1, 101)
+            .expect("sibling model scheduling projection")
+            .available
     );
 }

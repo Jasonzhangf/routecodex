@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Notify;
 
 #[test]
-fn one_post_commit_sse_failure_stays_retryable_until_threshold() {
+fn one_post_commit_sse_failure_enters_provider_cooldown_immediately() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -42,10 +42,13 @@ fn one_post_commit_sse_failure_stays_retryable_until_threshold() {
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
     assert!(
-        projection.available,
-        "one post-commit SSE failure must not enter the 15m global cooldown"
+        !projection.available,
+        "one post-commit SSE failure must enter the adaptive provider cooldown"
     );
-    assert_eq!(projection.blocked_scopes, Vec::<String>::new());
+    assert!(projection
+        .blocked_scopes
+        .iter()
+        .any(|scope| scope == "provider_cooldown_probe_pending"));
 }
 
 #[test]
@@ -128,8 +131,8 @@ fn successful_retry_clears_post_commit_sse_failure_state() {
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
     assert!(
-        after_post_success_failures.available,
-        "success must reset the failure streak so two later failures remain retryable"
+        !after_post_success_failures.available,
+        "after recovery, the next provider failure must cool immediately"
     );
 }
 
@@ -367,7 +370,7 @@ async fn failed_probe_backoff_starts_at_probe_completion_time() {
     assert!(
         health
             .store
-            .provider_cooldown_probe_keys_due(finished_ms + 29_000)
+            .provider_cooldown_probe_keys_due(finished_ms + 9_000)
             .expect("probe schedule projection")
             .is_empty(),
         "failure backoff must start after probe completion, not batch start"

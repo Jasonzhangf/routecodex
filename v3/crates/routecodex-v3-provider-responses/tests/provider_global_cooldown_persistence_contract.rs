@@ -206,7 +206,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn failed_probe_uses_thirty_second_second_probe_cadence() {
+fn failed_probe_uses_ten_second_second_probe_cadence() {
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -244,11 +244,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_000)
         .unwrap();
     assert!(store
-        .provider_cooldown_probe_keys_due(31_999)
+        .provider_cooldown_probe_keys_due(11_999)
         .unwrap()
         .is_empty());
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(32_000).unwrap(),
+        store.provider_cooldown_probe_keys_due(12_000).unwrap(),
         vec![("p".into(), Some("k".into()), Some("m".into()))]
     );
 }
@@ -306,11 +306,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .complete_provider_cooldown_probe_failure("p", Some("k"), Some("m"), 2_001)
         .unwrap();
     assert!(restored
-        .provider_cooldown_probe_keys_due(32_000)
+        .provider_cooldown_probe_keys_due(11_999)
         .unwrap()
         .is_empty());
     assert!(restored
-        .provider_cooldown_probe_keys_due(32_001)
+        .provider_cooldown_probe_keys_due(12_001)
         .unwrap()
         .contains(&("p".into(), Some("k".into()), Some("m".into()))));
 }
@@ -370,11 +370,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         )
         .unwrap();
     assert!(restored
-        .provider_cooldown_probe_keys_due(32_000)
+        .provider_cooldown_probe_keys_due(11_999)
         .unwrap()
         .is_empty());
     assert!(restored
-        .provider_cooldown_probe_keys_due(32_001)
+        .provider_cooldown_probe_keys_due(12_001)
         .unwrap()
         .contains(&("p".into(), Some("k".into()), Some("m".into()))));
     let second = restored
@@ -404,11 +404,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         )
         .unwrap();
     assert!(restored
-        .provider_cooldown_probe_keys_due(212_000)
+        .provider_cooldown_probe_keys_due(152_000)
         .unwrap()
         .is_empty());
     assert!(restored
-        .provider_cooldown_probe_keys_due(212_001)
+        .provider_cooldown_probe_keys_due(152_001)
         .unwrap()
         .contains(&("p".into(), Some("k".into()), Some("m".into()))));
 }

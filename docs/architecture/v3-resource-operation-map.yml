@@ -1133,7 +1133,7 @@ resources:
       health_window: latest 100 calls for this provider+authAlias+model
       score_contract: clamp(configured_priority + sum(deltas), 0, 150)
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: failure_streak >= typed failure_threshold when present; thresholdless recoverable uses score == 0; thresholdless irrecoverable blocks immediately
+      cooldown_condition: every typed provider failure blocks the exact providerId+authAlias+model identity immediately; the dynamic cooldown/probe ladder is selected from continuous failure streak and meaningful observed failure rate
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias cooldown block until a successful probe removes the block
@@ -1168,8 +1168,8 @@ resources:
       cross_session: shared
       cross_model_same_key: shared
       sibling_keys: isolated
-      cooldown_condition: consecutive auth-key failures >= typed policy failure_threshold
-      cooldown_deadline: typed policy cooldown_ms (401 = 18,000,000ms, 403 = 3,600,000ms)
+      cooldown_condition: every typed provider failure blocks the providerId+authAlias auth-key identity immediately
+      cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
       revival_rule: only a due auth-key probe success clears the auth-key cooldown and consecutive failure counts
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_at_generation, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_at_generation]
