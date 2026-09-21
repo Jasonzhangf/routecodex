@@ -1,11 +1,11 @@
 {
   "evidence_id": "v3-provider-cooldown-hold-recovery-source-20260921",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "c2d8fab2fb62df7ae2315489e78c5771204a6ddc",
-  "candidate_tree": "a84cddc0248b47c884ca441f9edd161630ac8649",
-  "base_commit": "31596c43adb6052b0daf79586ff0681f6c57bd91",
+  "candidate_commit": "ae1af2eb83ccfddfde9933a66620338bcfc32f5d",
+  "candidate_tree": "af3205d7c2942ba3fa81fd1670ecb7f5e83ee937",
+  "base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
   "integration_base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
-  "captured_at": "2026-09-20T22:10:01-07:00",
+  "captured_at": "2026-09-20T22:42:30-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
@@ -118,8 +118,8 @@
     ]
   },
   "notes": [
-    "This receipt binds source and gate execution to candidate commit c2d8fab2f and tree a84cddc0.",
-    "The receipt commit that follows c2d8fab2f changes this evidence file only; the scoped source and test paths remain unchanged.",
+    "This receipt binds source and gate execution to candidate commit ae1af2eb83ccfddfde9933a66620338bcfc32f5d and tree af3205d7c.",
+    "The receipt commit changes this evidence file only; the scoped source and test paths remain unchanged.",
     "This is candidate source and controlled replay evidence. It does not claim merge, install, managed restart, listener health, or production live replay."
   ]
 }
