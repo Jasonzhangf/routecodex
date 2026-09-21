@@ -826,7 +826,7 @@ flowchart TD
 
 ## v3.protocol_conversion_field_parity.outbound_helper_bindings
 
-Verification bindings for OpenAI outbound helper calls inside the existing Req07 to ProviderCompat06 adjacent codec edge; this chain does not add runtime nodes.
+Verification bindings for OpenAI, Anthropic, and Gemini outbound helper calls inside the existing Req07 to ProviderCompat06 adjacent codec edge; this chain does not add runtime nodes.
 
 Owner feature: `v3.protocol_conversion_field_parity`
 
@@ -839,8 +839,8 @@ flowchart TD
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_3["v3-runtime::hub_v1<br/>project_openai_chat_reasoning_summary_policy<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_4["v3-runtime::hub_v1<br/>normalize_openai_chat_messages_payload<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_5["v3-runtime::hub_v1<br/>project_openai_chat_provider_tools<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs</small>"]
-    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6["v3-runtime::hub_v1<br/>project_outbound_payload_for_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small>"]
-    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7["v3-runtime::hub_v1<br/>project_gemini_compatible_fields<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6["v3-runtime::hub_v1<br/>project_outbound_payload_for_selected_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7["v3-runtime::hub_v1<br/>project_gemini_compatible_fields_for_selected_target<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_8["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_9["v3-runtime::hub_v1<br/>project_v3_anthropic_message_as_responses_response_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small>"]
   end
@@ -858,7 +858,7 @@ flowchart TD
 | `v3-protocol-field-parity-openai-outbound-metadata-02` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | apply_outbound_projection_transforms<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | validate_openai_metadata<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-openai-outbound-summary-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | apply_outbound_projection_transforms<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_openai_chat_reasoning_summary_policy<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-openai-outbound-web-search-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | normalize_openai_chat_messages_payload<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_openai_chat_provider_tools<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs</small> | `v3.protocol_conversion_field_parity` |
-| `v3-protocol-field-parity-gemini-outbound-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | project_outbound_payload_for_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_gemini_compatible_fields<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small> | `v3.protocol_conversion_field_parity` |
+| `v3-protocol-field-parity-gemini-outbound-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | project_outbound_payload_for_selected_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_gemini_compatible_fields_for_selected_target<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-anthropic-response-context-01` | `ProviderRespCompat02ProviderCompat` → `V3HubRespInbound02Normalized` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | project_v3_anthropic_message_as_responses_response_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small> | `v3.protocol_conversion_field_parity` |
 
 ## v3.hub_pipeline.v1.relay_request_source_slice

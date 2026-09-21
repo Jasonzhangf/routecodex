@@ -349,9 +349,35 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     source: &Value,
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
+    project_outbound_payload_for_target_protocol_inner(source, target_protocol, None)
+}
+
+pub(crate) fn project_outbound_payload_for_selected_target_protocol(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+    model_capabilities: &[String],
+) -> Result<Value, String> {
+    project_outbound_payload_for_target_protocol_inner(
+        source,
+        target_protocol,
+        Some(model_capabilities),
+    )
+}
+
+fn project_outbound_payload_for_target_protocol_inner(
+    source: &Value,
+    target_protocol: V3OutboundTargetProtocol,
+    gemini_model_capabilities: Option<&[String]>,
+) -> Result<Value, String> {
     let mut source = source.clone();
     if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
-        project_gemini_compatible_fields(&mut source)?;
+        match gemini_model_capabilities {
+            Some(model_capabilities) => project_gemini_compatible_fields_for_selected_target(
+                &mut source,
+                model_capabilities,
+            )?,
+            None => project_gemini_compatible_fields(&mut source)?,
+        }
     }
     promote_tool_search_output_tools_to_provider_tools(&mut source)?;
     let source = &source;

@@ -1,5 +1,5 @@
 use super::request_outbound_format::{
-    project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
+    project_outbound_payload_for_selected_target_protocol, V3OutboundTargetProtocol,
 };
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
@@ -302,9 +302,10 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             encode_v3_responses_semantic_as_anthropic_request(source)
                 .map_err(|error| error.to_string())?
         }
-        V3HubProviderWireProtocol::Gemini => project_outbound_payload_for_target_protocol(
+        V3HubProviderWireProtocol::Gemini => project_outbound_payload_for_selected_target_protocol(
             input.provider_semantic_payload(),
             V3OutboundTargetProtocol::Gemini,
+            &selected.model_capabilities,
         )?,
     };
     bind_v3_selected_provider_model(provider_protocol_payload, selected)
@@ -524,6 +525,59 @@ mod tests {
         assert_eq!(
             req_compat.provider_semantic_payload()["thinking"]["type"],
             "adaptive"
+        );
+    }
+
+    #[test]
+    fn gemini_provider_req_rejects_reasoning_effort_without_selected_reasoning_capability() {
+        let req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"think"}],
+                "reasoning_effort": "high"
+            }),
+            V3HubProviderWireProtocol::Gemini,
+        );
+
+        let error = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect_err("Gemini provider send must validate selected target capabilities");
+        assert_eq!(
+            error.classification(),
+            crate::hub_v1::V3ProviderCompatErrorClassification::RequestPayloadInvalid
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("paths=$.reasoning_effort missing_capability=reasoning"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn gemini_provider_req_projects_reasoning_effort_with_selected_reasoning_capability() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::OpenAiChat,
+            json!({
+                "model": "client-route-alias",
+                "messages": [{"role":"user","content":"think"}],
+                "reasoning_effort": "high"
+            }),
+            V3HubProviderWireProtocol::Gemini,
+        );
+        req07
+            .previous
+            .selected_target
+            .model_capabilities
+            .push("reasoning".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("selected Gemini target with reasoning capability must accept effort");
+        assert_eq!(
+            req_compat
+                .provider_semantic_payload()
+                .pointer("/generationConfig/thinkingConfig/thinkingLevel"),
+            Some(&json!("HIGH"))
         );
     }
 

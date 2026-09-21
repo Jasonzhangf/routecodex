@@ -1575,7 +1575,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "{scope}", env = "V3_GEMINI_SC
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [route_groups.{scope}.pools.gemini_client]
 selection = {{ strategy = "priority" }}
@@ -1621,7 +1621,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "primary", env = "V3_GEMINI_PR
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [providers.secondary]
 type = "gemini"
@@ -1632,7 +1632,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "secondary", env = "V3_GEMINI_
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [route_groups.{scope}.pools.gemini_client]
 selection = {{ strategy = "priority" }}
@@ -1687,7 +1687,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 [route_groups.controlled.pools.gemini_client]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-client"] }}
