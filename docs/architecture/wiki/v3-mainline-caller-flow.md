@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 73 functional paths, 427 caller edges.
+Generated view: 73 functional paths, 428 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -57,7 +57,7 @@ flowchart TD
   module_v3_runtime__hub_v1 -->|2 edges / 2 paths| module_v3_error
   module_v3_runtime__hub_v1 -->|5 edges / 5 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|28 edges / 4 paths| module_v3_runtime
-  module_v3_runtime__hub_v1 -->|129 edges / 26 paths| module_v3_runtime__hub_v1
+  module_v3_runtime__hub_v1 -->|130 edges / 26 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime -->|3 edges / 3 paths| module_routecodex_v3_route_classifier
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -105,7 +105,7 @@ flowchart TD
 | v3-runtime::hub_v1 | v3-error | 2 | `v3.provider_global_subscription_probe`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime::hub_v1 | v3-provider-responses | 5 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry` |
 | v3-runtime::hub_v1 | v3-runtime | 28 | `v3.provider_action_gate.mainline`<br/>`v3.provider_global_subscription_probe`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding` |
-| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 129 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
+| v3-runtime::hub_v1 | v3-runtime::hub_v1 | 130 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.hub_pipeline.v1.relay_request_source_slice`<br/>`v3.hub_pipeline.v1.relay_response_source_slice`<br/>`v3.hub_pipeline.v1.request`<br/>`v3.hub_pipeline.v1.response`<br/>`v3.hub_relay.runtime_closeout`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.openai_chat_sse_typed_tree`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_conversion_field_parity.outbound_helper_bindings`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_compat.request_invalid_error_source`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.responses_chat_sse_typed_tree`<br/>`v3.responses_provider_event.terminal_merge`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.servertool_center.skeleton`<br/>`v3.sse.protocol_codec_projection_boundary`<br/>`v3.tool_thinking_hook_skeleton.mainline`<br/>`v3.web_search_servertool_state_machine` |
 | v3-runtime | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime | routecodex-v3-route-classifier | 3 | `v3.route_classifier.facts_classification`<br/>`v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
@@ -839,14 +839,17 @@ flowchart TD
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_3["v3-runtime::hub_v1<br/>project_openai_chat_reasoning_summary_policy<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_4["v3-runtime::hub_v1<br/>normalize_openai_chat_messages_payload<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small>"]
     c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_5["v3-runtime::hub_v1<br/>project_openai_chat_provider_tools<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs</small>"]
-    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
-    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7["v3-runtime::hub_v1<br/>project_v3_anthropic_message_as_responses_response_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6["v3-runtime::hub_v1<br/>project_outbound_payload_for_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7["v3-runtime::hub_v1<br/>project_gemini_compatible_fields<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_8["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+    c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_9["v3-runtime::hub_v1<br/>project_v3_anthropic_message_as_responses_response_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small>"]
   end
   c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_0 -->|v3-protocol-field-parity-openai-outbound-metadata-01<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_1
   c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_0 -->|v3-protocol-field-parity-openai-outbound-metadata-02<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_2
   c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_0 -->|v3-protocol-field-parity-openai-outbound-summary-01<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_3
   c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_4 -->|v3-protocol-field-parity-openai-outbound-web-search-01<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_5
-  c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6 -->|v3-protocol-field-parity-anthropic-response-context-01<br/>ProviderRespCompat02ProviderCompat → V3HubRespInbound02Normalized| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7
+  c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_6 -->|v3-protocol-field-parity-gemini-outbound-01<br/>V3HubReqOutbound07ProviderSemantic → ProviderReqCompat06ProviderCompat| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_7
+  c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_8 -->|v3-protocol-field-parity-anthropic-response-context-01<br/>ProviderRespCompat02ProviderCompat → V3HubRespInbound02Normalized| c_21_v3_protocol_conversion_field_parity_outbound_helper_bindings_9
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -855,6 +858,7 @@ flowchart TD
 | `v3-protocol-field-parity-openai-outbound-metadata-02` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | apply_outbound_projection_transforms<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | validate_openai_metadata<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-openai-outbound-summary-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | apply_outbound_projection_transforms<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_openai_chat_reasoning_summary_policy<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-openai-outbound-web-search-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | normalize_openai_chat_messages_payload<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_openai_chat_provider_tools<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs</small> | `v3.protocol_conversion_field_parity` |
+| `v3-protocol-field-parity-gemini-outbound-01` | `V3HubReqOutbound07ProviderSemantic` → `ProviderReqCompat06ProviderCompat` | anchored | project_outbound_payload_for_target_protocol<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</small> | project_gemini_compatible_fields<br/><small>routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs</small> | `v3.protocol_conversion_field_parity` |
 | `v3-protocol-field-parity-anthropic-response-context-01` | `ProviderRespCompat02ProviderCompat` → `V3HubRespInbound02Normalized` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | project_v3_anthropic_message_as_responses_response_with_context<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</small> | `v3.protocol_conversion_field_parity` |
 
 ## v3.hub_pipeline.v1.relay_request_source_slice
