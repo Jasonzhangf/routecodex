@@ -38,6 +38,14 @@
       "tests": "39/39 sub-gates green"
     },
     {
+      "command": "npm run verify:v3-resource-map",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-module-boundaries",
+      "result": "pass"
+    },
+    {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture",
       "result": "pass",
       "tests": "9 passed; 0 failed"
