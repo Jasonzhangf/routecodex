@@ -792,6 +792,7 @@ targets = [{ kind = "provider_model", provider = "test", model = "test-model", p
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[ignore = "asserts process-wide thread count; run by the dedicated serial test owner"]
     async fn web_search_hook_sidecar_pending_connect_is_cancelled_without_thread_growth() {
         const ATTEMPTS: usize = 64;
         const GENEROUS_BOUND: Duration = Duration::from_secs(2);

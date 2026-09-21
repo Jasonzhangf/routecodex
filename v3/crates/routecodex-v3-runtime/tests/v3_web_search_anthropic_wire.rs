@@ -239,7 +239,7 @@ fn test_socket_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("rcc-{label}-{nonce}.sock"))
+    PathBuf::from("/tmp").join(format!("rcc-{label}-{nonce}.sock"))
 }
 
 fn serve_completed_search(
