@@ -1,11 +1,11 @@
 {
   "evidence_id": "v3-provider-cooldown-hold-recovery-source-20260921",
   "feature_id": "v3.provider_global_subscription_probe",
-  "candidate_commit": "b8beea4454ec90f8facf91a1cb5dec521ea68275",
-  "candidate_tree": "183b528b42c75baedb0c137712fdecf1108aebdb",
+  "candidate_commit": "028f9b036ececa4c6d67f58581937cd83ec4dcfd",
+  "candidate_tree": "5593db45b358d9a918ba76a3b084e678a9a072f9",
   "base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
   "integration_base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
-  "captured_at": "2026-09-21T00:04:23-07:00",
+  "captured_at": "2026-09-21T00:32:12-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
@@ -38,46 +38,9 @@
       "tests": "39/39 sub-gates green"
     },
     {
-      "command": "npm run verify:v3-resource-map",
-      "result": "pass"
-    },
-    {
-      "command": "npm run verify:v3-module-boundaries",
-      "result": "pass"
-    },
-    {
-      "command": "npm run verify:v3-architecture-docs",
-      "result": "pass",
-      "tests": "docs: 25; resources: 179; edges: 427"
-    },
-    {
-      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
-      "result": "pass",
-      "tests": "12 passed; 0 failed"
-    },
-    {
-      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture",
-      "result": "pass"
-    },
-    {
-      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture",
-      "result": "pass",
-      "tests": "7 passed; 0 failed"
-    },
-    {
-      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture",
-      "result": "pass",
-      "tests": "1 passed; 0 failed"
-    },
-    {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture",
       "result": "pass",
-      "tests": "8 passed; 0 failed"
-    },
-    {
-      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture",
-      "result": "pass",
-      "tests": "55 passed; 0 failed"
+      "tests": "9 passed; 0 failed"
     },
     {
       "command": "npm run test:v3-provider-health-contract",
@@ -94,16 +57,12 @@
       "result": "pass"
     },
     {
-      "command": "cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features",
-      "result": "pass"
-    },
-    {
-      "command": "npm run test:v3-gemini-relay-runtime-integration",
-      "result": "pass",
-      "tests": "Gemini 20 passed; server controlled 1 passed; 0 failed"
-    },
-    {
       "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration openai_chat_provider_pool_exhaustion_holds_between_failed_and_successful_rescue_probes -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test gemini_relay_runtime_integration broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds -- --exact --nocapture",
       "result": "pass",
       "tests": "1 passed; 0 failed"
     }
@@ -124,9 +83,10 @@
     ]
   },
   "notes": [
-    "This receipt binds source and gate execution to candidate commit b8beea4454ec90f8facf91a1cb5dec521ea68275 and tree 183b528b4.",
-    "The OpenAI Chat integration fixture now verifies a failed rescue probe keeps the request held and the next due probe resumes it through normal provider transport.",
-    "The receipt commit changes this evidence file only; the scoped source and test paths remain unchanged.",
+    "This receipt binds source and gate execution to candidate commit 028f9b036ececa4c6d67f58581937cd83ec4dcfd and tree 5593db45b358d9a918ba76a3b084e678a9a072f9.",
+    "The focused cooldown suite verifies that model-specific and shared auth-key cooldowns both recover before a held request can be selected.",
+    "The OpenAI Chat and Gemini integration tests verify the held request resumes through normal provider transport after a successful rescue probe.",
+    "The evidence commit changes this receipt only; the scoped source and test paths are unchanged by that commit.",
     "This is candidate source and controlled replay evidence. It does not claim merge, install, managed restart, listener health, or production live replay."
   ]
 }
