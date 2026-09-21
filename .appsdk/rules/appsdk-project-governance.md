@@ -33,6 +33,44 @@ integrity gates; do not turn every available command into a mandatory phase.
 Run project commands from project cwd. An explicit optional project path is for
 operators intentionally working elsewhere; no project-root environment variable.
 
+## Truth and path ownership
+
+The host-wide persistent truths are fixed and must not be inferred from a
+project directory:
+
+```text
+~/.appsdk/{projects,runtimes,communication}.jsonl   AppSDK host truth
+~/.collab/{server.sock,events.jsonl,log.txt,routes.jsonl,...}
+                                                   Collab host truth
+```
+
+Project-local state has a different scope and owner:
+
+```text
+<project>/.appsdk/          AppSDK project contract, maps, records and lock
+<project>/.appsdk-control/  AppSDK-owned local run/cache state
+<project>/.agent-collab/    Collab-owned project registration/reducer input
+```
+
+None of the project-local paths is the global truth, and none is proof that the
+current peer is registered. Read live registration, role, liveness and peers
+through `collab context`; retire project-local state only through the owner's
+canonical reset/migration command. Do not inspect or edit `~/.appsdk`,
+`~/.collab`, `.appsdk-control/`, or `.agent-collab/` to reconstruct control
+state.
+
+The current client is Codex only. A peer is bound to the Codex sessionID
+through the live App Server thread; the global Collab store is the identity,
+route, mailbox, task, and liveness truth. Tracked `.appsdk/` files are present
+in a Git worktree because they are committed, but ignored `.agent-collab/` and
+`.appsdk-control/` state is not inherited. Ordinary project initialization and
+Collab registration run from the canonical project main checkout. An
+authorized AppSDK `--fresh --discard-legacy` reset is a separate operation and
+may run from its clean non-main owner worktree as specified below. Inside a
+worktree the same Codex sessionID/thread remains the same peer; return to the
+canonical project main checkout for route recovery or master promotion. Never
+register the worktree as a second peer or promote yourself from a worktree.
+
 ## SDK source repository and managed project boundary
 
 This Skill is used in two different contexts and must not blur them:
@@ -44,11 +82,12 @@ This Skill is used in two different contexts and must not blur them:
   checkout is not implicitly a managed consumer project; it does not make
   initialization impossible. If the user explicitly chooses to govern this
   SDK workspace with AppSDK, run `appsdk prepare` and confirm the preparation,
-  then run `appsdk init` from a clean non-`main` owner worktree. The normal
-  initialization path creates a project contract that the owner must review
-  and bind to the SDK source modules; it does not infer or overwrite those
-  modules. A `playground/<slug>` worktree used to develop the SDK remains an
-  SDK source worktree unless that explicit project registration is made. Its
+  then run ordinary `appsdk init` from the canonical project main checkout.
+  The normal initialization path creates a project contract that the owner
+  must review and bind to the SDK source modules; it does not infer or
+  overwrite those modules. A `playground/<slug>` worktree used to develop the
+  SDK remains an SDK source worktree unless that explicit project registration
+  is made. Its
   source, Git history, and release gates remain SDK-owned. Never run
   `appsdk init` or `appsdk reset-governance` merely to manufacture a contract,
   and never use fresh reset without the existing contract and explicit
@@ -113,6 +152,29 @@ The AppSDK reset and the Collab migration are separate owners and separate
 transactions. Never treat removal of `.appsdk/` as permission to delete or
 rebuild `.agent-collab/`, and never use the Collab migration as a substitute
 for an authorized AppSDK governance reset.
+
+The only clean-epoch reset entries are:
+
+```sh
+# AppSDK-owned project control plane; requires an existing contract and a
+# clean non-main owner worktree.
+appsdk init <project> --fresh --discard-legacy
+# Same transactional reset owner, lower-level entry:
+appsdk reset-governance <project> --discard-legacy
+
+# Collab-owned project control plane; explicit authorization and a controlled
+# daemon maintenance window are required.
+collab down
+collab reset --discard-legacy --approval "<explicit user authorization>"
+collab up
+collab init
+```
+
+`collab reset` archives the exact `.agent-collab/` and `.agent-collab-v2/`
+bytes, removes only Collab-owned control state and stale routes, and records
+`delivery_verified: false`. It never removes `.appsdk/` or
+`.appsdk-control/`. Never manually delete either project-local root, journal,
+mailbox, identity, task record, or route.
 
 Before choosing a route, record an inventory of every exact path and runtime
 object in the run note. At minimum include the AppSDK contract root and its
@@ -220,11 +282,22 @@ capability, registers the current peer, and arms the default
 `direct-message` lease. `collab init` resolves the project scope from the exact
 process `cwd`. If no registered App Server route exists, AppSDK initialization
 still succeeds for independent development, reports Collab pending, and never
-fabricates a peer or notification channel. Then use
-`collab who/status/context`, `collab sendmessage`, `collab inbox`, and
-`collab recv` only through the server-selected transport.
+fabricates a peer or notification channel. Then use `collab context`,
+`collab sendmessage`, `collab inbox`, and `collab recv` only through the
+server-selected transport.
 
-For the roles after initialization, see
+For an already governed project, the initialization contract is only:
+
+```text
+collab context
+-> registered: stop
+-> unregistered or context fails before registration: appsdk init .
+-> collab context
+-> role=master requires user approval and no live master; otherwise remain peer
+```
+
+Do not pre-probe environment, panes, `routes.jsonl`, or `.agent-collab/`.
+For the roles and copy/paste prompts after initialization, see
 [bootstrap-migration.md](references/bootstrap-migration.md#master-and-ordinary-peer-bootstrap).
 Master initialization adds `collab master promote --approval "<user text>"`
 after the peer is live and the user explicitly approved the exact project and
@@ -256,6 +329,29 @@ boundaries, and never deletes `.agent-collab/` or old Collab evidence. Collab
 state is removed or migrated through the `collab migrate` and daemon lifecycle
 owned by the Collab Skill. A fresh reset record proves reset only; it never
 imports old PASS, review, install, restart, delivery, or live communication.
+
+For the Collab half, use `collab migrate` when the journal is replayable. Use
+the explicit `collab reset --discard-legacy --approval "<user text>"` path only
+when the operator authorizes abandoning the old Collab epoch. The two reset
+commands are independent; neither one can claim the other's cleanup or
+delivery result.
+
+### Upstream AppSDK defect report
+
+When the defect belongs to AppSDK itself, query for an existing report, file
+one upstream record with reproduction and runtime identity, then read the
+created record back:
+
+```bash
+appsdk bug list -q "<symptom>" --json --upstream
+appsdk bug new --upstream -t "[SDK Bug] <symptom>" \
+  -m "<reproduction, expected, observed, version, commit, logs>" \
+  -l "P0,appsdk"
+appsdk bug show <id> --json --upstream
+```
+
+The report is evidence of a filed defect, not proof that the local delivery or
+the upstream fix passed.
 
 ## Conditional delivery gates
 
@@ -317,47 +413,37 @@ AppSDK governance. Desktop does not register or subscribe a long-horizon goal.
 
 ## Universal Bug Tracking & Defect Governance
 
-Defects and cross-round blockers are tracked through `appsdk bug` backed by
-`git-bug`. A feature request uses a confirmed goal/plan unless investigation
-finds a defect that needs the bug lifecycle.
+Execution-bound user inputs, requirements, problems, defects, and features use
+one development intake backed by the existing `git-bug` store:
 
-### 1. Requirements Triage & Kanban Management
-- **Master Role**:
-  - Receives user inputs / feature requests / bug reports.
-  - Queries existing issues first: `appsdk bug list -q "<keyword>" -l "<label>" --json`.
-  - If an existing related issue is found, **reopen** it and append details.
-  - If new, creates a new issue:
-    ```bash
-    appsdk bug new -t "<title>" -m "<requirements & reproduction>" -l "<priority>,<module>"
-    ```
-  - Prioritizes backlog using labels (e.g. `p0`, `p1`, `p2`) and dispatches workers based on highest priority issues within scope.
-- **Worker / Subworker Role**:
-  - Receives assigned issue and inspects its history: `appsdk bug show <id> --json`.
-  - Verifies and reproduces the defect/feature in an isolated worktree.
-  - Reports discoveries or new bugs to the bug system immediately; **does not auto-fix unrelated discoveries** to stay focused on the primary objective.
-  - **Blocker Handling & Block Criteria**:
-    - Task status can be marked as `blocked` (`collab task block <id>`) only with a concrete cause, responsible owner, unblock condition, and recovery trigger. Genuine external dependencies, resource ownership, missing credentials/approval, and cross-owner decisions may be valid waits; difficulty alone is not.
-    - AppSDK framework defects remain an upstream bug path (`appsdk bug new --upstream -t "[SDK Bug] ..." -l "P0,cli"`), but non-framework failures must first be investigated and solved in scope. If a cross-owner decision is required, report a concrete proposal to Master; Master must take over, reassign, or auditable-force-close in the same cycle.
-    - If encountering a valid AppSDK blocker and a live Master exists: report immediately to Master with root cause and proposed fix (`collab sendmessage --to <master> --subject blocker "..."`).
-    - If blocked by AppSDK and no live Master exists: file an upstream SDK bug, resolve or work around, and resume the task.
+```bash
+appsdk bug intake --input <intake.json>
+```
 
-### 2. Multi-Criteria Filtering
-- Master and workers filter issues to reduce noise:
-  - By status: `appsdk bug list --status <open|closed>`
-  - By label: `appsdk bug list -l <labels>`
-  - By participant/author: `appsdk bug list -p <user> -a <author>`
-  - By keyword query: `appsdk bug list -q <query>`
-  - By sort & direction: `appsdk bug list -b <creation|edit> -d <asc|desc>`
+The JSON declares `execution_bound: true`, classification `bug` or `feature`,
+title, original input, scope, owner, optional parent, acceptance, status,
+evidence links, and a dedup query. Intake queries first, reuses an exact
+match, appends changed intake details, reopens a closed match, or creates one record.
+It returns the authoritative `issue_id`. Read-only conversation uses no intake
+and `execution_bound: false` is rejected.
 
-### 3. Lifecycle Evidence Enforcement
-- **Architecture Gate**: `WorktreeRecord` must declare `bug_triage` (`query_executed: true`, a query containing the issue ID, `mode`, `reopened_from_issue_id`) verifying that existing issues were triaged before creating new work.
-- **Promotion / Closure Gate**: Closing a bug or promoting a candidate requires solution documentation in `git-bug`:
-  ```bash
-  appsdk bug close <bug_id> -m "Solution: <root cause & resolution>" --receipt-id <receipt_id>
-  ```
-- **Legacy Compatibility**: Tasks with empty, `none`, or `legacy-*` `issue_id` are exempt from retroactive bug tracking enforcement.
+Master, peer/worker, and subworker prompts use this same contract. Bind the
+returned ID through worktree, implementation, tests, review, merge, and
+closure. Without an ID, do not claim governed completion. Do not add another
+issue database, scheduler, daemon, or task truth.
 
-### 4. Stage gates: re-entry and reuse
+`WorktreeRecord` retains `bug_triage` and its query binding for non-legacy IDs.
+Closing or promotion still requires canonical solution evidence:
+
+```bash
+appsdk bug close <id> -m "Solution: <root cause and resolution>" --receipt-id <receipt>
+```
+
+Legacy empty, `none`, and `legacy-*` IDs remain exempt from retroactive intake.
+AppSDK framework defects retain the explicit `--upstream` route. Blocked tasks
+still require cause, owner, unblock condition, and recovery trigger.
+
+### Stage gates: re-entry and reuse
 
 Treat each lifecycle phase as its own persisted gate. The phase projection is
 bound to the candidate/tree, module scope, dependencies, artifact and
@@ -388,9 +474,13 @@ Collab, Codex TUI, Desktop, or a particular agent runtime.
 
 ## Long-Horizon Goal Subscription & Master Saturation
 
-`collab init` / `whoami` returns `role_brief`; treat it as the active contract.
-Master dispatches rather than codes: split and assign work, allocate resources,
-keep workers loaded, own blockers, and drive verify/merge/cleanup/close.
+`collab context` returns identity, liveness, tasks, inbox, `next_actions`,
+master/authority state, `role_brief`, and truth. Registration returns the brief
+effective at registration; `collab context` and `collab who` project the
+current brief, and promotion or delegation returns the replacement brief.
+Treat that brief as the contract. Master dispatches rather than codes: split
+and assign work, allocate resources, keep workers loaded, own blockers, and
+drive verify/merge/cleanup/close.
 Independent worker owns its task end to end and evaluates master collaboration
 requests against current ownership/capacity—accept non-conflicting work or
 negotiate explicitly. Managed subworker executes its assigned scope and reports
@@ -401,8 +491,15 @@ Notifications are interrupts, not completion. Follow the `P0/P1/P2 ACTION`,
 then resume current work; with no task, run `appsdk longhorizon show`. Never end
 on ACK, read, or summary.
 
-Register complex or long-running goals with a required markdown target and
-periodic reminder interval when persistent goal execution is selected:
+For a live peer, `collab context` is the authority and task-state query and
+returns the canonical `role_brief`; do not use `whoami` as a second
+initialization path. When no work is owned, run
+`appsdk longhorizon show --json`. Long waits must use the supported timer/wake
+path and then stop; do not poll in a loop.
+
+Register complex or long-running goals only after the plan file exists and the
+master has verified its live role. The goal is a one-shot deadline that must be
+rearmed explicitly:
 
 ```bash
 appsdk goal subscribe --goal docs/goals/<feature>-plan.md --interval 10m
@@ -422,10 +519,22 @@ appsdk goal subscribe --goal docs/goals/<feature>-plan.md --interval 10m
   the authorized live TUI/master endpoint; a prompt, appserver status, or
   daemon health cannot substitute for that authority.
 - Master is awakened periodically to:
-  1. Inspect worker states (`collab who` / `appsdk subworker status`); dispatch decomposed tasks to keep workers saturated whenever any worker is idle.
+  1. Inspect worker states with `collab context` and `appsdk subworker status`; dispatch decomposed tasks to keep workers saturated whenever any worker is idle.
   2. Enforce AppSDK lifecycle governance across all subworker tasks.
   3. Report any upstream AppSDK framework issues via `appsdk bug new --upstream`.
   4. Conclude only when all goal DoD conditions pass.
+
+The master's primary responsibilities are task decomposition, resource
+allocation and recovery, worker saturation, blocker ownership, independent
+review routing, merge/integration, bug management, final acceptance, and
+cleanup. The master owns the P0/P1 queue and dirty `main`: triage and dispatch
+the highest-priority open bugs, resolve or explicitly contain `main` dirt
+before integration, and do not leave either queue waiting for a worker to
+volunteer. The master does not write ordinary product code; implementation
+belongs to the task owner. The master keeps architecture, integration and
+critical repair only. Every assignment must state done-iff, allowed and
+forbidden paths, worktree/branch, exact test commands, expected result, and
+evidence location.
 
 ## Evidence and state ownership
 

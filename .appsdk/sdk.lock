@@ -1,7 +1,7 @@
 {
   "binary_ref": "project-sdk",
-  "bundle_digest": "sha256:8f3d202010e8070ff784d0bb58a8297b21c3ff5d9b7ec73bd77e9e8a3a884d5c",
-  "bundle_manifest_digest": "sha256:6c1bd9fcb25126f845c3ef54444fda86425794ba5203cf805d230f6b2f7883bf",
+  "bundle_digest": "sha256:8f1e5af4b6bc757df2328f02f5de70479e17e157dc475262cacb7c1484161358",
+  "bundle_manifest_digest": "sha256:c0e3756d3d801912d91e0df0d24ef8ad473a627ca593d6c0c5d7657c0b358c33",
   "bundle_resources": {
     "contracts": [
       "contracts/sdk-bundle.manifest.json",
@@ -18,10 +18,15 @@
       "contracts/maps/mainline-call-map.json",
       "contracts/maps/verification-map.json",
       "contracts/migrations/sdk-0.1.5-to-0.1.6.json",
+      "contracts/migrations/sdk-0.1.6-to-0.1.7.json",
       "contracts/migrations/0.1.5/governance-maps/resource-map.json",
       "contracts/migrations/0.1.5/governance-maps/function-map.json",
       "contracts/migrations/0.1.5/governance-maps/mainline-call-map.json",
       "contracts/migrations/0.1.5/governance-maps/verification-map.json",
+      "contracts/migrations/0.1.6/governance-maps/resource-map.json",
+      "contracts/migrations/0.1.6/governance-maps/function-map.json",
+      "contracts/migrations/0.1.6/governance-maps/mainline-call-map.json",
+      "contracts/migrations/0.1.6/governance-maps/verification-map.json",
       "contracts/transitions/zone-transition.manifest.json",
       "contracts/lifecycle-state-machines.manifest.json",
       "contracts/records/record-graph.contract.json",
@@ -39,6 +44,7 @@
       "contracts/records/merge-queue-state.schema.json",
       "contracts/records/integration-record.schema.json",
       "contracts/records/mainline-receipt-record.schema.json",
+      "contracts/records/collab-live-closure-record.schema.json",
       "contracts/records/merge-record.schema.json",
       "contracts/records/promotion-record.schema.json",
       "contracts/records/freeze-record.schema.json",
@@ -80,10 +86,9 @@
       "skills/project-memory/SKILL.md"
     ]
   },
-  "compiler_digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
+  "compiler_digest": "sha256:f311606f5ae209e8f8bd1de3998b76af443ad2e290e6c25882eebb3318d0f7be",
   "contract_schema": 1,
-  "digest": "sha256:e0724997e96afe09ee32a6be01913595102f3c1a1cd7f0095d3b82e6d1477861",
-  "previous_bundle_digest": "sha256:13eeb6a7e64d71ce59dd1193e4884bda1f169f459c5c3ddfd5ec5eddcc45857b",
+  "digest": "sha256:f311606f5ae209e8f8bd1de3998b76af443ad2e290e6c25882eebb3318d0f7be",
   "sdk": "appsdk",
-  "version": "0.1.6"
+  "version": "0.1.7"
 }
