@@ -350,6 +350,9 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     target_protocol: V3OutboundTargetProtocol,
 ) -> Result<Value, String> {
     let mut source = source.clone();
+    if matches!(target_protocol, V3OutboundTargetProtocol::Gemini) {
+        project_gemini_compatible_fields(&mut source)?;
+    }
     promote_tool_search_output_tools_to_provider_tools(&mut source)?;
     let source = &source;
     let control_paths = collect_outbound_control_field_paths(source);
@@ -372,6 +375,8 @@ pub(crate) fn project_outbound_payload_for_target_protocol(
     apply_outbound_projection_transforms(&mut projected, target_protocol)?;
     Ok(projected)
 }
+
+include!("request_outbound_gemini.rs");
 
 fn apply_outbound_projection_transforms(
     projected: &mut Value,
@@ -1452,3 +1457,7 @@ fn ensure_openai_chat_stream_usage_option(payload: &mut Value) {
 #[cfg(test)]
 #[path = "request_outbound_format_extra_tests.rs"]
 mod request_outbound_format_extra_tests;
+
+#[cfg(test)]
+#[path = "request_outbound_gemini_tests.rs"]
+mod request_outbound_gemini_tests;

@@ -412,7 +412,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     }
 }
 
-fn build_v3_gemini_transport_09(
+pub(crate) fn build_v3_gemini_transport_09(
     request_id: &str,
     target: V3ResponsesProviderTarget,
     transport_intent: V3HubTransportIntent,
