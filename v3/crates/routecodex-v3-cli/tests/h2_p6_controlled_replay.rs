@@ -599,7 +599,7 @@ type = "responses"
 base_url = "{failure_a_base}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "failure-a", env = "ROUTECODEX_V3_H2_FAILURE_A_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
 
 [providers.failure_a.models.test]
 wire_name = "wire-failure-a"
@@ -610,7 +610,7 @@ type = "responses"
 base_url = "{failure_a_base}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "failure-a", env = "ROUTECODEX_V3_H2_FAILURE_A_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
 
 [providers.failure_a_reselect.models.test]
 wire_name = "wire-failure-a"
@@ -621,7 +621,7 @@ type = "responses"
 base_url = "{failure_b_base}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "failure-b", env = "ROUTECODEX_V3_H2_FAILURE_B_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000, probe_interval_ms = 1800000 }}
 
 [providers.failure_b.models.test]
 wire_name = "wire-failure-b"

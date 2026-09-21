@@ -926,45 +926,22 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
         };
-        // Thresholded recoverable failures stay schedulable until the typed
-        // consecutive-failure threshold is reached, so one SSE failure must
-        // not by itself create a global cooldown. Assert the absence of a
-        // probe instead of sending a success, which would reset the streak.
+        // A typed provider-attempt failure immediately isolates the exact
+        // provider/key/model. Keep the provider held until its recovery probe
+        // succeeds; probe failures are control-plane recovery traffic and do
+        // not count as request attempts.
+        let probe_keys = provider_health
+            .store()
+            .provider_cooldown_probe_keys_due(u64::MAX)
+            .expect("provider cooldown probe inventory");
         assert!(
-            provider_health
-                .store()
-                .provider_cooldown_probe_keys_due(u64::MAX)
-                .expect("provider cooldown probe inventory")
-                .is_empty(),
-            "{case} one recoverable failure must not create a provider cooldown"
+            probe_keys.contains(&(
+                server_id.to_string(),
+                Some(server_id.to_string()),
+                Some("gemini-wire".to_string()),
+            )),
+            "{case} first typed failure must create an exact provider cooldown: {probe_keys:?}"
         );
-
-        // Broker 内完成的 provider-attempt 失败必须关闭本次 action lane，
-        // 连续失败达到阈值后保留 provider cooldown；Front 不参与错误判定。
-        for _ in 0..2 {
-            execute_v3_gemini_relay_runtime_with_provider_health(
-                &manifest,
-                V3GeminiRelayRuntimeInput {
-                    server_id: server_id.into(),
-                    failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                        "test-server",
-                        "test-group",
-                        concat!(module_path!(), ":", line!()),
-                    )
-                    .expect("test provider failure session scope"),
-                    request_id: format!("req-gemini-threshold-failure-{case}"),
-                    endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                    payload: json!({
-                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                        "stream":true
-                    }),
-                },
-                &failing,
-                provider_health.runtime_health(),
-            )
-            .await
-            .expect("provider attempt failure must reach terminal Error06");
-        }
         let held_manifest = manifest.clone();
         let held_health = provider_health.runtime_health();
         let probe_server = tokio::spawn(serve_one_gemini_probe(
@@ -1544,11 +1521,6 @@ async fn revive_cooled_provider(
     let probe_keys = store
         .provider_cooldown_probe_keys_due(u64::MAX)
         .expect("provider cooldown probe inventory");
-    // A recoverable failure below the typed threshold leaves no cooldown to
-    // revive; the probe inventory is then empty.
-    if probe_keys.is_empty() {
-        return;
-    }
     assert!(
         probe_keys.contains(&(
             provider_id.to_string(),
