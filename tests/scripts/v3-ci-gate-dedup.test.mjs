@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/test.yml', 'utf8');
@@ -11,6 +11,10 @@ const architectureCi = readFileSync('v3/scripts/architecture/verify-v3-architect
 const verifyRed = readFileSync('v3/scripts/verify-red.mjs', 'utf8');
 const common = readFileSync('v3/scripts/_common.mjs', 'utf8');
 const v3Test = readFileSync('v3/scripts/test.mjs', 'utf8');
+const cliIntegrationTargets = readdirSync('v3/crates/routecodex-v3-cli/tests')
+  .filter((file) => file.endsWith('.rs'))
+  .map((file) => file.slice(0, -'.rs'.length))
+  .sort();
 const modeBWebSearchFixtures = [
   readFileSync('v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs', 'utf8'),
   readFileSync('v3/crates/routecodex-v3-runtime/tests/responses_relay_mode_b_web_search_integration.rs', 'utf8'),
@@ -118,16 +122,15 @@ test('V3 workspace tests defer lifecycle coverage to its serial owner', () => {
     v3Test,
     /'--lib',\s*'hub_v1::web_search_sidecar::tests::web_search_hook_sidecar_pending_connect_is_cancelled_without_thread_growth',\s*'--',\s*'--ignored',\s*'--exact',\s*'--test-threads=1'/,
   );
-  for (const target of [
-    'foundation_cli',
-    'h2_p6_controlled_replay',
-    'user_config_cli',
-    'user_config_provider_request_dry_run',
-    'vr_full_function_controlled_replay',
-  ]) {
+  const serialLifecycleTarget = 'managed_lifecycle';
+  assert.ok(cliIntegrationTargets.includes(serialLifecycleTarget));
+  const explicitCliTargets = cliIntegrationTargets.filter((target) => target !== serialLifecycleTarget);
+  assert.ok(explicitCliTargets.length > 0);
+  for (const target of explicitCliTargets) {
     assert.match(v3Test, new RegExp(`'--test',\\s*'${target}'`));
   }
-  assert.doesNotMatch(v3Test, /'--test',\s*'managed_lifecycle'/);
+  assert.doesNotMatch(v3Test, new RegExp(`'--test',\\s*'${serialLifecycleTarget}'`));
+  assert.match(v3Package.scripts['test:v3-managed-server-lifecycle'], /--test managed_lifecycle/);
 });
 
 test('V3 Mode B sidecar fixtures keep Unix sockets within SUN_LEN under CI TMPDIR', () => {
