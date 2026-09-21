@@ -5,7 +5,7 @@
   "candidate_tree": "a84cddc0248b47c884ca441f9edd161630ac8649",
   "base_commit": "31596c43adb6052b0daf79586ff0681f6c57bd91",
   "integration_base_commit": "0aefa4bcd50eb5dcfd4945fbf0eb5d89282ff184",
-  "captured_at": "2026-09-21T05:15:00-07:00",
+  "captured_at": "2026-09-20T22:10:01-07:00",
   "source_unchanged": true,
   "scope": {
     "owner": "rust_v3_provider_adaptive_health_lifecycle",
@@ -50,37 +50,31 @@
       "tests": "docs: 25; resources: 179; edges: 427"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib",
       "result": "pass",
       "tests": "12 passed; 0 failed"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture",
       "result": "pass"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture",
       "result": "pass",
       "tests": "7 passed; 0 failed"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture",
       "result": "pass",
       "tests": "1 passed; 0 failed"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture",
       "result": "pass",
       "tests": "8 passed; 0 failed"
     },
     {
-      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture",
-      "cwd": "v3",
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture",
       "result": "pass",
       "tests": "55 passed; 0 failed"
     },
