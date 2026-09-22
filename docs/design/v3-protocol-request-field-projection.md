@@ -145,13 +145,13 @@ protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
 | Chat semantic | Responses | OpenAI Chat | Anthropic | Gemini |
 | --- | --- | --- | --- | --- |
 | `metadata` | same, OpenAI limits | same, OpenAI limits | conditional only for exactly one non-empty `user_id` | unmapped |
-| `client_metadata` | same source extension; never public `metadata` | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | unmapped |
-| `prompt_cache_key` | same | same | valid non-empty key is consumed as local cache hint; malformed fails; never becomes `cache_control` | unmapped |
-| `store` | same | same | `false` consumed before wire; `true` fails | unmapped |
-| `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | conditional projection only where the semantic matrix declares an exact target field |
+| `client_metadata` | same source extension; never public `metadata` | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | optional non-empty `user_id` projection; registered Codex local keys are consumed before wire; unknown keys fail | registered Codex local keys are consumed before wire as request-local context; `user_id` and unknown keys fail because Gemini declares no equivalent metadata field |
+| `prompt_cache_key` | same | same | valid non-empty key is consumed as local cache hint; malformed fails; never becomes `cache_control` | valid non-empty key is consumed as local cache hint; malformed fails; never becomes `cachedContent` |
+| `store` | same | same | `false` consumed before wire; `true` fails | `false` consumed before wire; `true` fails |
+| `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | `verbosity` low/medium/high consumed as local style hint; other subfields such as `format` remain unmapped |
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
-| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | unmapped |
+| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | default-safe outbound no-op for the declared `auto`/`concise`/`detailed` domain; no Gemini summary support is claimed; invalid values fail |
 | `reasoning_context_policy` | rename to `reasoning.context` | consumed before wire (source-roundtrip only) | unmapped | unmapped |
 | `reasoning_mode` | rename to `reasoning.mode` | unmapped | unmapped | unmapped |
 | `reasoning_include_thoughts` | unmapped | unmapped | unmapped | rename to `includeThoughts` |
@@ -392,8 +392,11 @@ These are separate semantics and are not mutually reconstructible:
 OpenAI `summary=auto|concise|detailed`, Anthropic
 `display=summarized|omitted`, and Gemini `includeThoughts:boolean` do not share
 the same value domain or continuation behavior. Cross-protocol conversion between
-them is therefore unmapped. In particular, no codec may encode summary, context,
-or mode as a system message or hidden prompt marker.
+them is therefore unmapped, except that Gemini outbound may consume the declared
+`reasoning_summary_policy` domain as a default-safe no-op: it does not declare
+Gemini summary support and does not encode a summary request. Invalid values
+remain unmapped. In particular, no codec may encode summary, context, or mode as
+a system message or hidden prompt marker.
 
 ## Client metadata
 
@@ -411,7 +414,10 @@ Target rules:
   semantics and may not be relabeled as `user_id`; registered Codex local keys
   are consumed before provider wire, while unknown keys remain unmapped.
 - Gemini: no general request metadata field with equivalent client payload
-  semantics is declared in the audited GenerateContent schema.
+  semantics is declared in the audited GenerateContent schema. Registered Codex
+  client-local keys are consumed before provider wire as request-local context;
+  `user_id` and unknown keys remain unmapped because consuming them would
+  silently discard provider-visible or unresolved metadata meaning.
 
 Metadata keys must never create or alter RouteCodex session, conversation,
 continuation, routing, provider-selection, or health state.
@@ -422,19 +428,24 @@ continuation, routing, provider-selection, or health state.
   exact data-plane value after adjacent field projection. Anthropic
   `cache_control` does not carry the same key semantic, so a valid Responses
   cache key is validated and consumed as a local cache hint before Anthropic
-  wire; malformed values fail. It must not rebuild `cache_control`.
+  wire; malformed values fail. It must not rebuild `cache_control`. Gemini has
+  no equivalent request field either; a valid non-empty key is consumed as a
+  local cache hint before Gemini wire, malformed values fail, and it must not
+  become `cachedContent`.
 - OpenAI Responses and OpenAI Chat both declare `store`; it remains an upstream
   storage preference. RouteCodex continuation save/restore is separately owned by
   the continuation control resource and cannot be inferred from `store`.
   Anthropic has no equivalent request field; `false` is validated and consumed
   before Anthropic wire, while `true` fails because remote storage semantics
-  cannot be preserved.
+  cannot be preserved. Gemini likewise consumes only `false`; `true` fails.
 - Responses `text.format` and `text.verbosity` are decoded into the registered
   text output configuration. OpenAI Chat projection is allowed only through its
   declared `response_format` and `verbosity` fields with shape validation.
   Anthropic validates `verbosity` as a local style hint and consumes it before
-  wire; it never becomes Anthropic `output_config.effort`. No codec may turn
-  output configuration into prompt text.
+  wire; it never becomes Anthropic `output_config.effort`. Gemini likewise
+  consumes `verbosity` low/medium/high as a local style hint and fails on other
+  values; `text.format` remains unmapped for Gemini because no exact target
+  field is declared. No codec may turn output configuration into prompt text.
 
 ## Tool declaration and tool-call projection
 

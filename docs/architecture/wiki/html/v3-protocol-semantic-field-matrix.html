@@ -261,7 +261,7 @@
   </tr>
 <tr>
     <td><span class="badge partial">partial</span></td>
-    <td><code>113</code></td>
+    <td><code>114</code></td>
     <td>Some runtime path or direction is covered, but cross-protocol or value-shape parity is incomplete.</td>
   </tr>
 <tr>
@@ -291,7 +291,7 @@
   </tr>
 <tr>
     <td><span class="badge semantic_declared">semantic_declared</span></td>
-    <td><code>50</code></td>
+    <td><code>49</code></td>
     <td>The OpenAI Chat native field or protocol-neutral extension has a manual semantic owner and transform rule, but runtime conversion closeout is not claimed.</td>
   </tr></tbody>
   </table></div>
@@ -315,14 +315,14 @@
 <tr>
     <td><code>gap.semantic_declared_runtime_closeout</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>semantic_declared</code></li></ul><div>count: <code>50</code></div></td>
+    <td><ul class="field-list"><li><code>semantic_declared</code></li></ul><div>count: <code>49</code></div></td>
     <td>These fields now have manual semantic owners and transform rules, but no runtime conversion completion evidence yet.</td>
     <td><code>v3 protocol codec owner selected per field family</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Add field-family red tests and implement adjacent Rust codec owner before changing semantic_declared to covered, partial, or unsupported_blocked.</span></td>
   </tr>
 <tr>
     <td><code>gap.partial_cross_protocol_semantics</code></td>
     <td><span class="badge runtime_closeout">runtime_closeout</span></td>
-    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>113</code></div></td>
+    <td><ul class="field-list"><li><code>partial</code></li></ul><div>count: <code>114</code></div></td>
     <td>Main protocol paths cover some directions, but not all equivalent request/response transforms across Responses, OpenAI Chat, Anthropic, and Gemini.</td>
     <td><code>v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files</code><br><span class="badge needs_runtime_goal">needs_runtime_goal</span><br><span class="muted">Close request and response directions together; no server/SSE/provider-transport repair owner.</span></td>
   </tr>
@@ -1082,7 +1082,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat top-level boolean; not equivalent to a specific tool_choice target.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini parallelism exact value mapping requires runtime contract</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini parallelism exact non-default value mapping requires runtime contract</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.parallel_tool_calls</code></li></ul>
@@ -1105,7 +1105,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean; keep it out of outbound parallelism unless a separate compatible target contract is approved.</div>
+    <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean. Gemini outbound may consume parallel_tool_calls=true as the permissive/default no-op only; false remains unmapped because it constrains provider behavior without an exact Gemini equivalent.</div>
 
   </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
@@ -1571,11 +1571,11 @@
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
-      <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort.</div>
+      <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort. The default-safe values are a no-extra-constraint policy only for targets whose outbound row explicitly declares default-safe no-op consumption.</div>
       <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings require a registered target-local request policy consumer.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection; Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection; Gemini consumes the declared policy domain as a default-safe no-op because it has no equivalent request field. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
@@ -1598,7 +1598,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>No direct equivalent in the audited Gemini request inventory.</div>
+    <div>No direct equivalent in the audited Gemini request inventory. Gemini outbound may consume the canonical auto/concise/detailed policy as a default-safe no-op with no explicit summary request; invalid values remain unmapped.</div>
 
   </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
@@ -2255,7 +2255,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat store is a boolean request policy. It is not equivalent to Responses previous_response_id or local continuation state.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge semantic_declared">semantic_declared</span><br><span class="muted">semantic owner declared; runtime conversion closeout pending</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini false-consume/true-fail behavior is declared; full cross-protocol/live closeout pending.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.store</code></li></ul>
@@ -2278,7 +2278,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied as raw payload truth.</div>
+    <div>Gemini has no equivalent storage request field; store=false is validated and consumed before wire, while store=true fails because remote storage semantics cannot be preserved.</div>
 
   </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
