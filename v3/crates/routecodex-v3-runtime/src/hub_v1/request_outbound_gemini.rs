@@ -20,8 +20,6 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
     let Some(row) = source.as_object_mut() else {
         return Ok(());
     };
-    consume_gemini_parallel_tool_calls(row)?;
-    consume_gemini_reasoning_summary_policy(row, "$.reasoning_summary_policy")?;
     consume_gemini_routecodex_chat_extension(row)?;
     if let Some(effort) = row.remove("reasoning_effort") {
         project_gemini_reasoning_effort(row, effort)?;
@@ -84,33 +82,6 @@ fn gemini_selected_target_supports_reasoning(model_capabilities: &[String]) -> b
         .any(|capability| capability == "reasoning" || capability == "thinking")
 }
 
-fn consume_gemini_parallel_tool_calls(row: &mut Map<String, Value>) -> Result<(), String> {
-    let Some(value) = row.remove("parallel_tool_calls") else {
-        return Ok(());
-    };
-    if value.as_bool().is_none() {
-        return Err(
-            "MalformedOutboundField target_protocol=gemini path=$.parallel_tool_calls".to_string(),
-        );
-    }
-    Ok(())
-}
-
-fn consume_gemini_reasoning_summary_policy(
-    row: &mut Map<String, Value>,
-    path: &str,
-) -> Result<(), String> {
-    let Some(value) = row.remove("reasoning_summary_policy") else {
-        return Ok(());
-    };
-    match value.as_str() {
-        Some("auto" | "concise" | "detailed") => Ok(()),
-        _ => Err(format!(
-            "MalformedOutboundField target_protocol=gemini path={path}"
-        )),
-    }
-}
-
 fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Result<(), String> {
     let Some(extension) = row.remove("routecodex_chat_extension") else {
         return Ok(());
@@ -137,10 +108,6 @@ fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Res
             .to_string()
     })?;
     consume_gemini_responses_store(&mut responses_request)?;
-    consume_gemini_reasoning_summary_policy(
-        &mut responses_request,
-        "$.routecodex_chat_extension.responses_request.reasoning_summary_policy",
-    )?;
     let mut unsupported: Vec<String> = responses_request
         .keys()
         .map(|key| json_path_child("$.routecodex_chat_extension.responses_request", key))
