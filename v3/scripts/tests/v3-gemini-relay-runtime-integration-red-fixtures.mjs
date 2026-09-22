@@ -18,7 +18,7 @@ const entryBindingManifest = 'docs/architecture/manifests/v3.entry_protocol_endp
 const virtualRouter = 'v3/crates/routecodex-v3-virtual-router/src/lib.rs';
 const cases = [
   ['missing Req06', relayCore, '        trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
-  ['transport skipped', relayCore, 'transport.send(transport_request),', 'transport.skip(transport_request),', /transport\.send/],
+  ['transport skipped', relayCore, 'transport.send(transport_request)', 'transport.skip(transport_request)', /transport\.send/],
   ['fallback added', relayCore, 'let mut trace = Vec::with_capacity(17);', 'let fallback = true; let mut trace = Vec::with_capacity(17);', /fallback/],
   ['Responses Direct re-entry', relayCore, 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],
   ['dynamic hooks', relayCore, 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /read_dir|dynamic/],
