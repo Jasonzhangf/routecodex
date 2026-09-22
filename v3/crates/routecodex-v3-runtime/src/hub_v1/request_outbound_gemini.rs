@@ -1,8 +1,9 @@
-// Gemini wire projection for Chat semantics that have a native equivalent.
+// Gemini wire projection for Chat semantics that have a native equivalent or a
+// registered default-safe no-op contract.
 //
 // The gemini top-level whitelist is Gemini-shaped, while the inbound payload
-// carries Chat semantics. Only fields with an exact Gemini equivalent are
-// consumed here; target-unsupported semantics fail before provider wire build.
+// carries Chat semantics. Constraining or non-default target-unsupported
+// semantics fail before provider wire build.
 
 fn project_gemini_compatible_fields(source: &mut Value) -> Result<(), String> {
     project_gemini_compatible_fields_inner(source)
@@ -21,6 +22,8 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
         return Ok(());
     };
     consume_gemini_routecodex_chat_extension(row)?;
+    consume_gemini_parallel_tool_calls_default(row)?;
+    consume_gemini_reasoning_summary_policy_default(row)?;
     if let Some(effort) = row.remove("reasoning_effort") {
         project_gemini_reasoning_effort(row, effort)?;
     }
@@ -28,6 +31,40 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
         project_gemini_tool_choice(row, tool_choice)?;
     }
     Ok(())
+}
+
+fn consume_gemini_parallel_tool_calls_default(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(value) = row.remove("parallel_tool_calls") else {
+        return Ok(());
+    };
+    match value.as_bool() {
+        Some(true) => Ok(()),
+        Some(false) => Err(
+            "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls"
+                .to_string(),
+        ),
+        None => Err(
+            "MalformedOutboundField target_protocol=gemini path=$.parallel_tool_calls".to_string(),
+        ),
+    }
+}
+
+fn consume_gemini_reasoning_summary_policy_default(
+    row: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let Some(value) = row.remove("reasoning_summary_policy") else {
+        return Ok(());
+    };
+    let value = value.as_str().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=gemini path=$.reasoning_summary_policy"
+            .to_string()
+    })?;
+    // Contracted Gemini outbound no-op: `auto` adds no explicit summary request.
+    if value == "auto" {
+        return Ok(());
+    }
+    Err("UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+        .to_string())
 }
 
 fn validate_gemini_thinking_config_for_selected_target(
