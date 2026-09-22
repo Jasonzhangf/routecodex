@@ -238,6 +238,7 @@ pub struct V3RuntimeToolreasonObservation {
     pub confidence: Option<u8>,
 }
 
+#[derive(Clone)]
 pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) status: u16,
     pub(crate) policy_error_type: String,

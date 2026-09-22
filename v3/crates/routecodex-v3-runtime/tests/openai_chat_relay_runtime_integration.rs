@@ -328,6 +328,79 @@ impl ResponsesTransport for ErrorTransport {
     }
 }
 
+struct PendingFirstFrameTransport;
+
+#[async_trait]
+impl ResponsesTransport for PendingFirstFrameTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::pending()),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn shared_relay_first_frame_deadline_projects_typed_failure_after_reselection() {
+    let server_id = "shared-relay-first-frame-deadline";
+    let mut manifest = manifest_with_two_providers_for_scope(server_id, true);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("shared relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 250;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(2),
+        execute_v3_openai_chat_relay_runtime(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    server_id,
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-shared-relay-first-frame-deadline".into(),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"first frame hangs"}],
+                    "stream":true
+                }),
+            },
+            &PendingFirstFrameTransport,
+        ),
+    )
+    .await
+    .expect("first-frame residence deadline must not hang shared relay")
+    .expect("shared relay must project typed terminal failure");
+
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_ref().map(Vec::len),
+        Some(6),
+        "shared relay deadline exhaustion must retain the typed Error01-06 chain"
+    );
+    assert!(matches!(
+        output.client_body,
+        V3OpenAiChatRelayClientBody::Json(_)
+    ));
+}
+
 struct ClientDisconnectTransport;
 
 #[async_trait]

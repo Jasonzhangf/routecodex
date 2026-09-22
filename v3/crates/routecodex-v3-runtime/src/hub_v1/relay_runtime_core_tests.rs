@@ -281,6 +281,41 @@ async fn guard_idle_times_out_after_first_frame() {
 }
 
 #[tokio::test]
+async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
+    let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
+        futures_util::stream::iter(vec![Ok(b"data: response.created\n\n".to_vec())]).chain(
+            futures_util::stream::unfold((), |_| async {
+                Some((
+                    Ok::<Vec<u8>, V3ProviderError>(b"data: response.progress\n\n".to_vec()),
+                    (),
+                ))
+            }),
+        ),
+    );
+    let mut stream = guard_v3_provider_sse_attempt_deadline(
+        "req-residence-deadline",
+        "provider-1",
+        stream,
+        std::time::Instant::now() + std::time::Duration::from_millis(50),
+    );
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match stream.next().await {
+                Some(Ok(_)) => {}
+                other => break other,
+            }
+        }
+    })
+    .await
+    .expect("attempt deadline guard must not hang");
+    assert!(matches!(
+        result,
+        Some(Err(V3ProviderError::Transport { reason, .. }))
+            if reason.contains("residence deadline")
+    ));
+}
+
+#[tokio::test]
 async fn provider_raw_sse_observation_is_preserved_on_side_channel() {
     let observation = V3RuntimeStreamObservation::default();
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(

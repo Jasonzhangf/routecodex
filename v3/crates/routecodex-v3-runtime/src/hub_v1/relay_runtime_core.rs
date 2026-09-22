@@ -169,6 +169,55 @@ async fn guard_relay_sse_first_frame(
 }
 
 /// Relay SSE idle guard: a configured window applies between every two frames.
+pub(crate) fn guard_v3_provider_sse_attempt_deadline(
+    request_id: &str,
+    provider_id: &str,
+    stream: routecodex_v3_provider_responses::V3ProviderSseStream,
+    deadline: std::time::Instant,
+) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+    let request_id = request_id.to_string();
+    let provider_id = provider_id.to_string();
+    Box::pin(futures_util::stream::unfold(
+        (stream, false),
+        move |(mut stream, timed_out)| {
+            let request_id = request_id.clone();
+            let provider_id = provider_id.clone();
+            async move {
+                if timed_out {
+                    return None;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Some((
+                        Err(V3ProviderError::Transport {
+                            request_id,
+                            provider_id,
+                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
+                        }),
+                        (stream, true),
+                    ));
+                }
+                match tokio::time::timeout_at(
+                    tokio::time::Instant::from_std(deadline),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(chunk)) => Some((chunk, (stream, false))),
+                    Ok(None) => None,
+                    Err(_) => Some((
+                        Err(V3ProviderError::Transport {
+                            request_id,
+                            provider_id,
+                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
+                        }),
+                        (stream, true),
+                    )),
+                }
+            }
+        },
+    ))
+}
+
 pub(crate) fn guard_v3_provider_sse_idle(
     request_id: &str,
     provider_id: &str,
@@ -858,10 +907,10 @@ where
                             &selected_target_provider_id,
                         );
                         drop(provider_action_permit.take());
-                        if let Some(failure) = handle_provider_failure(
+                        let terminal_failure = handle_provider_failure(
                             &failure_context,
                             selected,
-                            failure,
+                            failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
@@ -871,9 +920,15 @@ where
                             &mut pending_provider_action_recovery,
                         )
                         .await
-                        .map_err(V3RelayCoreError::Target)?
-                        {
+                        .map_err(V3RelayCoreError::Target)?;
+                        if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
+                            return Ok(C::assemble_failure_output(
+                                terminalize_provider_failure(failure),
+                                trace,
+                            ));
                         }
                         continue;
                     }
@@ -1008,6 +1063,12 @@ where
                     .providers
                     .get(&selected_target_provider_id)
                     .and_then(|provider| provider.sse_first_frame_timeout_ms);
+                let stream = guard_v3_provider_sse_attempt_deadline(
+                    request_id,
+                    &selected_target_provider_id,
+                    stream,
+                    attempt_budget.residence_deadline(),
+                );
                 let guarded_stream = match guard_relay_sse_first_frame(
                     request_id,
                     &selected_target_provider_id,
@@ -1025,12 +1086,17 @@ where
                         return Ok(C::assemble_failure_output(failure, trace));
                     }
                     Err(error) => {
+                        let residence_deadline_error = matches!(
+                            &error,
+                            V3ProviderError::Transport { reason, .. }
+                                if reason.contains("provider SSE attempt exceeded the request residence deadline")
+                        );
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
                         drop(provider_action_permit.take());
-                        if let Some(failure) = handle_provider_failure(
+                        let terminal_failure = handle_provider_failure(
                             &failure_context,
                             selected,
-                            failure,
+                            failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
@@ -1040,9 +1106,17 @@ where
                             &mut pending_provider_action_recovery,
                         )
                         .await
-                        .map_err(V3RelayCoreError::Target)?
-                        {
+                        .map_err(V3RelayCoreError::Target)?;
+                        if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(failure, trace));
+                        }
+                        if residence_deadline_error
+                            || attempt_budget.residence_deadline() <= std::time::Instant::now()
+                        {
+                            return Ok(C::assemble_failure_output(
+                                terminalize_provider_failure(failure),
+                                trace,
+                            ));
                         }
                         continue;
                     }
@@ -1193,10 +1267,10 @@ where
                         },
                         &selected_target_provider_id,
                     );
-                    if let Some(failure) = handle_provider_failure(
+                    let terminal_failure = handle_provider_failure(
                         &failure_context,
                         selected,
-                        failure,
+                        failure.clone(),
                         &mut V3RelayProviderFailurePolicyState {
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
@@ -1206,9 +1280,17 @@ where
                         &mut pending_provider_action_recovery,
                     )
                     .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
+                    .map_err(V3RelayCoreError::Target)?;
+                    let deadline_expired =
+                        attempt_budget.residence_deadline() <= std::time::Instant::now();
+                    if let Some(failure) = terminal_failure {
                         return Ok(C::assemble_failure_output(failure, trace));
+                    }
+                    if deadline_expired {
+                        return Ok(C::assemble_failure_output(
+                            terminalize_provider_failure(failure),
+                            trace,
+                        ));
                     }
                     continue;
                 }

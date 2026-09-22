@@ -112,6 +112,7 @@ use responses_relay_failures::{
     provider_request_relay_failure, provider_response_hook_failure,
     provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
     provider_terminal_admission_failure, server_routing_group,
+    terminalize_v3_responses_relay_provider_failure,
 };
 use responses_relay_json_hooks::*;
 

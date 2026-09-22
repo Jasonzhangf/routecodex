@@ -37,7 +37,7 @@ use std::pin::Pin;
 /// 错误 body 形状是协议 wire 差异（gemini `error.code`、anthropic `error.type`），
 /// 通过 `error_type_fn` / `error_message_fn` 提取函数指针表达；构造函数（协议本地）
 /// 负责填协议形状的 body 与对应提取函数。
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct V3RelayProviderFailure {
     pub status: u16,
     pub client_response: Value,
@@ -391,6 +391,35 @@ pub fn failure_error_type(failure: &V3RelayProviderFailure) -> Option<String> {
 /// 从 failure 提取错误消息（共享版；走协议提取函数字段）。
 pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
     (failure.error_message_fn)(&failure.client_response)
+}
+
+/// Provider failure that consumed the request residence budget must still be
+/// projected through the typed Error01-06 chain before the relay loop exits.
+pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3RelayProviderFailure {
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        failure.source_stage,
+        failure_error_type(&failure)
+            .as_deref()
+            .unwrap_or("provider_error"),
+        provider_failure_message(&failure),
+    );
+    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
+        V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source,
+                action_scope: V3ErrorActionScope::ProviderInstance {
+                    provider_id: "none".to_string(),
+                },
+                candidates_remaining: 0,
+                source_status: Some(failure.status),
+            },
+            false,
+            false,
+            None,
+        ),
+    ));
+    failure
 }
 
 /// SSE 响应链 trace 节点（共享版；替代各 runtime 的本地副本）。

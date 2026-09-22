@@ -876,6 +876,88 @@ impl ResponsesTransport for CompletedTextSseTransport {
     }
 }
 
+struct ContinuousNonTerminalSseTransport;
+
+#[async_trait]
+impl ResponsesTransport for ContinuousNonTerminalSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter(vec![Ok(
+            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_hang\",\"status\":\"in_progress\"}}\n\n".to_vec(),
+        )])
+        .chain(futures_util::stream::unfold((), |_| async {
+            Some((
+                Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"progress\"}\n\n".to_vec(),
+                ),
+                (),
+            ))
+        }));
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
+    let mut manifest = manifest();
+    manifest
+        .servers
+        .get_mut("controlled")
+        .expect("controlled server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 250;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(2),
+        execute_v3_responses_relay_runtime(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "controlled".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-responses-relay-continuous-non-terminal".into(),
+                payload: json!({
+                    "model":"client-responses",
+                    "input":"continuous non-terminal",
+                    "stream":true
+                }),
+            },
+            &ContinuousNonTerminalSseTransport,
+        ),
+    )
+    .await
+    .expect("continuous non-terminal provider stream must not hang the runtime")
+    .expect("runtime must project a typed provider terminal failure");
+
+    assert_eq!(output.status, 502);
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+    );
+    assert!(matches!(
+        output.client_body,
+        V3ResponsesRelayClientBody::Json(_)
+    ));
+}
+
 #[tokio::test]
 async fn responses_relay_sse_completed_without_provider_finish_reason_infers_stop_observability() {
     let output = execute_v3_responses_relay_runtime(
