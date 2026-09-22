@@ -812,6 +812,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &selected_target_provider_id,
                     )
                     .map_err(V3AnthropicRelayRuntimeError::Target)?;
+                let stream =
+                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        attempt_budget.residence_deadline(),
+                    );
                 let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
                     crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                         &input.request_id,
@@ -826,10 +833,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);
                         drop(_provider_action_permit.take());
-                        if let Some(failure) = handle_provider_failure(
+                        let terminal_failure = handle_provider_failure(
                             &failure_context,
                             selected,
-                            failure,
+                            failure.clone(),
                             &mut V3RelayProviderFailurePolicyState {
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
@@ -838,9 +845,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
                         )
-                        .await?
-                        {
+                        .await?;
+                        if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output(failure, trace));
+                        }
+                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
+                            return Ok(provider_failure_output(
+                                terminalize_provider_failure(failure),
+                                trace,
+                            ));
                         }
                         continue;
                     }
