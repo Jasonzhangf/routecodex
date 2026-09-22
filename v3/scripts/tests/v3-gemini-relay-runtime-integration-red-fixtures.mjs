@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const cwd = process.cwd();
@@ -53,11 +53,16 @@ const copied = [
   'docs/architecture/wiki/html/v3-gemini-relay-controlled-runtime.html',
   'package.json',
 ];
+function copyPath(root, path) {
+  const target = resolve(root, path);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(resolve(repo, path), target, { recursive: true });
+}
 const failures = [];
 for (const [name, file, from, to, diagnostic] of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-gemini-relay-red-'));
   try {
-    for (const path of copied) cpSync(resolve(repo, path), resolve(root, path), { recursive: true });
+    for (const path of copied) copyPath(root, path);
     const target = resolve(root, file);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(from)) throw new Error(name + ': mutation source missing');
