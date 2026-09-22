@@ -1281,6 +1281,9 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     owner_boundary: provider-standard request format helpers; no lifecycle/node transition
       owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+    owner_boundary: Gemini provider-standard request projection helpers included by
+      request_outbound_format.rs; no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
     owner_boundary: OpenAI Chat provider tool and JSON-schema projection helpers owned
       by request outbound formatting; no lifecycle/node transition owner
@@ -1347,6 +1350,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
@@ -2424,6 +2429,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
@@ -2526,6 +2533,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs

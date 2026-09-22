@@ -1368,9 +1368,7 @@ impl V3ProviderHealthStore {
         let available = state
             .provider_cooldown_probes
             .get(&key)
-            .map_or(true, |probe| {
-                !probe.probe_in_flight && probe.blocked_until_ms.is_none()
-            })
+            .is_none_or(|probe| !probe.probe_in_flight && probe.blocked_until_ms.is_none())
             && !auth_key_cooldown
             && !auth_key_probe;
         Ok(V3ProviderSchedulingProjection {
@@ -1959,7 +1957,7 @@ fn key_health_projection(
         success_streak: history.map_or(0, |history| history.success_streak),
         cooldown,
         cooldown_until_ms,
-        available: !cooldown && cooldown_until_ms.map_or(true, |deadline| deadline <= now_ms),
+        available: !cooldown && cooldown_until_ms.is_none_or(|deadline| deadline <= now_ms),
         score_generation: history.map_or(0, |history| history.score_generation),
     }
 }
@@ -2161,6 +2159,7 @@ fn complete_provider_probe_success_at_generation(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upsert_provider_cooldown_probe_with_interval(
     state: &mut V3ProviderHealthState,
     provider_id: &str,
@@ -2194,7 +2193,7 @@ fn upsert_provider_cooldown_probe_with_interval(
                 .and_then(|policy| policy.max_probe_interval_ms)
         });
     let probe_interval_ms = existing_probe_interval_ms.unwrap_or(probe_interval_ms);
-    let probe_interval_ms = probe_interval_ms.max(1).min(MAX_PROBE_INTERVAL_MS);
+    let probe_interval_ms = probe_interval_ms.clamp(1, MAX_PROBE_INTERVAL_MS);
     let probe_interval_ms = max_probe_interval_ms
         .map(|maximum| probe_interval_ms.min(maximum))
         .unwrap_or(probe_interval_ms);

@@ -61,7 +61,10 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new(),
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(
+                V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(manifest),
+            ),
         manifest,
         raw,
         hook_registry,

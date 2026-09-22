@@ -160,10 +160,10 @@ locked_items:
     chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-08-12T20:30:00+08:00'
+    locked_at: '2026-09-21T10:07:17-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:3971fd260ce4a0fb26db7dacb98d6f3508ea704a65914651eb09e3c154693bca
-    last_manual_authorization_id: auth-20260812-v3-binding-pending-clearance
+    fingerprint: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
+    last_manual_authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
   - item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
     chain_id: v3.hub_pipeline.v1.relay_request_source_slice
     status: audited_locked
@@ -445,6 +445,20 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
+    item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
+    approved_by: Jason
+    approved_at: '2026-09-21T10:07:17-07:00'
+    reason: "Jason authorized continuing the current Gemini outbound fix after review found the locked map still pointed at the pre-selected-target helper edge. This refresh binds the audited Gemini outbound helper edge to project_outbound_payload_for_selected_target_protocol -> project_gemini_compatible_fields_for_selected_target and records the selected concrete provider capability dependency; request/response lifecycle nodes, owner, and control-plane/data-plane boundaries stay unchanged."
+    fingerprint_before: sha256:a781d933813e1e63a6db468d5167d712fdfa0d3207fa4331e2c632ef037accf1
+    fingerprint_after: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
+  - authorization_id: auth-20260921-v3-gemini-outbound-helper-bind
+    item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
+    approved_by: Jason
+    approved_at: '2026-09-21T09:00:00-07:00'
+    reason: "Jason authorized completing the current Gemini outbound fix by binding the existing project_outbound_payload_for_target_protocol to project_gemini_compatible_fields helper edge in the protocol conversion field parity chain. This refresh adds the missing Gemini outbound helper review edge and regenerated caller-flow surfaces; request/response lifecycle nodes, owner, and control-plane/data-plane boundaries stay unchanged."
+    fingerprint_before: sha256:3971fd260ce4a0fb26db7dacb98d6f3508ea704a65914651eb09e3c154693bca
+    fingerprint_after: sha256:a781d933813e1e63a6db468d5167d712fdfa0d3207fa4331e2c632ef037accf1
   - authorization_id: auth-20260915-v3-remove-continuation-hub-request
     item_id: chain:v3.hub_pipeline.v1.request
     approved_by: Jason

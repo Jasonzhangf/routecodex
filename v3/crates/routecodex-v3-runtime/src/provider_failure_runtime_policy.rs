@@ -428,6 +428,18 @@ impl V3ProviderFailureRuntimeHealth {
         }
     }
 
+    pub fn from_manifest_for_isolated_tests(manifest: &V3Config05ManifestPublished) -> Self {
+        let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
+        Self {
+            store,
+            action_gate: V3ProviderActionGate::default(),
+            default_same_provider_retries: V3RelayProviderFailureRetryPolicy::from_manifest(
+                manifest,
+            )
+            .same_candidate_retries,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self::from_manifest_for_tests(manifest)

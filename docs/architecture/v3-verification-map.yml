@@ -1708,6 +1708,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
@@ -2394,9 +2397,11 @@ features:
   required_positive:
   - Direct client alias becomes the selected wire model before Provider12.
   - Responses OpenAI Chat Anthropic and Gemini Relay compat receive the selected wire model.
+  - Gemini Relay encodes the selected wire model in the URL path and omits body.model from the provider body.
   - Target-local reselection binds each attempt from that attempt's selected target.
   required_negative:
-  - Provider12 rejects stale or missing body.model instead of silently rewriting it.
+  - Provider12 rejects stale or missing body.model instead of silently rewriting it for body-model protocols.
+  - Gemini Relay must not send body.model after URL-path model binding, and its URL path must use the selected target wire_model.
   - A binding mismatch is an internal runtime contract failure and never a provider health failure.
   - Virtual Router remains payload-pure and Hub Router contains no provider-specific suffix mapping.
   - A previous attempt's model cannot leak into a reselected attempt.
@@ -2413,7 +2418,7 @@ features:
   - git diff --check
   completion_rule:
     source: Positive/negative Rust tests, unique-writer red fixtures, architecture maps, and build gate pass.
-    runtime: Installed V3 10000 dry-run and 5555 old-sample replay prove provider-request body.model equals the selected candidate wire_model for every attempt.
+    runtime: Installed V3 10000 dry-run and 5555 old-sample replay prove provider-request model identity equals the selected candidate wire_model for every attempt; body-model protocols prove this in body.model, while Gemini proves it in the URL path with body.model omitted.
     forbidden_claim: Correct local provider-request model does not prove an upstream provider did not remap that model internally.
 - feature_id: v3.web_search_servertool_state_machine
   status: design

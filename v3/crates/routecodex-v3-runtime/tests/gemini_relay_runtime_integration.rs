@@ -168,12 +168,20 @@ async fn json_runtime_executes_one_hub_lifecycle_and_preserves_gemini_semantics(
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     let mut expected_provider_payload = payload;
-    expected_provider_payload["model"] = json!("gemini-wire");
+    // The selected wire model is carried by the URL path above, never by the
+    // provider body (v3-verification-map: "selected URL path wire model without
+    // writing model into provider body"), so the Gemini transport drops the
+    // selected-model binding from the body.
+    expected_provider_payload
+        .as_object_mut()
+        .expect("Gemini provider payload must be object")
+        .remove("model");
     expected_provider_payload
         .as_object_mut()
         .expect("Gemini provider payload must be object")
         .remove("stream");
     assert_eq!(captured, expected_provider_payload);
+    assert!(captured.get("model").is_none(), "{captured}");
     assert!(captured.get("metadata_center").is_none());
     assert_eq!(output.status, 200);
     assert_eq!(output.node_trace.len(), 15);
@@ -1567,7 +1575,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "{scope}", env = "V3_GEMINI_SC
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [route_groups.{scope}.pools.gemini_client]
 selection = {{ strategy = "priority" }}
@@ -1613,7 +1621,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "primary", env = "V3_GEMINI_PR
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [providers.secondary]
 type = "gemini"
@@ -1624,7 +1632,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "secondary", env = "V3_GEMINI_
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 
 [route_groups.{scope}.pools.gemini_client]
 selection = {{ strategy = "priority" }}
@@ -1679,7 +1687,7 @@ auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]
 supports_streaming = true
-capabilities = ["text", "tools"]
+capabilities = ["text", "tools", "reasoning"]
 [route_groups.controlled.pools.gemini_client]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-client"] }}
@@ -1699,6 +1707,49 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "gemini-
 // The Gemini relay runtime preserves thinkingConfig.thinkingLevel natively in the
 // provider wire. The codec layer extracts ChatReasoningLevel semantics from the
 // thinkingLevel field. These tests verify the runtime integration path.
+
+// The selected wire model belongs in the Gemini URL path, not the provider body.
+// The shared selected-model binding writes `model` into the payload, so the
+// Gemini-owned transport must drop it before the request is sent.
+#[tokio::test]
+async fn gemini_wire_model_stays_in_url_and_out_of_provider_body() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    execute_v3_gemini_relay_runtime(
+        &manifest(),
+        V3GeminiRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-wire-model".into(),
+            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+            payload: json!({
+                "model": "gemini-client",
+                "contents": [{"role": "user", "parts": [{"text": "hi"}]}]
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+
+    let url = transport.captured_url.lock().unwrap().clone().unwrap();
+    assert!(
+        url.contains("/models/gemini-wire:generateContent"),
+        "selected wire model must be encoded in the Gemini URL path: {url}"
+    );
+    let body = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert!(
+        body.get("model").is_none(),
+        "Gemini provider body must not carry model: {body}"
+    );
+}
 
 #[tokio::test]
 async fn gemini_thinking_level_high_reaches_provider_wire() {

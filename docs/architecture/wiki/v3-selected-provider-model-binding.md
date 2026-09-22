@@ -10,6 +10,10 @@ model is route input. The selected target `wire_model` is the sole upstream requ
 Virtual Router remains payload-pure: it selects an opaque target and does not mutate request JSON.
 Target resolution freezes `{provider_id, model_id, wire_model}`. Immediately after that truth exists,
 `selected_provider_model_binding.rs` is the only block allowed to replace `body.model`.
+For protocols whose upstream API carries the model outside the JSON body, the same selected
+`wire_model` remains the truth but the transport-specific encoder owns that final placement.
+Gemini is such a URL-path model protocol: its transport uses the selected `wire_model` in
+`/models/{wire_model}:...` and omits `body.model` from the provider body.
 
 ```mermaid
 flowchart LR
@@ -21,8 +25,10 @@ flowchart LR
   F --> G[Provider12 validator]
 ```
 
-Provider wire validates `body.model == selected.wire_model`. It never silently repairs a stale
-client alias. A mismatch is an internal pipeline contract failure, not a Provider failure.
+Provider wire validates `body.model == selected.wire_model` for body-model protocols. It never
+silently repairs a stale client alias. For URL-model protocols, Provider wire validates the
+selected `wire_model` at the protocol-owned URL boundary and must not send a stale `body.model`.
+A mismatch is an internal pipeline contract failure, not a Provider failure.
 
 ## Mainline bindings
 
@@ -37,7 +43,8 @@ client alias. A mismatch is an internal pipeline contract failure, not a Provide
 
 - **Direct** calls the shared binding owner before `build_v3_provider_12_responses_wire_payload`.
 - **Relay** calls the same owner before `run_req_outbound_stage3_compat` for Responses, OpenAI Chat,
-  Anthropic, and Gemini.
+  Anthropic, and Gemini. Gemini then relocates the selected model to the URL path and omits
+  `body.model`.
 - Retry/reselection rebuilds from the request semantic source and binds the newly selected target;
   the previous attempt model cannot leak.
 
@@ -46,6 +53,7 @@ client alias. A mismatch is an internal pipeline contract failure, not a Provide
 - Virtual Router or Target mutating payload JSON.
 - Direct and Relay implementing separate model mapping rules.
 - Provider12 overwriting `body.model` to hide an earlier contract violation.
+- Gemini sending `body.model` after selected-model URL-path binding.
 - Provider suffix/prefix cases such as upstream billing aliases inside Hub/Router.
 - Treating local model-binding mismatch as provider health/cooldown input.
 
@@ -54,6 +62,6 @@ client alias. A mismatch is an internal pipeline contract failure, not a Provide
 - [ ] `request.model` is used only as route input before target selection.
 - [ ] `candidate.wire_model` is non-empty and bound by the shared owner.
 - [ ] Provider compatibility receives the bound payload.
-- [ ] Provider wire validates rather than repairs.
+- [ ] Provider wire validates rather than repairs; Gemini proves URL-path model identity and body omission.
 - [ ] Direct, Relay, and reselection positive/negative tests pass.
 - [ ] Provider-request snapshots prove each attempt uses its own selected wire model.

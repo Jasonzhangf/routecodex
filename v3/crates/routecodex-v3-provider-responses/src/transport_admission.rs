@@ -37,6 +37,7 @@ pub(crate) async fn acquire_provider_admission(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
     request_id: impl Into<String>,
     provider_id: impl Into<String>,

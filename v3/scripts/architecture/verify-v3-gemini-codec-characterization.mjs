@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = process.cwd();
+const cwd = process.cwd();
+const root = existsSync(resolve(cwd, 'v3/crates'))
+  ? cwd
+  : existsSync(resolve(cwd, 'crates'))
+    ? resolve(cwd, '..')
+    : resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs';
 const source = readFileSync(resolve(root, sourcePath), 'utf8');
 const tests = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs'), 'utf8');

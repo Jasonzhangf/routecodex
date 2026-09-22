@@ -288,8 +288,17 @@ saveButton.addEventListener("click", async () => {
     const result = await api("/api/routes", { method: "PUT", body: JSON.stringify({ servers: state.servers, reason: "webui routes update" }) });
     state.servers = result.servers; state.baseline = snapshot();
     renderServerSelector(); renderRoutes();
-    announce("ok", `Routes saved as revision #${result.revision_seq}.`);
-    setBusy(false, "Saved");
+    announce("info", `Saved revision #${result.revision_seq}; reloading runtime…`);
+    // A saved revision is not effective until the runtime reloads its immutable
+    // manifest, so success is only announced after reload confirms it.
+    try {
+      await api("/api/reload", { method: "POST" });
+      announce("ok", `Routes saved as revision #${result.revision_seq} and runtime reloaded.`);
+      setBusy(false, "Saved");
+    } catch (reloadError) {
+      announce("err", `Revision #${result.revision_seq} saved but runtime reload failed, so it is not active yet: ${reloadError.message}`);
+      setBusy(false, "Saved (reload failed)");
+    }
   } catch (error) {
     announce("err", `Save failed: ${error.message}`);
     setBusy(false, "Save failed");

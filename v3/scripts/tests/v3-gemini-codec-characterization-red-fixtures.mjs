@@ -1,11 +1,33 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-gemini-codec-characterization.mjs');
+const cwd = process.cwd();
+const repoRoot = existsSync(resolve(cwd, 'v3/crates'))
+  ? cwd
+  : existsSync(resolve(cwd, 'crates'))
+    ? resolve(cwd, '..')
+    : cwd;
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-gemini-codec-characterization.mjs');
+const copied = [
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
+  'v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs',
+  'v3/crates/routecodex-v3-server/src',
+  'v3/crates/routecodex-v3-provider-responses/src',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/resource_hooks.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+  'docs/architecture/v3-function-map.yml',
+  'docs/architecture/v3-verification-map.yml',
+  'docs/architecture/v3-mainline-call-map.yml',
+  'package.json',
+];
+function copyPath(root, relative) {
+  const target = resolve(root, relative);
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(resolve(repoRoot, relative), target, { recursive: true });
+}
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['protocol branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'V3HubEntryProtocol::Gemini', 'V3HubEntryProtocol::Responses', /missing V3HubEntryProtocol::Gemini|forbidden.*Responses/],
@@ -35,7 +57,7 @@ const failures = [];
 for (const [name, relative, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-gemini-codec-red-'));
   try {
-    for (const item of ['v3', 'docs', 'scripts', 'package.json']) cpSync(resolve(repoRoot, item), join(root, item), { recursive: true, filter: source => !source.includes('/target/') });
+    for (const path of copied) copyPath(root, path);
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(from)) throw new Error(`${name}: fixture source missing`);
