@@ -3918,12 +3918,13 @@ async fn responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof()
 }
 
 #[tokio::test]
-async fn affected_session_reaches_terminal_and_readmits_while_an_independent_session_is_unaffected()
-{
-    // Lifecycle regression for 7a7f58e: the affected session holds its
-    // admission permit until the post-commit provider failure terminal closes
-    // the response body, then readmits. A new independent session keeps
-    // working during that wait.
+async fn affected_session_terminal_releases_admission_while_an_independent_session_is_unaffected() {
+    // Lifecycle regression for 7a7f58e. The admission permit is released by the
+    // real post-commit terminal: the provider failure is fed through the same
+    // client SSE body the server builds, wrapped in the same permit-holding
+    // response body the request path uses. Only the terminal closing the body
+    // releases the permit, so the same session readmits while an independent
+    // session was never blocked.
     let gate = Arc::new(V3ResponsesSessionAdmissionGate::default());
     let scope = |session: &str, conversation: &str| V3ResponsesSessionAdmissionScope {
         endpoint: "/v1/responses".to_string(),
@@ -3935,6 +3936,23 @@ async fn affected_session_reaches_terminal_and_readmits_while_an_independent_ses
         .admit(scope("session-hang", "conversation-hang"))
         .await
         .unwrap();
+
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_provider_failure(
+            "provider_response_sse_stream",
+            "provider stream ended without terminal",
+        ),
+    )]);
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(v3_live_client_sse_body_for_protocol(
+            Box::pin(provider),
+            None,
+            V3SseClientProtocol::Responses,
+        ))
+        .expect("typed SSE response");
+    let response = hold_response_body_admission_permit(response, affected);
 
     let wait_gate = Arc::clone(&gate);
     let mut waiter = tokio::spawn(async move {
@@ -3951,7 +3969,7 @@ async fn affected_session_reaches_terminal_and_readmits_while_an_independent_ses
         tokio::time::timeout(std::time::Duration::from_millis(25), &mut waiter)
             .await
             .is_err(),
-        "the affected session must wait while its attempt is live"
+        "the affected session must wait while its response body is live"
     );
 
     let independent = gate
@@ -3960,12 +3978,16 @@ async fn affected_session_reaches_terminal_and_readmits_while_an_independent_ses
         .expect("an independent session must not be blocked by the affected session");
     drop(independent);
 
-    // The failure terminal closes the affected response body and releases its
-    // permit, so the same session reaches a terminal instead of hanging.
-    drop(affected);
+    // Consume the real body: the typed provider terminal closes the stream, the
+    // permit is released, and the same session is admitted again.
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("event: response.failed"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+
     let readmitted = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
         .await
-        .expect("the affected session must be released after its terminal")
+        .expect("the affected session must be released by its terminal")
         .expect("same-session waiter task must not panic")
         .expect("the affected session must be readmitted after its terminal");
     drop(readmitted);
