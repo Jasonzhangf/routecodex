@@ -344,6 +344,23 @@ fn v3_sse_runtime_error_source_chunk_for_protocol(
     }
 }
 
+/// Frame one post-commit terminal returned by the error owner into the target
+/// protocol's SSE error shape. The server does not classify or rebuild Error
+/// state here.
+fn v3_post_commit_sse_terminal_chunk(
+    status: u16,
+    code: &str,
+    message: &str,
+    protocol: V3SseClientProtocol,
+) -> Vec<u8> {
+    match protocol {
+        V3SseClientProtocol::Responses => v3_responses_sse_error_event_chunk(status, code, message),
+        V3SseClientProtocol::OpenAiChat
+        | V3SseClientProtocol::Anthropic
+        | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(status, code, message),
+    }
+}
+
 pub(crate) fn responses_direct_output_response_with_console(
     frame: V3Server16HttpFrame,
     stream_console_finalizer: Option<V3DirectSseConsoleFinalizer>,
@@ -583,21 +600,20 @@ pub(crate) fn v3_live_client_sse_body_for_protocol(
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(source)) => {
-                    match routecodex_v3_error::v3_sse_post_commit_disposition(&source) {
-                        routecodex_v3_error::V3SsePostCommitDisposition::CloseEof => None,
-                        routecodex_v3_error::V3SsePostCommitDisposition::ProjectInternalTerminal => {
-                        Some((
-                            Ok(v3_sse_runtime_error_source_chunk_for_protocol(
-                                "V3ServerRespOutbound05ClientFrame",
-                                "internal_response_stream_error",
-                                "internal response stream failed",
-                                599,
-                                protocol,
-                            )),
-                            (stream, true),
-                        ))
-                        }
-                    }
+                    // The error owner decides the post-commit terminal; the
+                    // server only frames the returned typed terminal, or closes
+                    // at EOF when the caller owns replay (client disconnect or
+                    // an exhausted target pool).
+                    let terminal = routecodex_v3_error::v3_sse_post_commit_terminal(source)?;
+                    Some((
+                        Ok(v3_post_commit_sse_terminal_chunk(
+                            terminal.status,
+                            &terminal.code,
+                            &terminal.message,
+                            protocol,
+                        )),
+                        (stream, true),
+                    ))
                 }
                 None => None,
             }

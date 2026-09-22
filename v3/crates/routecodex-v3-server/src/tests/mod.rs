@@ -532,7 +532,10 @@ async fn direct_live_sse_provider_failure_projects_typed_terminal_without_provid
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
     assert!(text.contains("event: response.failed"), "{text}");
-    assert!(text.contains("internal_response_stream_error"), "{text}");
+    // The provider failure keeps its real provider classification instead of
+    // being rewritten into the internal 599 response-stage error.
+    assert!(text.contains("network_error"), "{text}");
+    assert!(!text.contains("internal_response_stream_error"), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
 }
@@ -3871,7 +3874,7 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
         .expect("terminal event must be transportable");
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: response.failed\n"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
+    assert!(error.contains("provider_response_stream_failed"), "{error}");
     assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
     assert!(
         client.next().await.is_none(),
@@ -3912,6 +3915,60 @@ async fn responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof()
         client.next().await.is_none(),
         "typed terminal must close the affected session body"
     );
+}
+
+#[tokio::test]
+async fn affected_session_reaches_terminal_and_readmits_while_an_independent_session_is_unaffected()
+{
+    // Lifecycle regression for 7a7f58e: the affected session holds its
+    // admission permit until the post-commit provider failure terminal closes
+    // the response body, then readmits. A new independent session keeps
+    // working during that wait.
+    let gate = Arc::new(V3ResponsesSessionAdmissionGate::default());
+    let scope = |session: &str, conversation: &str| V3ResponsesSessionAdmissionScope {
+        endpoint: "/v1/responses".to_string(),
+        session_id: Some(session.to_string()),
+        conversation_id: Some(conversation.to_string()),
+    };
+
+    let affected = gate
+        .admit(scope("session-hang", "conversation-hang"))
+        .await
+        .unwrap();
+
+    let wait_gate = Arc::clone(&gate);
+    let mut waiter = tokio::spawn(async move {
+        wait_gate
+            .admit(V3ResponsesSessionAdmissionScope {
+                endpoint: "/v1/responses".to_string(),
+                session_id: Some("session-hang".to_string()),
+                conversation_id: Some("conversation-hang".to_string()),
+            })
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), &mut waiter)
+            .await
+            .is_err(),
+        "the affected session must wait while its attempt is live"
+    );
+
+    let independent = gate
+        .admit(scope("session-new", "conversation-new"))
+        .await
+        .expect("an independent session must not be blocked by the affected session");
+    drop(independent);
+
+    // The failure terminal closes the affected response body and releases its
+    // permit, so the same session reaches a terminal instead of hanging.
+    drop(affected);
+    let readmitted = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+        .await
+        .expect("the affected session must be released after its terminal")
+        .expect("same-session waiter task must not panic")
+        .expect("the affected session must be readmitted after its terminal");
+    drop(readmitted);
 }
 
 #[tokio::test]
