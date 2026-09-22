@@ -27,7 +27,8 @@ client request.model
   -> Target10 concrete provider selected { provider_id, model_id, wire_model }
   -> SelectedProviderModelBinding (single Rust semantic owner)
   -> Direct request projection OR Relay ProviderReqCompat06
-  -> Provider wire validates body.model == selected wire_model
+  -> Provider wire validates body.model == selected wire_model for body-model protocols
+     OR URL-model transport encodes selected wire_model in the provider URL path
   -> transport
 ```
 
@@ -38,7 +39,9 @@ client request.model
 4. Direct and Relay call the same binding owner before any provider-specific compatibility or
    transport encoding.
 5. Provider wire is a validator, not a repair layer. Missing or mismatched model is an internal
-   contract error and must fail-fast.
+   contract error and must fail-fast for protocols that carry model in the provider body.
+   URL-model protocols such as Gemini must instead prove the selected `wire_model` in the URL path
+   and omit `body.model` from the provider body.
 6. Retry/reselect always binds from the immutable attempt input to the newly selected target; it
    must not reuse the previous attempt's provider model.
 7. `model_id` is the canonical configured model key; `wire_model` is the only upstream HTTP model
@@ -54,12 +57,15 @@ client request.model
   ProviderReqCompat06 consumes the bound model -> ProviderReqOutbound08 validates -> transport.
 - Protocol conversion may copy the already-bound model while changing protocol shape; it may not
   select, derive, alias, restore, or replace the provider model.
+- Gemini Relay is the declared URL-model exception: after the shared binding, the Gemini transport
+  uses `target.wire_model` in `/models/{wire_model}:...` and drops `body.model` before send.
 
 ## Forbidden paths
 
 - `Virtual Router` mutating request JSON.
 - Provider runtime deriving model from `request.model`.
 - Provider wire silently overwriting a mismatch.
+- Gemini sending `body.model` after URL-path model binding.
 - Provider-specific suffix/prefix rules in Hub/Router (`-anyint`, provider key branches, etc.).
 - Direct and Relay implementing separate model-selection rules.
 - Compatibility profiles reading the client route alias as provider model truth.
@@ -72,10 +78,12 @@ as if the upstream rejected the model.
 
 ## Verification
 
-- Red/green provider-wire negative test: stale client model is rejected, never repaired.
+- Red/green provider-wire negative test: stale client model is rejected, never repaired for
+  body-model protocols.
 - Direct positive test: client alias differs from selected wire model and provider request contains
   the selected wire model.
 - Relay positive tests for Responses/OpenAI Chat/Anthropic/Gemini.
+- Gemini Relay positive test: selected wire model appears in the URL path and `body.model` is absent.
 - Retry/reselect test: each attempt uses its own selected wire model.
 - Static gate: request-model writes are allowed only in the shared binding owner; provider wire
   must contain equality validation and no `insert("model", target.wire_model)` repair.

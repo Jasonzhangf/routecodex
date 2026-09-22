@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const repo = process.cwd();
-const verifier = resolve(repo, 'scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
+const cwd = process.cwd();
+const repo = existsSync(resolve(cwd, 'v3/crates'))
+  ? cwd
+  : existsSync(resolve(cwd, 'crates'))
+    ? resolve(cwd, '..')
+    : cwd;
+const verifier = resolve(repo, 'v3/scripts/architecture/verify-v3-gemini-relay-runtime-integration.mjs');
 const runtime = 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs';
 const relayCore = 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs';
 const server = 'v3/crates/routecodex-v3-server/src/executors.rs';

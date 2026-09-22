@@ -130,18 +130,34 @@ fn gemini_wire_rejects_reasoning_effort_without_a_shared_level() {
 }
 
 #[test]
-fn gemini_wire_rejects_reasoning_summary_policy_without_a_wire_equivalent() {
+fn gemini_wire_consumes_reasoning_summary_policy_as_local_hint() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "reasoning_summary_policy": "detailed"
     });
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect("Gemini must consume the local summary hint before provider wire");
+    assert!(
+        request.get("reasoning_summary_policy").is_none(),
+        "summary hint must not reach Gemini wire: {request}"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_invalid_reasoning_summary_policy() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "reasoning_summary_policy": "verbose"
+    });
     let error =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini has no exact request-side summary policy equivalent");
+            .expect_err("invalid local summary hint must fail before provider send");
     assert_eq!(
         error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+        "MalformedOutboundField target_protocol=gemini path=$.reasoning_summary_policy"
     );
 }
 
@@ -280,11 +296,11 @@ fn gemini_wire_preserves_user_owned_routecodex_chat_extension_schema_property() 
 }
 
 // Regression for the live 4444 failure shape: a Responses-origin Chat payload
-// routed to a chat:gemini provider carried target-unsupported Chat semantics.
-// It must now fail explicitly in outbound projection instead of being silently
-// stripped or leaking to the provider body.
+// routed to a chat:gemini provider carried Chat semantics that are local hints
+// or have Gemini equivalents. They must be consumed/projected before provider
+// wire, not reported as UnmappedOutboundFields or leaked into the body.
 #[test]
-fn gemini_wire_rejects_responses_origin_unsupported_chat_fields_reported_live() {
+fn gemini_wire_consumes_responses_origin_fields_reported_live() {
     let payload = json!({
         "model": "gemini-3.8-flash",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
@@ -295,19 +311,47 @@ fn gemini_wire_rejects_responses_origin_unsupported_chat_fields_reported_live() 
         "tool_choice": "auto",
         "stream": true
     });
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect("live Responses-origin Gemini shape must project without unmapped fields");
+    assert_eq!(
+        request.pointer("/generationConfig/thinkingConfig/thinkingLevel"),
+        Some(&json!("MEDIUM"))
+    );
+    assert_eq!(
+        request.pointer("/toolConfig/functionCallingConfig/mode"),
+        Some(&json!("AUTO"))
+    );
+    for consumed in [
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "reasoning_summary_policy",
+        "routecodex_chat_extension",
+        "tool_choice",
+    ] {
+        assert!(
+            request.get(consumed).is_none(),
+            "{consumed} must not reach Gemini wire: {request}"
+        );
+    }
+    assert!(
+        !request.to_string().contains("routecodex_chat_extension"),
+        "RouteCodex extension must not leak to Gemini wire: {request}"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_true_responses_store_extension() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {"responses_request": {"store": true}}
+    });
     let error =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err(
-                "unsupported Gemini Chat semantics must fail explicitly before provider wire",
-            );
-    assert!(
-        error.contains("UnmappedOutboundFields target_protocol=gemini"),
-        "{error}"
-    );
-    assert!(error.contains("$.parallel_tool_calls"), "{error}");
-    assert!(error.contains("$.reasoning_summary_policy"), "{error}");
-    assert!(
-        error.contains("$.routecodex_chat_extension.responses_request.store"),
-        "{error}"
+            .expect_err("Gemini cannot honor a true Responses store request");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.store"
     );
 }

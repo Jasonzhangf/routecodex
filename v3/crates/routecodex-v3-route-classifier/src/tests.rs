@@ -707,7 +707,7 @@ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_sys
     let assistant_payload = json!({"role": "assistant", "content": "hi"});
     let user_payload = json!({"role": "user", "content": "hi"});
 
-    let tool_entries = project_responses_entries_from_array(&[tool_payload.clone()]);
+    let tool_entries = project_responses_entries_from_array(std::slice::from_ref(&tool_payload));
     assert_eq!(tool_entries.len(), 1);
     assert_eq!(tool_entries[0].role, ResponsesTurnRole::Tool);
     // role=tool with a content[] of text parts is mapped to kind=Other because
@@ -715,12 +715,14 @@ fn responses_role_for_value_distinguishes_tool_and_function_call_output_from_sys
     // projection itself is the contract under test here.
     assert_ne!(tool_entries[0].kind, ResponsesTurnKind::ToolOutput);
 
-    let tool_output_entries = project_responses_entries_from_array(&[tool_output_payload.clone()]);
+    let tool_output_entries =
+        project_responses_entries_from_array(std::slice::from_ref(&tool_output_payload));
     assert_eq!(tool_output_entries.len(), 1);
     assert_eq!(tool_output_entries[0].role, ResponsesTurnRole::Tool);
     assert_eq!(tool_output_entries[0].kind, ResponsesTurnKind::ToolOutput);
 
-    let system_entries = project_responses_entries_from_array(&[system_payload.clone()]);
+    let system_entries =
+        project_responses_entries_from_array(std::slice::from_ref(&system_payload));
     assert_eq!(system_entries[0].role, ResponsesTurnRole::System);
 
     // Negative check: assistant / user roles stay out of System.

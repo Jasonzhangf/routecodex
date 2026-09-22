@@ -17,25 +17,12 @@ fn project_gemini_compatible_fields_for_selected_target(
 }
 
 fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), String> {
-    let extension_paths = collect_gemini_routecodex_chat_extension_paths(source)?;
     let Some(row) = source.as_object_mut() else {
         return Ok(());
     };
-    let mut unsupported = Vec::new();
-    if row.contains_key("parallel_tool_calls") {
-        unsupported.push("$.parallel_tool_calls".to_string());
-    }
-    if row.contains_key("reasoning_summary_policy") {
-        unsupported.push("$.reasoning_summary_policy".to_string());
-    }
-    unsupported.extend(extension_paths);
-    if !unsupported.is_empty() {
-        return Err(format!(
-            "UnmappedOutboundFields target_protocol=gemini paths={}",
-            unsupported.join(",")
-        ));
-    }
-    row.remove("routecodex_chat_extension");
+    consume_gemini_parallel_tool_calls(row)?;
+    consume_gemini_reasoning_summary_policy(row, "$.reasoning_summary_policy")?;
+    consume_gemini_routecodex_chat_extension(row)?;
     if let Some(effort) = row.remove("reasoning_effort") {
         project_gemini_reasoning_effort(row, effort)?;
     }
@@ -97,40 +84,96 @@ fn gemini_selected_target_supports_reasoning(model_capabilities: &[String]) -> b
         .any(|capability| capability == "reasoning" || capability == "thinking")
 }
 
-fn collect_gemini_routecodex_chat_extension_paths(source: &Value) -> Result<Vec<String>, String> {
-    let Some(extension) = source
-        .as_object()
-        .and_then(|row| row.get("routecodex_chat_extension"))
-    else {
-        return Ok(Vec::new());
+fn consume_gemini_parallel_tool_calls(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(value) = row.remove("parallel_tool_calls") else {
+        return Ok(());
     };
-    gemini_chat_extension_unmapped_paths(extension, "$.routecodex_chat_extension")
+    if value.as_bool().is_none() {
+        return Err(
+            "MalformedOutboundField target_protocol=gemini path=$.parallel_tool_calls".to_string(),
+        );
+    }
+    Ok(())
 }
 
-fn gemini_chat_extension_unmapped_paths(
-    extension: &Value,
+fn consume_gemini_reasoning_summary_policy(
+    row: &mut Map<String, Value>,
     path: &str,
-) -> Result<Vec<String>, String> {
-    let extension = extension.as_object().ok_or_else(|| {
-        format!("MalformedOutboundField target_protocol=gemini path={path}")
-    })?;
-    let mut paths = Vec::new();
-    for (key, value) in extension {
-        let child_path = json_path_child(path, key);
-        if key == "responses_request" {
-            let responses_request = value.as_object().ok_or_else(|| {
-                format!("MalformedOutboundField target_protocol=gemini path={child_path}")
-            })?;
-            paths.extend(
-                responses_request
-                    .keys()
-                    .map(|key| json_path_child(&child_path, key)),
-            );
-        } else {
-            paths.push(child_path);
-        }
+) -> Result<(), String> {
+    let Some(value) = row.remove("reasoning_summary_policy") else {
+        return Ok(());
+    };
+    match value.as_str() {
+        Some("auto" | "concise" | "detailed") => Ok(()),
+        _ => Err(format!(
+            "MalformedOutboundField target_protocol=gemini path={path}"
+        )),
     }
-    Ok(paths)
+}
+
+fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(extension) = row.remove("routecodex_chat_extension") else {
+        return Ok(());
+    };
+    let mut extension = extension.as_object().cloned().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension"
+            .to_string()
+    })?;
+    let Some(responses_request) = extension.remove("responses_request") else {
+        if extension.is_empty() {
+            return Ok(());
+        }
+        return Err(format!(
+            "UnmappedOutboundFields target_protocol=gemini paths={}",
+            extension
+                .keys()
+                .map(|key| json_path_child("$.routecodex_chat_extension", key))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    };
+    let mut responses_request = responses_request.as_object().cloned().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request"
+            .to_string()
+    })?;
+    consume_gemini_responses_store(&mut responses_request)?;
+    consume_gemini_reasoning_summary_policy(
+        &mut responses_request,
+        "$.routecodex_chat_extension.responses_request.reasoning_summary_policy",
+    )?;
+    let mut unsupported: Vec<String> = responses_request
+        .keys()
+        .map(|key| json_path_child("$.routecodex_chat_extension.responses_request", key))
+        .collect();
+    unsupported.extend(
+        extension
+            .keys()
+            .map(|key| json_path_child("$.routecodex_chat_extension", key)),
+    );
+    if !unsupported.is_empty() {
+        return Err(format!(
+            "UnmappedOutboundFields target_protocol=gemini paths={}",
+            unsupported.join(",")
+        ));
+    }
+    Ok(())
+}
+
+fn consume_gemini_responses_store(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(value) = row.remove("store") else {
+        return Ok(());
+    };
+    match value.as_bool() {
+        Some(false) => Ok(()),
+        Some(true) => Err(
+            "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.store"
+                .to_string(),
+        ),
+        None => Err(
+            "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request.store"
+                .to_string(),
+        ),
+    }
 }
 
 fn project_gemini_reasoning_effort(

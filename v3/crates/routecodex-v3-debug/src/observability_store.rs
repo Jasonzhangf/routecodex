@@ -140,7 +140,7 @@ fn append_encoded_line(
         .open(path)?;
     let mut writer = BufWriter::new(file);
     writer
-        .write_all(&line_bytes)
+        .write_all(line_bytes)
         .map_err(V3WebuiObservabilityStoreError::Io)?;
     writer
         .write_all(b"\n")
