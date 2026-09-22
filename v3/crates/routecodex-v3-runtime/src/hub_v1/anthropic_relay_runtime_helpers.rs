@@ -378,6 +378,150 @@ fn extract_v3_anthropic_relay_usage_summary(
 #[cfg(test)]
 mod anthropic_client_sse_projection_tests {
     use super::*;
+    use routecodex_v3_provider_responses::{
+        V3ProviderResp14Raw, V3Transport13ResponsesHttpRequest,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RejectingAttemptBudgetTransport {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ResponsesTransport for RejectingAttemptBudgetTransport {
+        async fn send(
+            &self,
+            _request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.sends.fetch_add(1, Ordering::AcqRel);
+            panic!("exhausted Anthropic attempt budget must reject before transport.send")
+        }
+    }
+
+    fn attempt_budget_manifest(scope: &str) -> V3Config05ManifestPublished {
+        routecodex_v3_config::compile_v3_config_05_manifest(
+            routecodex_v3_config::parse_v3_config_02_authoring(
+                &r#"
+version = 3
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+[servers.__SCOPE__]
+bind = "127.0.0.1"
+port = 1
+routing_group = "__SCOPE__"
+endpoints = ["anthropic"]
+[providers.controlled]
+type = "responses"
+base_url = "http://controlled.invalid/v1"
+default_model = "responses-wire-model"
+auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+[providers.controlled.models.responses-wire-model]
+wire_name = "responses-wire-model"
+supports_streaming = true
+supports_thinking = true
+capabilities = ["text", "tools", "tool_outputs", "reasoning", "vision"]
+[route_groups.__SCOPE__.pools.claude_client]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "anthropic", models = ["claude-client-alias"] }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+[route_groups.__SCOPE__.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "controlled", model = "responses-wire-model", key = "controlled", priority = 1 }]
+"#
+                .replace("__SCOPE__", scope),
+            )
+            .expect("test manifest authoring parses"),
+        )
+        .expect("test manifest compiles")
+    }
+
+    #[tokio::test]
+    async fn attempt_budget_exhaustion_projects_execution_control_without_provider_send() {
+        std::env::set_var("CONTROLLED_KEY", "controlled-secret");
+        let scope = "anthropic_attempt_budget_exhausted";
+        let mut manifest = attempt_budget_manifest(scope);
+        manifest
+            .servers
+            .get_mut(scope)
+            .and_then(|server| server.execution.as_mut())
+            .expect("test server execution policy")
+            .attempt_store
+            .request_max_attempts = 1;
+        let request_execution_control =
+            crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, scope)
+                .expect("request execution control");
+        request_execution_control
+            .attempt_budget()
+            .admit_transport_attempt()
+            .expect("upstream attempt consumes the only transport slot");
+        let provider_health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(
+            &manifest,
+        );
+        let failure_session_scope = V3ProviderFailureSessionScope::new(
+            "test-server",
+            scope,
+            concat!(module_path!(), ":attempt_budget_exhaustion"),
+        )
+        .expect("test provider failure session scope");
+        let transport = RejectingAttemptBudgetTransport {
+            sends: AtomicUsize::new(0),
+        };
+
+        let output = execute_v3_anthropic_relay_runtime_inner(
+            &manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: scope.to_string(),
+                failure_session_scope: failure_session_scope.clone(),
+                request_id: "req-anthropic-attempt-budget-exhausted".to_string(),
+                toolreason_observation_session_id: None,
+                payload: json!({
+                    "model":"claude-client-alias",
+                    "messages":[{"role":"user","content":"attempt budget exhausted"}],
+                    "stream":true
+                }),
+            },
+            &transport,
+            Vec::new(),
+            V3HubRelayResponseHookProfile::empty(),
+            provider_health.clone(),
+            V3RelayProviderFailureRetryPolicy::from_manifest(&manifest),
+            true,
+            Some(request_execution_control.clone()),
+        )
+        .await
+        .expect("local execution-control exhaustion must project a typed client failure");
+
+        assert_eq!(output.status, 598);
+        assert_eq!(
+            output.error_chain.as_deref(),
+            Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        );
+        assert_eq!(
+            transport.sends.load(Ordering::Acquire),
+            0,
+            "the exhausted local attempt budget must reject before provider transport"
+        );
+        assert_eq!(
+            request_execution_control.transport_attempts(),
+            1,
+            "the rejected Anthropic relay attempt must not consume another slot"
+        );
+        let availability = provider_health.store().availability_for_session(
+            &failure_session_scope,
+            "controlled",
+            Some("controlled"),
+            Some("responses-wire-model"),
+            u64::MAX,
+        );
+        assert!(
+            availability.available,
+            "local execution-control exhaustion must not cool provider health: {availability:?}"
+        );
+        assert!(
+            availability.blocked_scopes.is_empty(),
+            "local execution-control exhaustion must not add provider-health blocks: {availability:?}"
+        );
+    }
 
     #[tokio::test]
     async fn closeout_replay_uses_selected_provider_wire_protocol() {
