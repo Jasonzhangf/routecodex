@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>73 functional paths</span>
-        <span>428 caller edges</span>
+        <span>74 functional paths</span>
+        <span>432 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>4</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>335</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>339</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -615,6 +615,7 @@ flowchart TD
 <tr><td><a href="#chain-v3_route_classifier_facts_classification"><code>v3.route_classifier.facts_classification</code></a><br/>v 3.route_classifier.facts_classification</td><td><span class="status audited_locked">locked by Jason</span></td><td>1</td><td>2</td><td><code>v3.route_classifier_local_owner</code></td><td><code>sha256:36f4b1ffde37…</code></td></tr>
 <tr><td><a href="#chain-v3_sse_protocol_codec_projection_boundary"><code>v3.sse.protocol_codec_projection_boundary</code></a><br/>v 3.sse.protocol_codec_projection_boundary</td><td><span class="status audited_locked">locked by Jason</span></td><td>3</td><td>7</td><td><code>v3.sse_protocol_codec_projection_boundary</code></td><td><code>sha256:95185e0a0787…</code></td></tr>
 <tr><td><a href="#chain-vr_current_turn_typed_route_facts"><code>vr.current_turn_typed_route_facts</code></a><br/>vr.current_turn_typed_route_facts</td><td><span class="status audited_locked">locked by Jason</span></td><td>2</td><td>3</td><td><code>vr.current_turn_typed_route_facts</code></td><td><code>sha256:572f913b7701…</code></td></tr>
+<tr><td><a href="#chain-v3_provider_admission_rescue_entrypoints"><code>v3.provider_admission_rescue_entrypoints</code></a><br/>v 3.provider_admission_rescue_entrypoints</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>4</td><td><code>v3.provider_global_subscription_probe</code></td><td><code>sha256:58d147793ddc…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_global_subscription_probe"><code>v3.provider_global_subscription_probe</code></a><br/>v 3.provider_global_subscription_probe</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>4</td><td><code>v3.provider_global_subscription_probe</code></td><td><code>sha256:487da1203d72…</code></td></tr>
 <tr><td><a href="#chain-v3_tool_thinking_hook_skeleton_mainline"><code>v3.tool_thinking_hook_skeleton.mainline</code></a><br/>v 3.tool_thinking_hook_skeleton.mainline</td><td><span class="status pending_review">pending review</span></td><td>9</td><td>8</td><td><code>v3.tool_thinking_hook_skeleton</code></td><td><code>sha256:9352c87ba7e0…</code></td></tr>
 <tr><td><a href="#chain-v3_server_internal_observability_projection"><code>v3.server.internal_observability_projection</code></a><br/>v 3.server.internal_observability_projection</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>3</td><td><code>v3.server_internal_observability_projection</code></td><td><code>sha256:cb84a1a12b65…</code></td></tr>
@@ -796,6 +797,13 @@ flowchart TD
             <span><code>vr.current_turn_typed_route_facts</code></span>
             <span>2 edges · 3 resources · routecodex-v3-route-classifier, v3-runtime</span>
             <span class="status audited_locked">locked by Jason</span>
+          </a>
+<a class="branch-card" href="#chain-v3_provider_admission_rescue_entrypoints">
+            <span class="chain-id">v 3.provider_admission_rescue_entrypoints</span>
+            <span>V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected</span>
+            <span><code>v3.provider_admission_rescue_entrypoints</code></span>
+            <span>4 edges · 4 resources · v3-runtime, v3-runtime::hub_v1</span>
+            <span class="status pending_review">pending review</span>
           </a>
 <a class="branch-card" href="#chain-v3_provider_global_subscription_probe">
             <span class="chain-id">v 3.provider_global_subscription_probe</span>
@@ -4260,6 +4268,48 @@ flowchart TD
 <tbody>
 <tr><td><code>vr-current-turn-01</code></td><td><code>V3HubReqExecution05Planned</code><br/>→ <code>V3CurrentTurnRouteFacts</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.route.current_turn_facts</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.request_facts</code></div></td><td><code>build_v3_current_turn_route_facts</code><br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small></td><td><code>classify_route</code><br/><small>routecodex-v3-route-classifier/src/route.rs</small></td></tr>
 <tr><td><code>v3-route-classifier-facts-02</code></td><td><code>V3RouterRequestFacts</code><br/>→ <code>V3CurrentTurnRouteFacts</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.route.request_facts</code></div></td><td><code>build_v3_router_request_facts_for_entry_with_control</code><br/><small>routecodex-v3-runtime/src/nodes.rs</small></td><td><code>build_v3_current_turn_route_facts</code><br/><small>routecodex-v3-route-classifier/src/active_turn.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_provider_admission_rescue_entrypoints" >
+      <summary>
+        <span class="summary-main">v 3.provider_admission_rescue_entrypoints</span>
+        <span class="summary-sub">V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected</span>
+        <span class="summary-sub">4 edges · <code>v3.provider_admission_rescue_entrypoints</code> · V3Target09CandidateSetExpanded → V3Target10ConcreteProviderSelected</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Direct and Relay Runtime entry points call the admission-aware provider rescue wrappers so provider cooldown exhaustion rescue and provider concurrency admission share one pre-transport selection boundary.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.provider_global_subscription_probe</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>v3-runtime · v3-runtime::hub_v1</code></span>
+          <span>resources: <code>4</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_provider_admission_rescue_entrypoints_0[&quot;&lt;b&gt;候选展开&lt;/b&gt;&lt;br/&gt;从 target 展开具体 provider 候选&lt;br/&gt;&lt;small&gt;V3Target09CandidateSetExpanded&lt;/small&gt;&quot;]
+  n_v3_provider_admission_rescue_entrypoints_1[&quot;&lt;b&gt;Provider 已选定&lt;/b&gt;&lt;br/&gt;唯一 provider/model/auth 进入 runtime&lt;br/&gt;&lt;small&gt;V3Target10ConcreteProviderSelected&lt;/small&gt;&quot;]
+  n_v3_provider_admission_rescue_entrypoints_0 --&gt;|v3-rd-target-select-direct-admission-rescue&lt;br/&gt;v3-runtime → v3-runtime| n_v3_provider_admission_rescue_entrypoints_1
+  n_v3_provider_admission_rescue_entrypoints_0 --&gt;|v3-rd-target-select-responses-direct-admission-rescue&lt;br/&gt;v3-runtime → v3-runtime| n_v3_provider_admission_rescue_entrypoints_1
+  n_v3_provider_admission_rescue_entrypoints_0 --&gt;|v3-rd-target-select-relay-core-admission-rescue&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime| n_v3_provider_admission_rescue_entrypoints_1
+  n_v3_provider_admission_rescue_entrypoints_0 --&gt;|v3-rd-target-select-responses-relay-admission-rescue&lt;br/&gt;v3-runtime::hub_v1 → v3-runtime| n_v3_provider_admission_rescue_entrypoints_1
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_provider_admission_rescue_entrypoints_0,n_v3_provider_admission_rescue_entrypoints_1 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-rd-target-select-direct-admission-rescue</code></td><td><code>V3Target09CandidateSetExpanded</code><br/>→ <code>V3Target10ConcreteProviderSelected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.target.candidate_set</code> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.concrete_provider</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.target.concrete_provider</code></div></td><td><code>execute_v3_direct_runtime_kernel_core_resident</code><br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small></td><td><code>select_v3_expanded_target_with_admission_rescue</code><br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small></td></tr>
+<tr><td><code>v3-rd-target-select-responses-direct-admission-rescue</code></td><td><code>V3Target09CandidateSetExpanded</code><br/>→ <code>V3Target10ConcreteProviderSelected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.target.candidate_set</code> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.concrete_provider</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.target.concrete_provider</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_core_resident</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>select_v3_expanded_target_with_admission_rescue</code><br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small></td></tr>
+<tr><td><code>v3-rd-target-select-relay-core-admission-rescue</code></td><td><code>V3Target09CandidateSetExpanded</code><br/>→ <code>V3Target10ConcreteProviderSelected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.target.candidate_set</code> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.concrete_provider</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.target.concrete_provider</code></div></td><td><code>execute_v3_relay_runtime_core</code><br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small></td><td><code>resolve_v3_relay_target_outcome_with_admission_rescue</code><br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small></td></tr>
+<tr><td><code>v3-rd-target-select-responses-relay-admission-rescue</code></td><td><code>V3Target09CandidateSetExpanded</code><br/>→ <code>V3Target10ConcreteProviderSelected</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.target.candidate_set</code> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.target.concrete_provider</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.provider.availability_projection</code> <code>v3.error.action_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.target.concrete_provider</code></div></td><td><code>execute_v3_responses_relay_runtime_inner</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small></td><td><code>resolve_v3_relay_target_outcome_with_admission_rescue</code><br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small></td></tr>
 </tbody>
 </table>
       </div>

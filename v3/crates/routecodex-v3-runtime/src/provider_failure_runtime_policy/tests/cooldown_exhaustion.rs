@@ -674,6 +674,89 @@ async fn auth_key_cooldown_holds_selection_until_probe_recovery() {
             retry_deadline_ms,
             Some(retry.expected_generation()),
         )
+        .expect("successful auth-key retry probe");
+    let selection = tokio::time::timeout(Duration::from_millis(500), selection)
+        .await
+        .expect("selection must wake after auth-key probe success")
+        .expect("selection task must not panic");
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Selected(_)),
+        "successful auth-key retry probe must resume the held request"
+    );
+}
+
+#[tokio::test]
+async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
+    let server_id = "auth_key_cooldown_with_successful_provider_probe";
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope = test_provider_failure_scope(
+        server_id,
+        server_id,
+        "auth-key-with-successful-provider-probe",
+    )
+    .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    for provider_id in ["first", "second"] {
+        put_auth_key_in_cooldown(&health, &failure_session_scope, provider_id, "key1", 20_001);
+    }
+    let first_permit = health
+        .store
+        .acquire_provider_cooldown_probe_if_due("first", Some("key1"), Some("gpt-test"), 25_001)
+        .expect("auth-key due probe acquisition")
+        .expect("the model candidate must acquire the model-less auth-key probe");
+    assert_eq!(first_permit.auth_alias(), Some("key1"));
+    assert_eq!(
+        first_permit.model_id(),
+        None,
+        "the auth-key probe must retain its model-less identity"
+    );
+
+    let selection = tokio::spawn({
+        let health = health.clone();
+        let failure_session_scope = failure_session_scope.clone();
+        async move {
+            select_v3_expanded_target_with_exhaustion_rescue(
+                &manifest,
+                expanded,
+                &failure_session_scope,
+                &health,
+                &BTreeSet::new(),
+                25_001,
+                0,
+                true,
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !selection.is_finished(),
+        "auth-key cooldown-only exhaustion must hold for successful probe recovery"
+    );
+    health
+        .store
+        .complete_provider_cooldown_probe_success_at_generation(
+            first_permit.provider_id(),
+            first_permit.auth_alias(),
+            first_permit.model_id(),
+            25_001,
+            Some(first_permit.expected_generation()),
+        )
         .expect("successful auth-key probe");
     let selection = tokio::time::timeout(Duration::from_millis(500), selection)
         .await
