@@ -1080,7 +1080,7 @@ async fn provider_internal_transport_response_lane_projects_599_without_provider
 }
 
 #[test]
-fn responses_provider_process_chat_forces_hub_relay() {
+fn responses_provider_process_chat_stays_same_protocol_direct() {
     let routing_group = "responses_process_chat";
     let manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
@@ -1093,8 +1093,8 @@ fn responses_provider_process_chat_forces_hub_relay() {
 
     assert_eq!(
         plan.decision.mode,
-        V3Execution11ProtocolDecisionMode::HubRelay,
-        "provider.responses.process=chat is the explicit force-Relay override"
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+        "provider.responses.process=chat is provider-private truth and must not force Relay"
     );
     assert_eq!(plan.decision.target.candidate.provider_id, "grok");
     assert_eq!(plan.decision.target.candidate.provider_type, "responses");
@@ -1102,7 +1102,36 @@ fn responses_provider_process_chat_forces_hub_relay() {
         plan.decision.target.candidate.responses_process.as_deref(),
         Some("chat")
     );
-    assert!(!plan.node_trace.contains(&"V3ResponsesDirect11Policy"));
+    assert!(plan.node_trace.contains(&"V3Execution11ProtocolDecision"));
+}
+
+#[test]
+fn responses_native_provider_stays_same_protocol_direct_for_http_entry() {
+    // A selected responses-native provider must never be pre-forced into
+    // HubRelay for a responses entry, even when its provider.responses.process
+    // is "chat": process is provider-private truth and does not override the
+    // entry's protocol execution mode.
+    let routing_group = "responses_native_direct_http";
+    let manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        test_plan_http_request(routing_group, "req-native-http", "exec-native-http"),
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        0,
+    )
+    .expect("responses-native provider should plan");
+
+    assert_eq!(
+        plan.decision.mode,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect,
+        "responses entry + responses-native provider must stay SameProtocolDirect"
+    );
+    assert_eq!(plan.decision.target.candidate.provider_type, "responses");
+    assert_eq!(
+        plan.decision.target.candidate.responses_process.as_deref(),
+        Some("chat")
+    );
+    assert!(plan.node_trace.contains(&"V3Execution11ProtocolDecision"));
 }
 
 #[test]
@@ -1136,7 +1165,7 @@ fn responses_provider_process_direct_keeps_same_protocol_direct() {
 }
 
 #[test]
-fn responses_provider_process_chat_without_relay_fails_fast() {
+fn responses_provider_process_chat_direct_only_stays_same_protocol_direct() {
     let routing_group = "responses_process_chat_direct_only";
     let mut manifest = scoped_test_manifest(responses_process_chat_manifest(), routing_group);
     manifest
@@ -1147,7 +1176,7 @@ fn responses_provider_process_chat_without_relay_fails_fast() {
         .as_mut()
         .expect("test server execution")
         .allowed_modes = vec!["direct".to_string()];
-    let error = plan_v3_responses_protocol_execution_with_provider_health(
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
         test_plan_http_request(
             routing_group,
@@ -1157,11 +1186,11 @@ fn responses_provider_process_chat_without_relay_fails_fast() {
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         0,
     )
-    .expect_err("process=chat is an explicit Relay override and must fail if Relay is disabled");
+    .expect("process=chat does not require Relay and Direct remains allowed");
 
     assert_eq!(
-        error.source.code,
-        "responses_process_chat_relay_not_allowed"
+        plan.decision.mode,
+        V3Execution11ProtocolDecisionMode::SameProtocolDirect
     );
 }
 

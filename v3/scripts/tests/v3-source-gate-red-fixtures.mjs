@@ -98,21 +98,6 @@ const fixtures = [
     diagnostic: /Target candidate must carry provider\.responses\.process/,
   },
   {
-    name: 'execution decision ignores responses process chat',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    transform: (source) => source.replace(/\.responses_process/g, '.provider_type'),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
-  },
-  {
-    name: 'execution decision forces responses process chat to direct',
-    file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
-    transform: (source) => source.replace(
-      '        V3Execution11ProtocolDecisionMode::HubRelay\n    } else if entry_protocol == selected_provider_protocol {',
-      '        V3Execution11ProtocolDecisionMode::SameProtocolDirect\n    } else if entry_protocol == selected_provider_protocol {',
-    ),
-    diagnostic: /V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay/,
-  },
-  {
     name: 'runtime reconstructs control from client payload metadata',
     file: 'v3/crates/routecodex-v3-runtime/src/nodes.rs',
     mutation: '\nfn forbidden_payload_control(body: &serde_json::Value) { let _ = body.pointer("/metadata/runtime_control"); }\n',

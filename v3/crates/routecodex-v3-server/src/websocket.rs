@@ -171,10 +171,60 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
         };
     let request_id = request_identity.request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    let failure_scope = match get_failure_session_scope(&state.server, headers, &request_id) {
+        Ok(scope) => scope,
+        Err(message) => {
+            let _ = send_responses_websocket_error(
+                socket,
+                "runtime_error",
+                format!("provider_transport_handoff_scope_incomplete: {message}"),
+            )
+            .await;
+            return Err(());
+        }
+    };
     let entry_facts = V3ResponsesEntryFacts::project(&payload);
-    let protocol_plan = None;
-    let effective_execution_mode =
-        responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts);
+    // The websocket entry shares the HTTP protocol execution planner: a
+    // responses-native provider must not be pre-forced into Relay here any
+    // more than on the HTTP path.
+    let protocol_plan = match plan_responses_entry_protocol_execution(
+        state,
+        &failure_scope,
+        "WEBSOCKET".to_string(),
+        "/v1/responses".to_string(),
+        V3RequestPurpose::Conversation,
+        &request_id,
+        &execution_id,
+        &request_identity.pipeline_id,
+        &payload,
+        &entry_facts,
+    ) {
+        Some(Ok(plan)) => Some(plan),
+        Some(Err(failure)) => {
+            let projected = project_v3_protocol_execution_plan_failure(failure);
+            let _ = send_responses_websocket_json(
+                socket,
+                &json!({
+                    "type": "error",
+                    "error": projected.body["error"].clone()
+                }),
+            )
+            .await;
+            return Err(());
+        }
+        None => None,
+    };
+    let effective_execution_mode = protocol_plan
+        .as_ref()
+        .map(|plan| match plan.decision.mode {
+            V3Execution11ProtocolDecisionMode::SameProtocolDirect => {
+                V3EntryProtocolExecutionMode::Direct
+            }
+            V3Execution11ProtocolDecisionMode::HubRelay => V3EntryProtocolExecutionMode::Relay,
+        })
+        .unwrap_or_else(|| {
+            responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts)
+        });
     match effective_execution_mode {
         V3EntryProtocolExecutionMode::Direct => {
             let outcome = execute_responses_direct_server_outcome(
