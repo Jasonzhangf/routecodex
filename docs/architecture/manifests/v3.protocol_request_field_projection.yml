@@ -72,7 +72,7 @@ semantic_registry:
       responses: client_metadata
       openai_chat: user_id_projection_other_fields_unmapped
       anthropic: user_id_projection_other_fields_unmapped
-      gemini: unmapped
+      gemini: registered_local_keys_consumed_user_id_and_unknown_unmapped
   - semantic_id: request.prompt_cache_key
     chat_storage: routecodex_chat_extension.responses_request.prompt_cache_key
     type: string
@@ -80,7 +80,7 @@ semantic_registry:
       responses: prompt_cache_key
       openai_chat: prompt_cache_key
       anthropic: unmapped
-      gemini: unmapped
+      gemini: non_empty_consumed_as_local_hint_malformed_unsupported
   - semantic_id: request.store
     chat_storage: routecodex_chat_extension.responses_request.store
     type: boolean
@@ -88,7 +88,7 @@ semantic_registry:
       responses: store
       openai_chat: store
       anthropic: false_consumed_true_unsupported
-      gemini: unmapped
+      gemini: false_consumed_true_unsupported
   - semantic_id: request.text.output_config
     chat_storage: routecodex_chat_extension.responses_request.text
     type: typed_object
@@ -133,7 +133,7 @@ semantic_registry:
       responses: reasoning.summary
       openai_chat: compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher
       anthropic: static_compatible_full_native_thinking_summary
-      gemini: unmapped
+      gemini: default_safe_noop_declared_domain_only_invalid_unmapped
   - semantic_id: request.reasoning_context_policy
     chat_storage: reasoning_context_policy
     type: enum_auto_current_turn_all_turns

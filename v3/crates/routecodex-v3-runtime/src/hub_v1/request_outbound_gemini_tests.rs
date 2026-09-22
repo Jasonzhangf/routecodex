@@ -130,18 +130,18 @@ fn gemini_wire_rejects_reasoning_effort_without_a_shared_level() {
 }
 
 #[test]
-fn gemini_wire_rejects_reasoning_summary_policy_as_unmapped() {
+fn gemini_wire_consumes_default_safe_reasoning_summary_policy() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "reasoning_summary_policy": "detailed"
     });
-    let error =
+    let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini has no declared reasoning_summary_policy projection");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+            .expect("the live Codex client's detailed summary policy is a declared no-op");
+    assert!(
+        request.get("reasoning_summary_policy").is_none(),
+        "consumed reasoning_summary_policy must not reach Gemini wire: {request}"
     );
 }
 
@@ -162,18 +162,36 @@ fn gemini_wire_rejects_invalid_reasoning_summary_policy_as_unmapped() {
 }
 
 #[test]
-fn gemini_wire_rejects_parallel_tool_calls_true_as_unmapped() {
+fn gemini_wire_rejects_whitespace_reasoning_summary_policy_as_unmapped() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "reasoning_summary_policy": " auto "
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("Gemini must not trim canonical reasoning_summary_policy values");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+    );
+}
+
+#[test]
+fn gemini_wire_consumes_parallel_tool_calls_true_as_default_safe() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "parallel_tool_calls": true
     });
-    let error =
+    let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini has no exact parallel_tool_calls projection");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls"
+            .expect(
+            "parallel_tool_calls=true is the permissive default and should not constrain Gemini",
+        );
+    assert!(
+        request.get("parallel_tool_calls").is_none(),
+        "default-safe parallel_tool_calls must not reach Gemini wire: {request}"
     );
 }
 
@@ -327,11 +345,11 @@ fn gemini_wire_preserves_user_owned_routecodex_chat_extension_schema_property() 
     );
 }
 
-// Regression for the live 4444 failure shape: Gemini can consume/project only
-// fields with a declared exact mapping. Other Responses-origin Chat semantics
-// must remain explicit unmapped errors rather than being silently stripped.
+// Regression for the live 4444 failure shape: default-safe Responses-origin
+// fields must be consumed while non-default or constraining semantics remain
+// explicit unmapped errors.
 #[test]
-fn gemini_wire_rejects_unmapped_responses_origin_fields_reported_live() {
+fn gemini_wire_consumes_default_safe_responses_origin_fields_reported_live() {
     let payload = json!({
         "model": "gemini-3.8-flash",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
@@ -342,13 +360,29 @@ fn gemini_wire_rejects_unmapped_responses_origin_fields_reported_live() {
         "tool_choice": "auto",
         "stream": true
     });
-    let error =
+    let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini must reject unmapped Responses-origin Chat fields");
+            .expect("Gemini must consume default-safe Responses-origin fields");
     assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls,$.reasoning_summary_policy"
+        request.pointer("/generationConfig/thinkingConfig/thinkingLevel"),
+        Some(&json!("MEDIUM"))
     );
+    assert_eq!(
+        request.pointer("/toolConfig/functionCallingConfig/mode"),
+        Some(&json!("AUTO"))
+    );
+    for consumed in [
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "reasoning_summary_policy",
+        "routecodex_chat_extension",
+        "tool_choice",
+    ] {
+        assert!(
+            request.get(consumed).is_none(),
+            "consumed field {consumed} must not reach Gemini wire: {request}"
+        );
+    }
 }
 
 #[test]
@@ -402,5 +436,141 @@ fn gemini_wire_rejects_true_responses_store_extension() {
     assert_eq!(
         error,
         "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.store"
+    );
+}
+
+// Regression for live bug 6215563: the Codex Responses client always sends
+// `client_metadata`, `prompt_cache_key` and `text.output_config` inside the
+// registered `routecodex_chat_extension.responses_request` container. Those
+// values are request-local Codex context, not provider semantics, so Gemini
+// must consume the declared default-safe values before wire and keep failing
+// closed for constraining or malformed values.
+#[test]
+fn gemini_wire_consumes_live_codex_responses_extension_fields() {
+    let payload = json!({
+        "model": "gemini-3.8-flash",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "parallel_tool_calls": true,
+        "reasoning_effort": "high",
+        "reasoning_summary_policy": "detailed",
+        "tool_choice": "auto",
+        "stream": true,
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "client_metadata": {
+                    "session_id": "01a0c963-890c-7b83-ab9f-b30d03a5a7ae",
+                    "thread_id": "01a0c963-890c-7b83-ab9f-b30d03a5a7ae",
+                    "turn_id": "01a0c96f-a956-74f3-94ad-b208ba48953d",
+                    "root_turn_id": "01a0c96f-a956-74f3-94ad-b208ba48953d",
+                    "x-codex-installation-id": "15252310-9634-460d-9809-64a631ebd187",
+                    "x-codex-turn-metadata": "{\"agent_name\":\"/root\"}",
+                    "x-codex-window-id": "01a0c963-890c-7b83-ab9f-b30d0"
+                },
+                "prompt_cache_key": "01a0c963-890c-7b83-ab9f-b30d03a5a7ae",
+                "store": false,
+                "text": {"verbosity": "high"}
+            }
+        }
+    });
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect("declared default-safe Codex extension fields must be consumed before Gemini wire");
+    assert!(
+        request.get("routecodex_chat_extension").is_none(),
+        "RouteCodex extension must never reach the Gemini wire: {request}"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_unknown_client_metadata_key() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "client_metadata": {"unregistered_key": "v"}
+            }
+        }
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("unregistered client_metadata keys are not declared for Gemini");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.client_metadata.unregistered_key"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_client_metadata_user_id_without_a_target_field() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {
+            "responses_request": {
+                "client_metadata": {"user_id": "client-user"}
+            }
+        }
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("Gemini has no client_metadata.user_id target field");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.client_metadata.user_id"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_malformed_prompt_cache_key() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {
+            "responses_request": {"prompt_cache_key": "   "}
+        }
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("an empty prompt_cache_key is malformed for Gemini");
+    assert_eq!(
+        error,
+        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request.prompt_cache_key"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_invalid_text_verbosity() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {
+            "responses_request": {"text": {"verbosity": "verbose"}}
+        }
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("verbosity outside low/medium/high is malformed for Gemini");
+    assert_eq!(
+        error,
+        "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request.text.verbosity"
+    );
+}
+
+#[test]
+fn gemini_wire_rejects_unmapped_text_format() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+        "routecodex_chat_extension": {
+            "responses_request": {"text": {"format": {"type": "json_schema"}}}
+        }
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("Gemini has no declared text.format projection in this owner");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.routecodex_chat_extension.responses_request.text.format"
     );
 }

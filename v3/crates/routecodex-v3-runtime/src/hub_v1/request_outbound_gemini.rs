@@ -1,8 +1,14 @@
-// Gemini wire projection for Chat semantics that have a native equivalent.
+// Gemini wire projection for Chat semantics that have a native equivalent or a
+// registered default-safe no-op contract.
 //
 // The gemini top-level whitelist is Gemini-shaped, while the inbound payload
-// carries Chat semantics. Only fields with an exact Gemini equivalent are
-// consumed here; target-unsupported semantics fail before provider wire build.
+// carries Chat semantics. Constraining or non-default target-unsupported
+// semantics fail before provider wire build.
+
+use super::client_metadata_projection::unsupported_client_metadata_paths;
+
+const GEMINI_RESPONSES_REQUEST_EXTENSION_PATH: &str =
+    "$.routecodex_chat_extension.responses_request";
 
 fn project_gemini_compatible_fields(source: &mut Value) -> Result<(), String> {
     project_gemini_compatible_fields_inner(source)
@@ -21,6 +27,8 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
         return Ok(());
     };
     consume_gemini_routecodex_chat_extension(row)?;
+    consume_gemini_parallel_tool_calls_default(row)?;
+    consume_gemini_reasoning_summary_policy_default(row)?;
     if let Some(effort) = row.remove("reasoning_effort") {
         project_gemini_reasoning_effort(row, effort)?;
     }
@@ -28,6 +36,44 @@ fn project_gemini_compatible_fields_inner(source: &mut Value) -> Result<(), Stri
         project_gemini_tool_choice(row, tool_choice)?;
     }
     Ok(())
+}
+
+fn consume_gemini_parallel_tool_calls_default(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(value) = row.remove("parallel_tool_calls") else {
+        return Ok(());
+    };
+    match value.as_bool() {
+        Some(true) => Ok(()),
+        Some(false) => Err(
+            "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls"
+                .to_string(),
+        ),
+        None => Err(
+            "MalformedOutboundField target_protocol=gemini path=$.parallel_tool_calls".to_string(),
+        ),
+    }
+}
+
+fn consume_gemini_reasoning_summary_policy_default(
+    row: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let Some(value) = row.remove("reasoning_summary_policy") else {
+        return Ok(());
+    };
+    let value = value.as_str().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=gemini path=$.reasoning_summary_policy"
+            .to_string()
+    })?;
+    // Contracted Gemini outbound no-op: the canonical Chat policy values select
+    // how a Responses-compatible target shapes reasoning summaries. Gemini has
+    // no equivalent request field, and the live Codex client asks for
+    // `detailed`, so the declared domain is consumed without claiming Gemini
+    // summary support; invalid values still fail closed.
+    if matches!(value, "auto" | "concise" | "detailed") {
+        return Ok(());
+    }
+    Err("UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+        .to_string())
 }
 
 fn validate_gemini_thinking_config_for_selected_target(
@@ -107,6 +153,9 @@ fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Res
         "MalformedOutboundField target_protocol=gemini path=$.routecodex_chat_extension.responses_request"
             .to_string()
     })?;
+    consume_gemini_responses_client_metadata(&mut responses_request)?;
+    consume_gemini_responses_prompt_cache_key(&mut responses_request)?;
+    consume_gemini_responses_text(&mut responses_request)?;
     consume_gemini_responses_store(&mut responses_request)?;
     let mut unsupported: Vec<String> = responses_request
         .keys()
@@ -124,6 +173,93 @@ fn consume_gemini_routecodex_chat_extension(row: &mut Map<String, Value>) -> Res
         ));
     }
     Ok(())
+}
+
+fn consume_gemini_responses_client_metadata(
+    row: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let Some(value) = row.remove("client_metadata") else {
+        return Ok(());
+    };
+    let client_metadata = value.as_object().ok_or_else(|| {
+        format!(
+            "MalformedOutboundField target_protocol=gemini path={GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.client_metadata"
+        )
+    })?;
+    let mut unsupported = Vec::new();
+    // `user_id` is the one source metadata key with a declared provider
+    // projection for OpenAI/Anthropic. Gemini has no equivalent field here, so
+    // consuming it would silently drop provider-visible meaning.
+    if client_metadata.contains_key("user_id") {
+        unsupported.push(format!(
+            "{GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.client_metadata.user_id"
+        ));
+    }
+    for path in unsupported_client_metadata_paths(client_metadata) {
+        match path.strip_prefix("$.request.client_metadata") {
+            Some(suffix) => unsupported.push(format!(
+                "{GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.client_metadata{suffix}"
+            )),
+            None => unsupported.push(path),
+        }
+    }
+    if unsupported.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "UnmappedOutboundFields target_protocol=gemini paths={}",
+        unsupported.join(",")
+    ))
+}
+
+fn consume_gemini_responses_prompt_cache_key(
+    row: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let Some(value) = row.remove("prompt_cache_key") else {
+        return Ok(());
+    };
+    if value
+        .as_str()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "MalformedOutboundField target_protocol=gemini path={GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.prompt_cache_key"
+    ))
+}
+
+fn consume_gemini_responses_text(row: &mut Map<String, Value>) -> Result<(), String> {
+    let Some(value) = row.remove("text") else {
+        return Ok(());
+    };
+    let text = value.as_object().ok_or_else(|| {
+        format!(
+            "MalformedOutboundField target_protocol=gemini path={GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.text"
+        )
+    })?;
+    if let Some(verbosity) = text.get("verbosity") {
+        if !verbosity
+            .as_str()
+            .is_some_and(|value| matches!(value, "low" | "medium" | "high"))
+        {
+            return Err(format!(
+                "MalformedOutboundField target_protocol=gemini path={GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.text.verbosity"
+            ));
+        }
+    }
+    let unsupported: Vec<String> = text
+        .keys()
+        .filter(|key| key.as_str() != "verbosity")
+        .map(|key| format!("{GEMINI_RESPONSES_REQUEST_EXTENSION_PATH}.text.{key}"))
+        .collect();
+    if unsupported.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "UnmappedOutboundFields target_protocol=gemini paths={}",
+        unsupported.join(",")
+    ))
 }
 
 fn consume_gemini_responses_store(row: &mut Map<String, Value>) -> Result<(), String> {
