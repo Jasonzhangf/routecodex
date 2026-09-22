@@ -609,7 +609,9 @@ fn parse_block(
         "thinking" => {
             if object
                 .keys()
-                .any(|key| !["type", "thinking", "signature"].contains(&key.as_str()))
+                .any(|key| {
+                    !["type", "thinking", "signature", "cache_control"].contains(&key.as_str())
+                })
             {
                 return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
             }
@@ -618,7 +620,7 @@ fn parse_block(
         "redacted_thinking" => {
             if object
                 .keys()
-                .any(|key| !["type", "data"].contains(&key.as_str()))
+                .any(|key| !["type", "data", "cache_control"].contains(&key.as_str()))
             {
                 return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
             }
@@ -790,6 +792,51 @@ mod tests {
         }
         assert_eq!(state.blocks[&1].input_json, "{\"x\":1}");
         assert_eq!(state.usage.as_ref().unwrap().output_tokens, Some(2));
+    }
+
+    #[test]
+    fn thinking_block_accepts_cache_control_extension() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type": "thinking",
+                "thinking": "working",
+                "signature": "sig",
+                "cache_control": {"type": "ephemeral"}
+            }),
+        )
+        .expect("cache_control is a provider extension, not malformed reasoning");
+        assert_eq!(block.thinking, "working");
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "cache_control")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"type": "ephemeral"}))
+        );
+    }
+
+    #[test]
+    fn redacted_thinking_block_accepts_cache_control_extension() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type": "redacted_thinking",
+                "data": "opaque",
+                "cache_control": {"type": "ephemeral"}
+            }),
+        )
+        .expect("cache_control is a provider extension, not malformed reasoning");
+        assert_eq!(block.redacted_data.as_deref(), Some("opaque"));
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "cache_control")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"type": "ephemeral"}))
+        );
     }
 
     #[test]
