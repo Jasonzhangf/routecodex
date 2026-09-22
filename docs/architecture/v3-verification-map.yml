@@ -3201,13 +3201,16 @@ features:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
   - A non-SSE inner response on an accepted SSE channel becomes an internal response-stage Error01-06 failure; it is never reinterpreted from payload bytes.
-  - A post-commit provider failure does not reroute or rebuild the current response; the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success.
+  - A post-commit provider failure does not reroute or reselect; it discards the partial attempt and projects exactly one typed client terminal, while only a client disconnect or an exhausted target pool closes at EOF. Semantic commit is still withheld until terminal success, so the failed attempt buffer never crosses the client edge.
   - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.
   required_gates:
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:v3-direct-sse-full-attempt-commit
   - npm run verify:v3-architecture-ci
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_client_disconnect_still_closes_without_terminal -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib affected_session_terminal_releases_admission_while_an_independent_session_is_unaffected -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture

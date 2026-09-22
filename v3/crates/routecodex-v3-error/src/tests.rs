@@ -97,10 +97,13 @@ fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
 }
 
 #[test]
-fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
+fn post_commit_sse_recovery_only_allows_a_real_client_disconnect() {
     let transient =
         raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended");
-    assert!(is_v3_sse_recoverable_disconnect_source(&transient));
+    assert_eq!(
+        v3_sse_post_commit_disposition(&transient),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
 
     let http = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -108,10 +111,99 @@ fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
         "provider_http_429",
         "rate limited",
     );
-    assert!(!is_v3_sse_recoverable_disconnect_source(&http));
     assert_eq!(
         v3_sse_post_commit_disposition(&http),
         V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    let disconnect = raise_v3_sse_client_disconnect();
+    assert_eq!(
+        v3_sse_post_commit_disposition(&disconnect),
+        V3SsePostCommitDisposition::CloseEof
+    );
+}
+
+#[test]
+fn post_commit_provider_failure_always_projects_a_typed_terminal_on_the_affected_session() {
+    // Regression 7a7f58e: an in-band provider failure after commit used to be
+    // classified as a recoverable close. The server then ended the client body
+    // at EOF with no protocol terminal, so the affected session never reached a
+    // terminal state again while a brand new session still worked. A provider
+    // error must project a typed terminal; only a real client disconnect may
+    // close the stream.
+    let in_band = raise_v3_sse_provider_failure(
+        "provider_response_sse_stream",
+        "provider stream ended without terminal",
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&in_band),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    let provider_http = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_400",
+        "provider returned 400",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(400),
+            code: Some("HTTP_400".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: None,
+            message: Some("context_length_exceeded".to_string()),
+        },
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&provider_http),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    // Control case: a genuine client disconnect still closes the stream without
+    // fabricating a provider success or an internal failure terminal.
+    let disconnect = raise_v3_sse_client_disconnect();
+    assert_eq!(
+        v3_sse_post_commit_disposition(&disconnect),
+        V3SsePostCommitDisposition::CloseEof
+    );
+}
+
+#[test]
+fn post_commit_provider_failure_terminal_preserves_the_real_provider_classification() {
+    // The provider failure must not be rewritten into the internal 599
+    // response-stage error: its real code and external status survive
+    // Error01 -> Error06, while a genuine internal failure still projects 599.
+    let provider_http = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_429",
+        "provider returned 429",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("HTTP_429".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: None,
+            message: Some("rate limited".to_string()),
+        },
+    );
+    let projected = project_v3_post_commit_sse_source_with_status(provider_http, 502);
+    assert_eq!(projected.status, 502);
+    // Pool exhaustion collapses the public code to the neutral client code,
+    // but it is no longer the internal response-stage error.
+    assert_eq!(projected.body["error"]["code"], "network_error");
+    assert_eq!(projected.chain, V3_ERROR_CHAIN_NODE_IDS);
+
+    let internal = raise_v3_sse_runtime_failure(
+        "V3ServerRespOutbound05ClientFrame",
+        "internal_response_stream_error",
+        "internal response stream failed",
+    );
+    let projected = project_v3_post_commit_sse_source_with_status(internal, 599);
+    assert_eq!(projected.status, 599);
+    assert_eq!(
+        projected.body["error"]["code"],
+        "internal_response_stream_error"
     );
 }
 

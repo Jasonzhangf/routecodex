@@ -447,7 +447,9 @@ features:
   - project_v3_pending_endpoint_error
   - build_v3_server_16_http_frame_from_v3_error_06
   - project_v3_post_commit_sse_source
-  - v3_post_commit_sse_error_event_chunk
+  - v3_sse_post_commit_terminal
+  - V3SsePostCommitTerminal
+  - v3_post_commit_sse_terminal_chunk
   - v3_sse_error_event_chunk
   - v3_client_sse_body
   allowed_paths:
