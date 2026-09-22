@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
     ResponsesTransport, V3ProviderError, V3ProviderHttpFailure, V3ProviderResp14Raw,
@@ -944,6 +945,46 @@ data: {"type":"response.reasoning_summary_text.delta","output_index":0,"item_id"
     }
 }
 
+struct ContinuousNonTerminalAnthropicSseTransport;
+
+#[async_trait]
+impl ResponsesTransport for ContinuousNonTerminalAnthropicSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([Ok(
+            br#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_anthropic_hang","status":"in_progress","output":[]}}
+
+"#
+            .to_vec(),
+        )])
+        .chain(futures_util::stream::unfold((), |_| async {
+            Some((
+                Ok::<Vec<u8>, V3ProviderError>(
+                    br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"progress"}
+
+"#
+                    .to_vec(),
+                ),
+                (),
+            ))
+        }));
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn responses_sse_projects_anthropic_thinking_from_response_governance() {
     let scope = "anthropic_thinking_sse";
@@ -1027,6 +1068,64 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
     assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "network_error");
     assert_eq!(output.client_response["error"]["message"], "network error");
+    assert_eq!(
+        output.error_chain.as_deref(),
+        Some(
+            &[
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error03TargetLocalAction",
+                "V3Error04TargetExhaustionDecision",
+                "V3Error05ExecutionDecision",
+                "V3Error06ClientProjected",
+            ][..]
+        )
+    );
+}
+
+#[tokio::test]
+async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
+    let scope = "anthropic_continuous_non_terminal";
+    let mut manifest = manifest(scope);
+    manifest
+        .servers
+        .get_mut(scope)
+        .expect("anthropic relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 250;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(2),
+        execute_v3_anthropic_relay_runtime(
+            &manifest,
+            V3AnthropicRelayRuntimeInput {
+                server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    scope,
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-anthropic-continuous-non-terminal".into(),
+                toolreason_observation_session_id: None,
+                payload: json!({
+                    "model":"claude-client-alias",
+                    "messages":[{"role":"user","content":"continuous non-terminal"}],
+                    "stream":true
+                }),
+            },
+            &ContinuousNonTerminalAnthropicSseTransport,
+        ),
+    )
+    .await
+    .expect("continuous non-terminal Anthropic stream must not hang the runtime")
+    .expect("Anthropic deadline exhaustion must project a typed terminal failure");
+
+    assert_eq!(output.status, 502);
+    assert_eq!(output.client_response["error"]["code"], "network_error");
     assert_eq!(
         output.error_chain.as_deref(),
         Some(

@@ -267,6 +267,10 @@ impl V3AttemptBudget {
         Ok(())
     }
 
+    pub(crate) fn residence_deadline(&self) -> Instant {
+        self.inner.deadline
+    }
+
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
         let planned_limit = self.inner.transport_attempt_limit.load(Ordering::Acquire);
