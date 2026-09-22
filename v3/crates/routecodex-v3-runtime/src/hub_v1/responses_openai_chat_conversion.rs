@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
@@ -322,7 +322,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeSet<String>,
+    custom_tool_names: &BTreeMap<String, String>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -360,12 +360,12 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        if !custom_tool_names.contains(name) {
+        let Some(client_name) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
             ));
-        }
+        };
         let input = custom.get("input").and_then(Value::as_str).ok_or_else(|| {
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool input must be a string before Responses projection"
@@ -375,7 +375,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         return Ok(json!({
             "type":"custom_tool_call",
             "call_id":call_id,
-            "name":name,
+            "name":client_name,
             "input":input
         }));
     }
@@ -411,7 +411,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "arguments":arguments
         }));
     }
-    if custom_tool_names.contains(name) {
+    if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // provider function arguments 必须是我们发出的对象 schema；只把
@@ -421,7 +421,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         return Ok(json!({
             "type":"custom_tool_call",
             "call_id":call_id,
-            "name":name,
+            "name":client_name,
             "input":input
         }));
     }
@@ -481,9 +481,9 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
     ))
 }
 
-pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
+pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMap<String, String> {
+    let mut names = BTreeMap::new();
+    collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), None, &mut names);
     for item in payload
         .get("input")
         .and_then(Value::as_array)
@@ -491,7 +491,7 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSe
         .flatten()
     {
         if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), &mut names);
+            collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), None, &mut names);
         }
     }
     names
@@ -499,19 +499,51 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSe
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
-    names: &mut BTreeSet<String>,
+    qualified_namespace: Option<&str>,
+    names: &mut BTreeMap<String, String>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if tool.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
+        match tool.get("type").and_then(Value::as_str) {
+            Some("custom") => {
+                if let Some(name) = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let provider_name = qualified_namespace
+                        .map(|namespace| provider_name_for_namespace_child(namespace, name))
+                        .unwrap_or_else(|| name.to_string());
+                    names.insert(provider_name, name.to_string());
+                }
+            }
+            Some("namespace") => {
+                let Some(namespace) = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let provider_namespace = qualified_namespace
+                    .map(|parent| provider_name_for_namespace_child(parent, namespace))
+                    .unwrap_or_else(|| namespace.to_string());
+                collect_v3_responses_custom_tool_names_from_tools(
+                    tool.get("tools"),
+                    Some(&provider_namespace),
+                    names,
+                );
+            }
+            _ => {}
         }
-        if let Some(name) = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            names.insert(name.to_string());
-        }
+    }
+}
+
+fn provider_name_for_namespace_child(namespace: &str, child: &str) -> String {
+    if child == namespace || child.starts_with(&format!("{namespace}__")) {
+        child.to_string()
+    } else {
+        format!("{namespace}__{child}")
     }
 }

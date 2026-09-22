@@ -81,12 +81,12 @@ fn collect_namespace_tool_names(
                     map,
                 )?;
             }
-            Some("function") => {
+            Some("function") | Some("custom") => {
                 let function = object.get("function").and_then(Value::as_object);
                 let child = function.and_then(|v| v.get("name"))
                     .or_else(|| object.get("name"))
                     .and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
-                    .ok_or_else(|| format!("provider namespace tool {client_namespace}.tools[{index}] requires a non-empty function name"))?;
+                    .ok_or_else(|| format!("provider namespace tool {client_namespace}.tools[{index}] requires a non-empty function or custom name"))?;
                 let client_path = format!("{client_namespace}.{child}");
                 let provider_name = if child == qualified_namespace || child.starts_with(&format!("{qualified_namespace}__")) {
                     child.to_string()
@@ -95,7 +95,7 @@ fn collect_namespace_tool_names(
                 };
                 map.insert(client_path, provider_name);
             }
-            _ => return Err(format!("provider namespace tool {client_namespace}.tools[{index}].type must be namespace or function")),
+            _ => return Err(format!("provider namespace tool {client_namespace}.tools[{index}].type must be namespace, function, or custom")),
         }
     }
     Ok(())
@@ -181,13 +181,65 @@ fn flatten_namespace_children(
                     flattened,
                 )?;
             }
+            Some("custom") if protocol == "openai-chat" => {
+                flatten_namespace_custom_tool(
+                    protocol,
+                    namespace_name,
+                    child,
+                    &format!("{path}.tools[{index}]"),
+                    flattened,
+                )?;
+            }
+            Some("custom") => {
+                return Err(format!(
+                    "{path}.tools[{index}].type custom is not representable for {protocol}"
+                ));
+            }
             _ => {
                 return Err(format!(
-                    "{path}.tools[{index}].type must be namespace or function"
+                    "{path}.tools[{index}].type must be namespace, function, or custom"
                 ));
             }
         }
     }
+    Ok(())
+}
+
+fn flatten_namespace_custom_tool(
+    protocol: &str,
+    namespace_name: &str,
+    child: &Map<String, Value>,
+    child_path: &str,
+    flattened: &mut Vec<Value>,
+) -> Result<(), String> {
+    for key in child.keys() {
+        if !matches!(key.as_str(), "type" | "name" | "description" | "format") {
+            return Err(format!(
+                "{child_path}.{key} is not representable for {protocol}"
+            ));
+        }
+    }
+    let child_name = child
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{child_path} requires a non-empty custom tool name"))?;
+    let description = match child.get("description") {
+        Some(value) if !value.is_string() => {
+            return Err(format!("{child_path}.description must be a string"));
+        }
+        Some(value) => Some(value.clone()),
+        None => None,
+    };
+    flattened.push(build_provider_function_tool(
+        protocol,
+        namespace_name,
+        child_name,
+        description,
+        Some(openai_chat_freeform_custom_tool_parameters()),
+        None,
+    ));
     Ok(())
 }
 
@@ -304,6 +356,20 @@ fn build_provider_function_tool(
     Value::Object(output)
 }
 
+fn openai_chat_freeform_custom_tool_parameters() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": "Raw free-form tool input."
+            }
+        },
+        "required": ["input"],
+        "additionalProperties": false
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,17 +447,74 @@ mod tests {
     }
 
     #[test]
+    fn flattens_openai_chat_custom_namespace_child_to_freeform_function() {
+        let flattened = flatten_namespace_tool_for_provider(
+            "openai-chat",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "description":"Patch files",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                }]
+            }),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(flattened.len(), 1);
+        assert_eq!(flattened[0]["type"], "function");
+        assert_eq!(flattened[0]["function"]["name"], "functions__apply_patch");
+        assert_eq!(flattened[0]["function"]["description"], "Patch files");
+        assert_eq!(
+            flattened[0]["function"]["parameters"]["properties"]["input"]["type"],
+            "string"
+        );
+
+        let name_map = namespace_tool_name_map(&json!({
+            "type":"namespace",
+            "name":"functions",
+            "tools":[{"type":"custom","name":"apply_patch"}]
+        }))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            name_map.get("functions.apply_patch").map(String::as_str),
+            Some("functions__apply_patch")
+        );
+    }
+
+    #[test]
     fn rejects_malformed_namespace_child_instead_of_dropping_it() {
         let error = flatten_namespace_tool_for_provider(
             "openai-chat",
             &json!({
                 "type":"namespace",
                 "name":"multi_agent_v1",
-                "tools":[{"type":"custom","name":"raw"}]
+                "tools":[{"type":"raw","name":"raw"}]
             }),
         )
         .unwrap_err();
-        assert!(error.contains("tools[0].type must be namespace or function"));
+        assert!(error.contains("tools[0].type must be namespace, function, or custom"));
+    }
+
+    #[test]
+    fn rejects_custom_namespace_child_for_non_openai_chat_protocol() {
+        let error = flatten_namespace_tool_for_provider(
+            "openai-responses",
+            &json!({
+                "type":"namespace",
+                "name":"functions",
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                }]
+            }),
+        )
+        .unwrap_err();
+        assert!(error.contains("tools[0].type custom is not representable for openai-responses"));
     }
 
     #[test]

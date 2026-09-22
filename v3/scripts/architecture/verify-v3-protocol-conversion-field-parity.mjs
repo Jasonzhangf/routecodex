@@ -106,6 +106,12 @@ const {
   featureBlock,
   walkCurrentImpl,
 } = attachParityHelpers({ failures, paths, text });
+const requireTextCount = (source, label, phrase, expected) => {
+  const count = source.split(phrase).length - 1;
+  if (count !== expected) {
+    failures.push(`${label}: expected ${expected} occurrence(s) of ${phrase}, found ${count}`);
+  }
+};
 const fieldMatrix = YAML.parse(text.fieldMatrix);
 const functionMap = YAML.parse(text.functionMap);
 const mainlineMap = YAML.parse(text.mainlineMap);
@@ -547,10 +553,16 @@ for (const testName of [
 for (const phrase of [
   'if object.get("type").and_then(Value::as_str) == Some("custom")',
   '.get("custom")',
-  'custom_tool_names.contains(name)',
+  '"name":client_name',
   '.get("input")',
   '"type":"custom_tool_call"',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
+requireTextCount(
+  chatToResponses,
+  `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`,
+  'custom_tool_names.get(name)',
+  2,
+);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'target_protocol_unmapped_field_projects_internal_598_without_switching_provider');
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'a request-shape error must not send or switch provider');

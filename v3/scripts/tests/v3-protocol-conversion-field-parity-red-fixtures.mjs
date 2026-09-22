@@ -97,8 +97,15 @@ const cases = [
     name: 'OpenAI Chat custom response is selected from function calls by name',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
     from: 'if object.get("type").and_then(Value::as_str) == Some("custom") {',
-    to: 'if custom_tool_names.contains("custom") {',
+    to: 'if custom_tool_names.get("custom").is_some() {',
     diagnostic: /missing if object\.get\("type"\)/u,
+  },
+  {
+    name: 'OpenAI Chat custom response ignores the active tool name mapping',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
+    from: 'if let Some(client_name) = custom_tool_names.get(name) {',
+    to: 'if let Some(client_name) = custom_tool_names.get("custom") {',
+    diagnostic: /custom_tool_names\.get\(name\)/u,
   },
   {
     name: 'Native OpenAI Chat custom grammar regression test is removed',
