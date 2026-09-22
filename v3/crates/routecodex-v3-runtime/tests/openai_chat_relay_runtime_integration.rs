@@ -405,6 +405,10 @@ struct PostCommitRecoverySseTransport {
     provider_ids: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
+struct WholeAttemptTimeoutThenSuccessTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
 #[async_trait]
 impl ResponsesTransport for ResponsesIncompleteThenChatSuccessTransport {
     async fn send(
@@ -547,6 +551,62 @@ data: [DONE]
 "#
                 .to_vec(),
         )]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for WholeAttemptTimeoutThenSuccessTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        let chunks: Vec<(Duration, Vec<u8>)> = if provider_id.ends_with("_primary") {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            vec![
+                (
+                    Duration::ZERO,
+                    br#"data: {"id":"primary-partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-partial-must-not-commit"},"finish_reason":null}]}
+
+"#
+                    .to_vec(),
+                ),
+                (
+                    Duration::from_millis(20),
+                    br#"data: {"id":"primary-terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-timeout-must-not-commit"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+                    .to_vec(),
+                ),
+            ]
+        } else {
+            vec![(
+                Duration::ZERO,
+                br#"data: {"id":"secondary-terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"secondary-after-timeout"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+                .to_vec(),
+            )]
+        };
+        let stream = futures_util::stream::unfold(chunks.into_iter(), |mut chunks| async move {
+            let (delay, chunk) = chunks.next()?;
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            Some((Ok(chunk), chunks))
+        });
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
             provider_id,
@@ -781,6 +841,70 @@ async fn post_first_frame_provider_failure_hands_off_without_client_error_event(
         "provider failure leaked to client: {text}"
     );
     assert!(!text.contains("post-first-frame provider stream failure"));
+}
+
+#[tokio::test]
+async fn relay_sse_whole_attempt_timeout_reselects_before_client_commit() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_whole_attempt_timeout";
+    let mut manifest = manifest_with_two_providers_for_scope(server_id, true);
+    let primary = format!("{server_id}_primary");
+    manifest
+        .providers
+        .get_mut(&primary)
+        .expect("primary provider exists")
+        .request_timeout_ms = 30;
+    let transport = WholeAttemptTimeoutThenSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-whole-attempt-timeout-reselect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover after a slow whole attempt"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("whole-attempt timeout must reselect before client projection");
+
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
+    assert_eq!(
+        provider_ids,
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ],
+        "whole-attempt timeout must exclude the timed-out provider"
+    );
+    let stream = match output.client_body {
+        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
+        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("secondary-after-timeout"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(!text.contains("primary-timeout-must-not-commit"), "{text}");
+    assert!(!text.contains("event: error"), "{text}");
 }
 
 #[async_trait]
