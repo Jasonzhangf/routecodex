@@ -40,7 +40,7 @@ pub(crate) use relay_runtime_shared::{
     build_v3_relay_observability, error_output, extract_error_type_style,
     extract_message_type_style, handle_provider_failure, provider_pool_exhausted_source,
     provider_request_failure, provider_runtime_failure, provider_target,
-    push_sse_response_chain_trace, server_routing_group,
+    push_sse_response_chain_trace, server_routing_group, terminalize_provider_failure,
     wrap_v3_relay_client_sse_usage_observation, V3RelayCommittedSseStream,
     V3RelayProjectedSseStream, V3RelayProviderFailure,
 };

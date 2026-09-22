@@ -321,6 +321,35 @@ pub(crate) fn provider_request_relay_failure(
     })
 }
 
+pub(crate) fn terminalize_v3_responses_relay_provider_failure(
+    mut failure: V3ResponsesRelayProviderFailure,
+) -> V3ResponsesRelayProviderFailure {
+    if failure.terminal_projection.is_none() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            failure.source_stage,
+            &failure.policy_error_type,
+            &failure.policy_error_message,
+        );
+        failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
+            V3ErrorHandlingCenter::decide_provider(
+                V3ErrorHandlingCenterInput {
+                    source,
+                    action_scope: V3ErrorActionScope::ProviderInstance {
+                        provider_id: failure.provider_id.clone(),
+                    },
+                    candidates_remaining: 0,
+                    source_status: Some(failure.status),
+                },
+                false,
+                false,
+                None,
+            ),
+        ));
+    }
+    failure
+}
+
 pub(crate) fn provider_response_stream_failure(
     error: V3ResponsesRelayRuntimeError,
     request_id: &str,

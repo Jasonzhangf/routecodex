@@ -875,6 +875,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         &selected_target_provider_id,
                     )
                     .map_err(V3ResponsesRelayRuntimeError::Target)?;
+                let stream =
+                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        attempt_budget.residence_deadline(),
+                    );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
@@ -902,12 +909,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             ));
+                        let residence_deadline_error = failure.policy_error_message.contains(
+                            "provider SSE attempt exceeded the request residence deadline",
+                        );
                         drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
                                 selected,
-                                failure,
+                                failure.clone(),
                                 &mut V3ResponsesRelayProviderRetryState {
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
@@ -922,9 +932,21 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             )
                             .await
                         );
+                        let deadline_expired =
+                            attempt_budget.residence_deadline() <= std::time::Instant::now();
                         if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output_with_observation(
                                 failure,
+                                trace,
+                                Some(stream_observation),
+                            ));
+                        }
+                        if residence_deadline_error || deadline_expired {
+                            return Ok(provider_failure_output_with_observation(
+                                attach_v3_provider_failure_events_to_failure(
+                                    terminalize_v3_responses_relay_provider_failure(failure),
+                                    &provider_failure_events,
+                                ),
                                 trace,
                                 Some(stream_observation),
                             ));
