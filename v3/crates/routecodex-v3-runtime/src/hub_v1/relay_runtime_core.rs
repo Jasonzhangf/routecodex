@@ -32,7 +32,8 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 enum V3RelayAttemptCollectFailure {
-    Provider(String),
+    ProviderResponseBody(String),
+    ProviderTransport(String),
     LocalStore(V3AttemptStoreError),
     Observation(String),
 }
@@ -232,7 +233,7 @@ fn observe_v3_provider_sse(
     }))
 }
 
-/// Relay transport 响应头等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
+/// Relay provider attempt 总等待窗口：从 provider manifest 的 `request_timeout_ms` 读取，
 /// 未配置时 serde default 为 300_000ms（5 分钟）。深上下文 provider 可通过
 /// `timeout = 900000` 覆盖为更长窗口。超时后归一化为 Transport 错误进入错误链。
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
@@ -773,73 +774,74 @@ where
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
-        let provider_raw = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
-            transport.send(transport_request),
-        )
-        .await
-        .unwrap_or_else(|_elapsed| {
-            // provider 挂起（响应头等待超时）：归一化为 Transport 错误进入错误链
-            // （记录 provider failure + reselect 切 provider + 连续失败拉黑），
-            // 避免客户端无限重试命中同一挂起 provider。
-            Err(V3ProviderError::Transport {
-                request_id: request_id.to_string(),
-                provider_id: selected_target_provider_id.clone(),
-                reason: "provider response header timed out (suspected hang)".to_string(),
-            })
-        }) {
-            Ok(raw) => raw,
-            Err(V3ProviderError::HttpStatus { response }) => {
-                let failure = C::provider_http_failure(
-                    response.status,
-                    &response.body,
-                    &selected_target_provider_id,
-                );
-                let _ = runtime_timing.finish_external();
-                drop(provider_action_permit.take());
-                if let Some(failure) = handle_provider_failure(
-                    &failure_context,
-                    selected,
-                    failure,
-                    &mut V3RelayProviderFailurePolicyState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        trace: &mut trace,
-                    },
-                    &mut retry_selected,
-                    &mut pending_provider_action_recovery,
-                )
+        let attempt_timeout =
+            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
+        let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;
+        let provider_raw =
+            match tokio::time::timeout_at(attempt_deadline, transport.send(transport_request))
                 .await
-                .map_err(V3RelayCoreError::Target)?
-                {
-                    return Ok(C::assemble_failure_output(failure, trace));
+                .unwrap_or_else(|_elapsed| {
+                    // provider 挂起（响应头等待超时）：归一化为 Transport 错误进入错误链
+                    // （记录 provider failure + reselect 切 provider + 连续失败拉黑），
+                    // 避免客户端无限重试命中同一挂起 provider。
+                    Err(V3ProviderError::Transport {
+                        request_id: request_id.to_string(),
+                        provider_id: selected_target_provider_id.clone(),
+                        reason: "provider response header timed out (suspected hang)".to_string(),
+                    })
+                }) {
+                Ok(raw) => raw,
+                Err(V3ProviderError::HttpStatus { response }) => {
+                    let failure = C::provider_http_failure(
+                        response.status,
+                        &response.body,
+                        &selected_target_provider_id,
+                    );
+                    let _ = runtime_timing.finish_external();
+                    drop(provider_action_permit.take());
+                    if let Some(failure) = handle_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3RelayProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                        &mut retry_selected,
+                        &mut pending_provider_action_recovery,
+                    )
+                    .await
+                    .map_err(V3RelayCoreError::Target)?
+                    {
+                        return Ok(C::assemble_failure_output(failure, trace));
+                    }
+                    continue;
                 }
-                continue;
-            }
-            Err(error) => {
-                let failure = provider_runtime_failure(error, &selected_target_provider_id);
-                let _ = runtime_timing.finish_external();
-                drop(provider_action_permit.take());
-                if let Some(failure) = handle_provider_failure(
-                    &failure_context,
-                    selected,
-                    failure,
-                    &mut V3RelayProviderFailurePolicyState {
-                        failed_candidates: &mut failed_candidates,
-                        same_candidate_retries: &mut same_candidate_retries,
-                        trace: &mut trace,
-                    },
-                    &mut retry_selected,
-                    &mut pending_provider_action_recovery,
-                )
-                .await
-                .map_err(V3RelayCoreError::Target)?
-                {
-                    return Ok(C::assemble_failure_output(failure, trace));
+                Err(error) => {
+                    let failure = provider_runtime_failure(error, &selected_target_provider_id);
+                    let _ = runtime_timing.finish_external();
+                    drop(provider_action_permit.take());
+                    if let Some(failure) = handle_provider_failure(
+                        &failure_context,
+                        selected,
+                        failure,
+                        &mut V3RelayProviderFailurePolicyState {
+                            failed_candidates: &mut failed_candidates,
+                            same_candidate_retries: &mut same_candidate_retries,
+                            trace: &mut trace,
+                        },
+                        &mut retry_selected,
+                        &mut pending_provider_action_recovery,
+                    )
+                    .await
+                    .map_err(V3RelayCoreError::Target)?
+                    {
+                        return Ok(C::assemble_failure_output(failure, trace));
+                    }
+                    continue;
                 }
-                continue;
-            }
-        };
+            };
         if let Err(timing_error) = runtime_timing.finish_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
@@ -1008,15 +1010,29 @@ where
                     .providers
                     .get(&selected_target_provider_id)
                     .and_then(|provider| provider.sse_first_frame_timeout_ms);
-                let guarded_stream = match guard_relay_sse_first_frame(
-                    request_id,
-                    &selected_target_provider_id,
-                    provider_wire_protocol,
-                    stream,
-                    sse_first_frame_timeout_ms,
+                let first_frame_result = match tokio::time::timeout_at(
+                    attempt_deadline,
+                    guard_relay_sse_first_frame(
+                        request_id,
+                        &selected_target_provider_id,
+                        provider_wire_protocol,
+                        stream,
+                        sse_first_frame_timeout_ms,
+                    ),
                 )
                 .await
                 {
+                    Err(_) => Err(V3ProviderError::Transport {
+                        request_id: request_id.to_string(),
+                        provider_id: selected_target_provider_id.clone(),
+                        reason: format!(
+                            "provider SSE stream exceeded the configured request timeout ({}ms) before first frame",
+                            attempt_timeout.as_millis()
+                        ),
+                    }),
+                    Ok(stream) => stream,
+                };
+                let guarded_stream = match first_frame_result {
                     Ok(stream) => stream,
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
                         // The client owns this lifecycle termination. Do not feed it
@@ -1138,7 +1154,18 @@ where
                 })?;
                 let mut projected_sse = projected_sse;
                 let stream_failure = loop {
-                    match projected_sse.next().await {
+                    let next = match tokio::time::timeout_at(attempt_deadline, projected_sse.next())
+                        .await
+                    {
+                        Ok(next) => next,
+                        Err(_) => {
+                            break Some(V3RelayAttemptCollectFailure::ProviderTransport(format!(
+                                "provider SSE stream exceeded the configured request timeout ({}ms) before terminal EOF",
+                                attempt_timeout.as_millis()
+                            )));
+                        }
+                    };
+                    match next {
                         Some(Ok(frame)) => {
                             if let Err(error) = committed_attempt.push(frame) {
                                 break Some(V3RelayAttemptCollectFailure::LocalStore(error));
@@ -1160,13 +1187,13 @@ where
                             }
                         }
                         Some(Err(reason)) => {
-                            break Some(V3RelayAttemptCollectFailure::Provider(reason))
+                            break Some(V3RelayAttemptCollectFailure::ProviderResponseBody(reason))
                         }
                         None => break None,
                     }
                 };
                 if let Some(failure) = stream_failure {
-                    let reason = match failure {
+                    let provider_error = match failure {
                         V3RelayAttemptCollectFailure::LocalStore(error) => {
                             drop(provider_action_permit.take());
                             return Err(V3RelayCoreError::Target(format!(
@@ -1179,20 +1206,28 @@ where
                                 "V3RuntimeStreamObservation relay control failure: {error}"
                             )));
                         }
-                        V3RelayAttemptCollectFailure::Provider(reason) => reason,
+                        V3RelayAttemptCollectFailure::ProviderResponseBody(reason) => {
+                            if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
+                                drop(provider_action_permit.take());
+                                return Err(V3RelayCoreError::WebSearchIntercepted(reason));
+                            }
+                            V3ProviderError::ResponseBody {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!("provider response event codec failed: {reason}"),
+                            }
+                        }
+                        V3RelayAttemptCollectFailure::ProviderTransport(reason) => {
+                            V3ProviderError::Transport {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason,
+                            }
+                        }
                     };
                     drop(provider_action_permit.take());
-                    if reason.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
-                        return Err(V3RelayCoreError::WebSearchIntercepted(reason));
-                    }
-                    let failure = provider_runtime_failure(
-                        V3ProviderError::ResponseBody {
-                            request_id: request_id.to_string(),
-                            provider_id: selected_target_provider_id.clone(),
-                            reason: format!("provider response event codec failed: {reason}"),
-                        },
-                        &selected_target_provider_id,
-                    );
+                    let failure =
+                        provider_runtime_failure(provider_error, &selected_target_provider_id);
                     if let Some(failure) = handle_provider_failure(
                         &failure_context,
                         selected,
