@@ -392,11 +392,7 @@ pub fn v3_builtin_model_defaults(model_id: &str) -> Option<&'static V3BuiltinMod
 /// 模型目录 / 能力面暴露。
 pub fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
     let normalized = normalized_model_id(model_id);
-    INTERNAL_CONFIG
-        .hidden_models
-        .exact
-        .iter()
-        .any(|id| *id == normalized)
+    INTERNAL_CONFIG.hidden_models.exact.contains(&normalized)
         || INTERNAL_CONFIG
             .hidden_models
             .prefixes

@@ -601,8 +601,8 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
     )
 }
 
-/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，
-/// 仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+#[allow(clippy::too_many_arguments)]
 pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     request_id: impl Into<String>,
     provider_id: impl Into<String>,

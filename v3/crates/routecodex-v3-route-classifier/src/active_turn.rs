@@ -169,14 +169,11 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
             if part.has_web_search {
                 has_current_turn_web_search = true;
             }
-            match entry.role {
-                ChatTurnRole::Tool => {
-                    has_current_turn_tool_output = true;
-                    if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
-                        has_current_turn_tool_execution_error = true;
-                    }
+            if entry.role == ChatTurnRole::Tool {
+                has_current_turn_tool_output = true;
+                if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
+                    has_current_turn_tool_execution_error = true;
                 }
-                _ => {}
             }
         }
         if matches!(entry.role, ChatTurnRole::Assistant) {
@@ -320,11 +317,11 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     }
 }
 
-fn chat_active_segment<'a>(
-    entries: &'a [ChatTurnEntry],
+fn chat_active_segment(
+    entries: &[ChatTurnEntry],
     latest_user_index: Option<usize>,
     latest_role: Option<ChatTurnRole>,
-) -> Option<&'a [ChatTurnEntry]> {
+) -> Option<&[ChatTurnEntry]> {
     if matches!(latest_role, Some(ChatTurnRole::User)) {
         return None;
     }
@@ -332,11 +329,11 @@ fn chat_active_segment<'a>(
     Some(&entries[start..])
 }
 
-fn responses_active_segment<'a>(
-    entries: &'a [ResponsesTurnEntry],
+fn responses_active_segment(
+    entries: &[ResponsesTurnEntry],
     latest_user_index: Option<usize>,
     latest_role: Option<ResponsesTurnRole>,
-) -> Option<&'a [ResponsesTurnEntry]> {
+) -> Option<&[ResponsesTurnEntry]> {
     if matches!(latest_role, Some(ResponsesTurnRole::User)) {
         return None;
     }

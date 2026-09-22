@@ -3,6 +3,8 @@ use crate::key_health::V3ProviderHealthProbePermit;
 use crate::provider_cooldown_probe::resolve_provider_cooldown_probe_key;
 use persistence::persist_cooldown_state;
 
+pub type V3ProviderCooldownProbeKey = (String, Option<String>, Option<String>);
+
 impl V3ProviderHealthStore {
     /// provider 级冷却中、冷却已到期且 probe 到期的 provider 列表
     /// （(provider_id, auth_alias, model_id)）。由后台 probe 循环消费。
@@ -11,7 +13,7 @@ impl V3ProviderHealthStore {
         &self,
         now_ms: u64,
         startup: bool,
-    ) -> Result<Vec<(String, Option<String>, Option<String>)>, V3ProviderHealthError> {
+    ) -> Result<Vec<V3ProviderCooldownProbeKey>, V3ProviderHealthError> {
         let state = self
             .state
             .read()
@@ -40,7 +42,7 @@ impl V3ProviderHealthStore {
     pub fn provider_cooldown_probe_keys_due(
         &self,
         now_ms: u64,
-    ) -> Result<Vec<(String, Option<String>, Option<String>)>, V3ProviderHealthError> {
+    ) -> Result<Vec<V3ProviderCooldownProbeKey>, V3ProviderHealthError> {
         self.provider_cooldown_probe_keys(now_ms, false)
     }
 

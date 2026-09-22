@@ -24,7 +24,7 @@ nodes:
     semantic: consumes already-bound provider model and performs declared provider compatibility only
   - node_id: V3Provider12ResponsesWirePayload
     owner: routecodex-v3-provider-responses
-    semantic: validates body.model equals selected wire model and rejects mismatch
+    semantic: validates body.model equals selected wire model and rejects mismatch for body-model protocols
 edges:
   - { step_id: v3-model-bind-01, from_node: V3Target10ConcreteProviderSelected, to_node: V3SelectedProviderModelBindingBlock, mode: direct }
   - { step_id: v3-model-bind-02, from_node: V3SelectedProviderModelBindingBlock, to_node: V3Provider12ResponsesWirePayload, mode: direct }
@@ -35,7 +35,8 @@ invariants:
   - The selected target wire_model is the sole upstream model truth.
   - Direct and Relay call the same binding owner.
   - Provider compatibility sees the selected provider model, never the client route alias.
-  - Provider wire validates equality and never repairs a stale model.
+  - Provider wire validates equality and never repairs a stale model for protocols that carry model in the provider body.
+  - Gemini encodes selected wire_model in the URL path and must omit body.model from the provider body.
   - Reselection repeats the binding from the newly selected target for every attempt.
 verification_gates:
   - npm run verify:v3-selected-provider-model-binding

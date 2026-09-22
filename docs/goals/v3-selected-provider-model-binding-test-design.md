@@ -9,15 +9,17 @@
 1. Binding accepts an object and writes exactly `selected.wire_model`.
 2. Binding mutates only the cloned provider payload; client model observation remains in route facts and the selected target remains immutable.
 3. Empty selected wire model fails.
-4. Provider wire accepts an exactly bound model.
-5. Provider wire rejects missing/mismatched model and never repairs it.
+4. Provider wire accepts an exactly bound model for body-model protocols.
+5. Provider wire rejects missing/mismatched body.model and never repairs it for body-model protocols.
+6. Gemini transport encodes the selected wire model in the URL path and omits body.model.
 
 ## Module black-box
 
 1. Direct request projection sends selected wire model when client alias differs.
 2. Relay ProviderReqCompat06 sees selected wire model before model-aware compatibility executes.
-3. Responses/OpenAI Chat/Anthropic/Gemini outbound bodies preserve selected wire model.
-4. Retry/reselect binds the model independently per attempt.
+3. Responses/OpenAI Chat/Anthropic outbound bodies preserve selected wire model.
+4. Gemini outbound URL path preserves selected wire model and the provider body omits model.
+5. Retry/reselect binds the model independently per attempt.
 
 ## Project black-box
 
@@ -28,7 +30,8 @@
 
 ## Positive / negative pairs
 
-- Positive: bound target model reaches transport. Negative: stale client model fails at wire gate.
+- Positive: bound target model reaches transport. Negative: stale client model fails at body-model wire gate.
+- Positive: Gemini URL path carries selected wire model. Negative: Gemini provider body does not carry body.model.
 - Positive: reselect uses new candidate model. Negative: prior attempt model cannot leak.
 - Positive: protocol codec copies bound model. Negative: codec cannot select from client alias.
 - Positive: upstream provider errors remain external. Negative: local binding mismatch is never

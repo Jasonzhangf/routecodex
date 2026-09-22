@@ -10,17 +10,12 @@ pub enum V3ProviderRecoveryKind {
     NotProviderHealth,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum V3ProviderHealthScope {
+    #[default]
     None,
     SessionProviderKey,
     GlobalProviderKey,
-}
-
-impl Default for V3ProviderHealthScope {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,7 +72,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .and_then(|error| error.status);
     // 统一错误模型：不再按状态码豁免——瞬态重试来源与 400/4xx 同样计入
     // 全局健康，首次 provider failure 即进入共享冷却，由后台探活或真实成功恢复。
-    if matches!(status, Some(401 | 402 | 403))
+    if matches!(status, Some(401..=403))
         || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
         let cooldown_ms = 5_000;
@@ -88,7 +83,7 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
             score_delta_milli: -20,
             failure_threshold: 0,
             cooldown_ms,
-            long_probe_backoff: matches!(status, Some(401 | 402 | 403)),
+            long_probe_backoff: matches!(status, Some(401..=403)),
         };
     }
     let mut action = V3ProviderFailureAction::recoverable(&classified.source.code);

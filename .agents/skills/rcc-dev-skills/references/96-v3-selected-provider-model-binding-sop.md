@@ -20,6 +20,7 @@ model divergence, retry candidate model leakage, or upstream "model not configur
 
 1. Inspect canonical `ports/<port>/<requestId>/request.json`.
 2. Inspect every `provider-request.json.attempts[].request.{providerId,body.model,url}`.
+   For Gemini, the selected model is proven by the URL path and `body.model` must be absent.
 3. Inspect matching `provider-response.json.attempts[].response`.
 4. Separate strings generated locally from strings appearing only in upstream responses/headers.
 5. Trace `Router07 -> Target10 {model_id,wire_model} -> binding -> compat -> wire -> transport`.
@@ -32,6 +33,8 @@ model divergence, retry candidate model leakage, or upstream "model not configur
 - `selected_provider_model_binding` is the sole semantic model replacement owner.
 - Direct and Relay must call the same owner before provider-specific compatibility.
 - Provider wire validates equality and must not repair a mismatch.
+- Gemini is the URL-model exception: the selected `wire_model` is encoded in `/models/{wire_model}:...`
+  and `body.model` is omitted from the provider body.
 - Retry/reselect binds each attempt independently.
 - Never add provider suffix/prefix special cases to Router/Hub.
 
@@ -39,7 +42,8 @@ model divergence, retry candidate model leakage, or upstream "model not configur
 
 | Evidence | Owner |
 | --- | --- |
-| wrong model already in provider-request body | local selected-model binding contract |
+| wrong model already in provider-request body for body-model protocols | local selected-model binding contract |
+| wrong model in Gemini provider-request URL or Gemini body.model present | Gemini transport selected-model URL binding |
 | provider-request correct; different model only in provider response | upstream provider mapping/billing |
 | compat behavior matches client alias, final wire model is correct | binding occurred too late |
 | second attempt carries first target model | retry attempt binding leak |
@@ -48,6 +52,7 @@ model divergence, retry candidate model leakage, or upstream "model not configur
 
 - Positive and negative model-binding tests.
 - Static unique-writer gate.
-- Provider-request dry-run showing client alias != selected wire model.
+- Provider-request dry-run showing client alias != selected wire model. For Gemini, this evidence is
+  URL path model identity plus absent `body.model`.
 - Old live sample replay.
 - Root cause and architectural owner explanation in the final summary.

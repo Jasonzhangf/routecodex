@@ -114,10 +114,23 @@ pub(crate) fn build_v3_provider_transport_request_for_protocol(
             build_v3_anthropic_messages_transport_request_from_v3_provider_08(wire)
                 .map_err(|error| error.to_string())
         }
-        V3HubProviderWireProtocol::Gemini => Err(
-            "selected provider wire protocol gemini has no registered HTTP transport builder"
-                .to_string(),
-        ),
+        V3HubProviderWireProtocol::Gemini => {
+            let transport_intent = match wire.stream_intent() {
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Sse => {
+                    super::V3HubTransportIntent::Sse
+                }
+                routecodex_v3_provider_responses::V3ResponsesStreamIntent::Json => {
+                    super::V3HubTransportIntent::Json
+                }
+            };
+            super::build_v3_gemini_transport_09(
+                wire.request_id(),
+                wire.target().clone(),
+                transport_intent,
+                wire.body().clone(),
+            )
+            .map_err(|error| error.to_string())
+        }
     }
 }
 
