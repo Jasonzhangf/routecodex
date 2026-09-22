@@ -1,5 +1,5 @@
 {
-  "bundle_digest": "sha256:8f1e5af4b6bc757df2328f02f5de70479e17e157dc475262cacb7c1484161358",
+  "bundle_digest": "sha256:752c5fdd98f08ada81d7381159dea21aff25fe830ac4e6a5f34d775dfcbba6ac",
   "manifest_digest": "sha256:c0e3756d3d801912d91e0df0d24ef8ad473a627ca593d6c0c5d7657c0b358c33",
   "resources": [
     {
@@ -142,7 +142,7 @@
     },
     {
       "class": "contracts",
-      "digest": "sha256:4568668437b4e0b44db4709d27e31c2783c8a6e4ccd828273a4675775f69ca1f",
+      "digest": "sha256:ae910c4426c8bccc22c9e2256e8ca9842eb39c2caa783428afec5c9a2d44c5d5",
       "path": ".appsdk/contracts/transitions/zone-transition.manifest.json",
       "source": "contracts/transitions/zone-transition.manifest.json"
     },
