@@ -3208,6 +3208,9 @@ features:
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:v3-direct-sse-full-attempt-commit
   - npm run verify:v3-architecture-ci
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_client_disconnect_still_closes_without_terminal -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib affected_session_terminal_releases_admission_while_an_independent_session_is_unaffected -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
