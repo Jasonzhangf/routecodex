@@ -97,10 +97,10 @@ fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
 }
 
 #[test]
-fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
+fn post_commit_sse_recovery_only_allows_a_real_client_disconnect() {
     let transient =
         raise_v3_sse_provider_failure("provider_response_sse_stream", "provider stream ended");
-    assert!(is_v3_sse_recoverable_disconnect_source(&transient));
+    assert!(!is_v3_sse_recoverable_disconnect_source(&transient));
 
     let http = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -111,6 +111,77 @@ fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
     assert!(!is_v3_sse_recoverable_disconnect_source(&http));
     assert_eq!(
         v3_sse_post_commit_disposition(&http),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    let disconnect = raise_v3_sse_client_disconnect();
+    assert!(is_v3_sse_recoverable_disconnect_source(&disconnect));
+}
+
+#[test]
+fn post_commit_provider_failure_always_projects_a_typed_terminal_on_the_affected_session() {
+    // Regression 7a7f58e: an in-band provider failure after commit used to be
+    // classified as a recoverable close. The server then ended the client body
+    // at EOF with no protocol terminal, so the affected session never reached a
+    // terminal state again while a brand new session still worked. A provider
+    // error must project a typed terminal; only a real client disconnect may
+    // close the stream.
+    let in_band = raise_v3_sse_provider_failure(
+        "provider_response_sse_stream",
+        "provider stream ended without terminal",
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&in_band),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    let provider_http = build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_400",
+        "provider returned 400",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(400),
+            code: Some("HTTP_400".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: None,
+            message: Some("context_length_exceeded".to_string()),
+        },
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&provider_http),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+
+    // Control case: a genuine client disconnect still closes the stream without
+    // fabricating a provider success or an internal failure terminal.
+    let disconnect = raise_v3_sse_client_disconnect();
+    assert_eq!(
+        v3_sse_post_commit_disposition(&disconnect),
+        V3SsePostCommitDisposition::CloseEof
+    );
+}
+
+#[test]
+fn post_commit_provider_failure_terminal_is_independent_per_session() {
+    // Control case: the typed terminal of one affected session source must not
+    // depend on, or leak into, an independent session's disposition.
+    let affected = raise_v3_sse_provider_failure(
+        "provider_response_sse_stream",
+        "session a provider stream ended",
+    );
+    let independent = raise_v3_sse_runtime_failure(
+        "V3ServerRespOutbound06ClientFrame",
+        "internal_response_stream_error",
+        "session b internal stream failed",
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&affected),
+        V3SsePostCommitDisposition::ProjectInternalTerminal
+    );
+    assert_eq!(
+        v3_sse_post_commit_disposition(&independent),
         V3SsePostCommitDisposition::ProjectInternalTerminal
     );
 }

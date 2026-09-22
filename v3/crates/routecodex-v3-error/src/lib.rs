@@ -1219,10 +1219,10 @@ pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
 }
 
-/// A provider becoming unavailable after the client SSE response has been
-/// committed is recoverable by the caller: close the stream at EOF so the
-/// caller can replay the same entry. Internal response failures remain
-/// explicit 599 terminals at the server boundary.
+/// A real client disconnect after the client SSE response has been committed
+/// closes the stream at EOF; the caller then owns replay of that abandoned
+/// entry. Post-commit provider failures are not recoverable here: they must
+/// project a typed terminal so the affected session still closes.
 pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(
         crate::sse_disposition::v3_sse_post_commit_disposition(source),

@@ -499,7 +499,11 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect() {
+async fn direct_live_sse_provider_failure_projects_typed_terminal_without_provider_detail() {
+    // Regression 7a7f58e: this stream used to close at EOF with no protocol
+    // terminal, which left the affected session with no terminal state. The
+    // provider failure now projects a typed terminal while provider-internal
+    // detail stays off the client stream.
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -527,10 +531,10 @@ async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect()
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
-    assert!(!text.contains("event: response.failed"), "{text}");
-    assert!(!text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.contains("event: response.failed"), "{text}");
+    assert!(text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(!text.contains("data: [DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -3872,6 +3876,60 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
+    );
+}
+
+#[tokio::test]
+async fn responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof() {
+    // Regression 7a7f58e: an in-band provider failure after commit must reach a
+    // protocol terminal. A bare EOF left the affected client session with no
+    // terminal state, while a brand new session continued to work.
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_provider_failure(
+            "provider_response_sse_stream",
+            "provider stream ended without terminal",
+        ),
+    )]);
+    let body = v3_live_client_sse_body_for_protocol(
+        Box::pin(provider),
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    let mut client = body.into_data_stream();
+
+    let terminal = client
+        .next()
+        .await
+        .expect("provider stream failure must emit a typed terminal event")
+        .expect("terminal event must be transportable");
+    let terminal = std::str::from_utf8(&terminal).unwrap();
+    assert!(
+        terminal.starts_with("event: response.failed\n"),
+        "{terminal}"
+    );
+    assert!(terminal.ends_with("data: [DONE]\n\n"), "{terminal}");
+    assert!(
+        client.next().await.is_none(),
+        "typed terminal must close the affected session body"
+    );
+}
+
+#[tokio::test]
+async fn responses_live_sse_client_disconnect_still_closes_without_terminal() {
+    // Control case for 7a7f58e: a genuine client disconnect must not fabricate
+    // a provider success or failure terminal; it still closes at EOF.
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_client_disconnect(),
+    )]);
+    let body = v3_live_client_sse_body_for_protocol(
+        Box::pin(provider),
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    let mut client = body.into_data_stream();
+    assert!(
+        client.next().await.is_none(),
+        "client disconnect must close without a fabricated terminal"
     );
 }
 
