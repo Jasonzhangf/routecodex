@@ -305,6 +305,172 @@ async fn responses_openai_chat_namespace_exec_function_call_restored_runtime() {
 }
 
 #[tokio::test]
+async fn responses_openai_chat_namespace_custom_leaf_exec_restores_dispatch_json() {
+    let raw_input = "const r = await tools.clock__curr_time({}); text(JSON.stringify(r));\n";
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-codex-custom-exec",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{
+                "id":"call_custom_exec",
+                "type":"function",
+                "function":{"name":"exec","arguments":serde_json::json!({"input":raw_input}).to_string()}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-responses-openai-chat-codex-custom-leaf-exec",
+            serde_json::json!({
+                "model":"gpt-6-luna",
+                "stream":false,
+                "input":[
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"read the clock"}]},
+                    {"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{
+                        "type":"custom","name":"exec","description":"Run tools",
+                        "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                    }]}]}
+                ]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("declared Codex custom tool must project through Responses Relay");
+
+    let response = match &result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("request selected JSON response transport"),
+    };
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1);
+    assert!(captures[0].1["tools"].as_array().is_some_and(|tools| {
+        tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "functions__exec")
+    }));
+    assert_eq!(result.status, 200);
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "exec");
+    assert_eq!(response["output"][0]["call_id"], "call_custom_exec");
+    assert_eq!(response["output"][0]["input"], raw_input);
+    assert!(response["output"][0].get("arguments").is_none());
+
+    let tool_call = response["output"][0].clone();
+    drop(captures);
+    let followup = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-codex-custom-exec-followup",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"The clock tool returned 12:34."},"finish_reason":"stop"}]
+        }),
+    };
+    let followup_result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-responses-openai-chat-codex-custom-leaf-exec-followup",
+            serde_json::json!({
+                "model":"gpt-6-luna",
+                "stream":false,
+                "input":[
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"read the clock"}]},
+                    tool_call,
+                    {"type":"custom_tool_call_output","call_id":"call_custom_exec","output":"12:34"},
+                    {"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{
+                        "type":"custom","name":"exec","description":"Run tools",
+                        "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                    }]}]}
+                ]
+            }),
+        ),
+        &followup,
+    )
+    .await
+    .expect("client custom tool output must reach the same provider call_id");
+    assert_eq!(followup_result.status, 200);
+    let followup_captures = followup.captures.lock().unwrap();
+    assert_eq!(followup_captures.len(), 1);
+    let messages = followup_captures[0].1["messages"].as_array().unwrap();
+    assert!(messages.iter().any(|message| message["role"] == "assistant"
+        && message["tool_calls"][0]["id"] == "call_custom_exec"));
+    assert!(messages.iter().any(|message| message["role"] == "tool"
+        && message["tool_call_id"] == "call_custom_exec"
+        && message["content"] == "12:34"));
+}
+
+#[tokio::test]
+async fn responses_openai_chat_namespace_custom_leaf_exec_restores_dispatch_sse() {
+    use futures_util::StreamExt;
+
+    let transport = ProviderProjectionSseTransport {
+        captures: Mutex::new(Vec::new()),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-responses-openai-chat-codex-custom-leaf-exec-sse",
+            serde_json::json!({
+                "model":"gpt-6-luna",
+                "stream":true,
+                "input":[
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"read the clock"}]},
+                    {"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{
+                        "type":"custom","name":"exec","description":"Run tools",
+                        "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                    }]}]}
+                ]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("Codex custom tool call must project through Responses SSE");
+    assert_eq!(result.status, 200);
+    assert!(transport.captures.lock().unwrap()[0].1["tools"]
+        .as_array()
+        .is_some_and(|tools| tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "functions__exec")));
+
+    let mut stream = match result.client_body {
+        V3ResponsesRelayClientBody::Sse(stream) => stream,
+        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE"),
+    };
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        bytes.extend(chunk);
+    }
+    let client_sse = String::from_utf8(bytes).expect("client SSE must be valid UTF-8");
+    assert!(
+        client_sse.contains("event: response.output_item.done"),
+        "{client_sse}"
+    );
+    assert!(
+        client_sse.contains("\"type\":\"custom_tool_call\""),
+        "{client_sse}"
+    );
+    assert!(client_sse.contains("\"name\":\"exec\""), "{client_sse}");
+    assert!(
+        client_sse.contains("\"call_id\":\"call_exec_sse\""),
+        "{client_sse}"
+    );
+    assert!(
+        client_sse.contains("\"input\":\"text(1 + 1)\\n\""),
+        "{client_sse}"
+    );
+    assert!(
+        client_sse.contains("event: response.completed"),
+        "{client_sse}"
+    );
+}
+
+#[tokio::test]
 async fn responses_openai_chat_namespace_exec_function_call_restored_sse_runtime() {
     use futures_util::StreamExt;
 

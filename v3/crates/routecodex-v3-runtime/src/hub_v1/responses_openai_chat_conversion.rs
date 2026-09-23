@@ -573,7 +573,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeMap<String, String>,
+    custom_tool_names: &BTreeMap<String, Option<(String, String)>>,
     namespaced_function_names: &BTreeMap<String, Option<(String, String)>>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
@@ -612,7 +612,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        let Some(client_name) = custom_tool_names.get(name) else {
+        let Some(Some((_, client_name))) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
@@ -663,7 +663,19 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "arguments":arguments
         }));
     }
-    if let Some(client_name) = custom_tool_names.get(name) {
+    if let Some(custom_identity) = custom_tool_names.get(name) {
+        let Some((_, client_name)) = custom_identity else {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("OpenAI Chat tool_call {name} matches multiple declared custom tools"),
+            ));
+        };
+        if namespaced_function_names.contains_key(name) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!(
+                    "OpenAI Chat tool_call {name} matches both custom and function declarations"
+                ),
+            ));
+        }
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // provider function arguments 必须是我们发出的对象 schema；只把
@@ -798,12 +810,12 @@ fn collect_v3_responses_namespaced_function_names_from_tools(
             .filter(|name| !name.is_empty())
             .unwrap_or(tool_name);
         let value = (namespace.to_string(), client_tool_name.to_string());
-        insert_v3_responses_namespace_alias(names, &qualified_name, &value);
-        insert_v3_responses_namespace_alias(names, tool_name, &value);
+        insert_v3_responses_declared_tool_alias(names, &qualified_name, &value);
+        insert_v3_responses_declared_tool_alias(names, tool_name, &value);
     }
 }
 
-fn insert_v3_responses_namespace_alias(
+fn insert_v3_responses_declared_tool_alias(
     names: &mut BTreeMap<String, Option<(String, String)>>,
     alias: &str,
     value: &(String, String),
@@ -859,7 +871,9 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
     ))
 }
 
-pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMap<String, String> {
+pub(crate) fn collect_v3_responses_custom_tool_names(
+    payload: &Value,
+) -> BTreeMap<String, Option<(String, String)>> {
     let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), None, &mut names);
     for item in payload
@@ -878,7 +892,7 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMa
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
     qualified_namespace: Option<&str>,
-    names: &mut BTreeMap<String, String>,
+    names: &mut BTreeMap<String, Option<(String, String)>>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         match tool.get("type").and_then(Value::as_str) {
@@ -892,7 +906,11 @@ pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
                     let provider_name = qualified_namespace
                         .map(|namespace| provider_name_for_namespace_child(namespace, name))
                         .unwrap_or_else(|| name.to_string());
-                    names.insert(provider_name, name.to_string());
+                    let identity = (provider_name.clone(), name.to_string());
+                    insert_v3_responses_declared_tool_alias(names, &provider_name, &identity);
+                    if qualified_namespace.is_some() {
+                        insert_v3_responses_declared_tool_alias(names, name, &identity);
+                    }
                 }
             }
             Some("namespace") => {
