@@ -94,11 +94,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     // pre-hook Responses body here would classify the wire shape instead of the
     // normalized request and can miss semantic routing facts such as reasoning.
     let route_facts_body = std::sync::Arc::clone(request_outcome.payload_arc());
-    let anthropic_response_projection_context =
-        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&provider_semantic_body)
-            .map_err(|error| {
-                V3ResponsesRelayRuntimeError::ProviderWireEncoding(error.to_string())
-            })?;
     let request_tool_thinking_enabled = request_outcome.tool_thinking_enabled();
     let request_tool_thinking_turn_context = request_outcome.tool_thinking_turn_context().clone();
     let req04 = request_outcome.into_governed();
@@ -602,25 +597,21 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     }
                     continue;
                 }
-                let hook_provider_value =
-                    if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        handle_error_before_resp03!(
-                            project_v3_anthropic_message_as_responses_response_with_context(
-                                &provider_value,
-                                &anthropic_response_projection_context,
-                            )
-                            .map_err(|error| {
-                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                                    error.to_string(),
-                                )
-                            })
-                        )
-                    } else {
-                        provider_value.clone()
-                    };
+                let hook_provider_value = if provider_wire_protocol
+                    == V3HubProviderWireProtocol::Anthropic
+                {
+                    handle_error_before_resp03!(normalize_v3_anthropic_message_to_chat_response(
+                        &provider_value
+                    )
+                    .map_err(|error| {
+                        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+                    }))
+                } else {
+                    provider_value.clone()
+                };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        V3HubProviderWireProtocol::Responses
+                        V3HubProviderWireProtocol::OpenAiChat
                     } else {
                         provider_wire_protocol
                     };
@@ -898,7 +889,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     );
                 let stream_observation = V3RuntimeStreamObservation::default();
                 let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
                         provider_wire_protocol,
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                             &input.request_id,
@@ -907,7 +898,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             sse_idle_timeout,
                         ),
                         &stream_observation,
-                        &anthropic_response_projection_context,
                     )
                     .await;
                 handle_error_before_resp03!(runtime_timing
@@ -970,7 +960,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        V3HubProviderWireProtocol::Responses
+                        V3HubProviderWireProtocol::OpenAiChat
                     } else {
                         provider_wire_protocol
                     };

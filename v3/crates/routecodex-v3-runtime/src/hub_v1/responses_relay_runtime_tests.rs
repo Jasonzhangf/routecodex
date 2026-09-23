@@ -549,7 +549,9 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
         }))
         .expect_err("malformed signature_delta must not disappear");
 
-    assert!(error.to_string().contains("Anthropic signature_delta requires signature"));
+    assert!(error
+        .to_string()
+        .contains("Anthropic signature_delta requires signature"));
 }
 
 #[test]
@@ -584,7 +586,9 @@ fn anthropic_provider_thinking_delta_without_payload_survives_as_distinct_codec_
         .expect_err("thinking_delta without thinking must not disappear");
 
     assert!(
-        error.to_string().contains("thinking_delta requires thinking"),
+        error
+            .to_string()
+            .contains("thinking_delta requires thinking"),
         "the missing thinking payload must survive as its own codec failure: {error}"
     );
 }

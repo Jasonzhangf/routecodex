@@ -30,6 +30,10 @@ const paths = {
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  responseInboundNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
+  responseStreamMaterialization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
+  anthropicRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  anthropicRelayHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -119,6 +123,30 @@ const verificationMap = YAML.parse(text.verificationMap);
 const requestFieldProjectionManifest = YAML.parse(text.requestFieldProjectionManifest);
 const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModules);
 
+for (const [key, label] of [
+  ['responseInboundNormalization', 'Anthropic provider response inbound normalization'],
+  ['responseStreamMaterialization', 'Anthropic provider SSE normalization'],
+  ['responsesRuntimeInner', 'Responses Relay provider response flow'],
+  ['anthropicRelayRuntime', 'Anthropic Relay provider response flow'],
+  ['anthropicRelayHooks', 'Anthropic Relay request inbound normalization'],
+]) {
+  forbid(text[key], `${paths[key]}::${label}`, [
+    /project_v3_anthropic_message_as_responses_response_with_context/u,
+    /project_v3_anthropic_message_as_responses_response\(/u,
+    /encode_v3_anthropic_request_as_responses_semantic\(/u,
+  ]);
+}
+requireText(
+  text.anthropicCodec,
+  `${paths.anthropicCodec}::Anthropic Chat request normalizer`,
+  'normalize_v3_anthropic_request_to_chat',
+);
+requireText(
+  text.anthropicCodec,
+  `${paths.anthropicCodec}::Anthropic Chat response normalizer`,
+  'normalize_v3_anthropic_message_to_chat_response',
+);
+
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
 requireText(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::provider_response_projection_error`, 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(');
@@ -126,6 +154,7 @@ requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
+requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::anthropic_provider_chat_normalization`, 'anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound');
 forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
@@ -296,8 +325,8 @@ for (const phrase of [
   'if input.entry_protocol == V3HubEntryProtocol::Responses',
   'build_v3_chat_canonical_request_from_responses_payload_for_req_inbound',
   'if input.entry_protocol == V3HubEntryProtocol::Anthropic',
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'Anthropic inbound Chat canonicalization failed',
+  'normalize_v3_anthropic_request_to_chat',
+  'Anthropic inbound Chat normalization failed',
   'semantic_protocol: V3HubRequestSemanticProtocol::Chat',
 ]) requireText(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical`, phrase);
 forbid(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical_no_control_rebuild`, [
@@ -430,30 +459,25 @@ for (const phrase of [
   'normalize_v3_hub_responses_usage_from_openai_chat_usage',
   'build_v3_responses_reasoning_item_from_openai_chat_message',
   'build_v3_responses_function_call_from_openai_chat_tool_call',
+  'anthropic_reasoning_blocks',
+  'build_v3_responses_reasoning_item_from_chat_extension',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
 forbid(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
-const anthropicToResponses = functionSlice(
+const anthropicRequestNormalizer = functionSlice(
   text.anthropicCodec,
   paths.anthropicCodec,
-  'pub fn encode_v3_anthropic_request_as_responses_semantic',
-  'pub fn characterize_v3_anthropic_client_input_to_hub_semantic',
+  'pub fn normalize_v3_anthropic_request_to_chat',
+  'pub fn encode_v3_responses_semantic_as_anthropic_request',
 );
 for (const phrase of [
-  'pub fn encode_v3_anthropic_request_as_responses_semantic',
-  '"metadata"',
-  '"temperature"',
-  '"top_p"',
-  '"top_k"',
-  '"parallel_tool_calls"',
-  'object.get("stop_sequences")',
-  '"reasoning_thinking_mode"',
-  '"reasoning_budget_tokens"',
-  '"reasoning_display_policy"',
-  '"anthropic_request"',
-  'anthropic_tool_choice_as_responses_tool_choice',
-]) requireText(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, phrase);
-forbid(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /anthropic_entry_system/]);
+  'pub fn normalize_v3_anthropic_request_to_chat',
+  'build_v3_chat_canonical_request_from_responses_payload',
+  'preserved_fields',
+  'reasoning_effort',
+  'routecodex_chat_extension',
+]) requireText(anthropicRequestNormalizer, `${paths.anthropicCodec}::anthropic_to_chat_normalizer`, phrase);
+forbid(anthropicRequestNormalizer, `${paths.anthropicCodec}::anthropic_to_chat_normalizer`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
 
 const responsesRequestToAnthropic = functionSlice(
   text.anthropicCodec,
@@ -694,6 +718,7 @@ for (const [owner, body, phrases] of [
     'responses_relay_reasoning_effort_projects_minimax_adaptive_thinking',
     'responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
+    'responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client',
     'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak',
     'must not synthesize thinking budget from Responses effort',
     'reasoning_summary_policy',

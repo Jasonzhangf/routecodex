@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
@@ -48,6 +48,14 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                     .to_string(),
             )
         })?;
+    let anthropic_provider_extensions = payload
+        .pointer(
+            "/choices/0/message/routecodex_chat_extension/anthropic_provider_response_extensions",
+        )
+        .and_then(Value::as_object);
+    let anthropic_stop_reason = anthropic_provider_extensions
+        .and_then(|extensions| extensions.get("stop_reason"))
+        .and_then(Value::as_str);
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
@@ -60,7 +68,104 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                 .map(str::to_string);
         }
         if let Some(message) = choice.get("message").and_then(Value::as_object) {
-            if let Some(reasoning) =
+            let anthropic_extension = message
+                .get("routecodex_chat_extension")
+                .and_then(Value::as_object);
+            consume_anthropic_reasoning_extensions_for_responses(anthropic_extension)?;
+            if let Some(order) = anthropic_extension
+                .and_then(|extension| extension.get("anthropic_content_order"))
+                .and_then(Value::as_array)
+            {
+                let reasoning = anthropic_extension
+                    .and_then(|extension| extension.get("anthropic_reasoning_blocks"))
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let text_blocks = anthropic_extension
+                    .and_then(|extension| extension.get("anthropic_text_blocks"))
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let calls = message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                for entry in order {
+                    let Some(index) = entry
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|i| i as usize)
+                    else {
+                        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                            "Anthropic response content order has a malformed index".to_string(),
+                        ));
+                    };
+                    match entry.get("kind").and_then(Value::as_str) {
+                        Some("text") => {
+                            let text = text_blocks.get(index).and_then(Value::as_str).ok_or_else(
+                                || {
+                                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                        "Anthropic response content order references missing text"
+                                            .to_string(),
+                                    )
+                                },
+                            )?;
+                            if !text.trim().is_empty() {
+                                output_text_parts.push(text.to_string());
+                                output.push(json!({"type":"output_text","text":text}));
+                            }
+                        }
+                        Some("reasoning") => {
+                            let block = reasoning.get(index).ok_or_else(|| {
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    "Anthropic response content order references missing reasoning"
+                                        .to_string(),
+                                )
+                            })?;
+                            if let Some(item) =
+                                build_v3_responses_reasoning_item_from_chat_extension(block)
+                            {
+                                output.push(item);
+                            }
+                        }
+                        Some("tool_call") => {
+                            let call = calls.get(index).ok_or_else(|| {
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    "Anthropic response content order references missing tool call"
+                                        .to_string(),
+                                )
+                            })?;
+                            output.push(
+                                build_v3_responses_function_call_from_openai_chat_tool_call(
+                                    call,
+                                    &custom_tool_names,
+                                )?,
+                            );
+                        }
+                        _ => {
+                            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                "Anthropic response content order has an unknown block kind"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some(reasoning_blocks) = message
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get("anthropic_reasoning_blocks"))
+                .and_then(Value::as_array)
+            {
+                for block in reasoning_blocks {
+                    if let Some(reasoning) =
+                        build_v3_responses_reasoning_item_from_chat_extension(block)
+                    {
+                        output.push(reasoning);
+                    }
+                }
+            } else if let Some(reasoning) =
                 build_v3_responses_reasoning_item_from_openai_chat_message(message)
             {
                 output.push(reasoning);
@@ -81,17 +186,53 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
             }
         }
     }
-    let status = if output.iter().any(|item| {
-        matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
-        )
-    }) || finish_reason.as_deref() == Some("tool_calls")
-    {
-        "requires_action"
-    } else {
-        "completed"
+    let status = match anthropic_stop_reason {
+        Some("tool_use") => "requires_action",
+        Some("max_tokens" | "refusal" | "model_context_window_exceeded") => "incomplete",
+        Some("pause_turn") => "in_progress",
+        Some("end_turn" | "stop_sequence") => "completed",
+        _ if output.iter().any(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
+            )
+        }) || finish_reason.as_deref() == Some("tool_calls") =>
+        {
+            "requires_action"
+        }
+        _ => "completed",
     };
+    let mut output_items = Vec::new();
+    let mut message_item: Option<Map<String, Value>> = None;
+    for item in output {
+        if item.get("type").and_then(Value::as_str) == Some("output_text") {
+            let message = message_item.get_or_insert_with(|| {
+                let mut message = Map::new();
+                message.insert("type".to_string(), Value::String("message".to_string()));
+                message.insert("status".to_string(), Value::String("completed".to_string()));
+                message.insert("role".to_string(), Value::String("assistant".to_string()));
+                message.insert("content".to_string(), Value::Array(Vec::new()));
+                message
+            });
+            let content = message
+                .get_mut("content")
+                .and_then(Value::as_array_mut)
+                .ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Responses message output content lost its array shape".to_string(),
+                    )
+                })?;
+            content.push(item);
+        } else {
+            if let Some(message) = message_item.take() {
+                output_items.push(Value::Object(message));
+            }
+            output_items.push(item);
+        }
+    }
+    if let Some(message) = message_item {
+        output_items.push(Value::Object(message));
+    }
     let mut response = Map::new();
     response.insert(
         "id".to_string(),
@@ -108,7 +249,13 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         response.insert("created_at".to_string(), created_at.clone());
     }
     response.insert("status".to_string(), Value::String(status.to_string()));
-    response.insert("output".to_string(), Value::Array(output));
+    response.insert("output".to_string(), Value::Array(output_items));
+    if let Some(metadata) = provider_semantic_body
+        .pointer("/routecodex_chat_extension/responses_request/metadata")
+        .and_then(Value::as_object)
+    {
+        response.insert("metadata".to_string(), Value::Object(metadata.clone()));
+    }
     if !output_text_parts.is_empty() {
         response.insert(
             "output_text".to_string(),
@@ -118,6 +265,27 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     if let Some(finish_reason) = finish_reason {
         response.insert("finish_reason".to_string(), Value::String(finish_reason));
     }
+    if let Some(extensions) = anthropic_provider_extensions {
+        if let Some(stop_reason) = extensions.get("stop_reason") {
+            response.insert("finish_reason".to_string(), stop_reason.clone());
+        }
+        for field in ["stop_sequence", "stop_details"] {
+            if let Some(value) = extensions.get(field) {
+                response.insert(field.to_string(), value.clone());
+            }
+        }
+        if anthropic_stop_reason == Some("max_tokens") {
+            response.insert(
+                "incomplete_details".to_string(),
+                json!({"reason":"max_output_tokens"}),
+            );
+        } else if anthropic_stop_reason == Some("refusal") {
+            response.insert(
+                "incomplete_details".to_string(),
+                json!({"reason":"content_filter"}),
+            );
+        }
+    }
     if let Some(usage) = payload
         .get("usage")
         .and_then(normalize_v3_hub_responses_usage_from_openai_chat_usage)
@@ -125,6 +293,85 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         response.insert("usage".to_string(), usage);
     }
     Ok(Value::Object(response))
+}
+
+fn consume_anthropic_reasoning_extensions_for_responses(
+    extension: Option<&serde_json::Map<String, Value>>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(entries) = extension
+        .and_then(|extension| extension.get("anthropic_provider_reasoning_extensions"))
+        .and_then(Value::as_array)
+    else {
+        return Ok(());
+    };
+    // Provider-private fields on otherwise understood reasoning blocks have no
+    // Responses wire equivalent; consume them explicitly at target projection.
+    // Unknown block kinds retain a `type` tag and fail below instead of vanishing.
+    if entries.iter().any(|entry| entry.get("type").is_some()) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider content block is incompatible with Responses output".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_projection_rejects_unmapped_anthropic_content_blocks() {
+        let payload = json!({
+            "choices":[{
+                "finish_reason":"stop",
+                "message":{
+                    "role":"assistant",
+                    "content":"visible",
+                    "routecodex_chat_extension":{
+                        "anthropic_provider_response_extensions":{"stop_reason":"end_turn"},
+                        "anthropic_provider_reasoning_extensions":[{
+                            "block_index":0,
+                            "block":{"type":"server_tool_use","id":"st_1"},
+                            "type":"server_tool_use"
+                        }]
+                    }
+                }
+            }]
+        });
+        let error =
+            build_v3_responses_provider_response_from_openai_chat_payload(&payload, &json!({}))
+                .expect_err("unmapped Anthropic block must not be silently dropped");
+        assert!(
+            error
+                .to_string()
+                .contains("incompatible with Responses output"),
+            "unexpected projection error: {error}"
+        );
+    }
+}
+
+fn build_v3_responses_reasoning_item_from_chat_extension(block: &Value) -> Option<Value> {
+    let block = block.as_object()?;
+    let summary = block.get("summary").and_then(Value::as_array);
+    let encrypted_content = block
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    if summary.is_none_or(Vec::is_empty) && encrypted_content.is_none() {
+        return None;
+    }
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    if let Some(summary) = summary {
+        item.insert("summary".to_string(), Value::Array(summary.clone()));
+    }
+    if let Some(encrypted_content) = encrypted_content {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(encrypted_content.to_string()),
+        );
+    }
+    Some(Value::Object(item))
 }
 
 pub(crate) fn build_v3_responses_reasoning_item_from_openai_chat_message(

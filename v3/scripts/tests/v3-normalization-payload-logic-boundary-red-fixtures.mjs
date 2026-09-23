@@ -74,14 +74,6 @@ const fixtures = [
     diagnostic: /ProviderRespCompat02ProviderCompat manifest node/,
   },
   {
-    name: 'Anthropic protocol mapping is allowed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
-    from: 'pub fn encode_v3_anthropic_request_as_responses_semantic(',
-    to: '// protocol mapping may mention messages/tools without tool identity governance\npub fn encode_v3_anthropic_request_as_responses_semantic(',
-    expectPass: true,
-    diagnostic: /must pass/,
-  },
-  {
     name: 'ReqInbound tool governance',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
     from: 'V3HubReqInbound02Normalized {\n            previous: input,',
@@ -138,11 +130,11 @@ const fixtures = [
     diagnostic: /ReqChatProcess protocol conversion boundary/,
   },
   {
-    name: 'Anthropic Relay inbound codec removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
-    from: 'let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;',
-    to: 'let payload = payload;',
-    diagnostic: /Anthropic Relay request protocol codec boundary|missing encode_v3_anthropic_request_as_responses_semantic/,
+    name: 'Anthropic inbound Chat normalization removed',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs',
+    from: 'normalize_v3_anthropic_request_to_chat(source_payload)',
+    to: 'Ok(source_payload)',
+    diagnostic: /Anthropic inbound Chat normalization/,
   },
 ];
 

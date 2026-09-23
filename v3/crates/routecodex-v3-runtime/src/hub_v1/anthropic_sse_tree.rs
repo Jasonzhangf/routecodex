@@ -606,34 +606,8 @@ fn parse_block(
     {
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
-        "thinking" => {
-            let unexpected: Vec<&str> = object
-                .keys()
-                .map(String::as_str)
-                .filter(|key| !["type", "thinking", "signature", "cache_control"].contains(key))
-                .collect();
-            if !unexpected.is_empty() {
-                return Err(V3AnthropicSseTreeError::UnexpectedThinkingBlockFields(
-                    unexpected.join(","),
-                ));
-            }
-            V3AnthropicSseBlockKind::Thinking
-        }
-        "redacted_thinking" => {
-            let unexpected: Vec<&str> = object
-                .keys()
-                .map(String::as_str)
-                .filter(|key| !["type", "data", "cache_control"].contains(key))
-                .collect();
-            if !unexpected.is_empty() {
-                return Err(
-                    V3AnthropicSseTreeError::UnexpectedRedactedThinkingBlockFields(
-                        unexpected.join(","),
-                    ),
-                );
-            }
-            V3AnthropicSseBlockKind::RedactedThinking
-        }
+        "thinking" => V3AnthropicSseBlockKind::Thinking,
+        "redacted_thinking" => V3AnthropicSseBlockKind::RedactedThinking,
         "server_tool_use" => V3AnthropicSseBlockKind::ServerToolUse,
         "web_search_tool_result" => V3AnthropicSseBlockKind::WebSearchToolResult,
         other => V3AnthropicSseBlockKind::Extension(other.to_owned()),
@@ -760,10 +734,6 @@ pub(crate) enum V3AnthropicSseTreeError {
         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
     )]
     DuplicateMessageAfterBlock,
-    #[error("Anthropic thinking content block carries unexpected field(s): {0}")]
-    UnexpectedThinkingBlockFields(String),
-    #[error("Anthropic redacted_thinking content block carries unexpected field(s): {0}")]
-    UnexpectedRedactedThinkingBlockFields(String),
     #[error("Anthropic tool input JSON is malformed")]
     MalformedToolInput,
     #[error("Anthropic stream emitted an event after message_stop")]
@@ -826,6 +796,27 @@ mod tests {
                 .find(|extension| extension.name == "cache_control")
                 .map(|extension| extension.value.clone()),
             Some(json!({"type": "ephemeral"}))
+        );
+    }
+
+    #[test]
+    fn thinking_block_preserves_unregistered_provider_fields_as_extensions() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type":"thinking",
+                "thinking":"working",
+                "vendor_reasoning_hint":{"mode":"private"}
+            }),
+        )
+        .expect("provider-specific reasoning fields remain data extensions");
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "vendor_reasoning_hint")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"mode":"private"}))
         );
     }
 

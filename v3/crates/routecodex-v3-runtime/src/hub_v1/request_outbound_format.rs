@@ -1,8 +1,8 @@
 use super::V3HubEntryProtocol;
 use crate::protocol_tables::{
-    map_field as table_map_field, map_value as table_map_value, V3TableDirection, V3TableKind,
+    V3TableDirection, V3TableKind, map_field as table_map_field, map_value as table_map_value,
 };
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
@@ -120,10 +120,35 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
         "web_search_options",
     ] {
         if let Some(value) = projected_source.get(key) {
-            responses_payload.insert(key.to_string(), value.clone());
+            let value = if key == "tool_choice" {
+                project_chat_tool_choice_to_responses(value)?
+            } else {
+                value.clone()
+            };
+            responses_payload.insert(key.to_string(), value);
         }
     }
     normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
+}
+
+fn project_chat_tool_choice_to_responses(value: &Value) -> Result<Value, String> {
+    let Some(object) = value.as_object() else {
+        return Ok(value.clone());
+    };
+    if object.get("type").and_then(Value::as_str) != Some("function") {
+        return Ok(value.clone());
+    }
+    let name = object
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| {
+            "MalformedOutboundField target_protocol=responses path=$.tool_choice.function.name"
+                .to_string()
+        })?;
+    Ok(serde_json::json!({"type":"function","name":name}))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
@@ -694,7 +719,81 @@ fn take_responses_request_chat_extension(
         .as_object()
         .cloned()
         .ok_or_else(|| "MalformedOutboundField path=$.routecodex_chat_extension".to_string())?;
-    let responses_request = extension.remove("responses_request");
+    let mut responses_request = extension
+        .remove("responses_request")
+        .map(|value| {
+            value.as_object().cloned().ok_or_else(|| {
+                "MalformedOutboundField path=$.routecodex_chat_extension.responses_request"
+                    .to_string()
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(anthropic_request) = extension.remove("anthropic_request") {
+        // Anthropic-only extensions are projected through this target-owned
+        // allowlist; remaining Anthropic request semantics are incompatible
+        // with this target and are dropped here.
+        let anthropic_request = anthropic_request.as_object().ok_or_else(|| {
+            "MalformedOutboundField path=$.routecodex_chat_extension.anthropic_request".to_string()
+        })?;
+        if target_protocol != "anthropic"
+            && anthropic_request
+                .get("system")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| {
+                    blocks.iter().any(|block| {
+                        block
+                            .as_object()
+                            .is_some_and(|block| block.contains_key("cache_control"))
+                    })
+                })
+        {
+            return Err(format!(
+                "IncompatibleOutboundField target_protocol={target_protocol} path=$.system.cache_control"
+            ));
+        }
+        if let Some(user_id) = anthropic_request
+            .get("metadata")
+            .and_then(Value::as_object)
+            .and_then(|metadata| metadata.get("user_id"))
+            .filter(|value| !value.is_null())
+        {
+            if let Some(user_id) = user_id
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let metadata = responses_request
+                    .entry("metadata".to_string())
+                    .or_insert_with(|| Value::Object(Map::new()))
+                    .as_object_mut()
+                    .ok_or_else(|| "MalformedOutboundField path=$.metadata".to_string())?;
+                let user_id = Value::String(user_id.to_string());
+                if metadata
+                    .get("user_id")
+                    .is_some_and(|existing| existing != &user_id)
+                {
+                    return Err(format!(
+                        "ConflictingOutboundField target_protocol={target_protocol} path=$.metadata.user_id"
+                    ));
+                }
+                metadata.insert("user_id".to_string(), user_id);
+            }
+        }
+        if let Some(format) = anthropic_request
+            .get("output_config")
+            .and_then(Value::as_object)
+            .and_then(|output_config| output_config.get("format"))
+            .filter(|value| !value.is_null())
+        {
+            let text = responses_request
+                .entry("text".to_string())
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| "MalformedOutboundField path=$.text".to_string())?;
+            text.insert("format".to_string(), format.clone());
+        }
+    }
     if !extension.is_empty() {
         return Err(format!(
             "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
@@ -705,14 +804,7 @@ fn take_responses_request_chat_extension(
                 .join(",")
         ));
     }
-    responses_request
-        .map(|value| {
-            value.as_object().cloned().ok_or_else(|| {
-                "MalformedOutboundField path=$.routecodex_chat_extension.responses_request"
-                    .to_string()
-            })
-        })
-        .transpose()
+    Ok((!responses_request.is_empty()).then_some(responses_request))
 }
 
 fn insert_unless_matching(
@@ -1241,12 +1333,74 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .unwrap_or("user")
             .trim();
         if role.eq_ignore_ascii_case("tool") {
+            // Responses function_call_output accepts a scalar string. Keep the
+            // normalized text and consume non-text Anthropic tool-result blocks
+            // here as target-incompatible data; Anthropic outbound reuses the
+            // registered raw tool-result extension instead.
             if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
                 output.push(item);
             }
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
+            if let Some(order) = row
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get("anthropic_content_order"))
+                .and_then(Value::as_array)
+            {
+                let content_parts = row
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let tool_calls = row
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                for entry in order {
+                    let index = entry
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|index| index as usize)
+                        .ok_or_else(|| {
+                            "MalformedOutboundField path=$.anthropic_content_order.index"
+                                .to_string()
+                        })?;
+                    match entry.get("kind").and_then(Value::as_str) {
+                        Some("content") => {
+                            let part = content_parts.get(index).ok_or_else(|| {
+                                "MalformedOutboundField path=$.anthropic_content_order.content"
+                                    .to_string()
+                            })?;
+                            output.push(Value::Object(Map::from_iter([
+                                ("type".to_string(), Value::String("message".to_string())),
+                                ("role".to_string(), Value::String("assistant".to_string())),
+                                (
+                                    "content".to_string(),
+                                    chat_content_to_responses_content(
+                                        &Value::Array(vec![part.clone()]),
+                                        "assistant",
+                                    )?,
+                                ),
+                            ])));
+                        }
+                        Some("tool_call") => {
+                            let call = tool_calls.get(index).ok_or_else(|| "MalformedOutboundField path=$.anthropic_content_order.tool_call".to_string())?;
+                            if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
+                                output.push(item);
+                            }
+                        }
+                        _ => {
+                            return Err(
+                                "MalformedOutboundField path=$.anthropic_content_order.kind"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
             if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
                 output.push(reasoning);
             }
