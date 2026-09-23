@@ -1079,7 +1079,7 @@ features:
   - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
   - V3Execution11ProtocolDecision is written by protocol execution planning before initial dispatch and recomputed only for the currently selected Target10 after provider failure reselection; the
     selected entry-protocol execution mode remains the only Direct/Relay lock
-  - V3Target10ConcreteProviderSelected carries provider.responses.process; selected Responses providers with process=chat must choose Hub Relay before SameProtocolDirect during protocol execution planning
+  - V3Target10ConcreteProviderSelected carries provider.responses.process as provider-private truth; a responses entry selecting a responses-native provider stays SameProtocolDirect regardless of process=chat
   - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
@@ -1116,7 +1116,7 @@ features:
   - rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml
   - rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml
   - 4444 and 5555 health version must match the installed rccv3 artifact
-  - 5555 provider-request dry-run and live /v1/responses replay selecting asxs-grok must show Hub Relay nodes and provider Chat wire rather than SameProtocolDirect POST /responses
+  - 5555 provider-request dry-run and live /v1/responses replay selecting a responses-native provider must show SameProtocolDirect and provider POST /responses; a cross-protocol provider still requires Hub Relay
   completion_rule:
     source: P6 Server03 through Server16, generic Provider transport, Target-local reselection, full exhaustion, and same-kernel no-network Dry Run require all listed source gates.
     runtime: 'Verified with the actual V3 CLI and dedicated multi-listener config.p6.toml: JSON, SSE, reselection, exhaustion, Dry Run no-send, Debug trace, secret isolation, explicit Ctrl-C, and closed

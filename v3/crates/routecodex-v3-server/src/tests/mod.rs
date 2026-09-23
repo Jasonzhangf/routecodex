@@ -325,12 +325,20 @@ fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
         V3EntryProtocolExecutionMode::PendingNotImplemented,
         "Config-owned pending status must remain terminal for HTTP and WebSocket dispatch",
     );
+    assert!(
+        !responses_fresh_protocol_plan_allowed(
+            V3EntryProtocolExecutionMode::PendingNotImplemented,
+            &fresh,
+        ),
+        "PendingNotImplemented must not enter the fresh provider protocol planner",
+    );
     assert_eq!(
         responses_effective_execution_mode_for_entry_facts(
             V3EntryProtocolExecutionMode::Direct,
             &fresh,
         ),
-        V3EntryProtocolExecutionMode::Relay,
+        V3EntryProtocolExecutionMode::Direct,
+        "Fresh responses entries must not be pre-forced to Relay before selected-provider truth",
     );
     assert_eq!(
         responses_effective_execution_mode_for_entry_facts(

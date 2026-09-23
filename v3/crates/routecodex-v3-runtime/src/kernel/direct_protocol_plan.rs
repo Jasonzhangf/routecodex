@@ -224,7 +224,6 @@ pub(crate) fn protocol_candidate_keys_for_decision_mode(
             }
             Ok(_) => {}
             Err(source) if source.code == "protocol_mismatch_relay_not_allowed" => {}
-            Err(source) if source.code == "responses_process_chat_relay_not_allowed" => {}
             Err(source) => return Err(source),
         }
     }

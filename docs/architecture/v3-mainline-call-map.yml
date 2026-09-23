@@ -1244,7 +1244,7 @@ chains:
     owner_feature_id: v3.responses_direct_mvp_architecture
     semantic_contract:
       - reads selected provider_type and provider.responses.process from v3.target.concrete_provider
-      - responses provider with responses.process=chat chooses HubRelay before SameProtocolDirect
+      - provider.responses.process is provider-private truth; a responses entry selecting a responses-native provider stays SameProtocolDirect regardless of process=chat
       - writes the initial protocol decision before dispatch; after provider-failure reselection the execution owner recomputes the decision only for the newly selected Target10
     resource_flow:
       consumes:

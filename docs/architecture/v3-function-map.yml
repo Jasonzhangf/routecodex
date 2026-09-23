@@ -700,7 +700,7 @@ features:
   - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
   - kernel::tests::provider_sse_failure_event_reselects_before_client_stream
   - kernel::tests::direct_reselect_can_handoff_to_relay_target_after_provider_failure
-  - kernel::tests::responses_provider_process_chat_forces_hub_relay
+  - kernel::tests::responses_provider_process_chat_stays_same_protocol_direct
   - build_v3_server_16_http_frame_from_v3_resp_15
   - execute_responses_direct_server_outcome
   - pending_endpoint

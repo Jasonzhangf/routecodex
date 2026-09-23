@@ -481,7 +481,7 @@ fn same_protocol_without_direct_or_relay_fails_explicitly() {
 }
 
 #[test]
-fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
+fn protocol_mismatch_ignores_same_protocol_process_policy() {
     let manifest = test_manifest();
     let plan = plan_v3_responses_protocol_execution_with_provider_health(
         &manifest,
@@ -504,12 +504,15 @@ fn protocol_mismatch_is_decided_before_same_protocol_process_policy() {
     let mut selected = plan.decision.target;
     selected.candidate.responses_process = Some("chat".to_string());
 
-    let error = build_v3_execution_11_protocol_decision_from_v3_target_10(
+    let decision = build_v3_execution_11_protocol_decision_from_v3_target_10(
         selected,
         "anthropic_messages",
-        &["direct".to_string()],
+        &["direct".to_string(), "relay".to_string()],
     )
-    .expect_err("protocol mismatch must require Relay before reading same-protocol policy");
+    .expect("protocol mismatch with Relay allowed must choose HubRelay");
 
-    assert_eq!(error.code, "responses_process_chat_relay_not_allowed");
+    assert_eq!(
+        decision.mode,
+        V3Execution11ProtocolDecisionMode::HubRelay
+    );
 }
