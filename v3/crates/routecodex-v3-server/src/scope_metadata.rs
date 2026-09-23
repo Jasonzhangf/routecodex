@@ -26,6 +26,14 @@ pub(crate) fn responses_entry_facts_allow_fresh_protocol_plan(
     !entry_facts.has_unpaired_function_call_output
 }
 
+pub(crate) fn responses_fresh_protocol_plan_allowed(
+    configured_mode: V3EntryProtocolExecutionMode,
+    entry_facts: &V3ResponsesEntryFacts,
+) -> bool {
+    configured_mode != V3EntryProtocolExecutionMode::PendingNotImplemented
+        && responses_entry_facts_allow_fresh_protocol_plan(entry_facts)
+}
+
 pub(crate) fn plan_responses_entry_protocol_execution(
     state: &Arc<V3ListenerState>,
     failure_scope: &routecodex_v3_error::V3ProviderFailureSessionScope,
@@ -36,9 +44,10 @@ pub(crate) fn plan_responses_entry_protocol_execution(
     execution_id: &str,
     pipeline_id: &str,
     payload: &Value,
+    configured_mode: V3EntryProtocolExecutionMode,
     entry_facts: &V3ResponsesEntryFacts,
 ) -> Option<Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure>> {
-    if !responses_entry_facts_allow_fresh_protocol_plan(entry_facts) {
+    if !responses_fresh_protocol_plan_allowed(configured_mode, entry_facts) {
         return None;
     }
     let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(

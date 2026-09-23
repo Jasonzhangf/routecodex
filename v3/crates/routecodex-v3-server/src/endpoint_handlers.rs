@@ -148,6 +148,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &execution_id,
                 &request_identity.pipeline_id,
                 &payload,
+                execution_mode,
                 entry_facts,
             ) {
                 Some(Ok(plan)) => Some(plan),

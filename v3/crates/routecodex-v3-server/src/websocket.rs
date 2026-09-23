@@ -197,6 +197,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
         &execution_id,
         &request_identity.pipeline_id,
         &payload,
+        execution_mode,
         &entry_facts,
     ) {
         Some(Ok(plan)) => Some(plan),
