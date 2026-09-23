@@ -439,6 +439,43 @@ async fn front_http_adapter_preserves_existing_router_service() {
     assert!(String::from_utf8_lossy(&response).contains("204 No Content"));
 }
 
+// Regression for the reattach lease-binding migration (bug 5d74611 rework).
+// bind -> reattach -> connection exit must leave every broker association
+// table empty. reattach bumps the lease key to a new generation; the binding
+// of record in connection_leases must follow so the guard's single unregister
+// path removes the migrated client_sockets/client_connections records.
+#[test]
+fn reattach_updates_connection_binding_for_guard_cleanup() {
+    let now = Instant::now();
+    let broker = V3FrontTransportBroker::new(4);
+    let connection = broker.allocate_connection_identity();
+    let lease = lease(now);
+    let old_key = lease.key.clone();
+    let (write_tx, _write_rx) = mpsc::channel(1);
+
+    broker
+        .register_front_socket(connection, test_front_socket(write_tx))
+        .expect("front socket registration");
+    broker
+        .bind_connection_lease(connection, lease.clone(), now)
+        .expect("front connection lease binding");
+    let checkpoint = broker.freeze(now).pop().expect("front checkpoint");
+    let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
+    assert_ne!(restored.key, old_key, "reattach must bump the generation key");
+
+    let guard = V3FrontConnectionGuard {
+        broker: broker.clone(),
+        connection,
+    };
+    drop(guard);
+
+    assert_eq!(
+        broker.active_connection_count(),
+        0,
+        "guard drop after reattach must empty all broker association tables"
+    );
+}
+
 #[tokio::test]
 async fn front_broker_unregisters_connection_on_all_exit_paths() {
     async fn run_connection(broker: &V3FrontTransportBroker, client_close: bool) {

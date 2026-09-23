@@ -631,6 +631,20 @@ impl V3FrontTransportBroker {
                 .expect("front broker client socket lock")
                 .insert(lease.key.clone(), socket);
         }
+        // Keep the accepted-connection binding pointing at the live lease key so
+        // the connection guard's single unregister path removes the migrated
+        // client_sockets/client_connections records. connection_leases is the
+        // binding of record; only the lease key changes across a generation bump.
+        for bound_lease in self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .values_mut()
+        {
+            if bound_lease.key == old_key {
+                *bound_lease = lease.clone();
+            }
+        }
         lease
     }
 
