@@ -9,13 +9,54 @@ use routecodex_v3_runtime::{
     characterize_v3_openai_chat_hub_semantic_to_provider_wire,
     characterize_v3_openai_chat_provider_raw_to_hub_response_semantic,
     execute_v3_responses_relay_runtime, V3HubEntryProtocol, V3HubProviderWireProtocol,
-    V3HubTransportIntent,
+    V3HubTransportIntent, V3ResponsesRelayClientBody,
 };
 use std::sync::Mutex;
 
 struct ProviderProjectionJsonTransport {
     captures: Mutex<Vec<(String, serde_json::Value)>>,
     response: serde_json::Value,
+}
+
+struct ProviderProjectionSseTransport {
+    captures: Mutex<Vec<(String, serde_json::Value)>>,
+}
+
+#[async_trait::async_trait]
+impl routecodex_v3_provider_responses::ResponsesTransport for ProviderProjectionSseTransport {
+    async fn send(
+        &self,
+        request: routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    ) -> Result<
+        routecodex_v3_provider_responses::V3ProviderResp14Raw,
+        routecodex_v3_provider_responses::V3ProviderError,
+    > {
+        self.captures
+            .lock()
+            .unwrap()
+            .push((request.url().to_string(), request.body().clone()));
+        let frames = [
+            r#"data: {"id":"chatcmpl-codex-exec-sse","object":"chat.completion.chunk","model":"chat-wire-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_exec_sse","type":"function","function":{"name":"exec","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"data: {"id":"chatcmpl-codex-exec-sse","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"input\":\"text(1 + 1)\\n\"}"}}]},"finish_reason":null}]}"#,
+            r#"data: {"id":"chatcmpl-codex-exec-sse","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "data: [DONE]",
+        ];
+        let chunks = frames
+            .into_iter()
+            .map(|frame| Ok(format!("{frame}\n\n").into_bytes()));
+        Ok(
+            routecodex_v3_provider_responses::V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(futures_util::stream::iter(chunks)),
+            ),
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -203,6 +244,134 @@ async fn responses_openai_chat_field_parity_request_matrix_runtime() {
         "OpenAI Chat provider wire must map only Responses reasoning.effort to reasoning_effort"
     );
     assert!(result.error_chain.is_none());
+}
+
+#[tokio::test]
+async fn responses_openai_chat_namespace_exec_function_call_restored_runtime() {
+    let transport = ProviderProjectionJsonTransport {
+        captures: Mutex::new(Vec::new()),
+        response: serde_json::json!({
+            "id":"chatcmpl-codex-exec",
+            "object":"chat.completion",
+            "model":"chat-wire-model",
+            "choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{
+                "id":"call_exec_1",
+                "type":"function",
+                "function":{"name":"exec","arguments":"{\"input\":\"text(1 + 1)\\n\"}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-responses-openai-chat-codex-exec-namespace",
+            serde_json::json!({
+                "model":"gpt-5.5",
+                "stream":false,
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"2 + 2"}]}],
+                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}]}]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("Codex function tool call must complete the Responses Relay path");
+
+    let response = match &result.client_body {
+        V3ResponsesRelayClientBody::Json(body) => body,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("request selected JSON response transport"),
+    };
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "provider must receive the request");
+    assert!(
+        captures[0].1["tools"].as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "functions__exec")
+        }),
+        "provider wire must advertise the namespaced Codex tool"
+    );
+    assert_eq!(result.status, 200, "client response: {response}");
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "exec");
+    assert_eq!(response["output"][0]["call_id"], "call_exec_1");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"input\":\"text(1 + 1)\\n\"}"
+    );
+    assert!(result.error_chain.is_none());
+}
+
+#[tokio::test]
+async fn responses_openai_chat_namespace_exec_function_call_restored_sse_runtime() {
+    use futures_util::StreamExt;
+
+    let transport = ProviderProjectionSseTransport {
+        captures: Mutex::new(Vec::new()),
+    };
+    let result = execute_v3_responses_relay_runtime(
+        &manifest_openai_chat_wire(),
+        responses_relay_input(
+            "req-responses-openai-chat-codex-exec-namespace-sse",
+            serde_json::json!({
+                "model":"gpt-5.5",
+                "stream":true,
+                "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"2 + 2"}]}],
+                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}]}]
+            }),
+        ),
+        &transport,
+    )
+    .await
+    .expect("Codex function tool SSE must complete the Responses Relay path");
+
+    assert_eq!(result.status, 200);
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 1, "provider must receive the request");
+    assert_eq!(captures[0].1["stream"], true);
+    assert!(
+        captures[0].1["tools"].as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "functions__exec")
+        }),
+        "provider wire must advertise the namespaced Codex tool"
+    );
+    drop(captures);
+
+    let mut stream = match result.client_body {
+        V3ResponsesRelayClientBody::Sse(stream) => stream,
+        V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE"),
+    };
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        bytes.extend(chunk);
+    }
+    let client_sse = String::from_utf8(bytes).expect("client SSE must be valid UTF-8");
+    assert!(client_sse.contains("event: response.function_call_arguments.done"));
+    assert!(
+        client_sse.contains("\"namespace\":\"functions\""),
+        "{client_sse}"
+    );
+    assert!(client_sse.contains("\"name\":\"exec\""), "{client_sse}");
+    assert!(
+        client_sse.contains("\"call_id\":\"call_exec_sse\""),
+        "{client_sse}"
+    );
+    let arguments_event = client_sse
+        .split("event: response.function_call_arguments.done\n")
+        .nth(1)
+        .and_then(|event| event.strip_prefix("data: "))
+        .and_then(|data| data.lines().next())
+        .expect("SSE must include a complete function_call_arguments.done event");
+    let arguments_event: serde_json::Value =
+        serde_json::from_str(arguments_event).expect("arguments event data must be JSON");
+    assert_eq!(arguments_event["arguments"], r#"{"input":"text(1 + 1)\n"}"#);
+    assert!(client_sse.contains("event: response.completed"));
+    assert!(client_sse.contains("event: response.done"));
+    assert!(client_sse.contains("data: [DONE]"));
 }
 
 #[tokio::test]
