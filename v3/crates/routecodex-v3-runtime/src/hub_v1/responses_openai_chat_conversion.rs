@@ -573,7 +573,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeMap<String, Option<(String, String)>>,
+    custom_tool_names: &BTreeMap<String, Option<(String, String, String)>>,
     namespaced_function_names: &BTreeMap<String, Option<(String, String)>>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
@@ -612,7 +612,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        let Some(Some((provider_name, client_name))) = custom_tool_names.get(name) else {
+        let Some(Some((_, client_name, namespace))) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
@@ -626,8 +626,8 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         })?;
         return Ok(build_v3_responses_declared_custom_tool_call(
             call_id,
-            provider_name,
             client_name,
+            namespace,
             input,
         ));
     }
@@ -654,23 +654,14 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if name == "tool_search" {
-        if custom_tool_names.contains_key(name) {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                "OpenAI Chat tool_call tool_search matches a declared custom tool and the reserved tool_search name"
-                    .to_string(),
-            ));
-        }
-        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-        return Ok(json!({
-            "type":"tool_search_call",
-            "call_id":call_id,
-            "execution":"client",
-            "arguments":arguments
-        }));
+    if name == "tool_search" && custom_tool_names.contains_key(name) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat tool_call tool_search matches a declared custom tool and the reserved tool_search name"
+                .to_string(),
+        ));
     }
     if let Some(custom_identity) = custom_tool_names.get(name) {
-        let Some((provider_name, client_name)) = custom_identity else {
+        let Some((_, client_name, namespace)) = custom_identity else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 format!("OpenAI Chat tool_call {name} matches multiple declared custom tools"),
             ));
@@ -690,8 +681,8 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
         return Ok(build_v3_responses_declared_custom_tool_call(
             call_id,
-            provider_name,
             client_name,
+            namespace,
             &input,
         ));
     }
@@ -699,6 +690,15 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
             format!("OpenAI Chat tool_call {name} matches multiple declared functions"),
         ));
+    }
+    if name == "tool_search" && !namespaced_function_names.contains_key(name) {
+        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
+        return Ok(json!({
+            "type":"tool_search_call",
+            "call_id":call_id,
+            "execution":"client",
+            "arguments":arguments
+        }));
     }
     let mut item = Map::from_iter([
         (
@@ -719,8 +719,8 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
 
 fn build_v3_responses_declared_custom_tool_call(
     call_id: &str,
-    provider_name: &str,
     client_name: &str,
+    namespace: &str,
     input: &str,
 ) -> Value {
     let mut item = json!({
@@ -729,10 +729,8 @@ fn build_v3_responses_declared_custom_tool_call(
         "name":client_name,
         "input":input
     });
-    if provider_name != client_name {
-        if let Some(namespace) = provider_name.strip_suffix(&format!("__{client_name}")) {
-            item["namespace"] = Value::String(namespace.to_string());
-        }
+    if !namespace.is_empty() {
+        item["namespace"] = Value::String(namespace.to_string());
     }
     item
 }
@@ -852,10 +850,10 @@ fn collect_v3_responses_namespaced_function_names_from_tools(
     }
 }
 
-fn insert_v3_responses_declared_tool_alias(
-    names: &mut BTreeMap<String, Option<(String, String)>>,
+fn insert_v3_responses_declared_tool_alias<T: Clone + PartialEq>(
+    names: &mut BTreeMap<String, Option<T>>,
     alias: &str,
-    value: &(String, String),
+    value: &T,
 ) {
     match names.get(alias) {
         Some(Some(existing)) if existing != value => {
@@ -910,7 +908,7 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
 
 pub(crate) fn collect_v3_responses_custom_tool_names(
     payload: &Value,
-) -> BTreeMap<String, Option<(String, String)>> {
+) -> BTreeMap<String, Option<(String, String, String)>> {
     let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), None, &mut names);
     for item in payload
@@ -929,7 +927,7 @@ pub(crate) fn collect_v3_responses_custom_tool_names(
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
     qualified_namespace: Option<&str>,
-    names: &mut BTreeMap<String, Option<(String, String)>>,
+    names: &mut BTreeMap<String, Option<(String, String, String)>>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         match tool.get("type").and_then(Value::as_str) {
@@ -943,7 +941,11 @@ pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
                     let provider_name = qualified_namespace
                         .map(|namespace| provider_name_for_namespace_child(namespace, name))
                         .unwrap_or_else(|| name.to_string());
-                    let identity = (provider_name.clone(), name.to_string());
+                    let identity = (
+                        provider_name.clone(),
+                        name.to_string(),
+                        qualified_namespace.unwrap_or_default().to_string(),
+                    );
                     insert_v3_responses_declared_tool_alias(names, &provider_name, &identity);
                     if qualified_namespace.is_some() {
                         insert_v3_responses_declared_tool_alias(names, name, &identity);

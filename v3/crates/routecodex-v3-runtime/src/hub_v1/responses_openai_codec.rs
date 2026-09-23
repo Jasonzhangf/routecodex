@@ -725,7 +725,11 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         })?;
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
     let name = if let Some(namespace) = read_v3_non_empty_str(item.get("namespace")) {
-        format!("{namespace}__{name}")
+        if name == namespace || name.starts_with(&format!("{namespace}__")) {
+            name.to_string()
+        } else {
+            format!("{namespace}__{name}")
+        }
     } else {
         name.to_string()
     };

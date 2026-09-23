@@ -134,4 +134,49 @@ fn reserved_tool_search_leaf_does_not_override_declared_custom_tool() {
     )
     .expect_err("reserved leaf must not replace a declared custom tool");
     assert!(error.to_string().contains("reserved tool_search"));
+
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"call_declared_tool_search","type":"function",
+            "function":{"name":"tool_search","arguments":"{}"}
+        }]},"finish_reason":"tool_calls"}]}),
+        &json!({"input":[{"type":"additional_tools","tools":[{
+            "type":"namespace","name":"functions","tools":[{"type":"function","name":"tool_search"}]
+        }]}]}),
+    )
+    .expect("declared function must retain its function kind");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "tool_search");
+}
+
+#[test]
+fn already_qualified_custom_child_keeps_declared_identity() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"call_qualified_exec","type":"function",
+            "function":{"name":"functions__exec","arguments":"{\"input\":\"text(1)\"}"}
+        }]},"finish_reason":"tool_calls"}]}),
+        &json!({"input":[{"type":"additional_tools","tools":[{
+            "type":"namespace","name":"functions","tools":[{"type":"custom","name":"functions__exec"}]
+        }]}]}),
+    )
+    .expect("qualified custom child must retain its declared namespace");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "functions__exec");
+
+    let canonical = crate::hub_v1::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+        &json!({"model":"gpt-6-luna","input":[
+            response["output"][0].clone(),
+            {"type":"custom_tool_call_output","call_id":"call_qualified_exec","output":"2"}
+        ]}),
+    )
+    .expect("qualified custom call and output must normalize together");
+    let provider_request = crate::hub_v1::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("qualified custom history must project to OpenAI Chat");
+    assert_eq!(
+        provider_request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__exec"
+    );
 }
