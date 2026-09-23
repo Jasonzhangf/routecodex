@@ -2394,7 +2394,7 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
   - routecodex-v3-runtime
-  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics.
+  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics, including restoring declared Responses client tool namespaces after OpenAI Chat provider projection.
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
     display policy, client metadata, arguments, and other protocol fields remain payload
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, health
@@ -2438,6 +2438,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_namespace_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
@@ -2491,6 +2493,7 @@ features:
   - execute_v3_responses_relay_runtime_inner
   - project_v3_responses_relay_runtime_failure
   - build_v3_responses_provider_response_from_openai_chat_payload
+  - collect_v3_responses_namespaced_function_names
   - encode_v3_responses_semantic_as_anthropic_request
   - project_v3_responses_json_as_anthropic_message
   - V3AnthropicResponsesProjectionContext::from_chat_canonical_request
@@ -2542,6 +2545,8 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_namespace_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs

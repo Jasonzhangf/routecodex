@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
@@ -60,6 +60,8 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body);
+    let namespaced_function_names =
+        collect_v3_responses_namespaced_function_names(provider_semantic_body);
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -140,6 +142,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                                 build_v3_responses_function_call_from_openai_chat_tool_call(
                                     call,
                                     &custom_tool_names,
+                                    &namespaced_function_names,
                                 )?,
                             );
                         }
@@ -181,6 +184,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                     output.push(build_v3_responses_function_call_from_openai_chat_tool_call(
                         call,
                         &custom_tool_names,
+                        &namespaced_function_names,
                     )?);
                 }
             }
@@ -570,6 +574,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
     custom_tool_names: &BTreeMap<String, String>,
+    namespaced_function_names: &BTreeMap<String, Option<(String, String)>>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -684,8 +689,134 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             Value::String(arguments.to_string()),
         ),
     ]);
+    restore_v3_responses_declared_function_namespace(&mut item, namespaced_function_names);
     super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut item);
     Ok(Value::Object(item))
+}
+
+fn restore_v3_responses_declared_function_namespace(
+    item: &mut Map<String, Value>,
+    names: &BTreeMap<String, Option<(String, String)>>,
+) {
+    if item.contains_key("namespace") {
+        return;
+    }
+    let Some(name) = item.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(Some((namespace, tool_name))) = names.get(name) else {
+        return;
+    };
+    item.insert("namespace".to_string(), Value::String(namespace.clone()));
+    item.insert("name".to_string(), Value::String(tool_name.clone()));
+}
+
+fn collect_v3_responses_namespaced_function_names(
+    payload: &Value,
+) -> BTreeMap<String, Option<(String, String)>> {
+    let mut names = BTreeMap::new();
+    collect_v3_responses_namespaced_function_names_from_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        None,
+        &mut names,
+    );
+    for item in payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_v3_responses_namespaced_function_names_from_tools(
+                item.get("tools")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+                None,
+                &mut names,
+            );
+        }
+    }
+    names
+}
+
+fn collect_v3_responses_namespaced_function_names_from_tools(
+    tools: &[Value],
+    namespace: Option<&str>,
+    names: &mut BTreeMap<String, Option<(String, String)>>,
+) {
+    for tool in tools {
+        let Some(tool_object) = tool.as_object() else {
+            continue;
+        };
+        if let (Some(group), Some(children)) = (
+            tool_object.get("name").and_then(Value::as_str),
+            tool_object.get("tools").and_then(Value::as_array),
+        ) {
+            let group = group.trim();
+            if group.is_empty() {
+                continue;
+            }
+            let qualified = namespace
+                .map(|parent| format!("{parent}__{group}"))
+                .unwrap_or_else(|| group.to_string());
+            collect_v3_responses_namespaced_function_names_from_tools(
+                children,
+                Some(&qualified),
+                names,
+            );
+            continue;
+        }
+        if tool_object
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind != "function")
+        {
+            continue;
+        }
+        let (Some(namespace), Some(tool_name)) =
+            (namespace, tool_object.get("name").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        let tool_name = tool_name.trim();
+        if tool_name.is_empty() {
+            continue;
+        }
+        let qualified_name =
+            if tool_name == namespace || tool_name.starts_with(&format!("{namespace}__")) {
+                tool_name.to_string()
+            } else {
+                format!("{namespace}__{tool_name}")
+            };
+        let client_tool_name = tool_name
+            .strip_prefix(&format!("{namespace}__"))
+            .filter(|name| !name.is_empty())
+            .unwrap_or(tool_name);
+        let value = (namespace.to_string(), client_tool_name.to_string());
+        insert_v3_responses_namespace_alias(names, &qualified_name, &value);
+        insert_v3_responses_namespace_alias(names, tool_name, &value);
+    }
+}
+
+fn insert_v3_responses_namespace_alias(
+    names: &mut BTreeMap<String, Option<(String, String)>>,
+    alias: &str,
+    value: &(String, String),
+) {
+    match names.get(alias) {
+        Some(Some(existing)) if existing != value => {
+            names.insert(alias.to_string(), None);
+        }
+        None => {
+            names.insert(alias.to_string(), Some(value.clone()));
+        }
+        _ => {}
+    }
 }
 
 fn parse_v3_openai_chat_custom_tool_input(

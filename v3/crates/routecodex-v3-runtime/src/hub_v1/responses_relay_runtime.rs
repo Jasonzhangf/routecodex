@@ -1131,6 +1131,10 @@ pub(crate) fn provider_target(
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]
 mod responses_relay_runtime_tests;
+
+#[cfg(test)]
+#[path = "responses_relay_runtime_namespace_tests.rs"]
+mod responses_relay_runtime_namespace_tests;
 #[cfg(test)]
 #[path = "responses_relay_runtime_tests_extra.rs"]
 mod responses_relay_runtime_tests_extra;
