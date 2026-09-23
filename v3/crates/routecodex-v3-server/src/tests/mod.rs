@@ -1357,6 +1357,106 @@ fn console_project_path_prefers_header_over_injected_workspace_cwd() {
 }
 
 #[test]
+fn console_project_path_reads_pi_cwd_system_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "You are an expert coding assistant operating inside pi, a coding agent harness.\n\n<skills>\n</skills>\n\n<cwd>\n/Users/fanzhang/Documents/github/routecodex\n</cwd>\n\n# pi-crew Delegation Policy (MANDATORY)"
+        }, {
+            "role": "user",
+            "content": "ping"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/Users/fanzhang/Documents/github/routecodex")
+    );
+    assert_eq!(
+        format_v3_console_project_name(
+            resolve_v3_console_project_path(&headers, &payload).as_deref()
+        ),
+        "routecodex"
+    );
+}
+
+#[test]
+fn console_project_path_prefers_explicit_workdir_over_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "workdir": "/from/body",
+        "messages": [{
+            "role": "developer",
+            "content": "<cwd>\n/from/pi-section\n</cwd>"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/body")
+    );
+}
+
+#[test]
+fn console_project_path_prefers_environment_context_over_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "<cwd>\n/from/pi-section\n</cwd>"
+        }],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "<environment_context>\n  <cwd>/from/codex</cwd>\n</environment_context>"
+            }]
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/codex")
+    );
+}
+
+#[test]
+fn console_project_path_ignores_unpaired_pi_cwd_marker() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "the <cwd> marker without a closing tag must not resolve"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(resolve_v3_console_project_path(&headers, &payload), None);
+}
+
+#[test]
+fn console_project_path_falls_through_unquoted_prose_marker_to_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "system",
+            "content": "Current workspace: unknown\n\n<cwd>\n/from/pi-section\n</cwd>"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/pi-section")
+    );
+}
+
+#[test]
 fn request_id_tokens_are_stable_and_path_safe() {
     assert_eq!(
         format_v3_request_id_entry("/v1/responses"),
