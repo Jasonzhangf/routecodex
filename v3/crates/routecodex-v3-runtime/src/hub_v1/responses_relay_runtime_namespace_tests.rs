@@ -42,8 +42,8 @@ fn codex_namespaced_exec_tool_call_restores_namespace_for_client_dispatch() {
 }
 
 #[test]
-fn ambiguous_codex_tool_leaf_does_not_gain_a_guessed_namespace() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+fn ambiguous_codex_tool_leaf_fails_before_client_dispatch() {
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
             "choices":[{"message":{"role":"assistant","tool_calls":[{
                 "id":"call_exec_2",
@@ -56,10 +56,22 @@ fn ambiguous_codex_tool_leaf_does_not_gain_a_guessed_namespace() {
             {"role":"developer","type":"additional_tools","tools":[{"name":"other","tools":[{"name":"exec"}]}]}
         ]}),
     )
-    .expect("ambiguous function leaf remains a valid provider response");
+    .expect_err("ambiguous function leaf must not dispatch a guessed tool");
 
-    assert!(response["output"][0].get("namespace").is_none());
-    assert_eq!(response["output"][0]["name"], "exec");
+    assert!(error.to_string().contains("multiple declared functions"));
+
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"call_exec_root_collision","type":"function",
+            "function":{"name":"exec","arguments":"{}"}
+        }]},"finish_reason":"tool_calls"}]}),
+        &json!({"input":[{"type":"additional_tools","tools":[
+            {"type":"function","name":"exec"},
+            {"type":"namespace","name":"functions","tools":[{"type":"function","name":"exec"}]}
+        ]}]}),
+    )
+    .expect_err("top-level and namespaced function leaf must not guess a dispatch target");
+    assert!(error.to_string().contains("multiple declared functions"));
 }
 
 #[test]
@@ -107,4 +119,19 @@ fn custom_tool_leaf_collision_fails_instead_of_dispatching_the_wrong_tool() {
     assert!(error
         .to_string()
         .contains("both custom and function declarations"));
+}
+
+#[test]
+fn reserved_tool_search_leaf_does_not_override_declared_custom_tool() {
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"call_tool_search_collision","type":"function",
+            "function":{"name":"tool_search","arguments":"{\"input\":\"text(1)\"}"}
+        }]},"finish_reason":"tool_calls"}]}),
+        &json!({"input":[{"type":"additional_tools","tools":[{
+            "type":"namespace","name":"functions","tools":[{"type":"custom","name":"tool_search"}]
+        }]}]}),
+    )
+    .expect_err("reserved leaf must not replace a declared custom tool");
+    assert!(error.to_string().contains("reserved tool_search"));
 }

@@ -655,6 +655,12 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .and_then(Value::as_str)
         .unwrap_or_default();
     if name == "tool_search" {
+        if custom_tool_names.contains_key(name) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "OpenAI Chat tool_call tool_search matches a declared custom tool and the reserved tool_search name"
+                    .to_string(),
+            ));
+        }
         let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
         return Ok(json!({
             "type":"tool_search_call",
@@ -687,6 +693,11 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             provider_name,
             client_name,
             &input,
+        ));
+    }
+    if matches!(namespaced_function_names.get(name), Some(None)) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("OpenAI Chat tool_call {name} matches multiple declared functions"),
         ));
     }
     let mut item = Map::from_iter([
