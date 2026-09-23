@@ -846,11 +846,7 @@ fn collect_v3_responses_namespaced_function_names_from_tools(
             } else {
                 format!("{namespace}__{tool_name}")
             };
-        let client_tool_name = tool_name
-            .strip_prefix(&format!("{namespace}__"))
-            .filter(|name| !name.is_empty())
-            .unwrap_or(tool_name);
-        let value = (namespace.to_string(), client_tool_name.to_string());
+        let value = (namespace.to_string(), tool_name.to_string());
         insert_v3_responses_declared_tool_alias(names, &qualified_name, &value);
         insert_v3_responses_declared_tool_alias(names, tool_name, &value);
     }

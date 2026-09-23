@@ -180,3 +180,36 @@ fn already_qualified_custom_child_keeps_declared_identity() {
         "functions__exec"
     );
 }
+
+#[test]
+fn already_qualified_function_child_keeps_declared_identity() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"choices":[{"message":{"role":"assistant","tool_calls":[{
+            "id":"call_qualified_function","type":"function",
+            "function":{"name":"functions__exec","arguments":"{}"}
+        }]},"finish_reason":"tool_calls"}]}),
+        &json!({"input":[{"type":"additional_tools","tools":[{
+            "type":"namespace","name":"functions","tools":[{
+                "type":"function","function":{"name":"functions__exec"}
+            }]
+        }]}]}),
+    )
+    .expect("qualified function child must retain its declared name");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "functions__exec");
+
+    let canonical = crate::hub_v1::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+        &json!({"model":"gpt-6-luna","input":[
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_qualified_function","output":"2"}
+        ]}),
+    )
+    .expect("qualified function call and output must normalize together");
+    let provider_request = crate::hub_v1::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("qualified function history must project to OpenAI Chat");
+    assert_eq!(
+        provider_request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__exec"
+    );
+}
