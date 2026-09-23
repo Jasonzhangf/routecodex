@@ -269,7 +269,7 @@ async fn responses_openai_chat_namespace_exec_function_call_restored_runtime() {
                 "model":"gpt-5.5",
                 "stream":false,
                 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"2 + 2"}]}],
-                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}]}]
+                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}}]}]
             }),
         ),
         &transport,
@@ -491,7 +491,7 @@ async fn responses_openai_chat_namespace_exec_function_call_restored_sse_runtime
                 "model":"gpt-5.5",
                 "stream":true,
                 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"2 + 2"}]}],
-                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}]}]
+                "tools":[{"type":"namespace","name":"functions","tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object","properties":{"input":{"type":"string"}},"required":["input"]}}}]}]
             }),
         ),
         &transport,

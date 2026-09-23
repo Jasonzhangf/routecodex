@@ -822,7 +822,13 @@ fn collect_v3_responses_namespaced_function_names_from_tools(
         {
             continue;
         }
-        let Some(tool_name) = tool_object.get("name").and_then(Value::as_str) else {
+        let Some(tool_name) = tool_object
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .or_else(|| tool_object.get("name"))
+            .and_then(Value::as_str)
+        else {
             continue;
         };
         let tool_name = tool_name.trim();
