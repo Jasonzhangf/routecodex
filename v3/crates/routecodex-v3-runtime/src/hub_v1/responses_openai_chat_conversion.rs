@@ -612,7 +612,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        let Some(Some((_, client_name))) = custom_tool_names.get(name) else {
+        let Some(Some((provider_name, client_name))) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
@@ -624,12 +624,12 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":client_name,
-            "input":input
-        }));
+        return Ok(build_v3_responses_declared_custom_tool_call(
+            call_id,
+            provider_name,
+            client_name,
+            input,
+        ));
     }
     let function = object
         .get("function")
@@ -664,7 +664,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         }));
     }
     if let Some(custom_identity) = custom_tool_names.get(name) {
-        let Some((_, client_name)) = custom_identity else {
+        let Some((provider_name, client_name)) = custom_identity else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 format!("OpenAI Chat tool_call {name} matches multiple declared custom tools"),
             ));
@@ -682,12 +682,12 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
         // 只在 provider wire 存在，不能泄露到客户端 custom input。
         let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":client_name,
-            "input":input
-        }));
+        return Ok(build_v3_responses_declared_custom_tool_call(
+            call_id,
+            provider_name,
+            client_name,
+            &input,
+        ));
     }
     let mut item = Map::from_iter([
         (
@@ -706,6 +706,26 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     Ok(Value::Object(item))
 }
 
+fn build_v3_responses_declared_custom_tool_call(
+    call_id: &str,
+    provider_name: &str,
+    client_name: &str,
+    input: &str,
+) -> Value {
+    let mut item = json!({
+        "type":"custom_tool_call",
+        "call_id":call_id,
+        "name":client_name,
+        "input":input
+    });
+    if provider_name != client_name {
+        if let Some(namespace) = provider_name.strip_suffix(&format!("__{client_name}")) {
+            item["namespace"] = Value::String(namespace.to_string());
+        }
+    }
+    item
+}
+
 fn restore_v3_responses_declared_function_namespace(
     item: &mut Map<String, Value>,
     names: &BTreeMap<String, Option<(String, String)>>,
@@ -719,6 +739,9 @@ fn restore_v3_responses_declared_function_namespace(
     let Some(Some((namespace, tool_name))) = names.get(name) else {
         return;
     };
+    if namespace.is_empty() {
+        return;
+    }
     item.insert("namespace".to_string(), Value::String(namespace.clone()));
     item.insert("name".to_string(), Value::String(tool_name.clone()));
 }
@@ -790,15 +813,18 @@ fn collect_v3_responses_namespaced_function_names_from_tools(
         {
             continue;
         }
-        let (Some(namespace), Some(tool_name)) =
-            (namespace, tool_object.get("name").and_then(Value::as_str))
-        else {
+        let Some(tool_name) = tool_object.get("name").and_then(Value::as_str) else {
             continue;
         };
         let tool_name = tool_name.trim();
         if tool_name.is_empty() {
             continue;
         }
+        let Some(namespace) = namespace else {
+            let value = (String::new(), tool_name.to_string());
+            insert_v3_responses_declared_tool_alias(names, tool_name, &value);
+            continue;
+        };
         let qualified_name =
             if tool_name == namespace || tool_name.starts_with(&format!("{namespace}__")) {
                 tool_name.to_string()

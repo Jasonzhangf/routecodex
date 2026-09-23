@@ -355,6 +355,7 @@ async fn responses_openai_chat_namespace_custom_leaf_exec_restores_dispatch_json
     assert_eq!(result.status, 200);
     assert_eq!(response["status"], "requires_action");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
     assert_eq!(response["output"][0]["name"], "exec");
     assert_eq!(response["output"][0]["call_id"], "call_custom_exec");
     assert_eq!(response["output"][0]["input"], raw_input);
@@ -398,7 +399,8 @@ async fn responses_openai_chat_namespace_custom_leaf_exec_restores_dispatch_json
     assert_eq!(followup_captures.len(), 1);
     let messages = followup_captures[0].1["messages"].as_array().unwrap();
     assert!(messages.iter().any(|message| message["role"] == "assistant"
-        && message["tool_calls"][0]["id"] == "call_custom_exec"));
+        && message["tool_calls"][0]["id"] == "call_custom_exec"
+        && message["tool_calls"][0]["function"]["name"] == "functions__exec"));
     assert!(messages.iter().any(|message| message["role"] == "tool"
         && message["tool_call_id"] == "call_custom_exec"
         && message["content"] == "12:34"));
@@ -456,6 +458,10 @@ async fn responses_openai_chat_namespace_custom_leaf_exec_restores_dispatch_sse(
         "{client_sse}"
     );
     assert!(client_sse.contains("\"name\":\"exec\""), "{client_sse}");
+    assert!(
+        client_sse.contains("\"namespace\":\"functions\""),
+        "{client_sse}"
+    );
     assert!(
         client_sse.contains("\"call_id\":\"call_exec_sse\""),
         "{client_sse}"

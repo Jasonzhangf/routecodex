@@ -94,4 +94,17 @@ fn custom_tool_leaf_collision_fails_instead_of_dispatching_the_wrong_tool() {
     assert!(error
         .to_string()
         .contains("both custom and function declarations"));
+
+    let custom_and_root_function = json!({"input":[{"type":"additional_tools","tools":[
+        {"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]},
+        {"type":"function","name":"exec"}
+    ]}]});
+    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+        &provider_response,
+        &custom_and_root_function,
+    )
+    .expect_err("top-level function must not be relabeled as namespaced custom");
+    assert!(error
+        .to_string()
+        .contains("both custom and function declarations"));
 }
