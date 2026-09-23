@@ -231,9 +231,12 @@ where
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
-        let selected = match retry_selected.take() {
-            Some(selected) => selected,
-            None => match select_v3_expanded_target_with_exhaustion_rescue(
+        let (selected, mut selected_admission): (
+            routecodex_v3_target::V3Target10ConcreteProviderSelected,
+            Option<V3RuntimeProviderAdmission>,
+        ) = match retry_selected.take() {
+            Some(selected) => (selected, None),
+            None => match select_v3_expanded_target_with_admission_rescue(
                 manifest,
                 expanded.clone(),
                 &direct_failure_session_scope,
@@ -245,15 +248,17 @@ where
             )
             .await
             {
-                V3TargetSelectionAfterRescue::Selected(value) => value,
-                V3TargetSelectionAfterRescue::Failed(source) => {
+                V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
+                    (value.selected, Some(value.admission))
+                }
+                V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
                     return error_output(
                         source,
                         trace,
                         &crate::hooks::register_responses_direct_hooks(),
                     );
                 }
-                V3TargetSelectionAfterRescue::Exhausted(error) => {
+                V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
                     // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
                     // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
                     // 哪个候选因何被冷却/排除。
@@ -408,6 +413,9 @@ where
         let mut provider_action_permit: Option<
             crate::provider_action_gate::V3ProviderActionPermit,
         > = None;
+        if pending_provider_action_recovery.is_some() {
+            drop(selected_admission.take());
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -479,6 +487,10 @@ where
                 &crate::hooks::register_responses_direct_hooks(),
             );
         }
+        let transport_request = match selected_admission.take() {
+            Some(admission) => transport_request.with_pre_acquired_admission(admission.into_lease()),
+            None => transport_request,
+        };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
