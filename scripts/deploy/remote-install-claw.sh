@@ -2,7 +2,7 @@
 # Remote-side installer for the claw RouteCodex V3 deployment.
 #
 # Executed ON the managed host by scripts/deploy/deploy-claw.sh, which streams
-# this file to `bash -s -- <args>`. It owns only this host's layout:
+# this file to `sh -s -- <args>`. It owns only this host's layout:
 #
 #   /opt/rcc/releases/<source-sha>/rccv3   immutable per-commit binary
 #   /usr/local/bin/rccv3                   active binary + deployed-sha marker
@@ -21,11 +21,15 @@
 # and /bin/sh is dash on the Linux CI runner.
 #
 # Usage: sh remote-install-claw.sh <source_sha> <version> <stage_dir> <domain> <port> \
-#          <nginx_conf> <host_symlinks>
+#          <nginx_conf> <host_symlinks> <server_ports>
 #
-# <nginx_conf> is the edge vhost path and <host_symlinks> is a space-separated
-# list of host paths that must point at the runtime config dir. Both are host
-# facts and are supplied by the caller so this file stays host-neutral.
+# <nginx_conf> is the edge vhost path, <host_symlinks> is a space-separated
+# list of host paths that must point at the runtime config dir, and
+# <server_ports> is the explicit loopback listener list. All three are host or
+# config facts and are supplied by the caller so this file stays host-neutral.
+# <server_ports> is explicit because /health is served only by the [servers.*]
+# listeners; a config that also declares an admin/webui port must not be probed
+# for it.
 
 set -eu
 
@@ -36,6 +40,7 @@ domain="$4"
 upstream_port="$5"
 nginx_conf="$6"
 host_symlinks="$7"
+server_ports="$8"
 
 root=/opt/rcc
 release="$root/releases/$source_sha"
@@ -74,6 +79,7 @@ case "$nginx_conf" in
   /*) ;;
   *) die "nginx_conf must be an absolute path, got: $nginx_conf" ;;
 esac
+[ -n "$server_ports" ] || die "server_ports must list at least one listener port"
 
 # --- managed-path guards (checked before any mutation) ----------------------
 if [ -e "$config_dir" ] \
@@ -141,14 +147,11 @@ chmod 0600 "$config_dir/secrets/v3/provider-auth.conf"
 find "$config_dir/provider" -name 'config.v2.toml' -exec chmod 0640 {} +
 chown -R root:root "$config_dir"
 
-"$release/rccv3" config check -c "$config_dir/config.toml" \
-  || die "deployed config failed validation"
-log "config check passed"
-
 # --- local paths the runtime expects ---------------------------------------
 # Provider configs may reference absolute secret paths, so the host needs those
 # paths to resolve to the runtime config dir. The exact list is a host fact and
-# arrives as $host_symlinks.
+# arrives as $host_symlinks. This must run before `config check`, which reads
+# every provider `secretFile` and fails if the path is not resolvable yet.
 for link in $host_symlinks; do
   case "$link" in
     /*) ;;
@@ -164,6 +167,10 @@ for link in $host_symlinks; do
   install -d "$(dirname "$link")"
   [ -L "$link" ] || ln -s "$config_dir" "$link"
 done
+
+"$release/rccv3" config check -c "$config_dir/config.toml" \
+  || die "deployed config failed validation"
+log "config check passed"
 
 # --- TLS --------------------------------------------------------------------
 install -d -m 0750 "$config_dir/certs"
@@ -293,12 +300,15 @@ systemctl is-active --quiet rccv3.service || die "rccv3.service is not active"
 systemctl is-active --quiet nginx || die "nginx is not active"
 
 # --- verification -----------------------------------------------------------
-# Ports are digits only, so intentional word splitting is unambiguous here.
-ports=$(grep -oE '^port[[:space:]]*=[[:space:]]*[0-9]+' "$config_dir/config.toml" \
-  | grep -oE '[0-9]+' | tr '\n' ' ')
-[ -n "$ports" ] || die "no listener ports found in deployed config"
+# The caller passes the projected [servers.*] port list, so a config that also
+# declares an admin/webui port is not probed for /health it does not serve.
+for port in $server_ports; do
+  case "$port" in
+    *[!0-9]*|'') die "server port must be numeric, got: $port" ;;
+  esac
+done
 
-for port in $ports; do
+for port in $server_ports; do
   healthy=0
   for _ in $(seq 1 30); do
     body=$(curl --silent --max-time 5 "http://127.0.0.1:$port/health" || true)

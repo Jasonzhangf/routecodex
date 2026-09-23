@@ -61,9 +61,11 @@ function parseArgs(argv) {
   return options;
 }
 
-const ROOT_SERVER_TABLE = /^servers\.([A-Za-z0-9_]+)$/u;
+// TOML bare keys allow A-Z, a-z, 0-9, `_` and `-`, and `servers` is a map of
+// arbitrary bare keys, so hyphens are legal server ids.
+const ROOT_SERVER_TABLE = /^servers\.([A-Za-z0-9_-]+)$/u;
 const TABLE_HEADER = /^\[([^\]]+)\]\s*$/u;
-const BIND_LINE = /^bind\s*=\s*.*$/u;
+const BIND_LINE = /^bind\s*=\s*"([^"]*)"\s*$/u;
 const PORT_LINE = /^port\s*=\s*(\d+)\s*$/u;
 const ROUTE_USE = /use\s*=\s*"([A-Za-z0-9_.-]+)\/([^"]+)"/gu;
 
@@ -94,7 +96,8 @@ function project({ input, output, bind, providersDir }) {
     }
 
     if (currentRoot !== null) {
-      if (BIND_LINE.test(line)) {
+      const bindMatch = BIND_LINE.exec(line);
+      if (bindMatch) {
         out.push(`bind = "${bind}"`);
         bindRewrites.set(currentRoot, bindRewrites.get(currentRoot) + 1);
         continue;
@@ -121,6 +124,21 @@ function project({ input, output, bind, providersDir }) {
     fail(`every [servers.<id>] root table must declare exactly one port; tables=${serverTables} ports=${ports.length}`);
   }
   if (providers.size === 0) fail('input config references no route provider');
+
+  // Fail closed on the invariant this projection exists to enforce. A bind
+  // line that did not get rewritten keeps its authoring address, so the host
+  // would listen publicly instead of behind the edge. That is exactly what an
+  // unrecognized root server table (e.g. a quoted TOML key) would produce.
+  const unrewritten = out
+    .map((line, index) => [BIND_LINE.exec(line), index + 1])
+    .filter(([match]) => match && match[1] !== bind);
+  if (unrewritten.length > 0) {
+    fail(
+      `projected config binds ${unrewritten
+        .map(([match, line]) => `'${match[1]}' at line ${line}`)
+        .join(', ')}; every listener must bind ${bind}`,
+    );
+  }
 
   const sortedProviders = [...providers].sort();
   if (providersDir) {

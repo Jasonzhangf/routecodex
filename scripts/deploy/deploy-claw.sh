@@ -138,7 +138,9 @@ trap cleanup EXIT INT TERM
 # --- build ------------------------------------------------------------------
 ARTIFACT="$WORK_DIR/artifact/rccv3"
 if [ "$SKIP_BUILD" -eq 1 ]; then
-  [ -f "$RCC_SKIP_BUILD_ARTIFACT" ] || die "--skip-build requires RCC_SKIP_BUILD_ARTIFACT to point at an existing rccv3"
+  [ -n "${RCC_SKIP_BUILD_ARTIFACT:-}" ] \
+    || die "--skip-build requires RCC_SKIP_BUILD_ARTIFACT to point at an existing rccv3"
+  [ -f "$RCC_SKIP_BUILD_ARTIFACT" ] || die "RCC_SKIP_BUILD_ARTIFACT is not a file: $RCC_SKIP_BUILD_ARTIFACT"
   cp "$RCC_SKIP_BUILD_ARTIFACT" "$ARTIFACT"
   chmod 0755 "$ARTIFACT"
   VERSION=${RCC_SKIP_BUILD_VERSION:?--skip-build requires RCC_SKIP_BUILD_VERSION}
@@ -173,7 +175,15 @@ PROJECTION=$(node "$SCRIPT_DIR/project-claw-config.mjs" \
 PROVIDERS=$(printf '%s\n' "$PROJECTION" | grep '^provider=' | cut -d= -f2 | sort -u)
 [ -n "$PROVIDERS" ] || die "config projection reported no providers"
 
+# The projection reports the exact [servers.<id>] listener ports. They are
+# passed to the host verbatim so health checks never probe a port that does not
+# serve /health (for example a declared admin/webui port).
+SERVER_PORTS=$(printf '%s\n' "$PROJECTION" | grep '^port=' | cut -d= -f2)
+[ -n "$SERVER_PORTS" ] || die "config projection reported no listener ports"
+SERVER_PORTS=$(printf '%s' "$SERVER_PORTS" | tr '\n' ' ')
+
 log "projected providers: $(printf '%s' "$PROVIDERS" | tr '\n' ' ')"
+log "projected listener ports: $SERVER_PORTS"
 
 cp -a "$RCC_HOME/secrets/v3/provider-auth.conf" "$STAGE_DIR/secrets/v3/provider-auth.conf"
 for provider in $PROVIDERS; do
@@ -221,7 +231,7 @@ ssh_run "tar --no-same-owner -xf '$REMOTE_STAGE/runtime.tar' -C '$REMOTE_STAGE/r
 
 # --- install ----------------------------------------------------------------
 log "installing on $RCC_CLAW_HOST"
-INSTALL_OUT=$(ssh_run "sh -s -- '$SOURCE_SHA' '$VERSION' '$REMOTE_STAGE' '$RCC_CLAW_DOMAIN' '$RCC_UPSTREAM_PORT' '$RCC_NGINX_CONF' '$RCC_HOST_SYMLINKS'" \
+INSTALL_OUT=$(ssh_run "sh -s -- '$SOURCE_SHA' '$VERSION' '$REMOTE_STAGE' '$RCC_CLAW_DOMAIN' '$RCC_UPSTREAM_PORT' '$RCC_NGINX_CONF' '$RCC_HOST_SYMLINKS' '$SERVER_PORTS'" \
   < "$SCRIPT_DIR/remote-install-claw.sh") \
   || die "remote install failed"
 printf '%s\n' "$INSTALL_OUT" | sed 's/^/[deploy-claw] host: /'

@@ -89,6 +89,10 @@ scripts/deploy/deploy-claw.sh --ref <commit-ish>
 always builds from `git archive <commit>`, so uncommitted edits can never reach
 the host.
 
+`--skip-build` reuses an existing artifact and requires `RCC_SKIP_BUILD_ARTIFACT`
+(a path to a built `rccv3`) plus `RCC_SKIP_BUILD_VERSION` to be set in the
+environment.
+
 ## Deployment layout on the host
 
 ```text
@@ -114,6 +118,8 @@ The deployer aborts before mutating anything when:
 - the edge key is not one 64-character hex string
 - `project-claw-config.mjs` finds a server table without exactly one `bind` or
   `port`, no server table, or no referenced provider
+- the projected config still binds a non-loopback address (an unrecognized
+  root server table would otherwise keep its authoring bind)
 - a referenced provider config is missing
 - the projected config fails `rccv3 config check`
 - the cross build produces no artifact, a non-ELF artifact, or an artifact that
@@ -126,7 +132,7 @@ aborts when:
 - `nginx -t` rejects the generated config
 - `rccv3 config check` rejects the deployed config
 - `rccv3.service` or `nginx` is not active
-- any configured listener never reports `status: ok`
+- any configured `[servers.*]` listener never reports `status: ok`
 - any listener reports a `build_version` different from the deployed version
 - the edge returns anything but `200` authenticated `/v1/models`, `401`
   unauthenticated, and `403` for `/_routecodex/*`
