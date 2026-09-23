@@ -398,6 +398,37 @@ impl V3FrontTransportBroker {
             .cloned()
     }
 
+    /// Symmetric removal for an accepted connection. Removes the connection
+    /// from every association table it can occupy: the pre-admission accepted
+    /// socket registry, the connection-to-lease binding, and, when a lease has
+    /// been bound, the lease-keyed client socket/connection records. The
+    /// `checkpoints` map is independent persistence state and is left intact.
+    ///
+    /// This is the single unregister path invoked by `V3FrontConnectionGuard` on
+    /// Drop, so it must not be duplicated per exit path in the caller.
+    pub fn unregister_connection(&self, connection: V3FrontConnectionIdentity) {
+        self.front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .remove(&connection);
+        let lease_key = self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .remove(&connection)
+            .map(|lease| lease.key);
+        if let Some(lease_key) = lease_key {
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .remove(&lease_key);
+            self.client_connections
+                .lock()
+                .expect("front broker client connection lock")
+                .remove(&lease_key);
+        }
+    }
+
     /// Bind the accepted Front connection to the complete request lease only
     /// after request admission has produced all typed scope components. The
     /// connection identity alone is never a recovery key.
@@ -693,6 +724,32 @@ impl V3FrontTransportBroker {
         for socket in sockets {
             socket.close_for_exec_replacement();
         }
+    }
+
+    /// Count of live accepted-connection association records across the broker
+    /// tables. `checkpoints` is independent persistence state and is excluded;
+    /// this is the stable baseline the connection guard must return to zero on
+    /// every exit path.
+    pub fn active_connection_count(&self) -> usize {
+        self.front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .len()
+            + self
+                .connection_leases
+                .lock()
+                .expect("front broker connection lease lock")
+                .len()
+            + self
+                .client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .len()
+            + self
+                .client_connections
+                .lock()
+                .expect("front broker client connection lock")
+                .len()
     }
 }
 
@@ -996,6 +1053,22 @@ impl AsyncWrite for V3FrontHttpIo {
     }
 }
 
+/// Owns the broker registration for one accepted Front connection. Created
+/// immediately after `register_front_socket` and dropped when the connection
+/// future ends for any reason (normal completion, protocol error, early return,
+/// client disconnect, or Future Drop during shutdown), guaranteeing the broker
+/// association tables are cleaned up without hand-written per-path removals.
+struct V3FrontConnectionGuard {
+    broker: V3FrontTransportBroker,
+    connection: V3FrontConnectionIdentity,
+}
+
+impl Drop for V3FrontConnectionGuard {
+    fn drop(&mut self) {
+        self.broker.unregister_connection(self.connection);
+    }
+}
+
 pub async fn serve_v3_front_http_connection<S>(
     stream: TcpStream,
     remote_addr: SocketAddr,
@@ -1015,6 +1088,12 @@ where
     front_transport_broker
         .register_front_socket(connection_identity, front_socket.clone())
         .map_err(std::io::Error::other)?;
+    // From here on every exit path (including early `?` returns and Future Drop)
+    // unregisters the accepted connection exactly once via Drop.
+    let _connection_guard = V3FrontConnectionGuard {
+        broker: front_transport_broker,
+        connection: connection_identity,
+    };
     let request_front_socket = front_socket.clone();
     let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
         let mut service = service.clone();

@@ -438,3 +438,78 @@ async fn front_http_adapter_preserves_existing_router_service() {
     accept.await.unwrap();
     assert!(String::from_utf8_lossy(&response).contains("204 No Content"));
 }
+
+#[tokio::test]
+async fn front_broker_unregisters_connection_on_all_exit_paths() {
+    async fn run_connection(broker: &V3FrontTransportBroker, client_close: bool) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let connection_identity = broker.allocate_connection_identity();
+        let serve_broker = broker.clone();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(|| async move { axum::http::StatusCode::NO_CONTENT }),
+        );
+        let accept = tokio::spawn(async move {
+            let (stream, remote) = listener.accept().await.unwrap();
+            serve_v3_front_http_connection(
+                stream,
+                remote,
+                connection_identity,
+                serve_broker,
+                app.into_service(),
+            )
+            .await
+            .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let request = if client_close {
+            &b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"[..]
+        } else {
+            &b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n"[..]
+        };
+        tokio::io::AsyncWriteExt::write_all(
+            &mut client,
+            request,
+        )
+        .await
+        .unwrap();
+        // Best-effort read of the `204 No Content` response, then hard-drop the
+        // socket. The drop drives the server's read half to EOF, which is the
+        // exit path the guard must cover; reading to end would hang because the
+        // accepted transport's write worker owns the write half.
+        let mut buf = [0_u8; 512];
+        let _ = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::io::AsyncReadExt::read(&mut client, &mut buf),
+        )
+        .await;
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), accept)
+            .await
+            .expect("server task must finish")
+            .unwrap();
+    }
+
+    // Repeatedly open/close clean and abruptly-disconnected connections against
+    // a single shared broker. Every exit path must return the broker's active
+    // connection tables to the empty baseline. On base this fails: the broker
+    // never removes a `front_sockets` entry, so the count keeps growing.
+    let broker = V3FrontTransportBroker::new(0);
+    for _ in 0..3 {
+        run_connection(&broker, true).await;
+        assert_eq!(
+            broker.active_connection_count(),
+            0,
+            "clean connection exit left broker association records behind"
+        );
+        run_connection(&broker, false).await;
+        assert_eq!(
+            broker.active_connection_count(),
+            0,
+            "abrupt disconnect left broker association records behind"
+        );
+    }
+}
