@@ -607,22 +607,30 @@ fn parse_block(
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
         "thinking" => {
-            if object
+            let unexpected: Vec<&str> = object
                 .keys()
-                .any(|key| {
-                    !["type", "thinking", "signature", "cache_control"].contains(&key.as_str())
-                })
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
+                .map(String::as_str)
+                .filter(|key| !["type", "thinking", "signature", "cache_control"].contains(key))
+                .collect();
+            if !unexpected.is_empty() {
+                return Err(V3AnthropicSseTreeError::UnexpectedThinkingBlockFields(
+                    unexpected.join(","),
+                ));
             }
             V3AnthropicSseBlockKind::Thinking
         }
         "redacted_thinking" => {
-            if object
+            let unexpected: Vec<&str> = object
                 .keys()
-                .any(|key| !["type", "data", "cache_control"].contains(&key.as_str()))
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
+                .map(String::as_str)
+                .filter(|key| !["type", "data", "cache_control"].contains(key))
+                .collect();
+            if !unexpected.is_empty() {
+                return Err(
+                    V3AnthropicSseTreeError::UnexpectedRedactedThinkingBlockFields(
+                        unexpected.join(","),
+                    ),
+                );
             }
             V3AnthropicSseBlockKind::RedactedThinking
         }
@@ -752,8 +760,10 @@ pub(crate) enum V3AnthropicSseTreeError {
         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
     )]
     DuplicateMessageAfterBlock,
-    #[error("Anthropic codec malformed reasoning content")]
-    MalformedReasoningContent,
+    #[error("Anthropic thinking content block carries unexpected field(s): {0}")]
+    UnexpectedThinkingBlockFields(String),
+    #[error("Anthropic redacted_thinking content block carries unexpected field(s): {0}")]
+    UnexpectedRedactedThinkingBlockFields(String),
     #[error("Anthropic tool input JSON is malformed")]
     MalformedToolInput,
     #[error("Anthropic stream emitted an event after message_stop")]
