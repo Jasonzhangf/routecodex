@@ -819,12 +819,7 @@ fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String
 fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
     let call_id = read_v3_non_empty_str(item.get("tool_call_id"))
         .or_else(|| read_v3_non_empty_str(item.get("call_id")))
-        .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")))
-        .or_else(|| read_v3_non_empty_str(item.get("id")))
-        .ok_or_else(|| {
-            "Responses tool output is missing call_id/tool_call_id before OpenAI Chat encoding"
-                .to_string()
-        })?;
+        .or_else(|| read_v3_non_empty_str(item.get("tool_use_id")));
     let output = item
         .get("output")
         .or_else(|| item.get("content"))
@@ -838,31 +833,32 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         .and_then(Value::as_str)
         .unwrap_or("function_call_output");
     let mut extension = Map::new();
-    extension.insert(
-        "responses_tool_output_type".to_string(),
-        Value::String(item_type.to_string()),
-    );
+    extension.insert("responses_tool_output_type".to_string(), json!(item_type));
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
-        extension.insert(
-            "responses_item_id".to_string(),
-            Value::String(item_id.to_string()),
-        );
+        extension.insert("responses_item_id".to_string(), json!(item_id));
     }
-    match item.get("status") {
-        None => {}
-        Some(Value::String(status)) if matches!(status.as_str(), "completed" | "incomplete") => {
-            extension.insert(
-                "responses_tool_output_status".to_string(),
-                Value::String(status.clone()),
+    let Some(call_id) = call_id else {
+        // 命名无配对输出：name/namespace 是配对身份，不得伪造 call_id。Chat 的 tool 角色
+        // 只能按 tool_call_id 配对，故以 user 角色承载 output 并保留注册扩展身份。
+        let name = read_v3_non_empty_str(item.get("name")).ok_or(
+            "Responses tool output is missing call_id/tool_call_id before OpenAI Chat encoding",
+        )?;
+        let mut named_extension = extension;
+        named_extension.insert("responses_tool_output_name".to_string(), json!(name));
+        if let Some(namespace) = read_v3_non_empty_str(item.get("namespace")) {
+            named_extension.insert(
+                "responses_tool_output_namespace".to_string(),
+                json!(namespace),
             );
         }
-        Some(_) => {
-            return Err(
-                "Responses function_call_output.status must be completed or incomplete before OpenAI Chat encoding"
-                    .to_string(),
-            )
-        }
-    }
+        copy_v3_responses_tool_result_status(item, &mut named_extension)?;
+        return Ok(json!({
+            "role":"user",
+            "content":content,
+            "routecodex_chat_extension":Value::Object(named_extension)
+        }));
+    };
+    copy_v3_responses_tool_result_status(item, &mut extension)?;
     Ok(json!({
         "role":"tool",
         "tool_call_id":call_id,
@@ -870,6 +866,24 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         "routecodex_chat_extension":Value::Object(extension)
     }))
 }
+
+fn copy_v3_responses_tool_result_status(
+    item: &Map<String, Value>,
+    extension: &mut Map<String, Value>,
+) -> Result<(), String> {
+    match item.get("status") {
+        None => Ok(()),
+        Some(_) if !matches!(item["status"].as_str(), Some("completed" | "incomplete")) => {
+            Err(TOOL_RESULT_STATUS_ERROR.to_string())
+        }
+        Some(status) => {
+            extension.insert("responses_tool_output_status".to_string(), status.clone());
+            Ok(())
+        }
+    }
+}
+
+const TOOL_RESULT_STATUS_ERROR: &str = "Responses function_call_output.status must be completed or incomplete before OpenAI Chat encoding";
 
 #[derive(Clone, Copy)]
 enum V3OpenAiChatHostedToolHistoryKind {

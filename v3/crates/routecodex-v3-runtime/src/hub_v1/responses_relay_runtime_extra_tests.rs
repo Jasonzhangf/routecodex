@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn named_unpaired_tool_output_without_call_id_is_not_rejected() {
+    // Live P0 shape (bug f29d7db): a standalone Codex notification output carries
+    // name+namespace but no call_id. codex-rs models.rs
+    // named_unpaired_function_call_output_round_trips_without_call_id documents it
+    // as a valid client item that must survive unchanged.
+    let payload = serde_json::json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+            {
+                "type": "function_call_output",
+                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+            }
+        ]
+    });
+
+    let ids = find_responses_tool_output_ids(&payload)
+        .expect("named unpaired tool output is a valid client semantic");
+    assert!(
+        ids.consumed_ids.is_empty(),
+        "named unpaired output has no call identity to consume: {:?}",
+        ids.consumed_ids
+    );
+}
+
+#[test]
 fn malformed_tool_output_missing_call_id_projects_client_400_not_598() {
     let payload = serde_json::json!({
         "input": [{"type": "function_call_output", "output": "tool result"}]
@@ -1163,7 +1191,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking content block carries unexpected field(s): text"));
 }
 
 #[tokio::test]
@@ -1184,7 +1212,7 @@ async fn anthropic_provider_sse_rejects_thinking_delta_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking_delta requires thinking"));
 }
 
 #[tokio::test]
@@ -1204,14 +1232,20 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic redacted_thinking content block carries unexpected field(s): signature"));
 }
 
 #[tokio::test]
 async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
-    for content_block in [
-        r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
-        r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
+    for (content_block, expected) in [
+        (
+            r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
+            "Anthropic thinking content block carries unexpected field(s): text",
+        ),
+        (
+            r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
+            "Anthropic redacted_thinking content block carries unexpected field(s): signature",
+        ),
     ] {
         let observation = V3RuntimeStreamObservation::default();
         let stream = format!(
@@ -1226,9 +1260,10 @@ async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
         .await
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("Anthropic codec malformed reasoning content"));
+        assert!(
+            error.to_string().contains(expected),
+            "each dual-truth shape must name its own block kind and key: {error}"
+        );
     }
 }
 
@@ -1462,4 +1497,93 @@ async fn responses_provider_sse_unknown_response_event_fails_instead_of_discardi
     assert!(error
         .to_string()
         .contains("response.reasoning_summary.delta is unsupported"));
+}
+
+// Bug 07d7959: provider_stream_materialization.rs collapsed ThinkingDeltaRequired
+// and MalformedReasoningContent onto one string, so a live 502 could not name the
+// frame shape that broke. These tests read the message through the materializer,
+// not the SSE tree, because that is the layer the operator actually sees.
+async fn anthropic_relay_codec_message_for(provider_bytes: Vec<Vec<u8>>) -> String {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(
+        provider_bytes.into_iter().map(Ok).collect::<Vec<_>>(),
+    ));
+    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err()
+    .to_string()
+}
+
+fn anthropic_message_start(id: &str) -> Vec<u8> {
+    format!(
+        "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"{id}\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\n"
+    )
+    .into_bytes()
+}
+
+fn anthropic_thinking_start() -> Vec<u8> {
+    b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n".to_vec()
+}
+
+#[tokio::test]
+async fn anthropic_relay_thinking_and_signature_delta_failures_are_distinct() {
+    let thinking_delta = anthropic_relay_codec_message_for(vec![
+        anthropic_message_start("msg_thinking_delta"),
+        anthropic_thinking_start(),
+        b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\"}}\n\n".to_vec(),
+    ])
+    .await;
+    let signature_delta = anthropic_relay_codec_message_for(vec![
+        anthropic_message_start("msg_signature_delta"),
+        anthropic_thinking_start(),
+        b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\"}}\n\n".to_vec(),
+    ])
+    .await;
+
+    assert!(
+        thinking_delta.ends_with("Anthropic thinking_delta requires thinking"),
+        "unexpected thinking_delta message: {thinking_delta}"
+    );
+    assert!(
+        signature_delta.ends_with("Anthropic signature_delta requires signature"),
+        "unexpected signature_delta message: {signature_delta}"
+    );
+    assert_ne!(
+        thinking_delta, signature_delta,
+        "two different codec failures must not surface one string"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_relay_block_shape_failures_name_their_block_kind_and_key() {
+    let thinking_block = anthropic_relay_codec_message_for(vec![
+        anthropic_message_start("msg_thinking_block"),
+        b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"native\",\"text\":\"alias\"}}\n\n".to_vec(),
+    ])
+    .await;
+    let redacted_block = anthropic_relay_codec_message_for(vec![
+        anthropic_message_start("msg_redacted_block"),
+        b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"native\",\"signature\":\"alias\"}}\n\n".to_vec(),
+    ])
+    .await;
+
+    assert!(
+        thinking_block
+            .ends_with("Anthropic thinking content block carries unexpected field(s): text"),
+        "unexpected thinking block message: {thinking_block}"
+    );
+    assert!(
+        redacted_block.ends_with(
+            "Anthropic redacted_thinking content block carries unexpected field(s): signature"
+        ),
+        "unexpected redacted_thinking block message: {redacted_block}"
+    );
+    assert_ne!(
+        thinking_block, redacted_block,
+        "the two reasoning block shapes must not share a message"
+    );
 }

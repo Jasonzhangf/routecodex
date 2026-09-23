@@ -549,9 +549,83 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
         }))
         .expect_err("malformed signature_delta must not disappear");
 
-    assert!(error
-        .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+    assert!(error.to_string().contains("Anthropic signature_delta requires signature"));
+}
+
+#[test]
+fn anthropic_provider_thinking_delta_without_payload_survives_as_distinct_codec_failure() {
+    let mut state = anthropic_sse_tree::V3AnthropicSseReducerState::default();
+    state
+        .apply_event(&json!({
+            "type":"message_start",
+            "message":{
+                "id":"msg_thinking_delta_missing",
+                "type":"message",
+                "role":"assistant",
+                "content":[],
+                "usage":{"input_tokens":1}
+            }
+        }))
+        .expect("message_start");
+    state
+        .apply_event(&json!({
+            "type":"content_block_start",
+            "index":0,
+            "content_block":{"type":"thinking","thinking":""}
+        }))
+        .expect("thinking start");
+
+    let error = state
+        .apply_event(&json!({
+            "type":"content_block_delta",
+            "index":0,
+            "delta":{"type":"thinking_delta"}
+        }))
+        .expect_err("thinking_delta without thinking must not disappear");
+
+    assert!(
+        error.to_string().contains("thinking_delta requires thinking"),
+        "the missing thinking payload must survive as its own codec failure: {error}"
+    );
+}
+
+#[test]
+fn anthropic_provider_signature_delta_without_payload_survives_as_distinct_codec_failure() {
+    let mut state = anthropic_sse_tree::V3AnthropicSseReducerState::default();
+    state
+        .apply_event(&json!({
+            "type":"message_start",
+            "message":{
+                "id":"msg_signature_delta_missing",
+                "type":"message",
+                "role":"assistant",
+                "content":[],
+                "usage":{"input_tokens":1}
+            }
+        }))
+        .expect("message_start");
+    state
+        .apply_event(&json!({
+            "type":"content_block_start",
+            "index":0,
+            "content_block":{"type":"thinking","thinking":""}
+        }))
+        .expect("thinking start");
+
+    let error = state
+        .apply_event(&json!({
+            "type":"content_block_delta",
+            "index":0,
+            "delta":{"type":"signature_delta"}
+        }))
+        .expect_err("signature_delta without signature must not disappear");
+
+    assert!(
+        error
+            .to_string()
+            .contains("signature_delta requires signature"),
+        "the missing signature payload must survive as its own codec failure: {error}"
+    );
 }
 
 fn glmrelay_error_policy_manifest() -> V3Config05ManifestPublished {

@@ -135,10 +135,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         deterministic_sample,
     };
     loop {
-        let selected = if let Some(selected) = retry_selected.take() {
-            selected
+        let (selected, mut selected_admission): (
+            routecodex_v3_target::V3Target10ConcreteProviderSelected,
+            Option<V3RuntimeProviderAdmission>,
+        ) = if let Some(selected) = retry_selected.take() {
+            (selected, None)
         } else if let Some(selected) = initial_selected_target.take() {
-            selected
+            (selected, None)
         } else {
             let target_resolution_input = V3RelayProviderTargetResolutionInput {
                 manifest,
@@ -153,27 +156,29 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     .map_err(V3ResponsesRelayRuntimeError::Target)?,
                 deterministic_sample,
             };
-            let target_resolution = if allow_exhaustion_rescue_probe {
-                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
-            } else {
-                resolve_v3_relay_target_outcome(target_resolution_input)
-            };
+            let target_resolution = resolve_v3_relay_target_outcome_with_admission_rescue(
+                target_resolution_input,
+                allow_exhaustion_rescue_probe,
+            )
+            .await;
             match target_resolution {
-                V3RelayProviderTargetResolution::Selected(selected) => selected,
-                V3RelayProviderTargetResolution::Failed(source)
+                V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
+                    (selected.selected, Some(selected.admission))
+                }
+                V3RelayProviderAdmittedTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
                 {
                     return Err(V3ResponsesRelayRuntimeError::ModelNotFound(
                         source.message.clone(),
                     ));
                 }
-                V3RelayProviderTargetResolution::Failed(source) => {
+                V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3ResponsesRelayRuntimeError::Target(format!(
                         "{}: {}",
                         source.code, source.message
                     )));
                 }
-                V3RelayProviderTargetResolution::Exhausted {
+                V3RelayProviderAdmittedTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
                     return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
@@ -346,6 +351,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         }
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
+        if pending_provider_action_recovery.is_some() {
+            drop(selected_admission.take());
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match handle_error_before_resp03!(provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -386,6 +394,12 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         handle_error_before_resp03!(runtime_timing
             .start_external()
             .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+        let transport_request = match selected_admission.take() {
+            Some(admission) => {
+                transport_request.with_pre_acquired_admission(admission.into_lease())
+            }
+            None => transport_request,
+        };
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
@@ -1277,12 +1291,22 @@ pub(crate) fn find_responses_tool_output_ids(
             .get("call_id")
             .or_else(|| item.get("tool_call_id"))
             .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ClientInboundCanonical(
-                    "Responses tool output requires call_id".to_string(),
-                )
-            })?;
+            .filter(|value| !value.is_empty());
+        let Some(id) = id else {
+            // 命名无配对输出（name+namespace，无 call_id）是合法客户端语义：
+            // 它没有可消费的 call 身份，身份由 name/namespace 承载，下游 canonical
+            // 保留该身份且不得伪造 call_id。只有既无 call_id 又无 name 才是畸形输入。
+            if item
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                continue;
+            }
+            return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+                "Responses tool output requires call_id".to_string(),
+            ));
+        };
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
         }

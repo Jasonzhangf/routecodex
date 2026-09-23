@@ -541,7 +541,7 @@ requireMatch(
 );
 requireMatch(
   source.relayCore,
-  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Generic relay core must require an explicit provider rescue-probe mode",
 );
 requireMatch(
@@ -556,7 +556,7 @@ requireMatch(
 );
 requireMatch(
   `${source.kernel}\n${source.v3DirectCore}`,
-  /select_v3_expanded_target_with_exhaustion_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  /select_v3_expanded_target_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Every direct kernel must pass the explicit rescue-probe gate to the shared owner",
 );
 requireMatch(
@@ -576,7 +576,7 @@ forbidMatch(
 );
 requireMatch(
   source.kernel,
-  /select_v3_expanded_target_with_exhaustion_rescue/u,
+  /select_v3_expanded_target_with_admission_rescue/u,
   "Direct provider selection must consume the shared exhaustion rescue owner",
 );
 const directSseMarker = "pub(crate) async fn project_and_collect_direct_sse_attempt";

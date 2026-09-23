@@ -446,11 +446,9 @@ const respChatProcessSource = read('v3/crates/routecodex-v3-runtime/src/hub_v1/r
 if (/continuation_response_id/.test(respChatProcessSource)) {
   fail('Resp03 continuation control identity cannot be embedded in Chat canonical payload');
 }
-if (!/responses_process_requires_relay/.test(runtimeNodesSource)
-    || !/selected[\s\S]{0,120}\.candidate[\s\S]{0,120}\.responses_process/.test(runtimeNodesSource)
-    || !/responses provider process=chat requires relay mode but relay is not allowed/.test(runtimeNodesSource)
-    || !/let mode = if responses_process_requires_relay[\s\S]{0,400}V3Execution11ProtocolDecisionMode::HubRelay[\s\S]{0,120}else if entry_protocol == selected_provider_protocol/.test(runtimeNodesSource)) {
-  fail('V3Execution11ProtocolDecision must route selected responses provider process=chat to HubRelay before SameProtocolDirect');
+if (!/let mode = if entry_protocol == selected_provider_protocol \{/.test(runtimeNodesSource)
+    || !/if direct_allowed \{\s*V3Execution11ProtocolDecisionMode::SameProtocolDirect/s.test(runtimeNodesSource)) {
+  fail('V3Execution11ProtocolDecision must keep a responses-native provider on SameProtocolDirect');
 }
 
 const foundationSource = read('v3/crates/routecodex-v3-runtime/src/foundation.rs');

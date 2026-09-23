@@ -104,7 +104,7 @@ for (const phrase of [
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
   'responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback',
   'responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream',
-  'responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime',
+  'responses_cross_protocol_websocket_uses_hub_relay_runtime',
   'responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null',
   'connect_async(request)',
   'responses_websockets=2026-02-06',

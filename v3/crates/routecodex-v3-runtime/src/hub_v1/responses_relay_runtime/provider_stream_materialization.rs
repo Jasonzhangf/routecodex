@@ -226,12 +226,6 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
                             .to_owned()
                     }
-                    V3AnthropicSseTreeError::ThinkingDeltaRequired => {
-                        "Anthropic codec malformed reasoning content".to_owned()
-                    }
-                    V3AnthropicSseTreeError::MalformedReasoningContent => {
-                        "Anthropic codec malformed reasoning content".to_owned()
-                    }
                     V3AnthropicSseTreeError::MalformedToolInput => {
                         "Anthropic provider event stream input_json_delta is malformed".to_owned()
                     }

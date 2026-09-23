@@ -67,11 +67,11 @@ const cases = [
     diagnostic: /missing run_v3_relay_provider_failure_policy|missing ordered SSE response path phrase let result = run_v3_relay_provider_failure_policy/,
   },
   {
-    name: 'responses relay removes exhaustion rescue resolver',
+    name: 'responses relay removes admitted exhaustion rescue resolver',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    marker: 'resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await',
-    mutation: 'resolve_v3_relay_target_outcome_without_rescue',
-    diagnostic: /missing resolve_v3_relay_target_outcome_with_rescue/u,
+    marker: 'resolve_v3_relay_target_outcome_with_admission_rescue(',
+    mutation: 'resolve_v3_relay_target_outcome_without_admission_rescue(',
+    diagnostic: /missing resolve_v3_relay_target_outcome_with_admission_rescue/u,
   },
   {
     name: 'responses relay resurrects local excluded availability',

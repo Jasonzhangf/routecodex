@@ -60,7 +60,7 @@ for (const [owner, text, phrases] of [
     'const OPENAI_BETA_HEADER: &str = "openai-beta";',
     'const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";',
     'websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>',
-    'session.lock_owned().await',
+    'session.lock_owned()',
     'struct WebSocketSseState',
     'impl Drop for WebSocketSseState',
     'if !self.finished {',

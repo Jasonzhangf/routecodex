@@ -4,6 +4,56 @@
 
 use super::*;
 
+pub(super) async fn acquire_connection_slot_before_provider_admission(
+    sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
+    request: &mut V3Transport13ResponsesRequest,
+) -> Result<Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>, V3ProviderError> {
+    let V3Transport13ResponsesRequestKind::WebSocketV2 {
+        request_id,
+        provider_id,
+        canonical_model_id,
+        url,
+        auth,
+        cancellation,
+        ..
+    } = &request.kind
+    else {
+        return Ok(None);
+    };
+    let session_key = websocket_session_key(provider_id, canonical_model_id, &auth.alias, url);
+    let session = {
+        let mut sessions = sessions.lock().await;
+        sessions
+            .entry(session_key)
+            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .clone()
+    };
+    ensure_not_cancelled(request_id, provider_id, cancellation.as_ref())?;
+    let lock = session.lock_owned();
+    match cancellation.clone() {
+        Some(cancellation) => {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(V3ProviderError::ClientDisconnect {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                }),
+                connection = lock => Ok(Some(connection)),
+            }
+        }
+        None => Ok(Some(lock.await)),
+    }
+}
+
+fn websocket_session_key(
+    provider_id: &str,
+    canonical_model_id: &str,
+    auth_alias: &str,
+    url: &str,
+) -> String {
+    format!("{provider_id}\u{1f}{canonical_model_id}\u{1f}{auth_alias}\u{1f}{url}")
+}
+
 #[derive(Default)]
 pub(super) struct V3ResponsesWebSocketProtocolAggregate {
     function_call_items: BTreeMap<u64, Value>,

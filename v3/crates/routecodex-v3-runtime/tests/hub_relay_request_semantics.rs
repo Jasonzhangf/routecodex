@@ -59,6 +59,64 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
 }
 
 #[test]
+fn responses_req_inbound02_keeps_named_unpaired_tool_output_through_req04_governance() {
+    // Live P0 shape (bug f29d7db): the standalone Codex notification output must
+    // survive ReqInbound02 canonicalization and Req04 tool governance untouched.
+    let hooks = compile_v3_hub_relay_request_hooks();
+    let governed = hooks
+        .run(
+            raw(json!({
+                "model":"gpt-5.5",
+                "input":[
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    },
+                    {
+                        "type":"function_call_output",
+                        "id":"fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                        "name":"send_message_to_thread",
+                        "namespace":"codex_tui",
+                        "output":"<codex_delegation>cross-thread notification</codex_delegation>"
+                    }
+                ]
+            })),
+            &V3HubServertoolRequestProfile::disabled(),
+        )
+        .expect("named unpaired tool output must pass ReqInbound02 and Req04 governance");
+
+    let payload = governed.payload();
+    let messages = payload["messages"]
+        .as_array()
+        .expect("Chat canonical messages");
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("tool_call_id").is_none()),
+        "no fabricated tool_call_id may appear for an unpaired output: {payload}"
+    );
+    let carrier = messages
+        .iter()
+        .find(|message| {
+            message["routecodex_chat_extension"]["responses_tool_output_name"].is_string()
+        })
+        .unwrap_or_else(|| panic!("named unpaired output must survive Req04: {payload}"));
+    let extension = &carrier["routecodex_chat_extension"];
+    assert_eq!(
+        extension["responses_tool_output_name"],
+        "send_message_to_thread"
+    );
+    assert_eq!(extension["responses_tool_output_namespace"], "codex_tui");
+    assert!(
+        carrier["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("cross-thread notification")),
+        "the exact output text must survive governance: {payload}"
+    );
+}
+
+#[test]
 fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_search_before_req04() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks

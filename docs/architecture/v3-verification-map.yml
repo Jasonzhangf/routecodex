@@ -1079,7 +1079,7 @@ features:
   - v3-rd-10 through v3-rd-12 may be anchored only by the generic Provider runtime source and controlled-upstream evidence
   - V3Execution11ProtocolDecision is written by protocol execution planning before initial dispatch and recomputed only for the currently selected Target10 after provider failure reselection; the
     selected entry-protocol execution mode remains the only Direct/Relay lock
-  - V3Target10ConcreteProviderSelected carries provider.responses.process; selected Responses providers with process=chat must choose Hub Relay before SameProtocolDirect during protocol execution planning
+  - V3Target10ConcreteProviderSelected carries provider.responses.process as provider-private truth; a responses entry selecting a responses-native provider stays SameProtocolDirect regardless of process=chat
   - P6 Dry Run invokes the same Runtime kernel and replaces only the Provider transport with a no-network effect
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
@@ -1116,7 +1116,7 @@ features:
   - rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml
   - rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml
   - 4444 and 5555 health version must match the installed rccv3 artifact
-  - 5555 provider-request dry-run and live /v1/responses replay selecting asxs-grok must show Hub Relay nodes and provider Chat wire rather than SameProtocolDirect POST /responses
+  - 5555 provider-request dry-run and live /v1/responses replay selecting a responses-native provider must show SameProtocolDirect and provider POST /responses; a cross-protocol provider still requires Hub Relay
   completion_rule:
     source: P6 Server03 through Server16, generic Provider transport, Target-local reselection, full exhaustion, and same-kernel no-network Dry Run require all listed source gates.
     runtime: 'Verified with the actual V3 CLI and dedicated multi-listener config.p6.toml: JSON, SSE, reselection, exhaustion, Dry Run no-send, Debug trace, secret isolation, explicit Ctrl-C, and closed
@@ -2971,6 +2971,11 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
@@ -2978,6 +2983,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
+  required_symbols:
+  - select_v3_expanded_target_with_admission_rescue
+  - resolve_v3_relay_target_outcome_with_admission_rescue
   required_positive:
   - one typed permit generation owns each scheduled or rescue probe and successful completion atomically resets score, streak, delta window, cooldown, and probe backoff state
   - Responses, OpenAI Chat, Anthropic, and Gemini probes require their protocol-specific terminal success shape before recovery
@@ -2988,12 +2996,18 @@ features:
   - matched HTTP 401 and HTTP 403 provider error policies with scope=auth_key record provider+auth_alias failures without model identity and cool the key after the first failure
   - a 401 auth-key cooldown blocks scheduling and session availability for another model under the same provider/auth_alias while sibling keys remain available
   - 401 auth-key business cooldown remains until semantic probe success, while its first recovery probe is due after 5 seconds and later failures advance the shared 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
+  - Direct and Relay admission-rescue selection skip a busy provider+authAlias candidate before Provider transport and can select an idle provider or sibling auth key without Router reentry
+  - Direct all-busy admission waits once for the selected candidates' typed acquireTimeoutMs, wakes on release, rescans the captured Target09 set, and sends only after acquiring a real admission lease
+  - Direct and Relay all-busy timeout completes as provider-pool exhaustion with concurrency_busy attempted candidates and no Provider transport send
+  - Due adaptive scheduled probes may satisfy all-busy admission only for the selected candidate and must leave the probe accounting balanced after Runtime hands the lease to transport
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - HTTP 2xx with an error object, malformed JSON, nonterminal status, or missing protocol terminal shape cannot recover a provider
   - an early due probe does not make the provider available before semantic probe success
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
+  - Busy admission never records provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
+  - All-busy timeout cannot send a provider request, leak a held admission lease, or convert local admission pressure into a typed provider health failure
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
@@ -3001,6 +3015,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures
@@ -3201,13 +3216,16 @@ features:
   - Relay and Direct requests enter the same Front skeleton; the Front does not choose between them.
   - The accept skeleton does not parse provider business events or own routing, health, or retry.
   - A non-SSE inner response on an accepted SSE channel becomes an internal response-stage Error01-06 failure; it is never reinterpreted from payload bytes.
-  - A post-commit provider failure does not reroute or rebuild the current response; the lifecycle makes provider failure post-commit unreachable by withholding semantic commit until terminal success.
+  - A post-commit provider failure does not reroute or reselect; it discards the partial attempt and projects exactly one typed client terminal, while only a client disconnect or an exhausted target pool closes at EOF. Semantic commit is still withheld until terminal success, so the failed attempt buffer never crosses the client edge.
   - Failed-attempt frames are discarded and cannot be concatenated with replacement-attempt frames.
   - New features cannot replace the accept channel, runtime worker, or projected-frame edge.
   required_gates:
   - npm run verify:v3-direct-sse-accept-skeleton
   - npm run verify:v3-direct-sse-full-attempt-commit
   - npm run verify:v3-architecture-ci
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib responses_live_sse_client_disconnect_still_closes_without_terminal -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib affected_session_terminal_releases_admission_while_an_independent_session_is_unaffected -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_guard_rejects_typed_responses_shape_before_client_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib openai_chat_direct_sse_ -- --nocapture
