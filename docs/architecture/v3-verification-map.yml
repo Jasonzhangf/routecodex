@@ -1735,8 +1735,8 @@ features:
   - Responses request to OpenAI Chat provider wire maps max_output_tokens to max_completion_tokens and preserves OpenAI Chat data-plane metadata/stop, tool schema, tool_choice, user, sampling, response_format,
     token fields, and projects Responses reasoning config to `reasoning_effort` while rejecting non-standard client_metadata and the raw Responses `reasoning` object from provider wire.
   - OpenAI Chat provider response to Responses projection preserves model, created timestamp, reasoning, text, tool calls, finish_reason, and usage fields.
-  - Anthropic Messages request to Responses provider semantic preserves system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking
-    fields.
+  - Anthropic Messages request is normalized to Chat canonical with system, image/text blocks, tool_use/tool_result, tool schema, tool_choice, metadata, sampling, top_k, token, stop, stream, and thinking
+    fields; the selected provider protocol is projected only at Req07/ProviderCompat06.
   - Anthropic request thinking.type, thinking.budget_tokens, and thinking.display decode into separate registered Chat fields; no raw thinking object crosses Chat Process and none is compressed to effort.
   - Responses reasoning.effort reaches Anthropic `output_config.effort` only for the exact shared value domain; none/minimal fail explicitly and no effort value invents `thinking.budget_tokens`.
   - Responses reasoning.effort is preserved until concrete target selection; DeepSeek lower/unknown values project to high and xhigh/max values project to max; MiniMax active effort uses adaptive thinking without `output_config.effort`.
@@ -1775,7 +1775,7 @@ features:
   - routecodex-v3-provider-responses::wire::tests::wire_wraps_deepseek_v41_malformed_function_arguments_for_openai_chat_profile
   - Structured Anthropic system blocks normalize into request.anthropic_system_blocks; Anthropic outbound alone may reconstruct system, while Responses/OpenAI Chat/Gemini fail explicitly instead of flattening
     block-local cache semantics.
-  - Anthropic provider JSON/SSE thinking response maps to Responses reasoning.summary/encrypted_content before response governance.
+  - Anthropic provider JSON/SSE response normalizes to Chat semantics before Resp03. Thinking signatures, redacted reasoning, cache_control, and unknown provider reasoning fields remain in registered Chat extensions until target Responses Outbound; unsupported provider extensions do not cause inbound 599.
   - Responses provider response to Anthropic client projection preserves ordered thinking/text/tool_use, usage, stop_reason, and rejects malformed function arguments.
   - Paired and unpaired malformed Responses function-call argument text is preserved exactly at the adjacent OpenAI Chat field projector without JSON-string rewrapping, MetadataCenter reconstruction, provider failure, or reselect.
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
@@ -1801,6 +1801,9 @@ features:
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
   - responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak
+  - responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning
+  - responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client
+  - anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound
   - responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary
   - anthropic_consumes_responses_json_schema_name_in_outbound_projection
   - openai_chat_wire_projects_responses_web_search_tool_to_options
@@ -1809,7 +1812,7 @@ features:
   - openai_chat_wire_rejects_unknown_client_metadata
   - responses_supported_verbosity_is_registered_local_style_hint_for_anthropic
   - anthropic_wire_consumes_reasoning_summary_policy_as_local_response_hint
-  - anthropic_projection_context_consumes_reasoning_summary_policy_for_response_shape
+  - Anthropic response normalization rejects unknown stop_reason instead of projecting it as successful stop.
   - openai_chat_wire_rejects_invalid_reasoning_summary_policy
   - responses_inbound_restores_codex_integer_tool_schema_types
   - responses_inbound_does_not_rewrite_string_session_id_schema

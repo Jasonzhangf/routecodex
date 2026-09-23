@@ -932,10 +932,10 @@ async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatproc
     .await
     .expect("Anthropic provider event stream must canonicalize before Responses Chat Process");
 
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "message");
+    assert_eq!(response["object"], "chat.completion");
+    assert_eq!(response["choices"][0]["message"]["role"], "assistant");
     assert_eq!(
-        response["output"][0]["content"][0]["text"],
+        response["choices"][0]["message"]["content"],
         "V3_ANTHROPIC_SSE_OK"
     );
     let snapshot = observation.snapshot().expect("stream observation");
@@ -944,21 +944,8 @@ async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatproc
 }
 
 #[tokio::test]
-async fn anthropic_provider_sse_uses_responses_projection_context_for_metadata_and_custom_tools() {
+async fn anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound() {
     let observation = V3RuntimeStreamObservation::default();
-    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
-        "tools":[{
-            "type":"custom",
-            "name":"apply_patch",
-            "description":"apply a patch"
-        }],
-        "routecodex_chat_extension":{
-            "responses_request":{
-                "metadata":{"trace_id":"sse-context-kept"}
-            }
-        }
-    }))
-    .expect("projection context");
     let provider = Box::pin(stream::iter(vec![
             Ok(br#"event: message_start
 data: {"type":"message_start","message":{"id":"msg_sse_custom","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":10}}}
@@ -992,22 +979,33 @@ data: {"type":"message_stop"}
             .to_vec()),
         ]));
 
-    let response =
-        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
-            V3HubProviderWireProtocol::Anthropic,
-            provider,
-            &observation,
-            &context,
-        )
-        .await
-        .expect("Anthropic SSE projection must use request context");
+    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("Anthropic SSE must normalize to Chat semantics");
 
-    assert_eq!(response["metadata"]["trace_id"], "sse-context-kept");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["call_id"], "call_apply_patch");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
-        response["output"][0]["input"],
+        response["choices"][0]["message"]["tool_calls"][0]["type"],
+        "function"
+    );
+    assert_eq!(
+        response["choices"][0]["message"]["tool_calls"][0]["id"],
+        "call_apply_patch"
+    );
+    assert_eq!(
+        response["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "apply_patch"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap()["input"],
         "*** Begin Patch\n*** End Patch"
     );
 }
@@ -1230,9 +1228,9 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     .await
     .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("Anthropic redacted_thinking content block carries unexpected field(s): signature"));
+    assert!(error.to_string().contains(
+        "Anthropic redacted_thinking content block carries unexpected field(s): signature"
+    ));
 }
 
 #[tokio::test]
@@ -1249,8 +1247,8 @@ async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
     ] {
         let observation = V3RuntimeStreamObservation::default();
         let stream = format!(
-                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
-            );
+            "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
+        );
         let provider = Box::pin(stream::iter(vec![Ok(stream.into_bytes())]));
         let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,

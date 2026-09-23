@@ -41,6 +41,7 @@ const relayRequest = readFileSync(resolve(sourceRoot, relayRequestPath), 'utf8')
 const responsesRelayRuntime = readFileSync(resolve(sourceRoot, responsesRelayRuntimePath), 'utf8');
 const responsesRelayJsonHooks = readFileSync(resolve(sourceRoot, responsesRelayJsonHooksPath), 'utf8');
 const anthropicRelayHooks = readFileSync(resolve(sourceRoot, anthropicRelayHooksPath), 'utf8');
+const reqInboundNormalized = readFileSync(resolve(sourceRoot, 'crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs'), 'utf8');
 const openaiChatCodec = readFileSync(resolve(sourceRoot, openaiChatCodecPath), 'utf8');
 const geminiCodec = readFileSync(resolve(sourceRoot, geminiCodecPath), 'utf8');
 const protocolBoundaryManifest = readFileSync(resolve(architectureRoot, protocolBoundaryManifestPath), 'utf8');
@@ -339,13 +340,13 @@ requireAll(responseToolCollector, 'RespChatProcess tool governance collector', [
 
 const anthropicRelayReqInbound = functionBody(anthropicRelayHooks, 'pub fn run_v3_anthropic_relay_runtime_req_inbound');
 requireAll(anthropicRelayReqInbound, 'Anthropic Relay request protocol codec boundary', [
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01',
+  'build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01',
 ]);
-// anthropicRelayStaticReqInbound 守卫（run_v3_anthropic_relay_req_inbound_hook 的
-// encode/build 双 builder 检查）随该函数删除而移除（2026-08-08 并行重构，函数已不存在）；
-// 替代守卫是上方 run_v3_anthropic_relay_runtime_req_inbound 的
-// encode_v3_anthropic_request_as_responses_semantic + build_v3_hub_req_inbound_02 检查。
+const reqInbound = functionBody(reqInboundNormalized, 'pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01');
+requireAll(reqInbound, 'Anthropic inbound Chat normalization', [
+  'normalize_v3_anthropic_request_to_chat(source_payload)',
+  'semantic_protocol: V3HubRequestSemanticProtocol::Chat',
+]);
 
 const responseRuntime = functionBody(responsesRelayJsonHooks, 'fn run_json_response_hooks');
 

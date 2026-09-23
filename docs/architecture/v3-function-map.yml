@@ -1144,7 +1144,6 @@ features:
   resource_bindings:
   - v3.request.normal_payload
   - v3.request.provider_semantic
-  - v3.request.response_projection_context
   - v3.hub.provider_wire_payload
   - v3.hub.response_semantic
   - v3.response.client_payload
@@ -2492,11 +2491,11 @@ features:
   - execute_v3_responses_relay_runtime_inner
   - project_v3_responses_relay_runtime_failure
   - build_v3_responses_provider_response_from_openai_chat_payload
-  - encode_v3_anthropic_request_as_responses_semantic
   - encode_v3_responses_semantic_as_anthropic_request
   - project_v3_responses_json_as_anthropic_message
   - V3AnthropicResponsesProjectionContext::from_chat_canonical_request
-  - project_v3_anthropic_message_as_responses_response_with_context
+  - normalize_v3_anthropic_request_to_chat
+  - normalize_v3_anthropic_message_to_chat_response
   - responses_openai_chat_field_parity_request_matrix
   - responses_openai_chat_field_parity_response_matrix
   - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility

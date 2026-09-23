@@ -50,15 +50,21 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
     assert_eq!(tool["type"], "function");
     assert_eq!(tool["function"]["name"], "apply_patch");
     assert_eq!(tool["function"]["parameters"]["required"], json!(["input"]));
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("reason")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("goal_alignment_confidence")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("model_id")
-        .is_none());
+    assert!(
+        tool["function"]["parameters"]["properties"]
+            .get("reason")
+            .is_none()
+    );
+    assert!(
+        tool["function"]["parameters"]["properties"]
+            .get("goal_alignment_confidence")
+            .is_none()
+    );
+    assert!(
+        tool["function"]["parameters"]["properties"]
+            .get("model_id")
+            .is_none()
+    );
 }
 
 #[test]
@@ -1353,10 +1359,10 @@ fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_sear
         description, "Search the web for up-to-date information.",
         "websearch description must match the standard web_search tool description: {description}"
     );
-    let query_description = tools[1]["function"]["parameters"]["properties"]["query"]
-        ["description"]
-        .as_str()
-        .expect("websearch query description");
+    let query_description =
+        tools[1]["function"]["parameters"]["properties"]["query"]["description"]
+            .as_str()
+            .expect("websearch query description");
     assert!(
         query_description.contains("concise query"),
         "websearch query description must guide the search query: {query_description}"
@@ -1609,4 +1615,43 @@ fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
         "client-echoed assistant reasoning must pass to wire reasoning_content untouched"
     );
     assert_eq!(request["messages"][1]["content"], "CONTINUE_A");
+}
+
+#[test]
+fn anthropic_interleaved_text_and_tool_calls_keep_responses_input_order() {
+    let messages = json!([{
+        "role":"assistant",
+        "content":[{"type":"text","text":"before"},{"type":"text","text":"after"}],
+        "tool_calls":[{"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{}"}}],
+        "routecodex_chat_extension":{"anthropic_content_order":[
+            {"kind":"content","index":0},
+            {"kind":"tool_call","index":0},
+            {"kind":"content","index":1}
+        ]}
+    }]);
+    let input = super::build_responses_input_from_chat_messages(messages.as_array().unwrap())
+        .expect("Responses input projection");
+    assert_eq!(input[0]["type"], "message");
+    assert_eq!(input[0]["content"][0]["text"], "before");
+    assert_eq!(input[1]["type"], "function_call");
+    assert_eq!(input[2]["type"], "message");
+    assert_eq!(input[2]["content"][0]["text"], "after");
+}
+
+#[test]
+fn responses_tool_result_projection_keeps_text_and_consumes_unrepresentable_image() {
+    let messages = json!([{
+        "role":"tool",
+        "tool_call_id":"call-1",
+        "content":"found",
+        "routecodex_chat_extension":{"anthropic_tool_result_content":[
+            {"type":"text","text":"found"},
+            {"type":"image","source":{"type":"url","url":"https://example.invalid/image"}}
+        ]}
+    }]);
+    let input = super::build_responses_input_from_chat_messages(messages.as_array().unwrap())
+        .expect("Responses tool output projection");
+    assert_eq!(input[0]["type"], "function_call_output");
+    assert_eq!(input[0]["output"], "found");
+    assert!(!input.to_string().contains("example.invalid/image"));
 }

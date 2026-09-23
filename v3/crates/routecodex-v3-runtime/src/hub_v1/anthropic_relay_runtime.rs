@@ -549,20 +549,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 {
                     return Err(V3AnthropicRelayRuntimeError::ModelNotFound(
                         source.message.clone(),
-                    ))
+                    ));
                 }
                 V3RelayProviderTargetResolution::Failed(source) => {
                     return Err(V3AnthropicRelayRuntimeError::Target(format!(
                         "{}: {}",
                         source.code, source.message
-                    )))
+                    )));
                 }
                 V3RelayProviderTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
                     return Err(V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
                         attempted_candidates,
-                    })
+                    });
                 }
             }
         };
@@ -1069,7 +1069,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 let provider_response_snapshot = provider_value.clone();
                 let hook_provider_value =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        match project_v3_anthropic_message_as_responses_response(&provider_value) {
+                        match normalize_v3_anthropic_message_to_chat_response(&provider_value) {
                             Ok(value) => value,
                             Err(error) => {
                                 let failure = provider_runtime_failure(
@@ -1107,7 +1107,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     };
                 let hook_provider_protocol =
                     if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
-                        V3HubProviderWireProtocol::Responses
+                        V3HubProviderWireProtocol::OpenAiChat
                     } else {
                         provider_wire_protocol
                     };
@@ -1128,20 +1128,12 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &response_hook_profile,
                         trace.as_mut(),
                         |finalized| {
-                            if provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat {
-                                project_v3_anthropic_client_response_for_provider(
-                                    finalized,
-                                    provider_wire_protocol,
-                                    transport_intent,
-                                )
-                                .map_err(V3AnthropicRelayRuntimeError::from)
-                            } else if transport_intent == V3HubTransportIntent::Sse {
-                                let client_events =
-                                    project_v3_responses_json_as_anthropic_events(finalized)?;
-                                Ok(project_v3_anthropic_client_events(client_events))
-                            } else {
-                                Ok(project_v3_responses_json_as_anthropic_message(finalized)?)
-                            }
+                            project_v3_anthropic_client_response_for_provider(
+                                finalized,
+                                provider_wire_protocol,
+                                transport_intent,
+                            )
+                            .map_err(V3AnthropicRelayRuntimeError::from)
                         },
                     ) {
                         Ok(closeout) => closeout,

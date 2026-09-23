@@ -81,7 +81,13 @@ pub(super) fn chat_messages_as_anthropic_messages(
             );
             tool_result.insert(
                 "content".to_string(),
-                responses_tool_output_as_anthropic_content(object.get("content")),
+                object
+                    .get("routecodex_chat_extension")
+                    .and_then(|extension| extension.get("anthropic_tool_result_content"))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        responses_tool_output_as_anthropic_content(object.get("content"))
+                    }),
             );
             if is_error {
                 tool_result.insert("is_error".to_string(), Value::Bool(true));
@@ -93,6 +99,64 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         let mut content = Vec::new();
+        let anthropic_extension = object
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object);
+        if let Some(order) = anthropic_extension
+            .and_then(|extension| extension.get("anthropic_content_order"))
+            .and_then(Value::as_array)
+        {
+            let content_parts = object
+                .get("content")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let tool_calls = object
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            for item in order {
+                let index = item
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .map(|index| index as usize)
+                    .ok_or(V3AnthropicCodecError::MalformedField {
+                        field: "anthropic_content_order.index",
+                    })?;
+                match item.get("kind").and_then(Value::as_str) {
+                    Some("content") => {
+                        let part = content_parts.get(index).ok_or(
+                            V3AnthropicCodecError::MalformedField {
+                                field: "anthropic_content_order.content",
+                            },
+                        )?;
+                        content.extend(responses_content_as_anthropic_content(Some(&json!([
+                            part
+                        ])))?);
+                    }
+                    Some("tool_call") => {
+                        let call =
+                            tool_calls
+                                .get(index)
+                                .ok_or(V3AnthropicCodecError::MalformedField {
+                                    field: "anthropic_content_order.tool_call",
+                                })?;
+                        content.push(openai_chat_tool_call_as_anthropic_tool_use(call)?);
+                    }
+                    _ => {
+                        return Err(V3AnthropicCodecError::MalformedField {
+                            field: "anthropic_content_order.kind",
+                        });
+                    }
+                }
+            }
+            if content.is_empty() {
+                continue;
+            }
+            output.push(json!({"role":role,"content":content}));
+            continue;
+        }
         if let Some(reasoning_content) = object.get("reasoning_content") {
             if let Some(reasoning_content) = reasoning_content.as_str() {
                 if !reasoning_content.is_empty() {
@@ -449,7 +513,7 @@ fn responses_tool_result_is_error(status: Option<&Value>) -> Result<bool, V3Anth
         Some(_) => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "function_call_output.status",
-            })
+            });
         }
     })
 }
@@ -700,13 +764,13 @@ pub(super) fn responses_web_search_call_result_content(
         "completed" if has_error => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "web_search_call.result",
-            })
+            });
         }
         "completed" | "failed" => {}
         _ => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "web_search_call.status",
-            })
+            });
         }
     }
 
@@ -1032,7 +1096,7 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
         Some(_) => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "tools[].description",
-            })
+            });
         }
         None => None,
     };
@@ -1051,35 +1115,41 @@ fn responses_custom_tool_as_anthropic_compatibility_tool(
                     "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: Anthropic does not natively enforce the source free-form custom-tool format; provide the exact raw string in the input field."
                 ),
                 "grammar" if format.len() == 3 => {
-                    let syntax = format
-                        .get("syntax")
-                        .and_then(Value::as_str)
-                        .ok_or(V3AnthropicCodecError::MalformedField {
+                    let syntax = format.get("syntax").and_then(Value::as_str).ok_or(
+                        V3AnthropicCodecError::MalformedField {
                             field: "tools[].format.syntax",
-                        })?;
-                    let definition = format
-                        .get("definition")
-                        .and_then(Value::as_str)
-                        .ok_or(V3AnthropicCodecError::MalformedField {
+                        },
+                    )?;
+                    let definition = format.get("definition").and_then(Value::as_str).ok_or(
+                        V3AnthropicCodecError::MalformedField {
                             field: "tools[].format.definition",
-                        })?;
+                        },
+                    )?;
                     format!(
                         "RouteCodex compatibility v3.custom_tool.anthropic_string_input_wrapper.v1: source grammar syntax={} definition={}; Anthropic does not natively enforce this grammar; provide the exact raw string in the input field.",
-                        serde_json::to_string(syntax).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.syntax" })?,
-                        serde_json::to_string(definition).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools[].format.definition" })?
+                        serde_json::to_string(syntax).map_err(|_| {
+                            V3AnthropicCodecError::MalformedField {
+                                field: "tools[].format.syntax",
+                            }
+                        })?,
+                        serde_json::to_string(definition).map_err(|_| {
+                            V3AnthropicCodecError::MalformedField {
+                                field: "tools[].format.definition",
+                            }
+                        })?
                     )
                 }
                 _ => {
                     return Err(V3AnthropicCodecError::UnmappedOutboundFields {
                         paths: "$.request.tools[].format".to_string(),
-                    })
+                    });
                 }
             }
         }
         _ => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "tools[].format",
-            })
+            });
         }
     };
     let description = source_description

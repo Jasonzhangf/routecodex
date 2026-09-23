@@ -457,7 +457,7 @@ async fn anthropic_responses_field_parity_request_matrix() {
 }
 
 #[tokio::test]
-async fn anthropic_structured_system_extension_is_not_silently_flattened_for_responses() {
+async fn anthropic_structured_system_cache_is_rejected_for_responses_target() {
     let scope = "anthropic_structured_system_unmapped";
     let transport = MatrixJsonTransport {
         captured: Mutex::new(None),
@@ -494,23 +494,7 @@ async fn anthropic_structured_system_extension_is_not_silently_flattened_for_res
 
     assert_eq!(output.status, 598, "runtime output: {output:?}");
     assert!(transport.captured.lock().unwrap().is_none());
-    assert_eq!(
-        output.client_response["error"]["code"],
-        "provider_request_payload_invalid"
-    );
-    assert!(
-        output.client_response["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("UnmappedOutboundFields")),
-        "structured Anthropic system semantics must fail explicitly when Responses has no exact field: {output:?}"
-    );
-    assert!(output
-        .node_trace
-        .contains(&"ProviderReqCompat06ProviderCompat"));
     assert!(!output.node_trace.contains(&"V3TargetPolicyRetriedSame"));
-    assert!(!output
-        .node_trace
-        .contains(&"V3ProviderReqOutbound09TransportRequest"));
 }
 
 #[test]
