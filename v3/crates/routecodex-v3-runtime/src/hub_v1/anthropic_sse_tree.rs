@@ -691,7 +691,7 @@ fn apply_delta(
             let signature = object
                 .get("signature")
                 .and_then(Value::as_str)
-                .ok_or(V3AnthropicSseTreeError::MalformedReasoningContent)?;
+                .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
         delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
@@ -768,6 +768,8 @@ pub(crate) enum V3AnthropicSseTreeError {
     InputJsonFragmentRequired,
     #[error("Anthropic thinking_delta requires thinking")]
     ThinkingDeltaRequired,
+    #[error("Anthropic signature_delta requires signature")]
+    SignatureDeltaRequired,
     #[error("Anthropic provider error: {0}")]
     ProviderError(String),
 }
