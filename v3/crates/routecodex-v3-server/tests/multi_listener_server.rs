@@ -1528,6 +1528,81 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
 }
 
 #[tokio::test]
+async fn openai_chat_http_entry_completes_responses_tool_round_trip() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-chat-tool-round-trip");
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    for server in manifest.servers.values_mut() {
+        server.endpoints.push("openai_chat".to_string());
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let tools = json!([{"type":"function","function":{"name":"lookup_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]);
+
+    let first = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&json!({
+            "model":"client-test",
+            "messages":[{"role":"user","content":"Weather in Paris?"}],
+            "tools":tools,
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let first_status = first.status();
+    let first_text = first.text().await.unwrap();
+    assert_eq!(first_status, StatusCode::OK, "{first_text}");
+    let first_body: Value = serde_json::from_str(&first_text).unwrap();
+    assert_eq!(first_body["choices"][0]["finish_reason"], "tool_calls");
+    let call = &first_body["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["id"], "call_body_metadata");
+    assert_eq!(call["function"]["name"], "lookup_weather");
+    assert_eq!(call["function"]["arguments"], "{\"city\":\"Paris\"}");
+    let first_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+
+    let second = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&json!({
+            "model":"client-test",
+            "messages":[
+                {"role":"user","content":"Weather in Paris?"},
+                {"role":"assistant","content":null,"tool_calls":[call]},
+                {"role":"tool","tool_call_id":"call_body_metadata","content":"sunny"}
+            ],
+            "tools":tools,
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let second_status = second.status();
+    let second_text = second.text().await.unwrap();
+    assert_eq!(second_status, StatusCode::OK, "{second_text}");
+    let second_body: Value = serde_json::from_str(&second_text).unwrap();
+    assert_eq!(
+        second_body["choices"][0]["message"]["content"],
+        "RCCV3_BODY_METADATA_TURN2_OK"
+    );
+    let second_capture = captures.recv().await.unwrap();
+    assert!(second_capture.body["input"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| {
+            item["type"] == "function_call_output"
+                && item["call_id"] == "call_body_metadata"
+                && item["output"] == "sunny"
+        })));
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
@@ -4142,18 +4217,36 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     assert!(response_body.contains("network error"), "{response_body}");
     assert!(!response_body.contains("controlled_unavailable"));
 
-    let json_response = client
-        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
-        .header("anthropic-version", "2023-06-01")
-        .json(&json!({
-            "model":"anthropic-client",
-            "max_tokens":64,
-            "messages":[{"role":"user","content":"provider is unavailable"}],
-            "stream":false
-        }))
-        .send()
-        .await
-        .unwrap();
+    // Error projection is checked for both transports with fresh provider
+    // health. The streaming failure cools this sole provider, so another
+    // request on the same aggregate correctly waits for recovery.
+    handle.shutdown().await;
+    let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let json_response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!(
+                "http://{}/v1/messages",
+                json_handle.listeners[0].addr
+            ))
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model":"anthropic-client",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"provider is unavailable"}],
+                "stream":false
+            }))
+            .send(),
+    )
+    .await
+    .expect("fresh JSON request must receive a terminal provider error")
+    .unwrap();
     assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(json_response.headers()["content-type"], "application/json");
     let json_body: Value = json_response.json().await.unwrap();
@@ -4163,7 +4256,7 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     );
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
-    handle.shutdown().await;
+    json_handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
 }
 

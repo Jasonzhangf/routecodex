@@ -77,6 +77,7 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
         let mut chunks = Vec::new();
@@ -109,6 +110,7 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
         let mut chunks = Vec::new();
@@ -148,6 +150,7 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
         let mut saw_error = false;
@@ -163,7 +166,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn responses_sse_incomplete_fails_before_chat_projection() {
+    async fn responses_sse_incomplete_projects_length_usage_and_done() {
         use futures_util::StreamExt;
         let manifest = test_relay_manifest();
         let outcome = test_relay_outcome(&manifest);
@@ -182,24 +185,21 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
-        let mut saw_error = None;
+        let mut chunks = Vec::new();
         while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(_) => {}
-                Err(error) => saw_error = Some(error),
-            }
+            chunks.push(chunk.expect("valid incomplete terminal must project"));
         }
-        let error = saw_error.expect("response.incomplete must fail before client projection");
-        assert!(
-            error.contains("provider_response_incomplete_max_output_tokens"),
-            "{error}"
-        );
+        let text = String::from_utf8(chunks.concat()).unwrap();
+        assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+        assert!(text.contains("\"choices\":[]"), "{text}");
+        assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     }
 
     #[tokio::test]
-    async fn responses_sse_incomplete_type_without_status_fails_before_chat_projection() {
+    async fn responses_sse_incomplete_type_without_status_projects_length() {
         use futures_util::StreamExt;
         let manifest = test_relay_manifest();
         let outcome = test_relay_outcome(&manifest);
@@ -217,20 +217,16 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
-        let mut saw_error = None;
+        let mut chunks = Vec::new();
         while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(_) => {}
-                Err(error) => saw_error = Some(error),
-            }
+            chunks.push(chunk.expect("incomplete type with reason must project"));
         }
-        let error = saw_error.expect("response.incomplete type must fail without status");
-        assert!(
-            error.contains("provider_response_incomplete_max_output_tokens"),
-            "{error}"
-        );
+        let text = String::from_utf8(chunks.concat()).unwrap();
+        assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+        assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     }
 
     #[tokio::test]
@@ -257,6 +253,7 @@ mod tests {
             false,
             false,
             V3RuntimeStreamObservation::default(),
+            true,
             outcome,
         );
         let mut saw_error = false;

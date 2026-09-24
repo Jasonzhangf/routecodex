@@ -878,13 +878,15 @@ fn project_responses_sse_as_openai_chat_stream(
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     stream_observation: V3RuntimeStreamObservation,
+    client_include_usage: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
-    let transducer = V3OpenAiChatResponsesSseTransducer::new();
+    let transducer =
+        V3OpenAiChatResponsesSseTransducer::new_with_usage_option(client_include_usage);
     let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
@@ -1082,14 +1084,18 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
-                            if let Some(failure) = classify_v3_provider_terminal_admission(
-                                V3HubProviderWireProtocol::Responses,
-                                &normalized,
-                            ) {
-                                return Err(format!(
-                                    "provider emitted {}: {}",
-                                    failure.code, failure.message
-                                ));
+                            if normalized.get("type").and_then(Value::as_str)
+                                != Some("response.incomplete")
+                            {
+                                if let Some(failure) = classify_v3_provider_terminal_admission(
+                                    V3HubProviderWireProtocol::Responses,
+                                    &normalized,
+                                ) {
+                                    return Err(format!(
+                                        "provider emitted {}: {}",
+                                        failure.code, failure.message
+                                    ));
+                                }
                             }
                             let event = classify_v3_responses_sse_event(&normalized)
                                 .map(|semantic| project_v3_responses_sse_event_json(&semantic))
@@ -1125,7 +1131,9 @@ fn project_responses_sse_as_openai_chat_stream(
                                 })?;
                                 pending.push_back(format!("data: {governed}\n\n").into_bytes());
                             }
-                            if event_type == "response.completed" {
+                            if event_type == "response.completed"
+                                || event_type == "response.incomplete"
+                            {
                                 pending.push_back(b"data: [DONE]\n\n".to_vec());
                                 done_seen = true;
                             }
@@ -1444,6 +1452,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
+        client_include_usage: bool,
         outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
         let session_id = outcome.failure_session_scope.session_id().to_owned();
@@ -1476,6 +1485,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 _retain_response_cipher,
                 tool_thinking_enabled,
                 stream_observation.clone(),
+                client_include_usage,
                 outcome,
             ));
         }
