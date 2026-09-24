@@ -703,6 +703,7 @@ pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_id: Option<String>,
     model: Option<String>,
     tool_call_index: usize,
+    emitted_tool_call: bool,
 }
 
 impl Default for V3OpenAiChatResponsesSseTransducer {
@@ -715,6 +716,7 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
             response_id: None,
             model: None,
             tool_call_index: 0,
+            emitted_tool_call: false,
         }
     }
 }
@@ -792,6 +794,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                 }
                 let index = self.tool_call_index;
                 self.tool_call_index += 1;
+                self.emitted_tool_call = true;
                 self.emitted_content = true;
                 let call_id = item
                     .get("call_id")
@@ -819,7 +822,11 @@ impl V3OpenAiChatResponsesSseTransducer {
                     .and_then(|response| response.get("status"))
                     .and_then(Value::as_str);
                 let finish_reason = if status == Some("completed") {
-                    Some("stop")
+                    Some(if self.emitted_tool_call {
+                        "tool_calls"
+                    } else {
+                        "stop"
+                    })
                 } else {
                     None
                 };
@@ -1153,6 +1160,28 @@ mod openai_chat_responses_sse_transducer_tests {
                 "total_tokens": 14
             })
         );
+    }
+
+    #[test]
+    fn responses_function_call_finishes_with_tool_calls_before_usage() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let call = transducer
+            .push_event(json!({
+                "type": "response.output_item.done",
+                "item": {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"q\":\"alpha\"}"}
+            }))
+            .expect("function call");
+        assert_eq!(
+            call[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+            "{\"q\":\"alpha\"}"
+        );
+        let terminal = transducer
+            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 4, "output_tokens": 2}}}))
+            .expect("completed");
+        assert_eq!(terminal[0]["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(terminal[1]["choices"], json!([]));
+        transducer.finish().expect("complete tool call");
     }
 
     #[test]

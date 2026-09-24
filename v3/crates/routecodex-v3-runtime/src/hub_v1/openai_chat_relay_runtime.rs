@@ -1125,7 +1125,9 @@ fn project_responses_sse_as_openai_chat_stream(
                                 })?;
                                 pending.push_back(format!("data: {governed}\n\n").into_bytes());
                             }
-                            if event_type == "response.completed" {
+                            if event_type == "response.completed"
+                                || event_type == "response.incomplete"
+                            {
                                 pending.push_back(b"data: [DONE]\n\n".to_vec());
                                 done_seen = true;
                             }

@@ -1143,10 +1143,20 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         }
         Err(routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
             message,
-        )) => assert!(
-            message.contains("request residence deadline"),
-            "unexpected request-stage failure: {message}"
-        ),
+        )) => {
+            assert!(
+                message.contains("request residence deadline"),
+                "unexpected request-stage failure: {message}"
+            );
+            let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(
+                routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
+                    message,
+                ),
+            );
+            assert_eq!(projected.status, 598);
+            assert_eq!(projected.error_chain.as_ref().map(Vec::len), Some(6));
+            assert!(projected.client_response.get("error").is_some());
+        }
         Err(error) => panic!("unexpected Anthropic relay failure: {error}"),
     }
 }
