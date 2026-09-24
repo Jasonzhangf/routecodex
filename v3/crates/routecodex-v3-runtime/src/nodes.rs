@@ -540,17 +540,18 @@ fn request_declares_v3_client_tool_surface(body: &Value) -> bool {
             })
 }
 
-/// 客户端显式声明 websearch 工具：typed 当前轮路由事实，驱动 VR 命中候选 Mode B pool。
+/// Hosted web search 声明：typed 当前轮路由事实，驱动 VR 命中 web_search pool。
 ///
-/// 两种形状按不同契约判定：
-/// - function/custom 名为 websearch/web_search/web-search：无条件贡献 web_search
-///   能力（fixlist item 1 验收：请求 model 非 Mode B（forwarder）但声明 websearch
-///   工具时，VR 必须因 web_search 意图路由到 Mode B pool，再由候选 mode 在投影
-///   层 fail-fast——Mode B 判定按 selected 候选 model 而非请求 model）。
-/// - 标准 `{"type":"web_search"}` / `{"type":"web_search_preview"}` /
+/// 与客户端本地 function/custom 工具严格区分（function-map 契约：暴露的工具声明
+/// 本身绝不设置 web_search 路由或能力）：
+/// - 客户端本地 function/custom 工具（即使名为 websearch/web_search/web-search）
+///   只贡献 `tools` 能力（`request_declares_v3_client_tool_surface`），不贡献
+///   hosted `web_search` 能力——否则 Codex/DSH 的普通工具列表会把请求收窄到
+///   仅 web_search-capable 候选、cooldown 时 pool 耗尽投影 502。
+/// - 标准 hosted 声明 `{"type":"web_search"}` / `{"type":"web_search_preview"}` /
 ///   `{"type":"web_search_20250305","name":"web_search"}`：仅当请求 model 配置
-///   Mode B 时贡献（v2-parity：非 Mode B 模型的原生 hosted 搜索由 provider 直接
-///   处理，声明不改变路由）。
+///   Mode B（metadata_center_local_search）时贡献（v2-parity：非 Mode B 模型的
+///   原生 hosted 搜索由 provider 直接处理，声明不改变路由）。
 fn request_declares_v3_web_search_tool(
     body: &Value,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
@@ -575,11 +576,8 @@ fn request_declares_v3_web_search_tool(
                     })
                 })
     };
-    // function/custom 命名 websearch 工具：无条件贡献（fixlist item 1）。
-    if declares_anywhere(is_v3_web_search_function_tool_declaration) {
-        return true;
-    }
-    // 标准形状：请求 model 必须配置 Mode B 才贡献（v2-parity）。
+    // 仅标准 hosted 声明贡献；客户端 function/custom 工具（含名为 web_search）
+    // 由 tools 面承载，不进入 hosted web_search 路由。
     let Some(manifest) = manifest else {
         return false;
     };
@@ -595,24 +593,6 @@ fn request_declares_v3_web_search_tool(
         crate::hub_v1::web_search_hop::resolve_web_search_mode_and_backend(manifest, model).0;
     mode.is_metadata_center_local_search()
         && declares_anywhere(is_v3_web_search_standard_declaration)
-}
-
-fn is_v3_web_search_function_tool_declaration(tool: &Value) -> bool {
-    let kind = tool
-        .get("type")
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    if !matches!(kind.as_str(), "function" | "custom" | "") {
-        return false;
-    }
-    let name = tool
-        .pointer("/function/name")
-        .or_else(|| tool.get("name"))
-        .and_then(Value::as_str)
-        .map(|value| value.trim().to_ascii_lowercase())
-        .unwrap_or_default();
-    matches!(name.as_str(), "websearch" | "web_search" | "web-search")
 }
 
 fn is_v3_web_search_standard_declaration(tool: &Value) -> bool {
@@ -979,6 +959,67 @@ mod tests {
             .required_capabilities
             .iter()
             .any(|capability| capability == "web_search"));
+    }
+
+    #[test]
+    fn client_function_tool_named_web_search_does_not_contribute_hosted_capability() {
+        // 回归：客户端本地 function 工具即使名为 web_search，也只贡献 tools 面，
+        // 不得强制 hosted web_search 能力（否则普通工具列表把请求收窄到仅
+        // web_search-capable 候选，cooldown 时 pool 耗尽投影 502）。
+        let request = serde_json::json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "continue"}],
+            "tools": [{"type": "function", "function": {
+                "name": "web_search",
+                "description": "client-side web search",
+                "parameters": {"type": "object"}
+            }}]
+        });
+        let facts = build_v3_router_request_facts_for_entry(&request, "chat", None);
+        assert!(
+            facts.capabilities.contains("tools"),
+            "client-local function tool must still contribute tools surface: {:?}",
+            facts.capabilities
+        );
+        assert!(
+            !facts.capabilities.contains("web_search"),
+            "client-local function tool named web_search must not force hosted web_search capability: {:?}",
+            facts.capabilities
+        );
+    }
+
+    #[test]
+    fn mode_b_model_client_function_tool_named_web_search_stays_tools_only() {
+        // 即使请求 model 是 Mode B，客户端本地 function 工具 web_search 依然不是
+        // hosted 声明：只有标准 hosted 形状（type=web_search / web_search_preview
+        // / web_search_20250305）才贡献 hosted web_search 能力。
+        let manifest = manifest_mode_b_websearch_for_routing_facts();
+        let request = serde_json::json!({
+            "model": "MiniMax-M3",
+            "messages": [{"role": "user", "content": "search routecodex"}],
+            "tools": [{"type": "function", "function": {
+                "name": "web_search",
+                "description": "client-side web search",
+                "parameters": {"type": "object"}
+            }}]
+        });
+        let facts = build_v3_router_request_facts_for_entry_with_control(
+            &request,
+            "responses",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            false,
+            Some(&manifest),
+        );
+        assert!(
+            facts.capabilities.contains("tools"),
+            "Mode B client-local function tool must still contribute tools surface: {:?}",
+            facts.capabilities
+        );
+        assert!(
+            !facts.capabilities.contains("web_search"),
+            "Mode B client-local function tool must not force hosted web_search capability: {:?}",
+            facts.capabilities
+        );
     }
 
     #[test]
