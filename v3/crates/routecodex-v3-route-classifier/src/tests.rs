@@ -249,7 +249,58 @@ fn current_turn_keyword_activates_web_search_but_declaration_does_not() {
 }
 
 #[test]
-fn current_turn_explicit_web_search_call_activates_route() {
+fn quoted_web_search_in_large_current_user_context_does_not_force_hosted_pool() {
+    let text = format!(
+        "<conversation>\nweb search\n{}\n</conversation>",
+        "x".repeat(5000)
+    );
+    let classification = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: text,
+        ..Default::default()
+    });
+    assert_ne!(classification.route_name, "web_search");
+    assert!(!classification
+        .required_capabilities
+        .contains(&"web_search".to_string()));
+}
+
+#[test]
+fn explicit_search_after_long_quoted_context_activates_hosted_pool() {
+    let text = format!(
+        "<conversation>\nweb search\n{}\n</conversation>\n请搜索今天的新闻",
+        "x".repeat(5000)
+    );
+    let classification = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: text,
+        ..Default::default()
+    });
+    assert_eq!(classification.route_name, "web_search");
+}
+
+#[test]
+fn quoted_search_after_preface_is_not_current_user_intent() {
+    let text = "Context:\n<conversation>web search</conversation>\nSummarize this";
+    let classification = classify_route(&RouteClassifierInput {
+        latest_message_from_user: true,
+        current_user_text: text.to_string(),
+        ..Default::default()
+    });
+    assert_ne!(classification.route_name, "web_search");
+    let explicit = format!("{text}\n请搜索今天的新闻");
+    assert!(crate::tools::has_current_user_web_search_intent(&explicit));
+}
+
+#[test]
+fn explicit_no_lookup_does_not_activate_web_search() {
+    assert!(!crate::tools::has_current_user_web_search_intent(
+        "Do not look up 'web search'; summarize it"
+    ));
+}
+
+#[test]
+fn assistant_web_search_call_does_not_activate_user_search_route() {
     let request = json!({
         "input": [
             {"type": "message", "role": "user", "content": "search"},
@@ -272,7 +323,7 @@ fn current_turn_explicit_web_search_call_activates_route() {
             ..Default::default()
         })
         .route_name,
-        "web_search"
+        "default"
     );
 }
 
@@ -307,7 +358,7 @@ fn shared_route_priority_matches_v2() {
 }
 
 #[test]
-fn metadata_attachment_wins_and_web_search_tool_evidence_is_route() {
+fn metadata_attachment_wins_and_web_search_tool_output_is_not_user_intent() {
     let multimodal = classify_route(&RouteClassifierInput {
         has_image_attachment: true,
         latest_message_from_user: true,
@@ -320,9 +371,9 @@ fn metadata_attachment_wins_and_web_search_tool_evidence_is_route() {
         last_assistant_tool_category: Some("websearch".into()),
         ..Default::default()
     });
-    assert_eq!(web_call.route_name, "web_search");
-    assert_eq!(web_call.candidates, vec!["web_search", "default"]);
-    assert_eq!(web_call.required_capabilities, vec!["web_search"]);
+    assert_eq!(web_call.route_name, "default");
+    assert_eq!(web_call.candidates, vec!["default"]);
+    assert!(web_call.required_capabilities.is_empty());
 }
 
 #[test]

@@ -770,3 +770,82 @@ fn responses_direct_provider_projection_without_discovered_tools_keeps_tools_unc
 
     assert_eq!(request["tools"], expected);
 }
+#[test]
+fn responses_relay_selected_target_filters_hosted_search_only() {
+    let payload = json!({
+        "model": "test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
+        ],
+        "tool_choice": {"type": "web_search"}
+    });
+    let default_wire =
+        build_v3_openai_responses_standard_request_for_selected_target(&payload, false).unwrap();
+    assert_eq!(default_wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(default_wire["tools"][0]["name"], "lookup");
+    assert!(default_wire.get("tool_choice").is_none());
+    let hosted_wire =
+        build_v3_openai_responses_standard_request_for_selected_target(&payload, true).unwrap();
+    assert_eq!(hosted_wire["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(hosted_wire["tool_choice"]["type"], "web_search");
+}
+
+#[test]
+fn chat_default_target_drops_forced_hosted_search_choice() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{"type": "web_search"}],
+        "tool_choice": {"type": "web_search"}
+    });
+    let wire = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        false,
+    )
+    .unwrap();
+    assert!(wire.get("tools").is_none());
+    assert!(wire.get("tool_choice").is_none());
+}
+
+#[test]
+fn chat_default_target_drops_anthropic_hosted_search_shape() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "tool_choice": {"type": "web_search_20250305"}
+    });
+    let wire = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::NativeRemoteSearchToolMix,
+        false,
+    )
+    .unwrap();
+    assert!(wire.get("tools").is_none());
+    assert!(wire.get("tool_choice").is_none());
+}
+
+#[test]
+fn chat_mode_b_without_selected_search_capability_drops_local_search() {
+    let payload = json!({
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "summarize"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "function", "function": {"name": "read_file"}}
+        ],
+        "tool_choice": {"type": "web_search"}
+    });
+    let wire = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        false,
+    )
+    .unwrap();
+    assert_eq!(wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(wire["tools"][0]["function"]["name"], "read_file");
+    assert!(wire.get("tool_choice").is_none());
+}

@@ -575,6 +575,8 @@ pub struct V3Error06ClientProjected {
     pub status: u16,
     pub body: serde_json::Value,
     pub chain: [&'static str; 6],
+    #[serde(skip)]
+    pub pool_exhausted: bool,
     /// Error02 classification projected as typed side-channel metadata; it is
     /// never merged into the normal client response body.
     pub error_class: &'static str,
@@ -960,6 +962,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         status,
         body,
         chain: V3_ERROR_CHAIN_NODE_IDS,
+        pool_exhausted: provider_pool_exhausted,
         error_class,
         error_detail,
         health_action,

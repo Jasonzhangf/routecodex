@@ -126,19 +126,23 @@ pub fn compile_direct_response_compat_plan(
     let profile = facts
         .compatibility_profile
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase);
     let supports_reasoning = facts
         .model_capabilities
         .iter()
         .any(|capability| matches!(capability.trim(), "reasoning" | "thinking"));
-    let block = match profile {
+    let block = match profile.as_deref() {
         None => V3DirectResponseCompatBlock::Passthrough,
+        Some("chat:openai") if facts.provider_protocol == V3HubProviderWireProtocol::OpenAiChat => {
+            V3DirectResponseCompatBlock::Passthrough
+        }
         Some("responses:thinking-tags" | "responses:cc" | "responses:deepseek-console-go")
             if facts.provider_protocol != V3HubProviderWireProtocol::Responses =>
         {
             return Err(format!(
                 "unsupported direct response compatibility profile {} for protocol {:?} model {}",
-                profile.unwrap_or_default(),
+                profile.as_deref().unwrap_or_default(),
                 facts.provider_protocol,
                 facts.canonical_model_id
             ));
@@ -215,6 +219,29 @@ mod tests {
         })
         .expect_err("responses profile must not attach to Chat direct");
         assert!(error.contains("unsupported direct response compatibility profile"));
+    }
+
+    #[test]
+    fn chat_direct_accepts_openai_compat_profile_without_response_rewrite() {
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "deepseek-v4.1-flash",
+            model_capabilities: &["text", "tools"],
+            compatibility_profile: Some("chat:openai"),
+        })
+        .expect("chat:openai is a declared Chat provider profile");
+        assert_eq!(plan.blocks, vec![V3DirectResponseCompatBlock::Passthrough]);
+        let mixed_case = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "deepseek-v4.1-flash",
+            model_capabilities: &["text", "tools"],
+            compatibility_profile: Some("chat:OpenAI"),
+        })
+        .expect("profile matching follows request compat normalization");
+        assert_eq!(
+            mixed_case.blocks,
+            vec![V3DirectResponseCompatBlock::Passthrough]
+        );
     }
 
     #[test]

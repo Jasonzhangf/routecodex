@@ -142,6 +142,21 @@ pub fn has_web_search_intent(text: &str) -> bool {
             .any(|term| normalized.contains(term))
 }
 
+pub fn has_current_user_web_search_intent(text: &str) -> bool {
+    let mut unquoted = String::new();
+    let mut remaining = text;
+    while let Some(start) = remaining.find("<conversation>") {
+        unquoted.push_str(&remaining[..start]);
+        let quoted = &remaining[start + "<conversation>".len()..];
+        let Some(end) = quoted.find("</conversation>") else {
+            return has_web_search_intent(&unquoted);
+        };
+        remaining = &quoted[end + "</conversation>".len()..];
+    }
+    unquoted.push_str(remaining);
+    has_web_search_intent(&unquoted)
+}
+
 pub fn classify_tool_call(
     raw_name: &str,
     raw_arguments: Option<&Value>,

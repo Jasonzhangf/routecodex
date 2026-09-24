@@ -1468,7 +1468,76 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
 }
 
 #[test]
-fn web_search_capability_filters_default_candidates_without_web_search_route_pool() {
+fn cooled_hosted_search_tier_selects_default_provider_without_search_capability() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.search]
+type = "responses"
+base_url = "http://search.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SEARCH_KEY" }] }
+[providers.search.models.m]
+capabilities = ["text", "web_search"]
+[providers.text]
+type = "responses"
+base_url = "http://text.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEXT_KEY" }] }
+[providers.text.models.m]
+capabilities = ["text"]
+[route_groups.g.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "search", model = "m", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key", priority = 1 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["web_search".into()]),
+                input_tokens: 10,
+                route_classification: test_route("web_search", &["web_search", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "web_search");
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from(["search:key:m".to_string()]),
+            },
+            0,
+        )
+        .expect("default must serve when hosted search is cooled");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert!(selected.candidate.required_capabilities.is_empty());
+}
+
+#[test]
+fn missing_web_search_pool_uses_default_without_hosted_capability() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1526,14 +1595,14 @@ targets = [
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::new(),
+                blocked: BTreeSet::from(["search:key:m".to_string()]),
             },
             0,
         )
-        .expect("web_search is a target capability filter, not a VR route reason");
+        .expect("default tier remains available when hosted search is unavailable");
 
-    assert_eq!(selected.candidate.provider_id, "search");
-    assert!(selected
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert!(!selected
         .candidate
         .required_capabilities
         .iter()

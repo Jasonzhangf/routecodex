@@ -497,7 +497,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
     if request_declares_v3_client_tool_surface(body) {
         capabilities.insert("tools".to_string());
     }
-    if declares_web_search_tool {
+    if active_turn.latest_message_from_user && declares_web_search_tool {
         capabilities.insert("web_search".to_string());
     }
     routecodex_v3_virtual_router::V3RouterRequestFacts {
@@ -986,6 +986,29 @@ mod tests {
             "client-local function tool named web_search must not force hosted web_search capability: {:?}",
             facts.capabilities
         );
+    }
+
+    #[test]
+    fn hosted_search_declaration_does_not_route_tool_result_continuation() {
+        let manifest = manifest_mode_b_websearch_for_routing_facts();
+        let request = serde_json::json!({
+            "model": "MiniMax-M3",
+            "messages": [
+                {"role": "user", "content": "read this file"},
+                {"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "file contents"}
+            ],
+            "tools": [{"type": "web_search"}]
+        });
+        let facts = build_v3_router_request_facts_for_entry_with_control(
+            &request,
+            "chat",
+            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
+            false,
+            Some(&manifest),
+        );
+        assert!(!facts.capabilities.contains("web_search"));
+        assert_ne!(facts.route_classification.route_name, "web_search");
     }
 
     #[test]
@@ -1580,12 +1603,9 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         assert!(!tools.capabilities.contains("tools"));
 
         let web = classify("web_search", json!({"query":"latest release"}));
-        assert_eq!(web.route_classification.route_name, "web_search");
-        assert_eq!(
-            web.route_classification.candidates,
-            ["web_search", "default"]
-        );
-        assert!(web.capabilities.contains("web_search"));
+        assert_eq!(web.route_classification.route_name, "default");
+        assert_eq!(web.route_classification.candidates, ["default"]);
+        assert!(!web.capabilities.contains("web_search"));
     }
 
     #[test]

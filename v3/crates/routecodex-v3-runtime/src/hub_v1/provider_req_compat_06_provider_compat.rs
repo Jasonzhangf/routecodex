@@ -4,7 +4,7 @@ use super::request_outbound_format::{
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
-    build_v3_openai_responses_standard_request_from_chat_canonical,
+    build_v3_openai_responses_standard_request_for_selected_target,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
     provider_protocol_compat_id, V3HubOpaquePayload, V3HubProviderWireProtocol,
     V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
@@ -290,8 +290,12 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             )?
         }
         V3HubProviderWireProtocol::Responses => {
-            build_v3_openai_responses_standard_request_from_chat_canonical(
+            build_v3_openai_responses_standard_request_for_selected_target(
                 input.provider_semantic_payload(),
+                selected
+                    .model_capabilities
+                    .iter()
+                    .any(|capability| capability == "web_search"),
             )?
         }
         V3HubProviderWireProtocol::Anthropic => {
@@ -1202,6 +1206,11 @@ mod tests {
         );
         req07.previous.selected_target.web_search_execution_mode =
             V3WebSearchExecutionMode::MetadataCenterLocalSearch;
+        req07
+            .previous
+            .selected_target
+            .model_capabilities
+            .push("web_search".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
             "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
@@ -1244,6 +1253,11 @@ mod tests {
         );
         req07.previous.selected_target.web_search_execution_mode =
             V3WebSearchExecutionMode::ServertoolSearchBackend;
+        req07
+            .previous
+            .selected_target
+            .model_capabilities
+            .push("web_search".to_string());
         req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)

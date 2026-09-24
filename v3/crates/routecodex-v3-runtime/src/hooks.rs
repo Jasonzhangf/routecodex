@@ -435,8 +435,12 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
         crate::hub_v1::V3HubProviderWireProtocol::Responses
             if request_body.get("messages").is_some() =>
         {
-            crate::hub_v1::build_v3_openai_responses_standard_request_from_chat_canonical(
+            crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target(
                 &request_body,
+                candidate
+                    .model_capabilities
+                    .iter()
+                    .any(|capability| capability == "web_search"),
             )
             .map_err(|error| {
                 build_v3_error_01_source_raised_internal(
@@ -461,6 +465,13 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
                     V3InternalErrorCode::V3Provider12ResponsesWirePayload,
                 )
             })?;
+        crate::hub_v1::project_openai_responses_hosted_web_search_for_selected_target(
+            &mut request_body,
+            candidate
+                .model_capabilities
+                .iter()
+                .any(|capability| capability == "web_search"),
+        );
     }
     let direct_request_protocol = match provider_protocol {
         crate::hub_v1::V3HubProviderWireProtocol::Responses => V3DirectRequestProtocol::Responses,
@@ -720,22 +731,61 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
-    let mut wire_body =
-        crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&request_body)
-            .map_err(|error| {
-                build_v3_error_01_source_raised_internal(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3ChatDirect11Policy",
-                    "chat_wire_projection_failed",
-                    error,
-                    V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+    let hosted_web_search_declared = request_body
+        .get("tools")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|tools| {
+            tools.iter().any(|tool| {
+                matches!(
+                    tool.get("type").and_then(serde_json::Value::as_str),
+                    Some("web_search" | "web_search_preview" | "web_search_20250305")
                 )
-            })?;
+            })
+        });
+    let projected = if hosted_web_search_declared {
+        crate::hub_v1::build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+            &request_body,
+            candidate.web_search_execution_mode,
+            candidate
+                .model_capabilities
+                .iter()
+                .any(|capability| capability == "web_search"),
+        )
+    } else {
+        crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&request_body)
+    };
+    let mut wire_body = projected.map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ChatDirect11Policy",
+            "chat_wire_projection_failed",
+            error,
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     wire_body = apply_v3_direct_request_key_hook_with_catalog(
         wire_body,
         V3DirectRequestProtocol::OpenAiChat,
         key_catalog,
     )?;
+    let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
+        candidate.compatibility_profile.as_deref(),
+    );
+    wire_body = crate::hub_v1::apply_v3_provider_req_compat_to_provider_payload(
+        wire_body,
+        candidate,
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        &profile,
+    )
+    .map_err(|error| {
+        build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ChatDirect11Policy",
+            "chat_direct_provider_compat_failed",
+            error.to_string(),
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+        )
+    })?;
     let secret = match (
         &candidate.env_name,
         &candidate.token_file,

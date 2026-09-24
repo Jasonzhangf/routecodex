@@ -63,16 +63,12 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let thinking_continuation = continuation && last_tool_category == "thinking";
     let coding_continuation = continuation && last_tool_category == "coding";
     let search_continuation = continuation && last_tool_category == "search";
-    let web_search_tool_intent = continuation && last_tool_category == "websearch";
     let other_tool_continuation = continuation && last_tool_category == "other";
     let unknown_tool_continuation = continuation && last_tool_category.is_empty();
     let current_user_web_search_intent = input.latest_message_from_user
-        && !input.has_current_turn_tool_output
-        && !input.has_image_attachment
-        && crate::tools::has_web_search_intent(&input.current_user_text);
-    let web_search = web_search_tool_intent
-        || input.has_current_turn_web_search
-        || current_user_web_search_intent;
+        && crate::tools::has_current_user_web_search_intent(&input.current_user_text);
+    let web_search = input.latest_message_from_user
+        && (input.has_current_turn_web_search || current_user_web_search_intent);
 
     let evaluation = vec![
         ("compact", input.is_compaction, "compact:registered-ingress"),
@@ -90,9 +86,7 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
         (
             "web_search",
             web_search,
-            if web_search_tool_intent {
-                "web_search:tool-intent"
-            } else if current_user_web_search_intent {
+            if current_user_web_search_intent {
                 "web_search:user-text-intent"
             } else {
                 "web_search:explicit-or-intent"

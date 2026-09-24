@@ -1515,10 +1515,8 @@ fn openai_chat_wire_accepts_standard_text_image_search_content_types() {
 }
 
 #[test]
-fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
-    // 非 gpt 模型（deepseek/plain-model 等）即使未配 Mode B（None）：标准
-    // web_search 声明统一替换为内部 websearch 工具（不区分 provider、不依赖
-    // provider 原生搜索能力——搜索由 RouteCodex 本地 hop 执行）。
+fn openai_chat_wire_removes_websearch_for_non_gpt_without_capability() {
+    // 无 hosted 能力且未配本地搜索时，default 目标只保留普通函数工具。
     let payload = json!({
         "model": "deepseek-v4-flash",
         "messages": [{"role": "user", "content": "search"}],
@@ -1536,30 +1534,14 @@ fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
         V3WebSearchExecutionMode::None,
         false,
     )
-    .expect("non-gpt provider must project the local websearch tool");
+    .expect("default provider must keep ordinary tools");
     assert!(
         request.get("web_search_options").is_none(),
         "non-gpt provider must not receive hosted web_search_options"
     );
     let tools = request["tools"].as_array().expect("tools retained");
-    let websearch = tools
-        .iter()
-        .find(|tool| {
-            tool.get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(Value::as_str)
-                == Some("websearch")
-        })
-        .expect("non-gpt provider must receive the local websearch tool");
-    assert_eq!(
-        websearch["function"]["description"],
-        "Search the web for up-to-date information."
-    );
-    assert_eq!(
-        tools.len(),
-        2,
-        "read_file + local websearch must both remain"
-    );
+    assert_eq!(tools.len(), 1, "only read_file must remain");
+    assert_eq!(tools[0]["function"]["name"], "read_file");
 }
 
 #[test]
