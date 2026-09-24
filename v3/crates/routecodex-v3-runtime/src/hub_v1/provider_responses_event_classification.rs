@@ -43,6 +43,21 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         });
     }
 
+    if event_type == "response.incomplete" {
+        let reason = event
+            .pointer("/response/incomplete_details/reason")
+            .or_else(|| event.pointer("/incomplete_details/reason"))
+            .and_then(Value::as_str);
+        return match reason {
+            Some("max_output_tokens" | "content_filter") => {
+                Ok(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput)
+            }
+            _ => Err(
+                "response.incomplete requires a supported incomplete_details.reason".to_string(),
+            ),
+        };
+    }
+
     if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
         crate::hub_v1::V3HubProviderWireProtocol::Responses,
         event,

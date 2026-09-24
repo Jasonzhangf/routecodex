@@ -468,6 +468,7 @@ struct ReselectTransport {
 
 struct ResponsesIncompleteThenChatSuccessTransport {
     provider_ids: Mutex<Vec<String>>,
+    empty: bool,
 }
 
 struct IncompleteWireThenChatSuccessTransport {
@@ -491,14 +492,21 @@ impl ResponsesTransport for ResponsesIncompleteThenChatSuccessTransport {
         let provider_id = request.provider_id().to_string();
         self.provider_ids.lock().unwrap().push(provider_id.clone());
         if provider_id == "openai_chat_responses_incomplete_reselect_primary" {
-            let frames = vec![
+            let mut frames = vec![
                 Ok::<Vec<u8>, V3ProviderError>(
-                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"primary-partial-must-not-commit\"}\n\n".to_vec(),
+                    b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_primary_incomplete\",\"status\":\"in_progress\"}}\n\n".to_vec(),
                 ),
+            ];
+            if !self.empty {
+                frames.push(Ok::<Vec<u8>, V3ProviderError>(
+                    b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"primary-partial-must-not-commit\"}\n\n".to_vec(),
+                ));
+            }
+            frames.push(
                 Ok::<Vec<u8>, V3ProviderError>(
                     b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_primary_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12}}}\n\n".to_vec(),
                 ),
-            ];
+            );
             return Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
                 request.provider_id().to_string(),
@@ -697,6 +705,7 @@ async fn responses_provider_incomplete_projects_chat_length_usage_and_done() {
     let manifest = manifest_with_two_responses_providers_for_scope(server_id);
     let transport = ResponsesIncompleteThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
+        empty: false,
     };
     let output = execute_v3_openai_chat_relay_runtime(
         &manifest,
@@ -747,6 +756,7 @@ async fn responses_provider_usage_respects_chat_client_opt_out() {
     let manifest = manifest_with_two_responses_providers_for_scope(server_id);
     let transport = ResponsesIncompleteThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
+        empty: false,
     };
     let output = execute_v3_openai_chat_relay_runtime(
         &manifest,
@@ -784,6 +794,57 @@ async fn responses_provider_usage_respects_chat_client_opt_out() {
     assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
     assert!(!text.contains("\"choices\":[]"), "{text}");
     assert!(!text.contains("\"usage\":"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
+#[tokio::test]
+async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_responses_incomplete_reselect";
+    let manifest = manifest_with_two_responses_providers_for_scope(server_id);
+    let transport = ResponsesIncompleteThenChatSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        empty: true,
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-chat-empty-incomplete".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"empty incomplete"}],
+                "stream":true,
+                "stream_options":{"include_usage":true}
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("empty incomplete terminal must reach Chat projection");
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        [format!("{server_id}_primary")]
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(text.contains("\"choices\":[]"), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
