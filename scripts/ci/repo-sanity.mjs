@@ -80,8 +80,15 @@ function checkRootLayout() {
     '.appsdk',
     '.appsdk-control',
     '.appsdk-prepare.json',
+    // Declared governance roots in .appsdk/project.json: active_root
+    // (active/lib/**), generated_root (generated/**), protected_root
+    // (protected/**). They are contract roots, not source; allow them to
+    // exist so a local appsdk-bootstrapped checkout passes this gate.
+    'active',
     'contracts',
+    'generated',
     'playground',
+    'protected',
     'v4',
   ]);
   const approvedIgnored = new Set([
