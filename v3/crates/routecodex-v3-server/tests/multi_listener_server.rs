@@ -413,6 +413,61 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+fn responses_relay_cross_protocol_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "openai_chat"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "optional"
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn responses_direct_binding_provider_protocol_manifest(
     port_a: u16,
     port_b: u16,
@@ -867,7 +922,7 @@ async fn controlled_held_responses_upstream(
     .chain(futures_util::stream::once(async move {
         let _permit = release.acquire_owned().await.unwrap();
         Ok::<_, std::io::Error>(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"released\"}]}]}}\n\ndata: [DONE]\n\n"
                 .to_vec(),
         )
     }));
@@ -1085,6 +1140,53 @@ async fn start_controlled_responses_relay_upstream() -> (
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_responses_relay_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn controlled_openai_chat_relay_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"id":"chatcmpl_relay","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"#,
+        ))
+        .unwrap()
+}
+
+async fn start_controlled_openai_chat_relay_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(controlled_openai_chat_relay_upstream),
+        )
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -2390,12 +2492,74 @@ async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and
 
 #[tokio::test]
 // feature_id: v3.responses_inbound_websocket_proxy
-async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime() {
+async fn responses_native_websocket_stays_same_protocol_direct() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-native-ws");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "response.create",
+                "model": "client-test",
+                "input": "native websocket stays direct",
+                "stream": false
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    let event = loop {
+        let message = socket.next().await.unwrap().unwrap();
+        let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+        if event["type"] == "response.completed" {
+            break event;
+        }
+    };
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["id"], "resp_json");
+
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some("Bearer secret-native-ws")
+    );
+    assert_eq!(capture.body["model"], "wire-test");
+    assert!(capture.body["input"]
+        .as_str()
+        .is_some_and(|input| { input == "native websocket stays direct" }));
+    assert!(
+        capture.body.get("messages").is_none(),
+        "responses-native provider must stay on the responses Direct wire: {:?}",
+        capture.body
+    );
+
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+// feature_id: v3.responses_inbound_websocket_proxy
+async fn responses_cross_protocol_websocket_uses_hub_relay_runtime() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
-        start_controlled_responses_relay_upstream().await;
+        start_controlled_openai_chat_relay_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-relay-ws");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+    let handle = spawn_v3_server_aggregate(responses_relay_cross_protocol_manifest(
         free_port(),
         free_port(),
         &provider_base_url,
@@ -2435,16 +2599,16 @@ async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runt
 
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
-    assert!(capture.body["input"].as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            item["role"] == "user"
-                && item["content"].as_array().is_some_and(|content| {
-                    content.iter().any(|part| {
-                        part["type"] == "input_text" && part["text"] == "relay websocket"
-                    })
-                })
-        })
-    }));
+    assert!(
+        capture.body.get("input").is_none(),
+        "cross-protocol Relay must project OpenAI Chat messages, not Responses input: {:?}",
+        capture.body
+    );
+    assert!(capture.body["messages"]
+        .as_array()
+        .is_some_and(|messages| messages.iter().any(|message| {
+            message["role"] == "user" && message["content"] == "relay websocket"
+        })));
 
     let _ = socket.close(None).await;
     handle.shutdown().await;

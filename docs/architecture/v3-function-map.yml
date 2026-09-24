@@ -447,7 +447,9 @@ features:
   - project_v3_pending_endpoint_error
   - build_v3_server_16_http_frame_from_v3_error_06
   - project_v3_post_commit_sse_source
-  - v3_post_commit_sse_error_event_chunk
+  - v3_sse_post_commit_terminal
+  - V3SsePostCommitTerminal
+  - v3_post_commit_sse_terminal_chunk
   - v3_sse_error_event_chunk
   - v3_client_sse_body
   allowed_paths:
@@ -698,7 +700,7 @@ features:
   - kernel::tests::provider_response_decode_failure_reselects_without_router_reentry
   - kernel::tests::provider_sse_failure_event_reselects_before_client_stream
   - kernel::tests::direct_reselect_can_handoff_to_relay_target_after_provider_failure
-  - kernel::tests::responses_provider_process_chat_forces_hub_relay
+  - kernel::tests::responses_provider_process_chat_stays_same_protocol_direct
   - build_v3_server_16_http_frame_from_v3_resp_15
   - execute_responses_direct_server_outcome
   - pending_endpoint
@@ -1142,7 +1144,6 @@ features:
   resource_bindings:
   - v3.request.normal_payload
   - v3.request.provider_semantic
-  - v3.request.response_projection_context
   - v3.hub.provider_wire_payload
   - v3.hub.response_semantic
   - v3.response.client_payload
@@ -1281,6 +1282,8 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     owner_boundary: provider-standard request format helpers; no lifecycle/node transition
       owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
+    owner_boundary: OpenAI Chat request normalization helper owned by request outbound formatting; no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
     owner_boundary: Gemini provider-standard request projection helpers included by
       request_outbound_format.rs; no lifecycle/node transition owner
@@ -1350,6 +1353,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
@@ -1795,6 +1799,7 @@ features:
   - characterize_v3_anthropic_hub_response_semantic_to_client_projection
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
@@ -2393,7 +2398,7 @@ features:
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
   - routecodex-v3-runtime
-  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics.
+  owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics, including restoring declared Responses client tool namespaces after OpenAI Chat provider projection.
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
     display policy, client metadata, arguments, and other protocol fields remain payload
     data-plane semantics owned by adjacent codecs. Routing, switching, retry, health
@@ -2429,6 +2434,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests/late_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
@@ -2437,11 +2443,14 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_namespace_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
@@ -2490,11 +2499,12 @@ features:
   - execute_v3_responses_relay_runtime_inner
   - project_v3_responses_relay_runtime_failure
   - build_v3_responses_provider_response_from_openai_chat_payload
-  - encode_v3_anthropic_request_as_responses_semantic
+  - collect_v3_responses_namespaced_function_names
   - encode_v3_responses_semantic_as_anthropic_request
   - project_v3_responses_json_as_anthropic_message
   - V3AnthropicResponsesProjectionContext::from_chat_canonical_request
-  - project_v3_anthropic_message_as_responses_response_with_context
+  - normalize_v3_anthropic_request_to_chat
+  - normalize_v3_anthropic_message_to_chat_response
   - responses_openai_chat_field_parity_request_matrix
   - responses_openai_chat_field_parity_response_matrix
   - responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility
@@ -2532,7 +2542,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests/late_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
@@ -2541,12 +2553,15 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_namespace_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
@@ -4511,8 +4526,13 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
@@ -4522,6 +4542,12 @@ features:
   - v3.provider.global_subscription_health
   - v3.provider.auth_key_cooldown_state
   - v3.config.published_manifest
+  - v3.provider.responses_transport_capability
+  mainline_bindings:
+  - v3-rd-target-select-direct-admission-rescue
+  - v3-rd-target-select-responses-direct-admission-rescue
+  - v3-rd-target-select-relay-core-admission-rescue
+  - v3-rd-target-select-responses-relay-admission-rescue
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
   - build_v3_provider_global_error_fingerprint_from_classified
@@ -4543,6 +4569,8 @@ features:
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - select_v3_expanded_target_with_exhaustion_rescue
+  - select_v3_expanded_target_with_admission_rescue
+  - resolve_v3_relay_target_outcome_with_admission_rescue
   - probe_v3_provider_global_target
   - spawn_v3_server_aggregate
   allowed_paths:
@@ -4558,9 +4586,13 @@ features:
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_cooldown_persistence_contract.rs
   - v3/crates/routecodex-v3-provider-responses/tests/provider_global_subscription_probe_contract.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_global_probe.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
@@ -4580,6 +4612,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_global_subscription_probe_contract -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map

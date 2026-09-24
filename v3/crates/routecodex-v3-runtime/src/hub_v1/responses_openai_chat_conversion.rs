@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
@@ -48,10 +48,20 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                     .to_string(),
             )
         })?;
+    let anthropic_provider_extensions = payload
+        .pointer(
+            "/choices/0/message/routecodex_chat_extension/anthropic_provider_response_extensions",
+        )
+        .and_then(Value::as_object);
+    let anthropic_stop_reason = anthropic_provider_extensions
+        .and_then(|extensions| extensions.get("stop_reason"))
+        .and_then(Value::as_str);
     let mut output = Vec::new();
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body);
+    let namespaced_function_names =
+        collect_v3_responses_namespaced_function_names(provider_semantic_body);
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -60,7 +70,105 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                 .map(str::to_string);
         }
         if let Some(message) = choice.get("message").and_then(Value::as_object) {
-            if let Some(reasoning) =
+            let anthropic_extension = message
+                .get("routecodex_chat_extension")
+                .and_then(Value::as_object);
+            consume_anthropic_reasoning_extensions_for_responses(anthropic_extension)?;
+            if let Some(order) = anthropic_extension
+                .and_then(|extension| extension.get("anthropic_content_order"))
+                .and_then(Value::as_array)
+            {
+                let reasoning = anthropic_extension
+                    .and_then(|extension| extension.get("anthropic_reasoning_blocks"))
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let text_blocks = anthropic_extension
+                    .and_then(|extension| extension.get("anthropic_text_blocks"))
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                let calls = message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
+                for entry in order {
+                    let Some(index) = entry
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|i| i as usize)
+                    else {
+                        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                            "Anthropic response content order has a malformed index".to_string(),
+                        ));
+                    };
+                    match entry.get("kind").and_then(Value::as_str) {
+                        Some("text") => {
+                            let text = text_blocks.get(index).and_then(Value::as_str).ok_or_else(
+                                || {
+                                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                        "Anthropic response content order references missing text"
+                                            .to_string(),
+                                    )
+                                },
+                            )?;
+                            if !text.trim().is_empty() {
+                                output_text_parts.push(text.to_string());
+                                output.push(json!({"type":"output_text","text":text}));
+                            }
+                        }
+                        Some("reasoning") => {
+                            let block = reasoning.get(index).ok_or_else(|| {
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    "Anthropic response content order references missing reasoning"
+                                        .to_string(),
+                                )
+                            })?;
+                            if let Some(item) =
+                                build_v3_responses_reasoning_item_from_chat_extension(block)
+                            {
+                                output.push(item);
+                            }
+                        }
+                        Some("tool_call") => {
+                            let call = calls.get(index).ok_or_else(|| {
+                                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                    "Anthropic response content order references missing tool call"
+                                        .to_string(),
+                                )
+                            })?;
+                            output.push(
+                                build_v3_responses_function_call_from_openai_chat_tool_call(
+                                    call,
+                                    &custom_tool_names,
+                                    &namespaced_function_names,
+                                )?,
+                            );
+                        }
+                        _ => {
+                            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                                "Anthropic response content order has an unknown block kind"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some(reasoning_blocks) = message
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get("anthropic_reasoning_blocks"))
+                .and_then(Value::as_array)
+            {
+                for block in reasoning_blocks {
+                    if let Some(reasoning) =
+                        build_v3_responses_reasoning_item_from_chat_extension(block)
+                    {
+                        output.push(reasoning);
+                    }
+                }
+            } else if let Some(reasoning) =
                 build_v3_responses_reasoning_item_from_openai_chat_message(message)
             {
                 output.push(reasoning);
@@ -76,22 +184,59 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                     output.push(build_v3_responses_function_call_from_openai_chat_tool_call(
                         call,
                         &custom_tool_names,
+                        &namespaced_function_names,
                     )?);
                 }
             }
         }
     }
-    let status = if output.iter().any(|item| {
-        matches!(
-            item.get("type").and_then(Value::as_str),
-            Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
-        )
-    }) || finish_reason.as_deref() == Some("tool_calls")
-    {
-        "requires_action"
-    } else {
-        "completed"
+    let status = match anthropic_stop_reason {
+        Some("tool_use") => "requires_action",
+        Some("max_tokens" | "refusal" | "model_context_window_exceeded") => "incomplete",
+        Some("pause_turn") => "in_progress",
+        Some("end_turn" | "stop_sequence") => "completed",
+        _ if output.iter().any(|item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call" | "tool_call" | "custom_tool_call" | "tool_search_call")
+            )
+        }) || finish_reason.as_deref() == Some("tool_calls") =>
+        {
+            "requires_action"
+        }
+        _ => "completed",
     };
+    let mut output_items = Vec::new();
+    let mut message_item: Option<Map<String, Value>> = None;
+    for item in output {
+        if item.get("type").and_then(Value::as_str) == Some("output_text") {
+            let message = message_item.get_or_insert_with(|| {
+                let mut message = Map::new();
+                message.insert("type".to_string(), Value::String("message".to_string()));
+                message.insert("status".to_string(), Value::String("completed".to_string()));
+                message.insert("role".to_string(), Value::String("assistant".to_string()));
+                message.insert("content".to_string(), Value::Array(Vec::new()));
+                message
+            });
+            let content = message
+                .get_mut("content")
+                .and_then(Value::as_array_mut)
+                .ok_or_else(|| {
+                    V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                        "Responses message output content lost its array shape".to_string(),
+                    )
+                })?;
+            content.push(item);
+        } else {
+            if let Some(message) = message_item.take() {
+                output_items.push(Value::Object(message));
+            }
+            output_items.push(item);
+        }
+    }
+    if let Some(message) = message_item {
+        output_items.push(Value::Object(message));
+    }
     let mut response = Map::new();
     response.insert(
         "id".to_string(),
@@ -108,7 +253,13 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         response.insert("created_at".to_string(), created_at.clone());
     }
     response.insert("status".to_string(), Value::String(status.to_string()));
-    response.insert("output".to_string(), Value::Array(output));
+    response.insert("output".to_string(), Value::Array(output_items));
+    if let Some(metadata) = provider_semantic_body
+        .pointer("/routecodex_chat_extension/responses_request/metadata")
+        .and_then(Value::as_object)
+    {
+        response.insert("metadata".to_string(), Value::Object(metadata.clone()));
+    }
     if !output_text_parts.is_empty() {
         response.insert(
             "output_text".to_string(),
@@ -118,6 +269,27 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     if let Some(finish_reason) = finish_reason {
         response.insert("finish_reason".to_string(), Value::String(finish_reason));
     }
+    if let Some(extensions) = anthropic_provider_extensions {
+        if let Some(stop_reason) = extensions.get("stop_reason") {
+            response.insert("finish_reason".to_string(), stop_reason.clone());
+        }
+        for field in ["stop_sequence", "stop_details"] {
+            if let Some(value) = extensions.get(field) {
+                response.insert(field.to_string(), value.clone());
+            }
+        }
+        if anthropic_stop_reason == Some("max_tokens") {
+            response.insert(
+                "incomplete_details".to_string(),
+                json!({"reason":"max_output_tokens"}),
+            );
+        } else if anthropic_stop_reason == Some("refusal") {
+            response.insert(
+                "incomplete_details".to_string(),
+                json!({"reason":"content_filter"}),
+            );
+        }
+    }
     if let Some(usage) = payload
         .get("usage")
         .and_then(normalize_v3_hub_responses_usage_from_openai_chat_usage)
@@ -125,6 +297,85 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
         response.insert("usage".to_string(), usage);
     }
     Ok(Value::Object(response))
+}
+
+fn consume_anthropic_reasoning_extensions_for_responses(
+    extension: Option<&serde_json::Map<String, Value>>,
+) -> Result<(), V3ResponsesRelayRuntimeError> {
+    let Some(entries) = extension
+        .and_then(|extension| extension.get("anthropic_provider_reasoning_extensions"))
+        .and_then(Value::as_array)
+    else {
+        return Ok(());
+    };
+    // Provider-private fields on otherwise understood reasoning blocks have no
+    // Responses wire equivalent; consume them explicitly at target projection.
+    // Unknown block kinds retain a `type` tag and fail below instead of vanishing.
+    if entries.iter().any(|entry| entry.get("type").is_some()) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "Anthropic provider content block is incompatible with Responses output".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responses_projection_rejects_unmapped_anthropic_content_blocks() {
+        let payload = json!({
+            "choices":[{
+                "finish_reason":"stop",
+                "message":{
+                    "role":"assistant",
+                    "content":"visible",
+                    "routecodex_chat_extension":{
+                        "anthropic_provider_response_extensions":{"stop_reason":"end_turn"},
+                        "anthropic_provider_reasoning_extensions":[{
+                            "block_index":0,
+                            "block":{"type":"server_tool_use","id":"st_1"},
+                            "type":"server_tool_use"
+                        }]
+                    }
+                }
+            }]
+        });
+        let error =
+            build_v3_responses_provider_response_from_openai_chat_payload(&payload, &json!({}))
+                .expect_err("unmapped Anthropic block must not be silently dropped");
+        assert!(
+            error
+                .to_string()
+                .contains("incompatible with Responses output"),
+            "unexpected projection error: {error}"
+        );
+    }
+}
+
+fn build_v3_responses_reasoning_item_from_chat_extension(block: &Value) -> Option<Value> {
+    let block = block.as_object()?;
+    let summary = block.get("summary").and_then(Value::as_array);
+    let encrypted_content = block
+        .get("encrypted_content")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    if summary.is_none_or(Vec::is_empty) && encrypted_content.is_none() {
+        return None;
+    }
+    let mut item = Map::new();
+    item.insert("type".to_string(), Value::String("reasoning".to_string()));
+    if let Some(summary) = summary {
+        item.insert("summary".to_string(), Value::Array(summary.clone()));
+    }
+    if let Some(encrypted_content) = encrypted_content {
+        item.insert(
+            "encrypted_content".to_string(),
+            Value::String(encrypted_content.to_string()),
+        );
+    }
+    Some(Value::Object(item))
 }
 
 pub(crate) fn build_v3_responses_reasoning_item_from_openai_chat_message(
@@ -322,7 +573,8 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeSet<String>,
+    custom_tool_names: &BTreeMap<String, Option<(String, String, String)>>,
+    namespaced_function_names: &BTreeMap<String, Option<(String, String)>>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -360,24 +612,24 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        if !custom_tool_names.contains(name) {
+        let Some(Some((_, client_name, namespace))) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
             ));
-        }
+        };
         let input = custom.get("input").and_then(Value::as_str).ok_or_else(|| {
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool input must be a string before Responses projection"
                     .to_string(),
             )
         })?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":name,
-            "input":input
-        }));
+        return Ok(build_v3_responses_declared_custom_tool_call(
+            call_id,
+            client_name,
+            namespace,
+            input,
+        ));
     }
     let function = object
         .get("function")
@@ -402,27 +654,50 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         .get("arguments")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if name == "tool_search" {
-        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-        return Ok(json!({
-            "type":"tool_search_call",
-            "call_id":call_id,
-            "execution":"client",
-            "arguments":arguments
-        }));
+    if name == "tool_search" && custom_tool_names.contains_key(name) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            "OpenAI Chat tool_call tool_search matches a declared custom tool and the reserved tool_search name"
+                .to_string(),
+        ));
     }
-    if custom_tool_names.contains(name) {
+    if let Some(custom_identity) = custom_tool_names.get(name) {
+        let Some((_, client_name, namespace)) = custom_identity else {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!("OpenAI Chat tool_call {name} matches multiple declared custom tools"),
+            ));
+        };
+        if namespaced_function_names.contains_key(name) {
+            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                format!(
+                    "OpenAI Chat tool_call {name} matches both custom and function declarations"
+                ),
+            ));
+        }
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // provider function arguments 必须是我们发出的对象 schema；只把
         // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
         // 只在 provider wire 存在，不能泄露到客户端 custom input。
         let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
+        return Ok(build_v3_responses_declared_custom_tool_call(
+            call_id,
+            client_name,
+            namespace,
+            &input,
+        ));
+    }
+    if matches!(namespaced_function_names.get(name), Some(None)) {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("OpenAI Chat tool_call {name} matches multiple declared functions"),
+        ));
+    }
+    if name == "tool_search" && !namespaced_function_names.contains_key(name) {
+        let arguments = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
         return Ok(json!({
-            "type":"custom_tool_call",
+            "type":"tool_search_call",
             "call_id":call_id,
-            "name":name,
-            "input":input
+            "execution":"client",
+            "arguments":arguments
         }));
     }
     let mut item = Map::from_iter([
@@ -437,8 +712,160 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             Value::String(arguments.to_string()),
         ),
     ]);
+    restore_v3_responses_declared_function_namespace(&mut item, namespaced_function_names);
     super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut item);
     Ok(Value::Object(item))
+}
+
+fn build_v3_responses_declared_custom_tool_call(
+    call_id: &str,
+    client_name: &str,
+    namespace: &str,
+    input: &str,
+) -> Value {
+    let mut item = json!({
+        "type":"custom_tool_call",
+        "call_id":call_id,
+        "name":client_name,
+        "input":input
+    });
+    if !namespace.is_empty() {
+        item["namespace"] = Value::String(namespace.to_string());
+    }
+    item
+}
+
+fn restore_v3_responses_declared_function_namespace(
+    item: &mut Map<String, Value>,
+    names: &BTreeMap<String, Option<(String, String)>>,
+) {
+    if item.contains_key("namespace") {
+        return;
+    }
+    let Some(name) = item.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(Some((namespace, tool_name))) = names.get(name) else {
+        return;
+    };
+    if namespace.is_empty() {
+        return;
+    }
+    item.insert("namespace".to_string(), Value::String(namespace.clone()));
+    item.insert("name".to_string(), Value::String(tool_name.clone()));
+}
+
+fn collect_v3_responses_namespaced_function_names(
+    payload: &Value,
+) -> BTreeMap<String, Option<(String, String)>> {
+    let mut names = BTreeMap::new();
+    collect_v3_responses_namespaced_function_names_from_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        None,
+        &mut names,
+    );
+    for item in payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_v3_responses_namespaced_function_names_from_tools(
+                item.get("tools")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+                None,
+                &mut names,
+            );
+        }
+    }
+    names
+}
+
+fn collect_v3_responses_namespaced_function_names_from_tools(
+    tools: &[Value],
+    namespace: Option<&str>,
+    names: &mut BTreeMap<String, Option<(String, String)>>,
+) {
+    for tool in tools {
+        let Some(tool_object) = tool.as_object() else {
+            continue;
+        };
+        if let (Some(group), Some(children)) = (
+            tool_object.get("name").and_then(Value::as_str),
+            tool_object.get("tools").and_then(Value::as_array),
+        ) {
+            let group = group.trim();
+            if group.is_empty() {
+                continue;
+            }
+            let qualified = namespace
+                .map(|parent| format!("{parent}__{group}"))
+                .unwrap_or_else(|| group.to_string());
+            collect_v3_responses_namespaced_function_names_from_tools(
+                children,
+                Some(&qualified),
+                names,
+            );
+            continue;
+        }
+        if tool_object
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind != "function")
+        {
+            continue;
+        }
+        let Some(tool_name) = tool_object
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .or_else(|| tool_object.get("name"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let tool_name = tool_name.trim();
+        if tool_name.is_empty() {
+            continue;
+        }
+        let Some(namespace) = namespace else {
+            let value = (String::new(), tool_name.to_string());
+            insert_v3_responses_declared_tool_alias(names, tool_name, &value);
+            continue;
+        };
+        let qualified_name =
+            if tool_name == namespace || tool_name.starts_with(&format!("{namespace}__")) {
+                tool_name.to_string()
+            } else {
+                format!("{namespace}__{tool_name}")
+            };
+        let value = (namespace.to_string(), tool_name.to_string());
+        insert_v3_responses_declared_tool_alias(names, &qualified_name, &value);
+        insert_v3_responses_declared_tool_alias(names, tool_name, &value);
+    }
+}
+
+fn insert_v3_responses_declared_tool_alias<T: Clone + PartialEq>(
+    names: &mut BTreeMap<String, Option<T>>,
+    alias: &str,
+    value: &T,
+) {
+    match names.get(alias) {
+        Some(Some(existing)) if existing != value => {
+            names.insert(alias.to_string(), None);
+        }
+        None => {
+            names.insert(alias.to_string(), Some(value.clone()));
+        }
+        _ => {}
+    }
 }
 
 fn parse_v3_openai_chat_custom_tool_input(
@@ -481,9 +908,11 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
     ))
 }
 
-pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
+pub(crate) fn collect_v3_responses_custom_tool_names(
+    payload: &Value,
+) -> BTreeMap<String, Option<(String, String, String)>> {
+    let mut names = BTreeMap::new();
+    collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), None, &mut names);
     for item in payload
         .get("input")
         .and_then(Value::as_array)
@@ -491,7 +920,7 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSe
         .flatten()
     {
         if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), &mut names);
+            collect_v3_responses_custom_tool_names_from_tools(item.get("tools"), None, &mut names);
         }
     }
     names
@@ -499,19 +928,59 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSe
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
-    names: &mut BTreeSet<String>,
+    qualified_namespace: Option<&str>,
+    names: &mut BTreeMap<String, Option<(String, String, String)>>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
-        if tool.get("type").and_then(Value::as_str) != Some("custom") {
-            continue;
+        match tool.get("type").and_then(Value::as_str) {
+            Some("custom") => {
+                if let Some(name) = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let provider_name = qualified_namespace
+                        .map(|namespace| provider_name_for_namespace_child(namespace, name))
+                        .unwrap_or_else(|| name.to_string());
+                    let identity = (
+                        provider_name.clone(),
+                        name.to_string(),
+                        qualified_namespace.unwrap_or_default().to_string(),
+                    );
+                    insert_v3_responses_declared_tool_alias(names, &provider_name, &identity);
+                    if qualified_namespace.is_some() {
+                        insert_v3_responses_declared_tool_alias(names, name, &identity);
+                    }
+                }
+            }
+            Some("namespace") => {
+                let Some(namespace) = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let provider_namespace = qualified_namespace
+                    .map(|parent| provider_name_for_namespace_child(parent, namespace))
+                    .unwrap_or_else(|| namespace.to_string());
+                collect_v3_responses_custom_tool_names_from_tools(
+                    tool.get("tools"),
+                    Some(&provider_namespace),
+                    names,
+                );
+            }
+            _ => {}
         }
-        if let Some(name) = tool
-            .get("name")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            names.insert(name.to_string());
-        }
+    }
+}
+
+fn provider_name_for_namespace_child(namespace: &str, child: &str) -> String {
+    if child == namespace || child.starts_with(&format!("{namespace}__")) {
+        child.to_string()
+    } else {
+        format!("{namespace}__{child}")
     }
 }

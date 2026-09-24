@@ -7,7 +7,7 @@ use routecodex_v3_runtime::{
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
     collect_v3_anthropic_request_shape_branch_semantics,
     encode_v3_anthropic_request_as_responses_semantic,
-    encode_v3_responses_semantic_as_anthropic_request,
+    encode_v3_responses_semantic_as_anthropic_request, normalize_v3_anthropic_request_to_chat,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
     project_v3_responses_json_as_anthropic_message, V3AnthropicChatShapeBranchSemantic,
@@ -15,6 +15,95 @@ use routecodex_v3_runtime::{
     V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
+
+#[test]
+fn anthropic_inbound_normalizes_directly_to_chat_without_responses_shape() {
+    let canonical = normalize_v3_anthropic_request_to_chat(json!({
+        "model":"claude-sonnet",
+        "system":"be exact",
+        "messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],
+        "tools":[{"name":"lookup","description":"find data","input_schema":{"type":"object"}}],
+        "tool_choice":{"type":"tool","name":"lookup"},
+        "max_tokens":128,
+        "thinking":{"type":"enabled","budget_tokens":512}
+    }))
+    .expect("Anthropic input normalizes to Chat");
+
+    assert_eq!(canonical["messages"][0]["role"], "system");
+    assert_eq!(canonical["messages"][1]["role"], "user");
+    assert_eq!(canonical["messages"][1]["content"][0]["text"], "hello");
+    assert_eq!(canonical["tools"][0]["function"]["name"], "lookup");
+    assert_eq!(canonical["tool_choice"]["function"]["name"], "lookup");
+    assert_eq!(canonical["max_tokens"], 128);
+    assert_eq!(
+        canonical["routecodex_chat_extension"]["anthropic_request"]["thinking"]["budget_tokens"],
+        512
+    );
+    assert!(canonical.get("input").is_none());
+    assert!(canonical.get("instructions").is_none());
+
+    let source_with_anthropic_fields = normalize_v3_anthropic_request_to_chat(json!({
+        "model":"claude-sonnet",
+        "system":[{"type":"text","text":"keep block","cache_control":{"type":"ephemeral"}}],
+        "messages":[{"role":"user","content":"hello"}],
+        "thinking":{"type":"enabled","budget_tokens":512},
+        "metadata":{"user_id":"user-1"},
+        "context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]}
+    }))
+    .expect("Anthropic request fields normalize into registered Chat extensions");
+    let anthropic_wire =
+        encode_v3_responses_semantic_as_anthropic_request(source_with_anthropic_fields)
+            .expect("Anthropic target projects its compatible source extensions");
+    assert_eq!(
+        anthropic_wire["system"][0]["cache_control"]["type"],
+        "ephemeral"
+    );
+    assert_eq!(anthropic_wire["thinking"]["budget_tokens"], 512);
+    assert_eq!(anthropic_wire["metadata"]["user_id"], "user-1");
+    assert_eq!(
+        anthropic_wire["context_management"]["edits"][0]["keep"],
+        "all"
+    );
+
+    let interleaved = normalize_v3_anthropic_request_to_chat(json!({
+        "model":"claude-sonnet",
+        "messages":[{"role":"assistant","content":[
+            {"type":"text","text":"before"},
+            {"type":"tool_use","id":"call-1","name":"lookup","input":{"q":"x"}},
+            {"type":"text","text":"after"}
+        ]}]
+    }))
+    .expect("interleaved Anthropic blocks normalize with ordering metadata");
+    let anthropic_wire = encode_v3_responses_semantic_as_anthropic_request(interleaved)
+        .expect("Anthropic outbound reconstructs ordered blocks");
+    assert_eq!(
+        anthropic_wire["messages"][0]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["text", "tool_use", "text"]
+    );
+
+    let tool_result = normalize_v3_anthropic_request_to_chat(json!({
+        "model":"claude-sonnet",
+        "messages":[
+            {"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"lookup","input":{}}]},
+            {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":[
+                {"type":"text","text":"found"},
+                {"type":"image","source":{"type":"url","url":"https://example.invalid/image"}}
+            ]}]}
+        ]
+    }))
+    .expect("multimodal Anthropic tool result normalizes without losing source content");
+    let anthropic_wire = encode_v3_responses_semantic_as_anthropic_request(tool_result)
+        .expect("Anthropic outbound reconstructs original tool result content");
+    assert_eq!(
+        anthropic_wire["messages"][1]["content"][0]["content"][1]["type"],
+        "image"
+    );
+}
 
 #[test]
 fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape() {

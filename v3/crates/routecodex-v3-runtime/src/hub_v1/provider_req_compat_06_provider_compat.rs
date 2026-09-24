@@ -717,6 +717,78 @@ mod tests {
     }
 
     #[test]
+    fn responses_relay_openai_chat_profile_projects_namespace_custom_tool() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": [{
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "use the tools"}]
+                }],
+                "tools": [{
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{
+                        "type": "function",
+                        "name": "exec_command",
+                        "description": "Run command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"],
+                            "additionalProperties": false
+                        }
+                    }, {
+                        "type": "custom",
+                        "name": "apply_patch",
+                        "description": "Patch files",
+                        "format": {
+                            "type": "grammar",
+                            "syntax": "lark",
+                            "definition": "start: /.+/"
+                        }
+                    }]
+                }]
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.provider_type = "openai_chat".to_string();
+        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.wire_model = "deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
+            "chat:openai must flatten Responses namespace custom tools before provider compat",
+        );
+        let tools = req_compat.provider_semantic_payload()["tools"]
+            .as_array()
+            .expect("provider tools");
+        assert!(tools.iter().any(|tool| {
+            tool.pointer("/function/name").and_then(Value::as_str)
+                == Some("functions__exec_command")
+        }));
+        let custom_tool = tools
+            .iter()
+            .find(|tool| {
+                tool.pointer("/function/name").and_then(Value::as_str)
+                    == Some("functions__apply_patch")
+            })
+            .expect("custom namespace child must project to a provider function tool");
+        assert_eq!(
+            custom_tool
+                .pointer("/function/parameters/properties/input/type")
+                .and_then(Value::as_str),
+            Some("string")
+        );
+        assert!(
+            custom_tool.pointer("/function/format").is_none(),
+            "OpenAI Chat function tool must not receive the Responses custom format field"
+        );
+    }
+
+    #[test]
     fn deepseek_openai_chat_thinking_tool_choice_object_is_omitted_on_provider_wire() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,

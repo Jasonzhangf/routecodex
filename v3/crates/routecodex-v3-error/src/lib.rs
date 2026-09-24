@@ -1219,17 +1219,6 @@ pub fn is_v3_client_disconnect_source(source: &V3Error01SourceRaised) -> bool {
     matches!(source.source_kind, V3ErrorSourceKind::ClientDisconnect)
 }
 
-/// A provider becoming unavailable after the client SSE response has been
-/// committed is recoverable by the caller: close the stream at EOF so the
-/// caller can replay the same entry. Internal response failures remain
-/// explicit 599 terminals at the server boundary.
-pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -> bool {
-    matches!(
-        crate::sse_disposition::v3_sse_post_commit_disposition(source),
-        crate::sse_disposition::V3SsePostCommitDisposition::CloseEof
-    )
-}
-
 pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
     build_v3_error_01_source_raised_internal(
         V3ErrorSourceKind::RuntimeFailure,
@@ -1251,7 +1240,25 @@ pub fn raise_v3_runtime_observability_contract_failure(
     )
 }
 
+/// Post-commit SSE projection.
+///
+/// `default_status` is used when the source carries no external status of its
+/// own. The client body is already committed, so the projection cannot rewrite
+/// the HTTP status; it keeps the real source classification and public code
+/// through Error01 -> Error06 instead of synthesizing an internal 599.
 pub fn project_v3_post_commit_sse_source(
+    source: V3Error01SourceRaised,
+    default_status: u16,
+) -> V3Error06ClientProjected {
+    let source_status = source
+        .external_error
+        .as_ref()
+        .and_then(|external| external.status)
+        .unwrap_or(default_status);
+    project_v3_post_commit_sse_source_with_status(source, source_status)
+}
+
+pub fn project_v3_post_commit_sse_source_with_status(
     source: V3Error01SourceRaised,
     status: u16,
 ) -> V3Error06ClientProjected {
@@ -1319,7 +1326,10 @@ mod subscription;
 #[cfg(test)]
 mod tests;
 
-pub use sse_disposition::{v3_sse_post_commit_disposition, V3SsePostCommitDisposition};
+pub use sse_disposition::{
+    v3_sse_post_commit_disposition, v3_sse_post_commit_terminal, V3SsePostCommitDisposition,
+    V3SsePostCommitTerminal,
+};
 pub use subscription::{
     build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_error_fingerprint,
     build_v3_provider_global_error_fingerprint_from_classified,

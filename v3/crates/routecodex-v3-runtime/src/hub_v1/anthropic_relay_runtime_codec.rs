@@ -92,20 +92,21 @@ pub fn project_v3_responses_json_as_anthropic_events(
 
 /// Dispatch the client projection by the selected provider wire protocol.
 ///
-/// The Anthropic entry serves any routed provider: `anthropic` and `responses`
-/// providers carry the canonical Responses-shaped semantic payload (projected
-/// via `project_v3_responses_json_as_anthropic_message`), while `openai_chat`
-/// providers carry the raw `chat.completion` composite shape and need their own
-/// Anthropic message projection. Non-OpenAiChat behavior is unchanged.
+/// The Anthropic entry serves any routed provider. Responses payloads use the
+/// Responses-to-Anthropic projector; Anthropic and OpenAI Chat provider
+/// responses normalize to Chat before the Anthropic target projection.
 pub fn project_v3_anthropic_client_response_for_provider(
     semantic: &Value,
     provider_protocol: V3HubProviderWireProtocol,
     transport_intent: V3HubTransportIntent,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let message = if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
-        project_v3_openai_chat_completion_as_anthropic_message(semantic)?
-    } else {
-        project_v3_responses_json_as_anthropic_message(semantic)?
+    let message = match provider_protocol {
+        V3HubProviderWireProtocol::Responses | V3HubProviderWireProtocol::Gemini => {
+            project_v3_responses_json_as_anthropic_message(semantic)?
+        }
+        V3HubProviderWireProtocol::Anthropic | V3HubProviderWireProtocol::OpenAiChat => {
+            project_v3_openai_chat_completion_as_anthropic_message(semantic)?
+        }
     };
     match transport_intent {
         V3HubTransportIntent::Sse => {
@@ -130,7 +131,30 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
         .ok_or(V3AnthropicCodecError::ContentNotArray)?;
     let choice = choices.first().cloned().unwrap_or_default();
     let message = choice.get("message").cloned().unwrap_or_default();
+    let provider_extensions = message
+        .pointer("/routecodex_chat_extension/anthropic_provider_response_extensions")
+        .cloned();
+    let anthropic_stop_reason = provider_extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get("stop_reason"))
+        .cloned();
     let mut content = Vec::new();
+    if let Some(reasoning_blocks) = message
+        .pointer("/routecodex_chat_extension/anthropic_reasoning_blocks")
+        .and_then(Value::as_array)
+    {
+        for block in reasoning_blocks {
+            if let Some(summary) = block.pointer("/summary/0/text").and_then(Value::as_str) {
+                let mut thinking = json!({"type":"thinking","thinking":summary});
+                if let Some(signature) = block.get("encrypted_content") {
+                    thinking["signature"] = signature.clone();
+                }
+                content.push(thinking);
+            } else if let Some(data) = block.get("encrypted_content") {
+                content.push(json!({"type":"redacted_thinking","data":data}));
+            }
+        }
+    }
     if let Some(thinking) = message
         .get("reasoning_content")
         .and_then(Value::as_str)
@@ -176,30 +200,39 @@ pub fn project_v3_openai_chat_completion_as_anthropic_message(
         }));
     }
     let response_id = object.get("id").and_then(Value::as_str).unwrap_or("record");
-    let message_id = if let Some(id) = response_id.strip_prefix("chatcmpl-") {
+    let message_id = if response_id.starts_with("msg_") {
+        response_id.to_string()
+    } else if let Some(id) = response_id.strip_prefix("chatcmpl-") {
         format!("msg_{id}")
     } else {
         format!("msg_{response_id}")
     };
-    let mut message = json!({
+    let mut anthropic_message = json!({
         "id":message_id,
         "type":"message",
         "role":"assistant",
-        "stop_reason":openai_chat_stop_reason_as_anthropic_stop_reason(&choice, &tool_calls),
+        "stop_reason":anthropic_stop_reason.unwrap_or_else(|| openai_chat_stop_reason_as_anthropic_stop_reason(&choice, &tool_calls)),
         "content":content
     });
     if let Some(model) = object.get("model") {
-        message["model"] = model.clone();
+        anthropic_message["model"] = model.clone();
     }
     if let Some(usage) = object.get("usage").and_then(Value::as_object) {
-        message["usage"] = json!({
+        anthropic_message["usage"] = json!({
             "input_tokens":usage.get("prompt_tokens").cloned().unwrap_or(Value::Null),
             "output_tokens":usage.get("completion_tokens").cloned().unwrap_or(Value::Null)
         });
     } else if let Some(usage) = object.get("usage") {
-        message["usage"] = usage.clone();
+        anthropic_message["usage"] = usage.clone();
     }
-    Ok(message)
+    if let Some(provider_extensions) = provider_extensions.as_ref().and_then(Value::as_object) {
+        for field in ["stop_sequence", "stop_details"] {
+            if let Some(value) = provider_extensions.get(field) {
+                anthropic_message[field] = value.clone();
+            }
+        }
+    }
+    Ok(anthropic_message)
 }
 
 fn openai_chat_stop_reason_as_anthropic_stop_reason(choice: &Value, tool_calls: &[Value]) -> Value {
@@ -360,7 +393,7 @@ fn project_v3_anthropic_message_as_sse_events(
             Some(_) | None => {
                 return Err(V3AnthropicCodecError::MalformedField {
                     field: "content type",
-                })
+                });
             }
         }
     }

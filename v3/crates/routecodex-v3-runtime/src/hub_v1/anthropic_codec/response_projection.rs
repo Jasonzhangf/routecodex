@@ -136,13 +136,13 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         "context_window_exceeded" => {
             return Err(V3AnthropicCodecError::UnsupportedStopReason {
                 stop_reason: stop_reason.to_string(),
-            })
+            });
         }
         other => {
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_reason",
                 reason: format!("finish_reason_map produced unsupported hub value '{other}'"),
-            })
+            });
         }
     };
 
@@ -156,14 +156,14 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_sequence",
                 reason: "stop_reason=stop_sequence requires a non-empty string".to_string(),
-            })
+            });
         }
         (_, None | Some(Value::Null)) => None,
         (_, Some(_)) => {
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_sequence",
                 reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
+            });
         }
     };
 
@@ -176,13 +176,13 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_details",
                 reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
+            });
         }
         Some(_) => {
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_details",
                 reason: "must be an object when present".to_string(),
-            })
+            });
         }
     };
 
@@ -239,7 +239,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 Some(_) => {
                     return Err(V3AnthropicCodecError::MalformedField {
                         field: "reasoning_summary_policy",
-                    })
+                    });
                 }
             };
             let mut item = json!({

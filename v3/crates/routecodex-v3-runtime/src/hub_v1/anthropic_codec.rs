@@ -17,10 +17,14 @@ use std::sync::OnceLock;
 
 mod message_encoding;
 mod projection_context;
+mod request_normalization;
+mod response_normalization;
 mod response_projection;
 mod responses_to_anthropic;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
+pub use request_normalization::normalize_v3_anthropic_request_to_chat;
+pub use response_normalization::normalize_v3_anthropic_message_to_chat_response;
 use response_projection::{
     anthropic_reasoning_part_as_responses_reasoning,
     flush_v3_anthropic_text_content_as_responses_message,
@@ -126,7 +130,9 @@ pub enum V3AnthropicCodecError {
     MalformedResponseContentBlockType { index: usize },
     #[error("Anthropic provider response.content[{index}].type '{content_type}' is unknown")]
     UnknownResponseContentBlock { index: usize, content_type: String },
-    #[error("Anthropic provider response.content[{index}].type '{content_type}' is source-roundtrip-only and unsupported for Responses Relay")]
+    #[error(
+        "Anthropic provider response.content[{index}].type '{content_type}' is source-roundtrip-only and unsupported for Responses Relay"
+    )]
     UnsupportedResponseContentBlock { index: usize, content_type: String },
     #[error(
         "Anthropic provider response.content[{index}].type '{content_type}' is malformed: {reason}"
@@ -136,9 +142,13 @@ pub enum V3AnthropicCodecError {
         content_type: String,
         reason: String,
     },
-    #[error("Anthropic provider response.content[{index}].type 'server_tool_use' name '{name}' is unsupported for Responses Relay")]
+    #[error(
+        "Anthropic provider response.content[{index}].type 'server_tool_use' name '{name}' is unsupported for Responses Relay"
+    )]
     UnsupportedServerToolUse { index: usize, name: String },
-    #[error("Anthropic provider response.content[{index}].type 'web_search_tool_result' tool_use_id '{tool_use_id}' has no matching server_tool_use")]
+    #[error(
+        "Anthropic provider response.content[{index}].type 'web_search_tool_result' tool_use_id '{tool_use_id}' has no matching server_tool_use"
+    )]
     UnpairedWebSearchToolResult { index: usize, tool_use_id: String },
     #[error("UnmappedOutboundFields target_protocol=anthropic paths={paths}")]
     UnmappedOutboundFields { paths: String },
@@ -506,6 +516,36 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
                 .unwrap_or(false),
         ),
     );
+    if let Some(anthropic_request) = anthropic_request_extension(object)? {
+        for key in [
+            "thinking",
+            "metadata",
+            "context_management",
+            "output_config",
+        ] {
+            if let Some(value) = anthropic_request.get(key) {
+                if output.get(key).is_some_and(|existing| existing != value) {
+                    return Err(V3AnthropicCodecError::MalformedField {
+                        field: "conflicting Anthropic request extension",
+                    });
+                }
+                output.insert(key.to_string(), value.clone());
+            }
+        }
+        if let Some(source_extensions) = anthropic_request
+            .get("source_extensions")
+            .and_then(Value::as_object)
+        {
+            for (key, value) in source_extensions {
+                if output.get(key).is_some_and(|existing| existing != value) {
+                    return Err(V3AnthropicCodecError::MalformedField {
+                        field: "conflicting Anthropic source extension",
+                    });
+                }
+                output.insert(key.clone(), value.clone());
+            }
+        }
+    }
     Ok(Value::Object(output))
 }
 
@@ -597,6 +637,12 @@ fn responses_request_chat_extension(
 fn anthropic_request_system_extension(
     object: &Map<String, Value>,
 ) -> Result<Option<&Value>, V3AnthropicCodecError> {
+    Ok(anthropic_request_extension(object)?.and_then(|request| request.get("system")))
+}
+
+fn anthropic_request_extension(
+    object: &Map<String, Value>,
+) -> Result<Option<&Map<String, Value>>, V3AnthropicCodecError> {
     let Some(extension) = object.get("routecodex_chat_extension") else {
         return Ok(None);
     };
@@ -614,12 +660,25 @@ fn anthropic_request_system_extension(
             .ok_or(V3AnthropicCodecError::MalformedField {
                 field: "routecodex_chat_extension.anthropic_request",
             })?;
-    if anthropic_request.len() != 1 || anthropic_request.keys().any(|key| key != "system") {
+    if anthropic_request.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "system"
+                | "thinking"
+                | "output_config"
+                | "metadata"
+                | "context_management"
+                | "source_extensions"
+                | "history_reasoning_blocks"
+                | "history_content_blocks"
+                | "history_tool_result_blocks"
+        )
+    }) {
         return Err(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension.anthropic_request",
         });
     }
-    Ok(anthropic_request.get("system"))
+    Ok(Some(anthropic_request))
 }
 
 fn responses_reasoning_fields_as_anthropic_thinking(
@@ -658,7 +717,7 @@ fn responses_reasoning_fields_as_anthropic_thinking(
         None => {
             return Err(V3AnthropicCodecError::MalformedField {
                 field: "reasoning_thinking_mode",
-            })
+            });
         }
     };
     let mut thinking = Map::new();

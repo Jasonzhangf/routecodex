@@ -45,7 +45,7 @@ fn finish_v3_responses_provider_sse_decoder_typed(
         Err(error) => {
             return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
                 error.to_string(),
-            ))
+            ));
         }
     };
     let Some(trailing) = trailing else {
@@ -95,23 +95,8 @@ pub async fn materialize_v3_provider_sse_as_canonical_response(
 
 pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
     provider_protocol: V3HubProviderWireProtocol,
-    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
-    observation: &V3RuntimeStreamObservation,
-) -> Result<Value, V3ResponsesRelayRuntimeError> {
-    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
-        provider_protocol,
-        provider,
-        observation,
-        &V3AnthropicResponsesProjectionContext::default(),
-    )
-    .await
-}
-
-pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
-    provider_protocol: V3HubProviderWireProtocol,
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
-    anthropic_context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     // upstream 200 + body 0 字节（如 glmrelay_anthropic / glmrelay_openai 在
     // /v1/responses 上声明 text/event-stream 但不发帧）：先把 stream 的第一个
@@ -139,10 +124,9 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
             .await
         }
         V3HubProviderWireProtocol::Anthropic => {
-            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
+            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
                 replayed,
                 observation,
-                anthropic_context,
             )
             .await
         }
@@ -161,10 +145,9 @@ fn merge_first_chunk_back_into_provider_stream(
     Box::pin(head.chain(tail))
 }
 
-pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
+pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,
-    anthropic_context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     use futures_util::StreamExt;
 
@@ -225,12 +208,6 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
                     V3AnthropicSseTreeError::DuplicateMessageAfterBlock => {
                         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
                             .to_owned()
-                    }
-                    V3AnthropicSseTreeError::ThinkingDeltaRequired => {
-                        "Anthropic codec malformed reasoning content".to_owned()
-                    }
-                    V3AnthropicSseTreeError::MalformedReasoningContent => {
-                        "Anthropic codec malformed reasoning content".to_owned()
                     }
                     V3AnthropicSseTreeError::MalformedToolInput => {
                         "Anthropic provider event stream input_json_delta is malformed".to_owned()
@@ -297,11 +274,10 @@ pub(crate) async fn build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_
             },
         );
     }
-    let response = project_v3_anthropic_message_as_responses_response_with_context(
-        &anthropic_message,
-        anthropic_context,
-    )
-    .map_err(|error| V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string()))?;
+    let response =
+        normalize_v3_anthropic_message_to_chat_response(&anthropic_message).map_err(|error| {
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
+        })?;
     observation
         .record_provider_event_json(&response)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
@@ -887,16 +863,14 @@ mod tests {
             }),
         ]));
 
-        let response =
-            build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events_with_context(
-                provider,
-                &observation,
-                &V3AnthropicResponsesProjectionContext::default(),
-            )
-            .await
-            .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
+        let response = build_v3_hub_resp_inbound_02_from_anthropic_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("a late provider read error cannot reopen a confirmed Anthropic terminal");
 
-        assert_eq!(response["status"], "completed");
+        assert_eq!(response["object"], "chat.completion");
     }
 
     #[tokio::test]

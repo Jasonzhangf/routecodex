@@ -141,6 +141,7 @@ if [ "$SKIP_BUILD" -eq 1 ]; then
   [ -n "${RCC_SKIP_BUILD_ARTIFACT:-}" ] \
     || die "--skip-build requires RCC_SKIP_BUILD_ARTIFACT to point at an existing rccv3"
   [ -f "$RCC_SKIP_BUILD_ARTIFACT" ] || die "RCC_SKIP_BUILD_ARTIFACT is not a file: $RCC_SKIP_BUILD_ARTIFACT"
+  install -d -m 0700 "$WORK_DIR/artifact"
   cp "$RCC_SKIP_BUILD_ARTIFACT" "$ARTIFACT"
   chmod 0755 "$ARTIFACT"
   VERSION=${RCC_SKIP_BUILD_VERSION:?--skip-build requires RCC_SKIP_BUILD_VERSION}

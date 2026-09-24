@@ -1,14 +1,12 @@
 use super::{
-    anthropic_codec::encode_v3_anthropic_request_as_responses_semantic,
-    build_v3_hub_req_inbound_01_client_raw, build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01,
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
     build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03,
     validate_v3_anthropic_hub_response_payload_for_client_projection, V3AnthropicCodecError,
-    V3HubEntryProtocol, V3HubExecutionMode, V3HubOpaquePayload, V3HubProviderWireProtocol,
-    V3HubReqInbound01ClientRaw, V3HubReqInbound02Normalized, V3HubRespChatProcess03Governed,
-    V3HubRespOutbound05ClientSemantic, V3HubTransportIntent,
+    V3HubEntryProtocol, V3HubExecutionMode, V3HubProviderWireProtocol, V3HubReqInbound01ClientRaw,
+    V3HubReqInbound02Normalized, V3HubRespChatProcess03Governed, V3HubRespOutbound05ClientSemantic,
+    V3HubTransportIntent,
 };
 use serde_json::Value;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum V3AnthropicRelayProtocolHookError {
@@ -18,6 +16,8 @@ pub enum V3AnthropicRelayProtocolHookError {
     ExecutionModeNotRelay,
     #[error("Anthropic Relay hook keeps Responses as the provider wire protocol")]
     ProviderWireProtocolNotResponses,
+    #[error("Anthropic inbound normalization failed: {0}")]
+    InboundNormalization(String),
     #[error(transparent)]
     Codec(#[from] V3AnthropicCodecError),
 }
@@ -74,23 +74,8 @@ pub fn run_v3_anthropic_relay_runtime_req_inbound(
         V3HubExecutionMode::Relay,
         V3HubProviderWireProtocol::Responses,
     )?;
-    let V3HubReqInbound01ClientRaw {
-        payload,
-        entry_protocol,
-        invocation_source,
-        transport_intent,
-    } = raw;
-    let V3HubOpaquePayload(payload) = payload;
-    let payload = Arc::try_unwrap(payload).unwrap_or_else(|arc| (*arc).clone());
-    let payload = encode_v3_anthropic_request_as_responses_semantic(payload)?;
-    Ok(build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(
-        build_v3_hub_req_inbound_01_client_raw(
-            payload,
-            entry_protocol,
-            invocation_source,
-            transport_intent,
-        ),
-    ))
+    build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+        .map_err(V3AnthropicRelayProtocolHookError::InboundNormalization)
 }
 
 /// Anthropic relay 05 构建的受控路径：校验 Anthropic/Relay/Responses 轴 +

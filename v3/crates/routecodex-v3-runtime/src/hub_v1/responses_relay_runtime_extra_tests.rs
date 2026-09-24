@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn named_unpaired_tool_output_without_call_id_is_not_rejected() {
+    // Live P0 shape (bug f29d7db): a standalone Codex notification output carries
+    // name+namespace but no call_id. codex-rs models.rs
+    // named_unpaired_function_call_output_round_trips_without_call_id documents it
+    // as a valid client item that must survive unchanged.
+    let payload = serde_json::json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+            {
+                "type": "function_call_output",
+                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+            }
+        ]
+    });
+
+    let ids = find_responses_tool_output_ids(&payload)
+        .expect("named unpaired tool output is a valid client semantic");
+    assert!(
+        ids.consumed_ids.is_empty(),
+        "named unpaired output has no call identity to consume: {:?}",
+        ids.consumed_ids
+    );
+}
+
+#[test]
 fn malformed_tool_output_missing_call_id_projects_client_400_not_598() {
     let payload = serde_json::json!({
         "input": [{"type": "function_call_output", "output": "tool result"}]
@@ -904,10 +932,10 @@ async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatproc
     .await
     .expect("Anthropic provider event stream must canonicalize before Responses Chat Process");
 
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "message");
+    assert_eq!(response["object"], "chat.completion");
+    assert_eq!(response["choices"][0]["message"]["role"], "assistant");
     assert_eq!(
-        response["output"][0]["content"][0]["text"],
+        response["choices"][0]["message"]["content"],
         "V3_ANTHROPIC_SSE_OK"
     );
     let snapshot = observation.snapshot().expect("stream observation");
@@ -916,21 +944,8 @@ async fn anthropic_provider_sse_canonicalizes_responses_response_before_chatproc
 }
 
 #[tokio::test]
-async fn anthropic_provider_sse_uses_responses_projection_context_for_metadata_and_custom_tools() {
+async fn anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound() {
     let observation = V3RuntimeStreamObservation::default();
-    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
-        "tools":[{
-            "type":"custom",
-            "name":"apply_patch",
-            "description":"apply a patch"
-        }],
-        "routecodex_chat_extension":{
-            "responses_request":{
-                "metadata":{"trace_id":"sse-context-kept"}
-            }
-        }
-    }))
-    .expect("projection context");
     let provider = Box::pin(stream::iter(vec![
             Ok(br#"event: message_start
 data: {"type":"message_start","message":{"id":"msg_sse_custom","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":10}}}
@@ -964,22 +979,33 @@ data: {"type":"message_stop"}
             .to_vec()),
         ]));
 
-    let response =
-        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
-            V3HubProviderWireProtocol::Anthropic,
-            provider,
-            &observation,
-            &context,
-        )
-        .await
-        .expect("Anthropic SSE projection must use request context");
+    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("Anthropic SSE must normalize to Chat semantics");
 
-    assert_eq!(response["metadata"]["trace_id"], "sse-context-kept");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["call_id"], "call_apply_patch");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
-        response["output"][0]["input"],
+        response["choices"][0]["message"]["tool_calls"][0]["type"],
+        "function"
+    );
+    assert_eq!(
+        response["choices"][0]["message"]["tool_calls"][0]["id"],
+        "call_apply_patch"
+    );
+    assert_eq!(
+        response["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "apply_patch"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            response["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap()["input"],
         "*** Begin Patch\n*** End Patch"
     );
 }
@@ -1163,7 +1189,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking content block carries unexpected field(s): text"));
 }
 
 #[tokio::test]
@@ -1184,7 +1210,7 @@ async fn anthropic_provider_sse_rejects_thinking_delta_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking_delta requires thinking"));
 }
 
 #[tokio::test]
@@ -1202,21 +1228,27 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     .await
     .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+    assert!(error.to_string().contains(
+        "Anthropic redacted_thinking content block carries unexpected field(s): signature"
+    ));
 }
 
 #[tokio::test]
 async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
-    for content_block in [
-        r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
-        r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
+    for (content_block, expected) in [
+        (
+            r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
+            "Anthropic thinking content block carries unexpected field(s): text",
+        ),
+        (
+            r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
+            "Anthropic redacted_thinking content block carries unexpected field(s): signature",
+        ),
     ] {
         let observation = V3RuntimeStreamObservation::default();
         let stream = format!(
-                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
-            );
+            "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
+        );
         let provider = Box::pin(stream::iter(vec![Ok(stream.into_bytes())]));
         let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,
@@ -1226,9 +1258,10 @@ async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
         .await
         .unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("Anthropic codec malformed reasoning content"));
+        assert!(
+            error.to_string().contains(expected),
+            "each dual-truth shape must name its own block kind and key: {error}"
+        );
     }
 }
 
@@ -1313,153 +1346,5 @@ async fn openai_chat_provider_sse_raw_json_error_body_exposes_upstream_error() {
     assert!(error.to_string().contains("Panic detected"));
 }
 
-#[tokio::test]
-async fn responses_provider_sse_materializes_created_tool_usage_without_silent_loss() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_scaffold\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\",\"arguments\":\"\"}}\n\n".to_vec()),
-            Ok(b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"call_id\":\"call_1\",\"delta\":\"{\\\"cmd\\\":\"}\n\n".to_vec()),
-            Ok(b"event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"requires_action\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}},\"required_action\":{\"type\":\"submit_tool_outputs\"}}\n\n".to_vec()),
-            Ok(b"data: [DONE]\n\n".to_vec()),
-        ]));
-    let response =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap();
-
-    assert_eq!(response["id"], "resp_scaffold");
-    assert_eq!(response["model"], "provider-model");
-    assert_eq!(response["created_at"], 123);
-    assert_eq!(response["status"], "requires_action");
-    assert_eq!(response["required_action"]["type"], "submit_tool_outputs");
-    assert_eq!(response["usage"]["total_tokens"], 5);
-    assert_eq!(response["output"][0]["call_id"], "call_1");
-    assert_eq!(response["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
-}
-
-#[tokio::test]
-async fn responses_provider_sse_reasoning_summary_events_materialize_without_provider_failure() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_reasoning_summary\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[]}}\n\n".to_vec()),
-            Ok(b"event: response.reasoning_summary_part.added\ndata: {\"type\":\"response.reasoning_summary_part.added\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n".to_vec()),
-            Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"Need \"}\n\n".to_vec()),
-            Ok(b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"delta\":\"inspect\"}\n\n".to_vec()),
-            Ok(b"event: response.reasoning_summary_text.done\ndata: {\"type\":\"response.reasoning_summary_text.done\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"text\":\"Need inspect\"}\n\n".to_vec()),
-            Ok(b"event: response.reasoning_summary_part.done\ndata: {\"type\":\"response.reasoning_summary_part.done\",\"output_index\":0,\"item_id\":\"rs_1\",\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"Need inspect\"}}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n".to_vec()),
-            Ok(b"data: [DONE]\n\n".to_vec()),
-        ]));
-    let response =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap();
-
-    assert_eq!(response["id"], "resp_reasoning_summary");
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["usage"]["total_tokens"], 5);
-    assert_eq!(response["output"][0]["id"], "rs_1");
-    assert_eq!(response["output"][0]["type"], "reasoning");
-    assert_eq!(
-        response["output"][0]["summary"][0],
-        json!({"type":"summary_text","text":"Need inspect"})
-    );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_custom_tool_call_input_events_materialize_without_provider_failure()
-{
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_custom_tool_call_input\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"custom_tool_call\",\"call_id\":\"call_ctc\",\"name\":\"exec_command\",\"input\":\"\"}}\n\n".to_vec()),
-            Ok(b"event: response.custom_tool_call_input.delta\ndata: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":0,\"item_id\":\"ctc_1\",\"delta\":\"{\\\"cmd\\\":\\\"\"}\n\n".to_vec()),
-            Ok(b"event: response.custom_tool_call_input.delta\ndata: {\"type\":\"response.custom_tool_call_input.delta\",\"output_index\":0,\"item_id\":\"ctc_1\",\"delta\":\"pwd\\\"}\"}\n\n".to_vec()),
-            Ok(b"event: response.custom_tool_call_input.done\ndata: {\"type\":\"response.custom_tool_call_input.done\",\"output_index\":0,\"item_id\":\"ctc_1\",\"input\":\"{\\\"cmd\\\":\\\"pwd\\\"}\"}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n".to_vec()),
-            Ok(b"data: [DONE]\n\n".to_vec()),
-        ]));
-    let response =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap();
-
-    assert_eq!(response["id"], "resp_custom_tool_call_input");
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["usage"]["total_tokens"], 5);
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["call_id"], "call_ctc");
-    assert_eq!(response["output"][0]["input"], "{\"cmd\":\"pwd\"}");
-}
-
-#[tokio::test]
-async fn responses_provider_sse_merges_stream_output_items_into_terminal_output_without_silent_loss(
-) {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_tool_search_merge\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Searching\"}]}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"tsc_1\",\"type\":\"tool_search_call\",\"call_id\":\"call_search\",\"execution\":\"client\",\"status\":\"completed\",\"arguments\":{\"query\":\"computer use control local Mac apps screenshot click type\",\"limit\":5}}}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_tool_search_merge\",\"status\":\"completed\",\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Searching\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":214,\"total_tokens\":216}}}\n\n".to_vec()),
-            Ok(b"data: [DONE]\n\n".to_vec()),
-        ]));
-    let response =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap();
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["usage"]["output_tokens"], 214);
-    assert_eq!(response["output"].as_array().unwrap().len(), 2);
-    assert_eq!(response["output"][0]["type"], "reasoning");
-    assert_eq!(response["output"][1]["type"], "tool_search_call");
-    assert_eq!(response["output"][1]["call_id"], "call_search");
-    assert_eq!(
-        response["output"][1]["arguments"]["query"],
-        "computer use control local Mac apps screenshot click type"
-    );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_stream_output_without_identity_does_not_overwrite_terminal_output()
-{
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_no_identity_merge\",\"model\":\"provider-model\",\"created_at\":123}}\n\n".to_vec()),
-            Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"stream text\"}]}}\n\n".to_vec()),
-            Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_identity_merge\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"terminal reasoning\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":4,\"total_tokens\":6}}}\n\n".to_vec()),
-            Ok(b"data: [DONE]\n\n".to_vec()),
-        ]));
-    let response =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap();
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"].as_array().unwrap().len(), 2);
-    assert_eq!(response["output"][0]["type"], "message");
-    assert_eq!(response["output"][1]["type"], "reasoning");
-    assert_eq!(
-        response["output"][1]["summary"][0]["text"],
-        "terminal reasoning"
-    );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
-        )]));
-    let error =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("response.reasoning_summary.delta is unsupported"));
-}
+#[path = "responses_relay_runtime_extra_tests/stream_materialization_tests.rs"]
+mod stream_materialization_tests;

@@ -1,5 +1,6 @@
 use crate::*;
 use axum::http::HeaderMap;
+use routecodex_v3_runtime::V3ResponsesProtocolExecutionPlanFailure;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -25,17 +26,56 @@ pub(crate) fn responses_entry_facts_allow_fresh_protocol_plan(
     !entry_facts.has_unpaired_function_call_output
 }
 
+pub(crate) fn responses_fresh_protocol_plan_allowed(
+    configured_mode: V3EntryProtocolExecutionMode,
+    entry_facts: &V3ResponsesEntryFacts,
+) -> bool {
+    configured_mode != V3EntryProtocolExecutionMode::PendingNotImplemented
+        && responses_entry_facts_allow_fresh_protocol_plan(entry_facts)
+}
+
+pub(crate) fn plan_responses_entry_protocol_execution(
+    state: &Arc<V3ListenerState>,
+    failure_scope: &routecodex_v3_error::V3ProviderFailureSessionScope,
+    method: String,
+    path: String,
+    request_purpose: V3RequestPurpose,
+    request_id: &str,
+    execution_id: &str,
+    pipeline_id: &str,
+    payload: &Value,
+    configured_mode: V3EntryProtocolExecutionMode,
+    entry_facts: &V3ResponsesEntryFacts,
+) -> Option<Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure>> {
+    if !responses_fresh_protocol_plan_allowed(configured_mode, entry_facts) {
+        return None;
+    }
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
+        state.server.id.clone(),
+        failure_scope.clone(),
+        request_id.to_string(),
+        execution_id.to_string(),
+        method,
+        path,
+        request_purpose,
+        Some(state.server.port),
+        Some(pipeline_id.to_string()),
+        payload.clone(),
+    );
+    Some(plan_v3_responses_protocol_execution_with_provider_health(
+        &state.manifest,
+        raw,
+        state.provider_health.runtime_health(),
+        current_epoch_ms(),
+    ))
+}
+
 pub(crate) fn responses_effective_execution_mode_for_entry_facts(
     configured_mode: V3EntryProtocolExecutionMode,
     entry_facts: &V3ResponsesEntryFacts,
 ) -> V3EntryProtocolExecutionMode {
     match configured_mode {
         V3EntryProtocolExecutionMode::PendingNotImplemented => configured_mode,
-        V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
-            if responses_entry_facts_allow_fresh_protocol_plan(entry_facts) =>
-        {
-            V3EntryProtocolExecutionMode::Relay
-        }
         V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay => {
             configured_mode
         }

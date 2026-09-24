@@ -124,6 +124,51 @@ async fn openai_chat_stream_usage_preserves_cached_input_tokens() {
     );
 }
 
+#[test]
+fn openai_chat_namespace_custom_function_call_restores_raw_custom_input() {
+    let raw_patch = "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-old\n+new\n*** End Patch";
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_namespace_custom",
+            "choices":[{
+                "message":{
+                    "role":"assistant",
+                    "content":"",
+                    "tool_calls":[{
+                        "id":"call_apply_patch",
+                        "type":"function",
+                        "function":{
+                            "name":"functions__apply_patch",
+                            "arguments": serde_json::to_string(&json!({"input": raw_patch})).unwrap()
+                        }
+                    }]
+                },
+                "finish_reason":"tool_calls"
+            }]
+        }),
+        &json!({
+            "tools":[{
+                "type":"namespace",
+                "name":"functions",
+                "tools":[{
+                    "type":"custom",
+                    "name":"apply_patch",
+                    "description":"Patch files",
+                    "format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}
+                }]
+            }]
+        }),
+    )
+    .expect("namespace custom tool must project back to Responses custom raw input");
+
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["call_id"], "call_apply_patch");
+    assert_eq!(response["output"][0]["name"], "apply_patch");
+    assert_eq!(response["output"][0]["input"], raw_patch);
+    assert!(response["output"][0].get("arguments").is_none());
+}
+
 #[path = "responses_relay_runtime_extra_tests.rs"]
 mod extracted_tests_tail;
 #[path = "responses_relay_runtime_extra_tail_tests.rs"]

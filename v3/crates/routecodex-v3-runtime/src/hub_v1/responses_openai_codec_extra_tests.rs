@@ -1,6 +1,72 @@
 use super::*;
 
 #[test]
+fn named_unpaired_tool_output_keeps_identity_without_fabricating_call_id() {
+    // Live P0 shape (bug f29d7db): name+namespace identify the standalone output.
+    // The Responses item id (fco_*) is an item id, never a tool call id, so it must
+    // not become tool_call_id and must not fabricate a Chat tool pair.
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+            }
+        ]
+    }))
+    .expect("named unpaired tool output must reach Chat canonical");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert!(
+        messages.iter().all(|message| {
+            message.get("tool_call_id").and_then(Value::as_str)
+                != Some("fco_01a0c969-72fc-7530-9f23-0181a8b116e3")
+        }),
+        "the Responses item id must never be projected as a tool_call_id: {request}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("role").and_then(Value::as_str) != Some("tool")),
+        "an unpaired output must not fabricate a tool role message: {request}"
+    );
+    let carrier = messages
+        .iter()
+        .find(|message| {
+            message["routecodex_chat_extension"]["responses_tool_output_name"].is_string()
+        })
+        .unwrap_or_else(|| panic!("named unpaired output must keep its identity: {request}"));
+    let extension = &carrier["routecodex_chat_extension"];
+    assert_eq!(
+        extension["responses_tool_output_name"],
+        "send_message_to_thread"
+    );
+    assert_eq!(extension["responses_tool_output_namespace"], "codex_tui");
+    assert_eq!(
+        extension["responses_item_id"],
+        "fco_01a0c969-72fc-7530-9f23-0181a8b116e3"
+    );
+    assert_eq!(
+        extension["responses_tool_output_type"],
+        "function_call_output"
+    );
+    assert!(
+        carrier["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("cross-thread notification")),
+        "the exact output text must survive canonicalization: {request}"
+    );
+}
+
+#[test]
 fn codex_client_metadata_keeps_source_identity_in_chat_extension() {
     let turn_metadata = "x".repeat(577);
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({

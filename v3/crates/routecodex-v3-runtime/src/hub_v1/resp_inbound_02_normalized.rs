@@ -1,6 +1,5 @@
 use super::{
-    project_v3_anthropic_message_as_responses_response_with_context,
-    ProviderRespCompat02ProviderCompat, V3AnthropicResponsesProjectionContext,
+    normalize_v3_anthropic_message_to_chat_response, ProviderRespCompat02ProviderCompat,
     V3HubProviderWireProtocol, V3HubResponseNormalizedKind, V3HubTransportIntent,
     V3ProviderRespInbound01Raw,
 };
@@ -24,32 +23,24 @@ pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(
 
 pub fn build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request(
     mut input: ProviderRespCompat02ProviderCompat,
-    chat_request: Option<&Value>,
+    _chat_request: Option<&Value>,
 ) -> Result<V3HubRespInbound02Normalized, String> {
     let mut semantic_protocol = input.raw().provider_protocol;
     if input.raw().provider_protocol == V3HubProviderWireProtocol::Anthropic {
         match input.raw().transport_intent {
-            // JSON：anthropic 响应在 Resp02 内投影为 responses canonical。
+            // Inbound owns lossless normalization to Chat semantics. The selected
+            // target protocol is projected only after Chat Process.
             V3HubTransportIntent::Json => {
-                let context = match chat_request {
-                    Some(request) => {
-                        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(request)
-                            .map_err(|error| error.to_string())?
-                    }
-                    None => V3AnthropicResponsesProjectionContext::default(),
-                };
-                let canonical = project_v3_anthropic_message_as_responses_response_with_context(
-                    input.raw().payload.0.as_ref(),
-                    &context,
-                )
-                .map_err(|error| error.to_string())?;
+                let canonical =
+                    normalize_v3_anthropic_message_to_chat_response(input.raw().payload.0.as_ref())
+                        .map_err(|error| error.to_string())?;
                 input.raw_mut().payload.0 = Arc::new(canonical);
-                semantic_protocol = V3HubProviderWireProtocol::Responses;
+                semantic_protocol = V3HubProviderWireProtocol::OpenAiChat;
             }
-            // SSE：ProviderRespCompat02 物化阶段已投影为 responses canonical，
-            // semantic_protocol 必须随之标记，raw 保留 anthropic wire 事实。
+            // SSE: materialization has already normalized Anthropic events to Chat.
+            // Keep raw Anthropic protocol as transport evidence.
             V3HubTransportIntent::Sse => {
-                semantic_protocol = V3HubProviderWireProtocol::Responses;
+                semantic_protocol = V3HubProviderWireProtocol::OpenAiChat;
             }
         }
     }

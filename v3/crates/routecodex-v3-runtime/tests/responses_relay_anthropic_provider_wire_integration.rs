@@ -38,7 +38,7 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
                 "role":"assistant",
                 "model":"MiniMax-M3",
                 "content":[
-                    {"type":"thinking","thinking":"basic plan"},
+                    {"type":"thinking","thinking":"basic plan","cache_control":{"type":"ephemeral"},"vendor_reasoning_hint":{"format":"opaque"}},
                     {"type":"text","text":"RCC_V3_MINIMAX_BASIC_OK"}
                 ],
                 "usage":{"input_tokens":7,"output_tokens":5},
@@ -292,6 +292,74 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     assert_eq!(client["usage"]["input_tokens"], 7);
     assert_eq!(client["usage"]["output_tokens"], 5);
     assert_eq!(client["usage"]["total_tokens"], 12);
+}
+
+#[tokio::test]
+async fn responses_relay_named_unpaired_tool_output_reaches_anthropic_wire_without_fabricated_call_id(
+) {
+    // Live P0 shape (bug f29d7db): the standalone Codex notification output must
+    // reach the selected Anthropic target as client-visible text, not as a
+    // fabricated tool_result whose tool_use_id has no matching tool_use.
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-named-unpaired-output".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    },
+                    {
+                        "type":"function_call_output",
+                        "id":"fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                        "name":"send_message_to_thread",
+                        "namespace":"codex_tui",
+                        "output":"<codex_delegation>cross-thread notification</codex_delegation>"
+                    }
+                ],
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("named unpaired tool output must not be rejected before routing");
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let messages = captured["messages"].as_array().expect("anthropic messages");
+    let serialized = serde_json::to_string(messages).unwrap();
+    assert!(
+        serialized.contains("cross-thread notification"),
+        "the unpaired output text must reach the Anthropic wire: {captured}"
+    );
+    assert!(
+        !serialized.contains("fco_01a0c969-72fc-7530-9f23-0181a8b116e3"),
+        "the Responses item id must never become an Anthropic tool_use_id: {captured}"
+    );
+    assert!(
+        messages.iter().all(|message| {
+            message["content"]
+                .as_array()
+                .is_none_or(|blocks| blocks.iter().all(|block| block["type"] != "tool_result"))
+        }),
+        "an unpaired output must not fabricate an Anthropic tool_result: {captured}"
+    );
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
 }
 
 #[tokio::test]
@@ -555,7 +623,7 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
     .await
     .unwrap();
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 200, "{output:?}");
     let projection = transport
         .captured_projection
         .lock()
@@ -1098,11 +1166,13 @@ impl ResponsesTransport for AnthropicProviderJsonReasoningTransport {
                 "role":"assistant",
                 "model":"MiniMax-M3",
                 "content":[
-                    {"type":"thinking","thinking":"plan before answer","signature":"sig-json-1"},
-                    {"type":"text","text":"answer"}
+                    {"type":"text","text":"before"},
+                    {"type":"thinking","thinking":"plan before answer","signature":"sig-json-1","cache_control":{"type":"ephemeral"},"vendor_reasoning_hint":{"mode":"private"}},
+                    {"type":"tool_use","id":"call-1","name":"lookup","input":{"q":"x"}},
+                    {"type":"text","text":"after"}
                 ],
                 "usage":{"input_tokens":7,"output_tokens":5},
-                "stop_reason":"end_turn"
+                "stop_reason":"tool_use"
             }))
             .unwrap(),
         ))
@@ -1138,13 +1208,20 @@ async fn responses_relay_anthropic_provider_json_preserves_thinking_to_responses
         V3ResponsesRelayClientBody::Json(value) => value,
         V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
     };
-    assert_eq!(client["output"][0]["type"], "reasoning");
+    assert_eq!(client["output"][0]["type"], "message");
+    assert_eq!(client["output"][0]["content"][0]["text"], "before");
+    assert_eq!(client["output"][1]["type"], "reasoning");
     assert_eq!(
-        client["output"][0]["summary"][0]["text"],
+        client["output"][1]["summary"][0]["text"],
         "plan before answer"
     );
-    assert_eq!(client["output"][0]["encrypted_content"], "sig-json-1");
-    assert_eq!(client["output"][1]["content"][0]["text"], "answer");
+    assert_eq!(client["output"][1]["encrypted_content"], "sig-json-1");
+    assert!(client["output"][1].get("cache_control").is_none());
+    assert!(client["output"][1].get("vendor_reasoning_hint").is_none());
+    assert_eq!(client["output"][2]["type"], "function_call");
+    assert_eq!(client["output"][2]["call_id"], "call-1");
+    assert_eq!(client["output"][3]["content"][0]["text"], "after");
+    assert_eq!(client["status"], "requires_action");
 }
 
 struct AnthropicProviderSseReasoningTransport;
@@ -1247,7 +1324,7 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
     .await
     .unwrap();
 
-    assert_eq!(output.status, 200);
+    assert_eq!(output.status, 200, "{output:?}");
     match output.client_body {
         V3ResponsesRelayClientBody::Sse(mut stream) => {
             use futures_util::StreamExt;
@@ -1264,7 +1341,10 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
                 text.contains("redacted-sse-1"),
                 "redacted_thinking.data must become Responses reasoning.encrypted_content: {text}"
             );
-            assert!(text.contains("thinking-sse-sig"), "thinking signature_delta must become Responses reasoning.encrypted_content: {text}");
+            assert!(
+                text.contains("thinking-sse-sig"),
+                "thinking signature_delta must become Responses reasoning.encrypted_content: {text}"
+            );
             assert!(
                 text.contains("plan step"),
                 "thinking text must remain Responses reasoning.summary text: {text}"

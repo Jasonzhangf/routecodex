@@ -14,8 +14,9 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue,
+    select_v3_expanded_target_with_admission_rescue, select_v3_target_with_session_then_global,
+    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
+    V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -320,12 +321,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut pending_provider_action_recovery = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
-        let selected = match pinned_selected.take() {
-            Some(selected) => selected,
+        let (selected, mut selected_admission): (
+            routecodex_v3_target::V3Target10ConcreteProviderSelected,
+            Option<V3RuntimeProviderAdmission>,
+        ) = match pinned_selected.take() {
+            Some(selected) => (selected, None),
             None => match initial_selected_target.take() {
-                Some(selected) => selected,
+                Some(selected) => (selected, None),
                 None => match retry_selected.take() {
-                    Some(selected) => selected,
+                    Some(selected) => (selected, None),
                     None => {
                         let captured_expanded = match expanded.as_ref() {
                             Some(expanded) => expanded.clone(),
@@ -340,7 +344,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 )
                             }
                         };
-                        match select_v3_expanded_target_with_exhaustion_rescue(
+                        match select_v3_expanded_target_with_admission_rescue(
                             manifest,
                             captured_expanded.clone(),
                             &direct_failure_session_scope,
@@ -352,11 +356,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                         .await
                         {
-                            V3TargetSelectionAfterRescue::Selected(value) => value,
-                            V3TargetSelectionAfterRescue::Failed(source) => {
+                            V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
+                                (value.selected, Some(value.admission))
+                            }
+                            V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
                                 return error_output(source, trace, &hook_registry);
                             }
-                            V3TargetSelectionAfterRescue::Exhausted(error) => {
+                            V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
                                 return error_output(
                                     build_v3_error_01_source_raised(
                                         V3ErrorSourceKind::TargetPoolExhausted,
@@ -683,6 +689,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &hook_registry,
                 )
             }
+        };
+        let transport_request = match selected_admission.take() {
+            Some(admission) => {
+                transport_request.with_pre_acquired_admission(admission.into_lease())
+            }
+            None => transport_request,
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());

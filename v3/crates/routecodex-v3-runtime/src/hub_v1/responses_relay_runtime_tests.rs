@@ -551,7 +551,85 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic signature_delta requires signature"));
+}
+
+#[test]
+fn anthropic_provider_thinking_delta_without_payload_survives_as_distinct_codec_failure() {
+    let mut state = anthropic_sse_tree::V3AnthropicSseReducerState::default();
+    state
+        .apply_event(&json!({
+            "type":"message_start",
+            "message":{
+                "id":"msg_thinking_delta_missing",
+                "type":"message",
+                "role":"assistant",
+                "content":[],
+                "usage":{"input_tokens":1}
+            }
+        }))
+        .expect("message_start");
+    state
+        .apply_event(&json!({
+            "type":"content_block_start",
+            "index":0,
+            "content_block":{"type":"thinking","thinking":""}
+        }))
+        .expect("thinking start");
+
+    let error = state
+        .apply_event(&json!({
+            "type":"content_block_delta",
+            "index":0,
+            "delta":{"type":"thinking_delta"}
+        }))
+        .expect_err("thinking_delta without thinking must not disappear");
+
+    assert!(
+        error
+            .to_string()
+            .contains("thinking_delta requires thinking"),
+        "the missing thinking payload must survive as its own codec failure: {error}"
+    );
+}
+
+#[test]
+fn anthropic_provider_signature_delta_without_payload_survives_as_distinct_codec_failure() {
+    let mut state = anthropic_sse_tree::V3AnthropicSseReducerState::default();
+    state
+        .apply_event(&json!({
+            "type":"message_start",
+            "message":{
+                "id":"msg_signature_delta_missing",
+                "type":"message",
+                "role":"assistant",
+                "content":[],
+                "usage":{"input_tokens":1}
+            }
+        }))
+        .expect("message_start");
+    state
+        .apply_event(&json!({
+            "type":"content_block_start",
+            "index":0,
+            "content_block":{"type":"thinking","thinking":""}
+        }))
+        .expect("thinking start");
+
+    let error = state
+        .apply_event(&json!({
+            "type":"content_block_delta",
+            "index":0,
+            "delta":{"type":"signature_delta"}
+        }))
+        .expect_err("signature_delta without signature must not disappear");
+
+    assert!(
+        error
+            .to_string()
+            .contains("signature_delta requires signature"),
+        "the missing signature payload must survive as its own codec failure: {error}"
+    );
 }
 
 fn glmrelay_error_policy_manifest() -> V3Config05ManifestPublished {
@@ -1343,158 +1421,5 @@ fn openai_chat_provider_reasoning_content_projects_replay_content_before_tool_ca
     assert_eq!(response["output"][1]["call_id"], "call_reasoning_exec");
 }
 
-#[test]
-fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_apply_patch",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_apply_patch",
-                        "type": "custom",
-                        "custom": {
-                            "name": "apply_patch",
-                            "input": "*** Begin Patch\n*** End Patch"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "tools": [{
-                "type":"custom",
-                "name":"apply_patch",
-                "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
-            }]
-        }),
-    )
-    .expect("Chat function projection must reverse to the declared Responses custom tool");
-
-    assert_eq!(response["status"], "requires_action");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
-    assert_eq!(
-        response["output"][0]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
-}
-
-#[test]
-fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custom_call() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_apply_patch_flattened",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_apply_patch_2",
-                        "type": "function",
-                        "function": {
-                            "name": "apply_patch",
-                            "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\",\"reason\":\"修改目标文件\",\"goal_alignment_confidence\":100,\"model_id\":\"gpt-test\"}"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "tools": [{"type":"custom","name":"apply_patch"}]
-        }),
-    )
-    .expect("flattened function tool_call must reverse to the declared Responses custom tool");
-
-    assert_eq!(response["status"], "requires_action");
-    assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "apply_patch");
-    assert_eq!(
-        response["output"][0]["input"],
-        "*** Begin Patch\n*** End Patch"
-    );
-}
-
-#[test]
-fn openai_chat_provider_structured_reasoning_keeps_summary_encrypted_and_replay_content() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_structured_reasoning",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": "visible answer",
-                    "reasoning": {
-                        "summary": [{"type":"summary_text","text":"safe summary"}],
-                        "content": [{"type":"reasoning_text","text":"private chain"}],
-                        "encrypted_content": "enc-opaque"
-                    }
-                },
-                "finish_reason": "stop"
-            }]
-        }),
-        &json!({"tools":[]}),
-    )
-    .expect("OpenAI Chat structured reasoning must project to Responses");
-
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["output"][0]["type"], "reasoning");
-    assert_eq!(response["output"][0]["summary"][0]["text"], "safe summary");
-    assert_eq!(response["output"][0]["encrypted_content"], "enc-opaque");
-    assert_eq!(
-        response["output"][0]["content"][0]["text"], "safe summary",
-        "Responses reasoning item must carry replay-safe plaintext content"
-    );
-    assert_eq!(response["output"][1]["type"], "output_text");
-    assert_eq!(response["output"][1]["text"], "visible answer");
-    assert!(
-        !response.to_string().contains("private chain"),
-        "private reasoning.content must not be serialized into the client payload: {response}"
-    );
-}
-
-#[test]
-fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id": "chatcmpl_usage_shape",
-            "choices": [{
-                "message": {"role": "assistant", "content": "ok"},
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 11,
-                "prompt_tokens_details": {"cached_tokens": 5},
-                "completion_tokens": 7,
-                "completion_tokens_details": {"reasoning_tokens": 2},
-                "total_tokens": 18
-            }
-        }),
-        &json!({"tools":[]}),
-    )
-    .expect("OpenAI Chat response must project to Responses");
-
-    assert_eq!(response["usage"]["input_tokens"], 11);
-    assert_eq!(
-        response["usage"]["input_tokens_details"]["cached_tokens"],
-        5
-    );
-    assert_eq!(response["usage"]["output_tokens"], 7);
-    assert_eq!(
-        response["usage"]["output_tokens_details"]["reasoning_tokens"],
-        2
-    );
-    assert_eq!(response["usage"]["total_tokens"], 18);
-    assert!(
-            response["usage"].get("prompt_tokens").is_none(),
-            "Hub canonical response usage must not expose OpenAI Chat provider-wire prompt_tokens: {response}"
-        );
-    assert!(
-            response["usage"].get("completion_tokens").is_none(),
-            "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
-        );
-}
+#[path = "responses_relay_runtime_tests/openai_chat_tool_response_tests.rs"]
+mod openai_chat_tool_response_tests;

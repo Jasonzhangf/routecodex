@@ -13,6 +13,10 @@ use super::request_outbound_metadata::{
     project_openai_client_metadata_to_metadata, validate_openai_metadata,
 };
 use super::request_outbound_tool_id::compact_tool_id;
+
+#[path = "request_outbound_format/openai_chat_request_normalization.rs"]
+mod openai_chat_request_normalization;
+use openai_chat_request_normalization::normalize_openai_chat_messages_payload;
 use std::collections::BTreeSet;
 pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
     payload: &Value,
@@ -120,10 +124,35 @@ fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Res
         "web_search_options",
     ] {
         if let Some(value) = projected_source.get(key) {
-            responses_payload.insert(key.to_string(), value.clone());
+            let value = if key == "tool_choice" {
+                project_chat_tool_choice_to_responses(value)?
+            } else {
+                value.clone()
+            };
+            responses_payload.insert(key.to_string(), value);
         }
     }
     normalize_responses_payload_for_provider_standard(&Value::Object(responses_payload))
+}
+
+fn project_chat_tool_choice_to_responses(value: &Value) -> Result<Value, String> {
+    let Some(object) = value.as_object() else {
+        return Ok(value.clone());
+    };
+    if object.get("type").and_then(Value::as_str) != Some("function") {
+        return Ok(value.clone());
+    }
+    let name = object
+        .get("function")
+        .and_then(Value::as_object)
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| {
+            "MalformedOutboundField target_protocol=responses path=$.tool_choice.function.name"
+                .to_string()
+        })?;
+    Ok(serde_json::json!({"type":"function","name":name}))
 }
 fn normalize_responses_payload_for_provider_standard(payload: &Value) -> Result<Value, String> {
     // The caller has already completed the adjacent Chat -> Responses projection.
@@ -694,7 +723,81 @@ fn take_responses_request_chat_extension(
         .as_object()
         .cloned()
         .ok_or_else(|| "MalformedOutboundField path=$.routecodex_chat_extension".to_string())?;
-    let responses_request = extension.remove("responses_request");
+    let mut responses_request = extension
+        .remove("responses_request")
+        .map(|value| {
+            value.as_object().cloned().ok_or_else(|| {
+                "MalformedOutboundField path=$.routecodex_chat_extension.responses_request"
+                    .to_string()
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(anthropic_request) = extension.remove("anthropic_request") {
+        // Anthropic-only extensions are projected through this target-owned
+        // allowlist; remaining Anthropic request semantics are incompatible
+        // with this target and are dropped here.
+        let anthropic_request = anthropic_request.as_object().ok_or_else(|| {
+            "MalformedOutboundField path=$.routecodex_chat_extension.anthropic_request".to_string()
+        })?;
+        if target_protocol != "anthropic"
+            && anthropic_request
+                .get("system")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| {
+                    blocks.iter().any(|block| {
+                        block
+                            .as_object()
+                            .is_some_and(|block| block.contains_key("cache_control"))
+                    })
+                })
+        {
+            return Err(format!(
+                "IncompatibleOutboundField target_protocol={target_protocol} path=$.system.cache_control"
+            ));
+        }
+        if let Some(user_id) = anthropic_request
+            .get("metadata")
+            .and_then(Value::as_object)
+            .and_then(|metadata| metadata.get("user_id"))
+            .filter(|value| !value.is_null())
+        {
+            if let Some(user_id) = user_id
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let metadata = responses_request
+                    .entry("metadata".to_string())
+                    .or_insert_with(|| Value::Object(Map::new()))
+                    .as_object_mut()
+                    .ok_or_else(|| "MalformedOutboundField path=$.metadata".to_string())?;
+                let user_id = Value::String(user_id.to_string());
+                if metadata
+                    .get("user_id")
+                    .is_some_and(|existing| existing != &user_id)
+                {
+                    return Err(format!(
+                        "ConflictingOutboundField target_protocol={target_protocol} path=$.metadata.user_id"
+                    ));
+                }
+                metadata.insert("user_id".to_string(), user_id);
+            }
+        }
+        if let Some(format) = anthropic_request
+            .get("output_config")
+            .and_then(Value::as_object)
+            .and_then(|output_config| output_config.get("format"))
+            .filter(|value| !value.is_null())
+        {
+            let text = responses_request
+                .entry("text".to_string())
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| "MalformedOutboundField path=$.text".to_string())?;
+            text.insert("format".to_string(), format.clone());
+        }
+    }
     if !extension.is_empty() {
         return Err(format!(
             "UnmappedOutboundFields target_protocol={target_protocol} paths={}",
@@ -705,14 +808,7 @@ fn take_responses_request_chat_extension(
                 .join(",")
         ));
     }
-    responses_request
-        .map(|value| {
-            value.as_object().cloned().ok_or_else(|| {
-                "MalformedOutboundField path=$.routecodex_chat_extension.responses_request"
-                    .to_string()
-            })
-        })
-        .transpose()
+    Ok((!responses_request.is_empty()).then_some(responses_request))
 }
 
 fn insert_unless_matching(
@@ -1241,12 +1337,74 @@ pub(crate) fn build_responses_input_from_chat_messages(
             .unwrap_or("user")
             .trim();
         if role.eq_ignore_ascii_case("tool") {
+            // Responses function_call_output accepts a scalar string. Keep the
+            // normalized text and consume non-text Anthropic tool-result blocks
+            // here as target-incompatible data; Anthropic outbound reuses the
+            // registered raw tool-result extension instead.
             if let Some(item) = chat_tool_result_to_responses_input_item(row)? {
                 output.push(item);
             }
             continue;
         }
         if role.eq_ignore_ascii_case("assistant") {
+            if let Some(order) = row
+                .get("routecodex_chat_extension")
+                .and_then(|extension| extension.get("anthropic_content_order"))
+                .and_then(Value::as_array)
+            {
+                let content_parts = row
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let tool_calls = row
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                for entry in order {
+                    let index = entry
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .map(|index| index as usize)
+                        .ok_or_else(|| {
+                            "MalformedOutboundField path=$.anthropic_content_order.index"
+                                .to_string()
+                        })?;
+                    match entry.get("kind").and_then(Value::as_str) {
+                        Some("content") => {
+                            let part = content_parts.get(index).ok_or_else(|| {
+                                "MalformedOutboundField path=$.anthropic_content_order.content"
+                                    .to_string()
+                            })?;
+                            output.push(Value::Object(Map::from_iter([
+                                ("type".to_string(), Value::String("message".to_string())),
+                                ("role".to_string(), Value::String("assistant".to_string())),
+                                (
+                                    "content".to_string(),
+                                    chat_content_to_responses_content(
+                                        &Value::Array(vec![part.clone()]),
+                                        "assistant",
+                                    )?,
+                                ),
+                            ])));
+                        }
+                        Some("tool_call") => {
+                            let call = tool_calls.get(index).ok_or_else(|| "MalformedOutboundField path=$.anthropic_content_order.tool_call".to_string())?;
+                            if let Some(item) = chat_tool_call_to_responses_input_item(call)? {
+                                output.push(item);
+                            }
+                        }
+                        _ => {
+                            return Err(
+                                "MalformedOutboundField path=$.anthropic_content_order.kind"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
             if let Some(reasoning) = chat_assistant_reasoning_to_responses_input_item(row) {
                 output.push(reasoning);
             }
@@ -1291,193 +1449,6 @@ fn chat_assistant_reasoning_to_responses_input_item(row: &Map<String, Value>) ->
         "type": "reasoning",
         "summary": [{"type": "summary_text", "text": text}]
     }))
-}
-
-fn normalize_openai_chat_message_content_part(part: &Value) -> Result<Value, String> {
-    let mut normalized = project_outbound_nested_payload_for_target_protocol(
-        part,
-        V3OutboundTargetProtocol::OpenAiChat,
-    )?;
-    let Some(row) = normalized.as_object_mut() else {
-        return Ok(normalized);
-    };
-    let part_type = row
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    match part_type.as_str() {
-        "input_text" | "output_text" | "commentary" => {
-            row.insert("type".to_string(), Value::String("text".to_string()));
-        }
-        "input_image" => {
-            row.insert("type".to_string(), Value::String("image_url".to_string()));
-            let image_url_value = match row.get("image_url").cloned() {
-                Some(Value::String(url)) => Some(Value::Object(Map::from_iter([(
-                    "url".to_string(),
-                    Value::String(url),
-                )]))),
-                Some(Value::Object(existing)) => Some(Value::Object(existing)),
-                _ => None,
-            };
-            if let Some(image_url) = image_url_value {
-                row.insert("image_url".to_string(), image_url);
-            }
-        }
-        _ => {}
-    }
-    Ok(normalized)
-}
-
-fn normalize_openai_chat_messages_payload(
-    payload: &Value,
-    model_id: Option<&str>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    has_web_search_capability: bool,
-) -> Result<Value, String> {
-    let mut normalized = project_outbound_payload_for_target_protocol(
-        payload,
-        V3OutboundTargetProtocol::OpenAiChat,
-    )?;
-    if let Some(row) = normalized.as_object_mut() {
-        if let Some(max_output_tokens) = row.remove("max_output_tokens") {
-            row.entry("max_completion_tokens".to_string())
-                .or_insert(max_output_tokens);
-        }
-        if let Some(reasoning_effort) = project_openai_chat_reasoning_effort_from_reasoning(row) {
-            row.entry("reasoning_effort".to_string())
-                .or_insert(reasoning_effort);
-        }
-    }
-    let instructions = normalized
-        .as_object_mut()
-        .and_then(|row| row.remove("instructions"))
-        .and_then(|value| value.as_str().map(str::to_string))
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty());
-    super::request_outbound_mcp_names::qualify_openai_chat_missing_mcp_tool_call_names(
-        &mut normalized,
-    );
-    let Some(messages) = normalized.get_mut("messages").and_then(Value::as_array_mut) else {
-        return Ok(normalized);
-    };
-    if let Some(instructions) = instructions {
-        let already_visible = messages.iter().any(|message| {
-            matches!(
-                message.get("role").and_then(Value::as_str),
-                Some("system" | "developer")
-            ) && message
-                .get("content")
-                .and_then(Value::as_str)
-                .is_some_and(|content| content.contains(&instructions))
-        });
-        if !already_visible {
-            if let Some(system_message) = messages.iter_mut().find(|message| {
-                matches!(
-                    message.get("role").and_then(Value::as_str),
-                    Some("system" | "developer")
-                )
-            }) {
-                if let Some(system_row) = system_message.as_object_mut() {
-                    match system_row.get_mut("content") {
-                        Some(Value::String(content)) => {
-                            if !content.trim().is_empty() {
-                                content.push_str("\n\n");
-                            }
-                            content.push_str(&instructions);
-                        }
-                        Some(Value::Array(parts)) => {
-                            parts.push(json!({"type": "text", "text": instructions}));
-                        }
-                        _ => {
-                            system_row.insert("content".to_string(), Value::String(instructions));
-                        }
-                    }
-                }
-            } else {
-                messages.insert(0, json!({"role": "system", "content": instructions}));
-            }
-        }
-    }
-    for message in messages.iter_mut() {
-        let Some(message_row) = message.as_object_mut() else {
-            continue;
-        };
-        super::request_outbound_mcp_names::normalize_openai_chat_message_tool_call_names(
-            message_row,
-        );
-        consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
-        let Some(content) = message_row.get_mut("content") else {
-            continue;
-        };
-        if let Value::Array(parts) = content {
-            let normalized_parts = parts
-                .iter()
-                .map(normalize_openai_chat_message_content_part)
-                .collect::<Result<Vec<_>, String>>()?;
-            *content = Value::Array(normalized_parts);
-        }
-    }
-    project_openai_chat_provider_tools_for_web_search_mode(
-        &mut normalized,
-        model_id,
-        web_search_execution_mode,
-        has_web_search_capability,
-    )?;
-    ensure_openai_chat_stream_usage_option(&mut normalized);
-    Ok(normalized)
-}
-fn consume_routecodex_chat_extension_for_openai_chat_provider(
-    message_row: &mut Map<String, Value>,
-) {
-    remove_object_field(message_row, "routecodex_chat_extension");
-    let Some(tool_calls) = message_row
-        .get_mut("tool_calls")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-    for tool_call in tool_calls {
-        if let Some(tool_call_row) = tool_call.as_object_mut() {
-            remove_object_field(tool_call_row, "routecodex_chat_extension");
-        }
-    }
-}
-
-fn project_openai_chat_reasoning_effort_from_reasoning(
-    row: &mut Map<String, Value>,
-) -> Option<Value> {
-    let reasoning = remove_object_field(row, "reasoning")?;
-    let effort = reasoning
-        .get("effort")
-        .and_then(Value::as_str)
-        .or_else(|| reasoning.as_str())
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())?
-        .to_ascii_lowercase();
-    (!matches!(
-        effort.as_str(),
-        "none" | "off" | "disabled" | "disable" | "false"
-    ))
-    .then(|| Value::String(effort))
-}
-
-fn remove_object_field(row: &mut Map<String, Value>, key: &str) -> Option<Value> {
-    row.remove(key)
-}
-
-fn ensure_openai_chat_stream_usage_option(payload: &mut Value) {
-    let Some(row) = payload.as_object_mut() else {
-        return;
-    };
-    if row.get("stream").and_then(Value::as_bool) != Some(true) {
-        return;
-    }
-    if row.contains_key("stream_options") {
-        return;
-    }
-    row.insert("stream_options".to_string(), json!({"include_usage": true}));
 }
 
 #[cfg(test)]

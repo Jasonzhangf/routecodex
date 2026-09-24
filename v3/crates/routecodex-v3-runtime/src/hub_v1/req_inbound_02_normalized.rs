@@ -1,5 +1,5 @@
 use super::{
-    encode_v3_anthropic_request_as_responses_semantic, normalize_v3_history_image_placeholders,
+    normalize_v3_anthropic_request_to_chat, normalize_v3_history_image_placeholders,
     V3HubEntryProtocol, V3HubReqInbound01ClientRaw, V3HubRequestSemanticProtocol,
 };
 use serde_json::Value;
@@ -52,56 +52,8 @@ pub fn build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
     if input.entry_protocol == V3HubEntryProtocol::Anthropic {
         let source_payload = std::mem::replace(&mut input.payload.0, Arc::new(Value::Null));
         let source_payload = Arc::try_unwrap(source_payload).unwrap_or_else(|arc| (*arc).clone());
-        let mut responses_semantic = if source_payload
-            .get("input")
-            .and_then(serde_json::Value::as_array)
-            .is_some()
-        {
-            source_payload
-        } else {
-            encode_v3_anthropic_request_as_responses_semantic(source_payload)
-                .map_err(|error| format!("Anthropic inbound semantic projection failed: {error}"))?
-        };
-        let mut anthropic_preserved_fields = Vec::new();
-        let mut anthropic_reasoning_effort = None;
-        let mut anthropic_request_extension = None;
-        if let Some(object) = responses_semantic.as_object_mut() {
-            anthropic_reasoning_effort = object.remove("reasoning_effort");
-            anthropic_request_extension = object.remove("routecodex_chat_extension");
-            for key in [
-                "context_management",
-                "output_config",
-                "reasoning_budget_tokens",
-                "reasoning_display_policy",
-                "reasoning_thinking_mode",
-            ] {
-                if let Some(value) = object.remove(key) {
-                    anthropic_preserved_fields.push((key.to_string(), value));
-                }
-            }
-        }
-        let mut canonical =
-            super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
-                &responses_semantic,
-            )
-            .map_err(|error| format!("Anthropic inbound Chat canonicalization failed: {error}"))?;
-        if let Some(canonical_object) = canonical.as_object_mut() {
-            for (key, value) in anthropic_preserved_fields {
-                canonical_object.insert(key, value);
-            }
-            if let Some(value) = anthropic_reasoning_effort {
-                canonical_object.insert("reasoning_effort".to_string(), value);
-            }
-            if let Some(value) = anthropic_request_extension {
-                if canonical_object.contains_key("routecodex_chat_extension") {
-                    return Err(
-                        "Anthropic inbound produced conflicting registered Chat extensions"
-                            .to_string(),
-                    );
-                }
-                canonical_object.insert("routecodex_chat_extension".to_string(), value);
-            }
-        }
+        let mut canonical = normalize_v3_anthropic_request_to_chat(source_payload)
+            .map_err(|error| format!("Anthropic inbound Chat normalization failed: {error}"))?;
         normalize_v3_history_image_placeholders(&mut canonical);
         input.payload.0 = Arc::new(canonical);
         return Ok(V3HubReqInbound02Normalized {

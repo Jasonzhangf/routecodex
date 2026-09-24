@@ -325,12 +325,20 @@ fn fresh_responses_preserves_pending_binding_and_wraps_implemented_modes() {
         V3EntryProtocolExecutionMode::PendingNotImplemented,
         "Config-owned pending status must remain terminal for HTTP and WebSocket dispatch",
     );
+    assert!(
+        !responses_fresh_protocol_plan_allowed(
+            V3EntryProtocolExecutionMode::PendingNotImplemented,
+            &fresh,
+        ),
+        "PendingNotImplemented must not enter the fresh provider protocol planner",
+    );
     assert_eq!(
         responses_effective_execution_mode_for_entry_facts(
             V3EntryProtocolExecutionMode::Direct,
             &fresh,
         ),
-        V3EntryProtocolExecutionMode::Relay,
+        V3EntryProtocolExecutionMode::Direct,
+        "Fresh responses entries must not be pre-forced to Relay before selected-provider truth",
     );
     assert_eq!(
         responses_effective_execution_mode_for_entry_facts(
@@ -499,7 +507,11 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect() {
+async fn direct_live_sse_provider_failure_projects_typed_terminal_without_provider_detail() {
+    // Regression 7a7f58e: this stream used to close at EOF with no protocol
+    // terminal, which left the affected session with no terminal state. The
+    // provider failure now projects a typed terminal while provider-internal
+    // detail stays off the client stream.
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -527,10 +539,13 @@ async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect()
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
-    assert!(!text.contains("event: response.failed"), "{text}");
+    assert!(text.contains("event: response.failed"), "{text}");
+    // The provider failure keeps its real provider classification instead of
+    // being rewritten into the internal 599 response-stage error.
+    assert!(text.contains("network_error"), "{text}");
     assert!(!text.contains("internal_response_stream_error"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
-    assert!(!text.contains("data: [DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -3967,11 +3982,141 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
         .expect("terminal event must be transportable");
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: response.failed\n"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
+    assert!(error.contains("provider_response_stream_failed"), "{error}");
     assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
+    );
+}
+
+#[tokio::test]
+async fn responses_live_sse_provider_failure_emits_typed_terminal_not_bare_eof() {
+    // Regression 7a7f58e: an in-band provider failure after commit must reach a
+    // protocol terminal. A bare EOF left the affected client session with no
+    // terminal state, while a brand new session continued to work.
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_provider_failure(
+            "provider_response_sse_stream",
+            "provider stream ended without terminal",
+        ),
+    )]);
+    let body = v3_live_client_sse_body_for_protocol(
+        Box::pin(provider),
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    let mut client = body.into_data_stream();
+
+    let terminal = client
+        .next()
+        .await
+        .expect("provider stream failure must emit a typed terminal event")
+        .expect("terminal event must be transportable");
+    let terminal = std::str::from_utf8(&terminal).unwrap();
+    assert!(
+        terminal.starts_with("event: response.failed\n"),
+        "{terminal}"
+    );
+    assert!(terminal.ends_with("data: [DONE]\n\n"), "{terminal}");
+    assert!(
+        client.next().await.is_none(),
+        "typed terminal must close the affected session body"
+    );
+}
+
+#[tokio::test]
+async fn affected_session_terminal_releases_admission_while_an_independent_session_is_unaffected() {
+    // Lifecycle regression for 7a7f58e. The admission permit is released by the
+    // real post-commit terminal: the provider failure is fed through the same
+    // client SSE body the server builds, wrapped in the same permit-holding
+    // response body the request path uses. Only the terminal closing the body
+    // releases the permit, so the same session readmits while an independent
+    // session was never blocked.
+    let gate = Arc::new(V3ResponsesSessionAdmissionGate::default());
+    let scope = |session: &str, conversation: &str| V3ResponsesSessionAdmissionScope {
+        endpoint: "/v1/responses".to_string(),
+        session_id: Some(session.to_string()),
+        conversation_id: Some(conversation.to_string()),
+    };
+
+    let affected = gate
+        .admit(scope("session-hang", "conversation-hang"))
+        .await
+        .unwrap();
+
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_provider_failure(
+            "provider_response_sse_stream",
+            "provider stream ended without terminal",
+        ),
+    )]);
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(v3_live_client_sse_body_for_protocol(
+            Box::pin(provider),
+            None,
+            V3SseClientProtocol::Responses,
+        ))
+        .expect("typed SSE response");
+    let response = hold_response_body_admission_permit(response, affected);
+
+    let wait_gate = Arc::clone(&gate);
+    let mut waiter = tokio::spawn(async move {
+        wait_gate
+            .admit(V3ResponsesSessionAdmissionScope {
+                endpoint: "/v1/responses".to_string(),
+                session_id: Some("session-hang".to_string()),
+                conversation_id: Some("conversation-hang".to_string()),
+            })
+            .await
+    });
+    tokio::task::yield_now().await;
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), &mut waiter)
+            .await
+            .is_err(),
+        "the affected session must wait while its response body is live"
+    );
+
+    let independent = gate
+        .admit(scope("session-new", "conversation-new"))
+        .await
+        .expect("an independent session must not be blocked by the affected session");
+    drop(independent);
+
+    // Consume the real body: the typed provider terminal closes the stream, the
+    // permit is released, and the same session is admitted again.
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("event: response.failed"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+
+    let readmitted = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+        .await
+        .expect("the affected session must be released by its terminal")
+        .expect("same-session waiter task must not panic")
+        .expect("the affected session must be readmitted after its terminal");
+    drop(readmitted);
+}
+
+#[tokio::test]
+async fn responses_live_sse_client_disconnect_still_closes_without_terminal() {
+    // Control case for 7a7f58e: a genuine client disconnect must not fabricate
+    // a provider success or failure terminal; it still closes at EOF.
+    let provider = futures_util::stream::iter(vec![Err(
+        routecodex_v3_error::raise_v3_sse_client_disconnect(),
+    )]);
+    let body = v3_live_client_sse_body_for_protocol(
+        Box::pin(provider),
+        None,
+        V3SseClientProtocol::Responses,
+    );
+    let mut client = body.into_data_stream();
+    assert!(
+        client.next().await.is_none(),
+        "client disconnect must close without a fabricated terminal"
     );
 }
 

@@ -606,24 +606,8 @@ fn parse_block(
     {
         "text" => V3AnthropicSseBlockKind::Text,
         "tool_use" => V3AnthropicSseBlockKind::ToolUse,
-        "thinking" => {
-            if object
-                .keys()
-                .any(|key| !["type", "thinking", "signature"].contains(&key.as_str()))
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
-            }
-            V3AnthropicSseBlockKind::Thinking
-        }
-        "redacted_thinking" => {
-            if object
-                .keys()
-                .any(|key| !["type", "data"].contains(&key.as_str()))
-            {
-                return Err(V3AnthropicSseTreeError::MalformedReasoningContent);
-            }
-            V3AnthropicSseBlockKind::RedactedThinking
-        }
+        "thinking" => V3AnthropicSseBlockKind::Thinking,
+        "redacted_thinking" => V3AnthropicSseBlockKind::RedactedThinking,
         "server_tool_use" => V3AnthropicSseBlockKind::ServerToolUse,
         "web_search_tool_result" => V3AnthropicSseBlockKind::WebSearchToolResult,
         other => V3AnthropicSseBlockKind::Extension(other.to_owned()),
@@ -689,7 +673,7 @@ fn apply_delta(
             let signature = object
                 .get("signature")
                 .and_then(Value::as_str)
-                .ok_or(V3AnthropicSseTreeError::MalformedReasoningContent)?;
+                .ok_or(V3AnthropicSseTreeError::SignatureDeltaRequired)?;
             block.signature = Some(signature.to_owned());
         }
         delta_type => block.extensions.extend(object_extensions(delta, &["type"])),
@@ -750,8 +734,6 @@ pub(crate) enum V3AnthropicSseTreeError {
         "Anthropic provider event stream emitted duplicate message_start after content_block_start"
     )]
     DuplicateMessageAfterBlock,
-    #[error("Anthropic codec malformed reasoning content")]
-    MalformedReasoningContent,
     #[error("Anthropic tool input JSON is malformed")]
     MalformedToolInput,
     #[error("Anthropic stream emitted an event after message_stop")]
@@ -766,6 +748,8 @@ pub(crate) enum V3AnthropicSseTreeError {
     InputJsonFragmentRequired,
     #[error("Anthropic thinking_delta requires thinking")]
     ThinkingDeltaRequired,
+    #[error("Anthropic signature_delta requires signature")]
+    SignatureDeltaRequired,
     #[error("Anthropic provider error: {0}")]
     ProviderError(String),
 }
@@ -790,6 +774,72 @@ mod tests {
         }
         assert_eq!(state.blocks[&1].input_json, "{\"x\":1}");
         assert_eq!(state.usage.as_ref().unwrap().output_tokens, Some(2));
+    }
+
+    #[test]
+    fn thinking_block_accepts_cache_control_extension() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type": "thinking",
+                "thinking": "working",
+                "signature": "sig",
+                "cache_control": {"type": "ephemeral"}
+            }),
+        )
+        .expect("cache_control is a provider extension, not malformed reasoning");
+        assert_eq!(block.thinking, "working");
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "cache_control")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"type": "ephemeral"}))
+        );
+    }
+
+    #[test]
+    fn thinking_block_preserves_unregistered_provider_fields_as_extensions() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type":"thinking",
+                "thinking":"working",
+                "vendor_reasoning_hint":{"mode":"private"}
+            }),
+        )
+        .expect("provider-specific reasoning fields remain data extensions");
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "vendor_reasoning_hint")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"mode":"private"}))
+        );
+    }
+
+    #[test]
+    fn redacted_thinking_block_accepts_cache_control_extension() {
+        let block = parse_block(
+            0,
+            &json!({
+                "type": "redacted_thinking",
+                "data": "opaque",
+                "cache_control": {"type": "ephemeral"}
+            }),
+        )
+        .expect("cache_control is a provider extension, not malformed reasoning");
+        assert_eq!(block.redacted_data.as_deref(), Some("opaque"));
+        assert_eq!(
+            block
+                .extensions
+                .iter()
+                .find(|extension| extension.name == "cache_control")
+                .map(|extension| extension.value.clone()),
+            Some(json!({"type": "ephemeral"}))
+        );
     }
 
     #[test]

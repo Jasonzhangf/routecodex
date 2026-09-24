@@ -31,7 +31,13 @@ fn probe_sse_fixture(
     let provider_key = "probe-sse-provider:key1";
     let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
     let held = controller.try_acquire(provider_key, 0).unwrap();
-    let probe = controller.try_acquire(provider_key, 0).unwrap();
+    controller.observe_rate_limit(provider_key, 0).unwrap();
+    let probe = controller
+        .try_acquire(
+            provider_key,
+            crate::adaptive_concurrency::V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS,
+        )
+        .unwrap();
     assert!(probe.is_probe());
     controller.release(held.into_permit()).unwrap();
     let guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), probe.into_permit())
@@ -74,11 +80,54 @@ fn probe_sse_fixture(
     )
 }
 
-fn assert_probe_sse_released(controller: &V3AdaptiveConcurrencyController) {
+fn assert_probe_sse_accepted(controller: &V3AdaptiveConcurrencyController) {
     let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
     assert_eq!(snapshot.in_flight, 0);
     assert!(!snapshot.probe_in_flight);
-    assert_eq!(snapshot.budget, 2);
+    assert_eq!(
+        snapshot.budget, 2,
+        "accepted SSE probe must expand adaptive budget"
+    );
+    assert!(!snapshot.saturated);
+    assert_eq!(snapshot.next_probe_at_ms, None);
+}
+
+#[test]
+fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
+    let provider_id = "drop-pre-acquired-provider";
+    let auth_alias = "key1";
+    let provider_key = format!("{provider_id}:{auth_alias}");
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller.ensure_initial_budget(&provider_key, 1).unwrap();
+    let lease = controller
+        .try_acquire_business(&provider_key)
+        .expect("pre-acquired lease must fill provider capacity");
+    assert_eq!(controller.snapshot(&provider_key).unwrap().in_flight, 1);
+
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-drop-pre-acquired",
+            provider_id,
+            "https://provider.example/v1/responses",
+            V3ProviderAuthHandle {
+                alias: auth_alias.into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
+            },
+            V3ResponsesStreamIntent::Json,
+            json!({"model":"wire-model","input":"hello"}),
+            vec![],
+            None,
+            100,
+        )
+        .unwrap()
+        .with_pre_acquired_admission(lease);
+
+    drop(request);
+    assert_eq!(
+        controller.snapshot(&provider_key).unwrap().in_flight,
+        0,
+        "dropping a request with pre-acquired admission must release capacity"
+    );
 }
 
 #[test]
@@ -89,12 +138,14 @@ fn probe_sse_headers_keep_permit_and_handoff_streaming() {
     let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
     assert_eq!(snapshot.in_flight, 1);
     assert!(snapshot.probe_in_flight);
+    assert!(snapshot.saturated);
+    assert_eq!(snapshot.budget, 1);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Streaming)
     );
     drop(raw);
-    assert_probe_sse_released(&controller);
+    assert_probe_sse_accepted(&controller);
 }
 
 #[tokio::test]
@@ -105,13 +156,13 @@ async fn probe_sse_eof_releases_once_and_marks_handoff_terminal() {
         panic!("probe response must remain SSE");
     };
     assert!(body.next().await.is_none());
-    assert_probe_sse_released(&controller);
+    assert_probe_sse_accepted(&controller);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Terminal)
     );
     drop(body);
-    assert_probe_sse_released(&controller);
+    assert_probe_sse_accepted(&controller);
 }
 
 #[tokio::test]
@@ -127,13 +178,13 @@ async fn probe_sse_error_releases_immediately_and_marks_handoff_failed() {
         panic!("probe response must remain SSE");
     };
     assert!(body.next().await.unwrap().is_err());
-    assert_probe_sse_released(&controller);
+    assert_probe_sse_accepted(&controller);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Failed)
     );
     assert!(body.next().await.is_none());
-    assert_probe_sse_released(&controller);
+    assert_probe_sse_accepted(&controller);
 }
 
 fn responses_http_target() -> V3ResponsesProviderTarget {

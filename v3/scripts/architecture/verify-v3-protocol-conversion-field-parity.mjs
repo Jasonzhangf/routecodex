@@ -23,6 +23,7 @@ const paths = {
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  openaiChatRequestNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
@@ -30,6 +31,10 @@ const paths = {
   directPassthroughTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   responsesRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
   responsesRuntimeInner: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+  responseInboundNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs',
+  responseStreamMaterialization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
+  anthropicRelayRuntime: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  anthropicRelayHooks: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
   responsesRuntimeTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests.rs',
   responsesRuntimeTestsExtra: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_extra_tests.rs',
   responsesRelayDryRun: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_dry_run.rs',
@@ -38,6 +43,7 @@ const paths = {
   webSearchSidecar: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  anthropicRequestNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
@@ -106,12 +112,42 @@ const {
   featureBlock,
   walkCurrentImpl,
 } = attachParityHelpers({ failures, paths, text });
+const requireTextCount = (source, label, phrase, expected) => {
+  const count = source.split(phrase).length - 1;
+  if (count !== expected) {
+    failures.push(`${label}: expected ${expected} occurrence(s) of ${phrase}, found ${count}`);
+  }
+};
 const fieldMatrix = YAML.parse(text.fieldMatrix);
 const functionMap = YAML.parse(text.functionMap);
 const mainlineMap = YAML.parse(text.mainlineMap);
 const verificationMap = YAML.parse(text.verificationMap);
 const requestFieldProjectionManifest = YAML.parse(text.requestFieldProjectionManifest);
 const requestFieldProjectionModules = YAML.parse(text.requestFieldProjectionModules);
+
+for (const [key, label] of [
+  ['responseInboundNormalization', 'Anthropic provider response inbound normalization'],
+  ['responseStreamMaterialization', 'Anthropic provider SSE normalization'],
+  ['responsesRuntimeInner', 'Responses Relay provider response flow'],
+  ['anthropicRelayRuntime', 'Anthropic Relay provider response flow'],
+  ['anthropicRelayHooks', 'Anthropic Relay request inbound normalization'],
+]) {
+  forbid(text[key], `${paths[key]}::${label}`, [
+    /project_v3_anthropic_message_as_responses_response_with_context/u,
+    /project_v3_anthropic_message_as_responses_response\(/u,
+    /encode_v3_anthropic_request_as_responses_semantic\(/u,
+  ]);
+}
+requireText(
+  text.anthropicCodec,
+  `${paths.anthropicCodec}::Anthropic Chat request normalizer`,
+  'normalize_v3_anthropic_request_to_chat',
+);
+requireText(
+  text.anthropicCodec,
+  `${paths.anthropicCodec}::Anthropic Chat response normalizer`,
+  'normalize_v3_anthropic_message_to_chat_response',
+);
 
 requireText(text.responsesRelayTypes, `${paths.responsesRelayTypes}::client_input_error_type`, 'ClientInboundCanonical(String)');
 requireText(text.responsesRelayDryRun, `${paths.responsesRelayDryRun}::client_input_error_projection`, 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(message)');
@@ -120,7 +156,8 @@ requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_
 requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_error_message`, 'web_search hooks sidecar task failed: {error}');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
-forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::anthropic_provider_chat_normalization`, 'anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound');
+forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/\.map_err\(\|error\| \{\s*V3ResponsesRelayRuntimeError::ClientInboundCanonical\(error\.to_string\(\)\)/u]);
 forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
 for (const phrase of [
@@ -159,12 +196,12 @@ if (requestFieldProjectionManifest?.status !== 'design' || requestFieldProjectio
 const projectionSemantics = new Map((requestFieldProjectionManifest?.semantic_registry ?? []).map((entry) => [entry?.semantic_id, entry]));
 for (const [semanticId, chatStorage, projections] of [
   ['request.metadata', 'routecodex_chat_extension.responses_request.metadata', { responses: 'metadata_openai_limits', openai_chat: 'metadata_openai_limits', anthropic: 'user_id_to_provider_wire_other_keys_to_response_projection_context', gemini: 'unmapped' }],
-  ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'unmapped' }],
-  ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'unmapped' }],
-  ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'unmapped' }],
+  ['request.client_metadata', 'routecodex_chat_extension.responses_request.client_metadata', { responses: 'client_metadata', openai_chat: 'user_id_projection_other_fields_unmapped', anthropic: 'user_id_projection_other_fields_unmapped', gemini: 'registered_local_keys_consumed_user_id_and_unknown_unmapped' }],
+  ['request.prompt_cache_key', 'routecodex_chat_extension.responses_request.prompt_cache_key', { responses: 'prompt_cache_key', openai_chat: 'prompt_cache_key', anthropic: 'unmapped', gemini: 'non_empty_consumed_as_local_hint_malformed_unsupported' }],
+  ['request.store', 'routecodex_chat_extension.responses_request.store', { responses: 'store', openai_chat: 'store', anthropic: 'false_consumed_true_unsupported', gemini: 'false_consumed_true_unsupported' }],
   ['request.reasoning_effort', 'reasoning_effort', { responses: 'reasoning.effort_known_domain_unknown_to_medium', openai_chat: 'reasoning_effort_provider_compatible_domain', anthropic: 'output_config.effort_or_minimax_adaptive_thinking', gemini: 'generationConfig.thinkingConfig.thinkingLevel_shared_domain_only' }],
   ['request.reasoning_budget_tokens', 'reasoning_budget_tokens', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'thinking.budget_tokens_with_thinking_constraints', gemini: 'generationConfig.thinkingConfig.thinkingBudget_with_model_constraints' }],
-  ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher', anthropic: 'static_compatible_full_native_thinking_summary', gemini: 'unmapped' }],
+  ['request.reasoning_summary_policy', 'reasoning_summary_policy', { responses: 'reasoning.summary', openai_chat: 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher', anthropic: 'static_compatible_full_native_thinking_summary', gemini: 'default_safe_noop_declared_domain_only_invalid_unmapped' }],
   ['request.reasoning_context_policy', 'reasoning_context_policy', { responses: 'reasoning.context', openai_chat: 'consumed_source_roundtrip_only_no_wire', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.reasoning_mode', 'reasoning_mode', { responses: 'reasoning.mode', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'unmapped' }],
   ['request.reasoning_include_thoughts', 'reasoning_include_thoughts', { responses: 'unmapped', openai_chat: 'unmapped', anthropic: 'unmapped', gemini: 'generationConfig.thinkingConfig.includeThoughts' }],
@@ -290,8 +327,8 @@ for (const phrase of [
   'if input.entry_protocol == V3HubEntryProtocol::Responses',
   'build_v3_chat_canonical_request_from_responses_payload_for_req_inbound',
   'if input.entry_protocol == V3HubEntryProtocol::Anthropic',
-  'encode_v3_anthropic_request_as_responses_semantic',
-  'Anthropic inbound Chat canonicalization failed',
+  'normalize_v3_anthropic_request_to_chat',
+  'Anthropic inbound Chat normalization failed',
   'semantic_protocol: V3HubRequestSemanticProtocol::Chat',
 ]) requireText(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical`, phrase);
 forbid(reqInbound02, `${paths.reqInbound02}::all_inbound_to_chat_canonical_no_control_rebuild`, [
@@ -356,6 +393,9 @@ forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_st
   /row\.remove\("include"\)/,
   /row\.remove\("reasoning"\)/,
 ]);
+forbid(text.openaiChatRequestNormalization, `${paths.openaiChatRequestNormalization}::no_silent_strip_projector`, [
+  /row\.remove\("client_metadata"\);\s*if\s*let\s*Some\(max_output_tokens\)/,
+]);
 requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::responses_client_metadata_projection`, 'pub(super) fn project_openai_client_metadata_to_metadata');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::client_metadata_user_id_only`, 'pub(super) fn unsupported_client_metadata_paths(');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, 'REGISTERED_CLIENT_LOCAL_METADATA_KEYS');
@@ -393,7 +433,7 @@ requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormat
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_unknown_client_metadata_rejected`, 'openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_does_not_reach_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
+requireText(text.openaiChatRequestNormalization, `${paths.openaiChatRequestNormalization}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
   'openai_chat_function_tool_redacted_schema_placeholders_pass_through',
@@ -424,30 +464,25 @@ for (const phrase of [
   'normalize_v3_hub_responses_usage_from_openai_chat_usage',
   'build_v3_responses_reasoning_item_from_openai_chat_message',
   'build_v3_responses_function_call_from_openai_chat_tool_call',
+  'anthropic_reasoning_blocks',
+  'build_v3_responses_reasoning_item_from_chat_extension',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
 forbid(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
-const anthropicToResponses = functionSlice(
-  text.anthropicCodec,
-  paths.anthropicCodec,
-  'pub fn encode_v3_anthropic_request_as_responses_semantic',
-  'pub fn characterize_v3_anthropic_client_input_to_hub_semantic',
+const anthropicRequestNormalizer = functionSlice(
+  text.anthropicRequestNormalization,
+  paths.anthropicRequestNormalization,
+  'pub fn normalize_v3_anthropic_request_to_chat',
+  'Ok(Value::Object(canonical))',
 );
 for (const phrase of [
-  'pub fn encode_v3_anthropic_request_as_responses_semantic',
-  '"metadata"',
-  '"temperature"',
-  '"top_p"',
-  '"top_k"',
-  '"parallel_tool_calls"',
-  'object.get("stop_sequences")',
-  '"reasoning_thinking_mode"',
-  '"reasoning_budget_tokens"',
-  '"reasoning_display_policy"',
-  '"anthropic_request"',
-  'anthropic_tool_choice_as_responses_tool_choice',
-]) requireText(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, phrase);
-forbid(anthropicToResponses, `${paths.anthropicCodec}::anthropic_to_responses`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i, /anthropic_entry_system/]);
+  'pub fn normalize_v3_anthropic_request_to_chat',
+  'characterize_v3_anthropic_client_input_to_hub_semantic',
+  'source_extensions',
+  'reasoning_effort',
+  'routecodex_chat_extension',
+]) requireText(anthropicRequestNormalizer, `${paths.anthropicRequestNormalization}::anthropic_to_chat_normalizer`, phrase);
+forbid(anthropicRequestNormalizer, `${paths.anthropicRequestNormalization}::anthropic_to_chat_normalizer`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
 
 const responsesRequestToAnthropic = functionSlice(
   text.anthropicCodec,
@@ -547,10 +582,16 @@ for (const testName of [
 for (const phrase of [
   'if object.get("type").and_then(Value::as_str) == Some("custom")',
   '.get("custom")',
-  'custom_tool_names.contains(name)',
+  '"name":client_name',
   '.get("input")',
   '"type":"custom_tool_call"',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
+requireTextCount(
+  chatToResponses,
+  `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`,
+  'custom_tool_names.get(name)',
+  2,
+);
 forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_for_openai_chat_custom`, [/extract_v3_responses_custom_tool_input_from_openai_chat_arguments/]);
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'target_protocol_unmapped_field_projects_internal_598_without_switching_provider');
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'a request-shape error must not send or switch provider');
@@ -572,7 +613,7 @@ requireText(text.providerReqCompat, `${paths.providerReqCompat}::verbosity_value
 requireText(text.providerReqCompat, `${paths.providerReqCompat}::exact_anthropic_fields`, 'responses_exact_client_user_id_and_json_schema_project_to_anthropic_wire');
 requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_local_context`, 'responses_relay_consumes_registered_codex_client_metadata_before_provider_wire');
 forbid(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_provider_wire_leak`, [/assert_eq!\(headers\["x-claude-code-session-id"\]/, /assert_eq!\(headers\["x-codex-turn-metadata"\]/]);
-requireText(text.anthropicTests, `${paths.anthropicTests}::structured_system_unmapped`, 'anthropic_structured_system_extension_is_not_silently_flattened_for_responses');
+requireText(text.anthropicTests, `${paths.anthropicTests}::structured_system_unmapped`, 'anthropic_structured_system_cache_is_rejected_for_responses_target');
 const openaiChatExtensionProjection = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,
@@ -682,6 +723,7 @@ for (const [owner, body, phrases] of [
     'responses_relay_reasoning_effort_projects_minimax_adaptive_thinking',
     'responses_relay_reasoning_summary_policy_is_consumed_before_anthropic_wire',
     'responses_relay_anthropic_provider_json_preserves_thinking_to_responses_reasoning',
+    'responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client',
     'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak',
     'must not synthesize thinking budget from Responses effort',
     'reasoning_summary_policy',

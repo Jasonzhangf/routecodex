@@ -38,13 +38,13 @@ audit_truth_contract:
     covered: 160
     covered_but_target_dependent: 0
     runtime_conformance_pending: 3
-    partial: 113
+    partial: 114
     extension_declared: 220
     source_inventory_only: 0
     shape_branch_gap: 18
     codec_shape_only: 14
     edge_only: 3
-    semantic_declared: 50
+    semantic_declared: 49
   gap_audit:
     - gap_id: gap.client_metadata.target_dependent
       category: runtime_closeout
@@ -70,7 +70,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - semantic_declared
-      affected_count: 50
+      affected_count: 49
       evidence: These fields now have manual semantic owners and transform rules, but no runtime conversion completion
         evidence yet.
       required_owner: v3 protocol codec owner selected per field family
@@ -81,7 +81,7 @@ audit_truth_contract:
       category: runtime_closeout
       affected_statuses:
         - partial
-      affected_count: 113
+      affected_count: 114
       evidence: Main protocol paths cover some directions, but not all equivalent request/response transforms across
         Responses, OpenAI Chat, Anthropic, and Gemini.
       required_owner: v3/crates/routecodex-v3-runtime/src/hub_v1 protocol codec files
@@ -1248,11 +1248,13 @@ chat_semantic_translation_groups:
       gemini:
         request_fields: []
         response_fields: []
-        transform: Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean;
-          keep it out of outbound parallelism unless a separate compatible target contract is approved.
+        transform: Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean.
+          Gemini outbound may consume parallel_tool_calls=true as the permissive/default no-op only; false remains unmapped
+          because it constrains provider behavior without an exact Gemini equivalent. request_fields lists only exact
+          wire-equivalent Gemini fields, so a default-safe no-op consumption is described here without adding a target field.
     chat_extension_fields: []
     current_impl: partial
-    gap: Gemini parallelism exact value mapping requires runtime contract
+    gap: Gemini parallelism exact non-default value mapping requires runtime contract
   - group_id: tool.call.id
     standard_chat_field: request.messages[].tool_calls[].id
     chat_fields:
@@ -1645,7 +1647,8 @@ chat_semantic_translation_groups:
       - request.reasoning_summary_policy
     direction: request
     standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
-      text itself and not reasoning effort.
+      text itself and not reasoning effort. The default-safe values are a no-extra-constraint policy only for targets whose
+      outbound row explicitly declares default-safe no-op consumption.
     chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning
       content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings
       require a registered target-local request policy consumer.
@@ -1670,12 +1673,13 @@ chat_semantic_translation_groups:
       gemini:
         request_fields: []
         response_fields: []
-        transform: No direct equivalent in the audited Gemini request inventory.
+        transform: No direct equivalent in the audited Gemini request inventory. Gemini outbound may consume the canonical
+          auto/concise/detailed policy as a default-safe no-op with no explicit summary request; invalid values remain unmapped.
     chat_extension_fields:
       - request.reasoning_summary_policy
     current_impl: partial
     gap: Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection;
-      Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no
+      Gemini consumes the declared policy domain as a default-safe no-op because it has no equivalent request field. Anthropic consumes valid values through the registered static compatibility projection with no
       provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response
       reasoning field does not authorize reconstructing the source request policy.
   - group_id: reasoning.request_context_policy
@@ -2153,12 +2157,12 @@ chat_semantic_translation_groups:
         request_fields:
           - request.store
         response_fields: []
-        transform: Gemini fields map only by the listed semantic meaning; transport or nested container shape must not be copied
-          as raw payload truth.
+        transform: Gemini has no equivalent storage request field; store=false is validated and consumed before wire,
+          while store=true fails because remote storage semantics cannot be preserved.
     chat_extension_fields:
       - request.store
-    current_impl: semantic_declared
-    gap: semantic owner declared; runtime conversion closeout pending
+    current_impl: partial
+    gap: Gemini false-consume/true-fail behavior is declared; full cross-protocol/live closeout pending.
   - group_id: lifecycle.truncation_policy
     standard_chat_field: request.truncation
     chat_fields:
