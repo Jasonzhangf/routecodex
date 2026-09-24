@@ -7501,6 +7501,36 @@ chains:
       produces: [v3.sse.responses.semantic_tree, v3.sse.chat.semantic_tree]
       side_channel_reads: []
       side_channel_writes: []
+  - step_id: v3-direct-sse-provider-response-compat-01
+    from_node: V3DirectResp14TypedProtocolData
+    to_node: V3DirectResp15ClientPayloadReady
+    caller_symbol: V3DirectSseContentConsumer::consume
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_consumers.rs
+    callee_symbol: apply_direct_provider_response_compat
+    callee_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    status: anchored
+    edge_kind: provider_private_response_compat_single_owner
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.direct_response.compat_plan, v3.sse.chat.semantic_tree]
+      produces: [v3.sse.chat.hook_effect, v3.response.client_payload]
+      side_channel_reads: [v3.direct_response.compat_plan]
+      side_channel_writes: []
+  - step_id: v3-direct-provider-response-compat-01
+    from_node: V3ProviderResp14Raw
+    to_node: V3DirectResp14ProviderProjectionPrepared
+    caller_symbol: project_provider_raw_to_client_payload_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    callee_symbol: apply_direct_provider_response_compat
+    callee_file: v3/crates/routecodex-v3-runtime/src/shared.rs
+    status: anchored
+    edge_kind: provider_private_response_compat_single_owner
+    owner_feature_id: v3.responses_chat_sse_typed_tree_refactor
+    resource_flow:
+      consumes: [v3.direct_response.compat_plan, v3.response.provider_raw]
+      produces: [v3.response.client_payload]
+      side_channel_reads: [v3.direct_response.compat_plan]
+      side_channel_writes: []
   - step_id: v3-direct-typed-hook-catalog-01
     from_node: V3ProviderResp14Raw
     to_node: V3DirectResp14ProviderProjectionPrepared

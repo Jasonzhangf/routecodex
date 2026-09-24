@@ -63,6 +63,13 @@ pub enum V3DirectResponseCompatBlock {
     Passthrough,
     ThinkingTags,
     DeepseekConsoleGoResponseShape,
+    /// Provider-private response compatibility (the `chat:*` / other
+    /// non-`responses:*` profiles). The payload rewrite itself is owned by the
+    /// single provider response compat owner
+    /// (`provider_resp_compat_02_provider_compat` -> `run_resp_inbound_stage3_compat`),
+    /// never by this Direct plan. This block only records that the Direct
+    /// response path must invoke that owner with the configured profile.
+    ProviderResponseCompat,
 }
 
 #[derive(Debug, Clone)]
@@ -78,11 +85,21 @@ pub struct V3DirectResponseCompatPlan {
     pub provider_protocol: V3HubProviderWireProtocol,
     pub canonical_model_id: String,
     pub blocks: Vec<V3DirectResponseCompatBlock>,
+    /// Configured provider-private compat profile carried for the
+    /// `ProviderResponseCompat` block. `None` when the plan does not select it.
+    pub provider_compat_profile: Option<String>,
 }
 
 impl V3DirectResponseCompatPlan {
     pub fn has_block(&self, block: V3DirectResponseCompatBlock) -> bool {
         self.blocks.contains(&block)
+    }
+
+    /// The provider-private compat profile the Direct response path must pass
+    /// to the provider response compat owner. Only present when the plan
+    /// selected `ProviderResponseCompat`.
+    pub fn provider_response_compat_profile(&self) -> Option<&str> {
+        self.provider_compat_profile.as_deref()
     }
 }
 
@@ -134,9 +151,15 @@ pub fn compile_direct_response_compat_plan(
         .any(|capability| matches!(capability.trim(), "reasoning" | "thinking"));
     let block = match profile.as_deref() {
         None => V3DirectResponseCompatBlock::Passthrough,
+        // `chat:openai` is a declared Chat provider profile whose provider
+        // response compat is a no-op; keep the fast path PR #236 added so the
+        // plan stays Passthrough instead of routing a no-op through the owner.
         Some("chat:openai") if facts.provider_protocol == V3HubProviderWireProtocol::OpenAiChat => {
             V3DirectResponseCompatBlock::Passthrough
         }
+        // Explicit no-op profile: resolving it through the provider response
+        // compat owner would also yield passthrough, so keep it local.
+        Some("compat:passthrough") => V3DirectResponseCompatBlock::Passthrough,
         Some("responses:thinking-tags" | "responses:cc" | "responses:deepseek-console-go")
             if facts.provider_protocol != V3HubProviderWireProtocol::Responses =>
         {
@@ -165,17 +188,23 @@ pub fn compile_direct_response_compat_plan(
                 facts.canonical_model_id
             ));
         }
-        Some(unknown) => {
-            return Err(format!(
-                "unsupported direct response compatibility profile {unknown} for protocol {:?} model {}",
-                facts.provider_protocol, facts.canonical_model_id
-            ));
-        }
+        // Everything else is provider-private compat: the `chat:*` profiles and
+        // any `responses:*` profile without a Direct-local Responses event
+        // rewriter (for example `responses:lmstudio`). Relay applies all of
+        // these through the single provider response compat owner; Direct must
+        // reach the same owner instead of rejecting the request or
+        // reimplementing the rewrite. The `responses:thinking-tags` /
+        // `responses:cc` / `responses:deepseek-console-go` rewriters above are
+        // already handled locally and never fall through, so this arm cannot
+        // double-apply them.
+        Some(_) => V3DirectResponseCompatBlock::ProviderResponseCompat,
     };
     Ok(V3DirectResponseCompatPlan {
         provider_protocol: facts.provider_protocol,
         canonical_model_id: facts.canonical_model_id.to_string(),
         blocks: vec![block],
+        provider_compat_profile: (block == V3DirectResponseCompatBlock::ProviderResponseCompat)
+            .then(|| profile.unwrap_or_default().to_string()),
     })
 }
 
@@ -206,6 +235,78 @@ mod tests {
             compatibility_profile: None,
         })
         .expect("missing profile must remain passthrough");
+        assert_eq!(plan.blocks, vec![V3DirectResponseCompatBlock::Passthrough]);
+    }
+
+    #[test]
+    fn compat_plan_accepts_chat_wire_profiles_for_direct() {
+        // chat-wire same-protocol providers are routed through the Direct
+        // kernel. Their configured profile is a provider-response-compat
+        // profile (chat:*), not a Responses event rewriter; the plan must
+        // carry it to the sole provider-response-compat owner instead of
+        // rejecting the request. `chat:openai` is the one declared no-op: its
+        // provider response compat is a passthrough, so the plan keeps it local
+        // (asserted separately in
+        // `chat_direct_accepts_openai_compat_profile_without_response_rewrite`).
+        for profile in [
+            "chat:glm",
+            "chat:glm-unsupported-prompt-cache-key-verbosity",
+            "chat:minimax",
+            "chat:gemini",
+            "chat:lmstudio",
+        ] {
+            let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+                provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+                canonical_model_id: "deepseek-v4.1-flash",
+                model_capabilities: &["text"],
+                compatibility_profile: Some(profile),
+            })
+            .unwrap_or_else(|error| panic!("chat-wire profile {profile} must compile: {error}"));
+            assert_eq!(
+                plan.blocks,
+                vec![V3DirectResponseCompatBlock::ProviderResponseCompat],
+                "profile {profile} must route through the provider response compat owner"
+            );
+            assert_eq!(
+                plan.provider_compat_profile.as_deref(),
+                Some(profile),
+                "profile {profile} must be carried to the owner verbatim"
+            );
+        }
+    }
+
+    #[test]
+    fn compat_plan_routes_unknown_responses_profile_to_owner_not_err() {
+        // A `responses:*` profile without a Direct-local Responses event
+        // rewriter (for example `responses:lmstudio`) must reach the single
+        // provider response compat owner instead of hard-failing the Direct
+        // path; the Responses event rewriters above keep their Err contract.
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            canonical_model_id: "lmstudio-model",
+            model_capabilities: &["text"],
+            compatibility_profile: Some("responses:lmstudio"),
+        })
+        .expect("responses:lmstudio must compile through the owner");
+        assert_eq!(
+            plan.blocks,
+            vec![V3DirectResponseCompatBlock::ProviderResponseCompat]
+        );
+        assert_eq!(
+            plan.provider_compat_profile.as_deref(),
+            Some("responses:lmstudio")
+        );
+    }
+
+    #[test]
+    fn compat_plan_keeps_passthrough_for_compat_passthrough() {
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "glm-5.2",
+            model_capabilities: &["text"],
+            compatibility_profile: Some("compat:passthrough"),
+        })
+        .expect("compat:passthrough must compile");
         assert_eq!(plan.blocks, vec![V3DirectResponseCompatBlock::Passthrough]);
     }
 

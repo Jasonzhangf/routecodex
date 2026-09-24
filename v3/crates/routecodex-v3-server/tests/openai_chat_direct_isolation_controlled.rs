@@ -310,6 +310,86 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
 }
 
+#[tokio::test]
+async fn chat_direct_isolated_applies_configured_provider_compat_profile() {
+    // Regression: the Direct chat flip routed chat-wire providers through the
+    // Direct kernel, which rejected any non-`responses:*` compatibility
+    // profile (hard 599) and skipped the provider request/response compat the
+    // Relay path applied. A chat-wire provider declaring
+    // `chat:glm-unsupported-prompt-cache-key-verbosity` must run Direct, strip
+    // the unsupported fields through the single compat owner, and still return
+    // the projected client body.
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_KEY", "controlled-secret");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
+    let (upstream_shutdown_tx, upstream_shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(controlled_openai_chat_upstream),
+        )
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async move {
+                let _ = upstream_shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let handle = spawn_v3_server_aggregate(manifest_with_profile(
+        free_port(),
+        upstream_addr.port(),
+        Some("chat:glm-unsupported-prompt-cache-key-verbosity"),
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"chat-client-alias",
+            "messages":[{"role":"user","content":"json"}],
+            "prompt_cache_key":"client-supplied-cache-key",
+            "verbosity":"high",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "a chat-wire provider with a chat:* profile must not 599 on the Direct path"
+    );
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["choices"][0]["message"]["content"], "controlled json");
+
+    let capture = captures_rx.recv().await.unwrap();
+    assert_eq!(capture.body["model"], "chat-wire-model");
+    assert!(
+        capture.body.get("prompt_cache_key").is_none(),
+        "provider request compat owner must strip prompt_cache_key: {}",
+        capture.body
+    );
+    assert!(
+        capture.body.get("verbosity").is_none(),
+        "provider request compat owner must strip verbosity: {}",
+        capture.body
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown_tx.send(()).unwrap();
+    std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -322,9 +402,20 @@ fn manifest(
     server_port: u16,
     upstream_port: u16,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_with_profile(server_port, upstream_port, None)
+}
+
+fn manifest_with_profile(
+    server_port: u16,
+    upstream_port: u16,
+    compatibility_profile: Option<&str>,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     // The shared hub_v1 fixture now defaults openai_chat to Direct, which is the
     // behavior under test: a chat entry with a chat-wire provider must run the
     // isolated Direct skeleton.
+    let compatibility_profile = compatibility_profile
+        .map(|profile| format!("compatibility_profile = \"{profile}\"\n"))
+        .unwrap_or_default();
     let source = format!(
         r#"
 version = 3
@@ -343,7 +434,7 @@ endpoints = ["openai_chat"]
 type = "openai_chat"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "chat-wire-model"
-auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI_CHAT_CONTROLLED_KEY" }}] }}
+{compatibility_profile}auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI_CHAT_CONTROLLED_KEY" }}] }}
 [providers.controlled.models.chat-wire-model]
 wire_name = "chat-wire-model"
 aliases = ["chat-client-alias"]

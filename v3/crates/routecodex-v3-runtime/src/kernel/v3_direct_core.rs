@@ -932,6 +932,18 @@ where
                         crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
                     ) && response_projection.compat_plan.provider_protocol
                         == V3HubProviderWireProtocol::Responses,
+                    response_projection
+                        .compat_plan
+                        .has_block(
+                            crate::direct_response_hooks::V3DirectResponseCompatBlock::ProviderResponseCompat,
+                        )
+                        .then(|| {
+                            response_projection
+                                .compat_plan
+                                .provider_response_compat_profile()
+                        })
+                        .flatten()
+                        .map(ToOwned::to_owned),
                     crate::hooks::register_responses_direct_hooks().direct_sse_typed_hooks(),
                     tool_thinking_enabled,
                     crate::hub_v1::v3_toolreason_client_projection_enabled_for_server(
