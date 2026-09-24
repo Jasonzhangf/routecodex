@@ -9,7 +9,8 @@ use crate::nodes::V3ProviderAttemptSseStream;
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error01SourceRaised, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream,
@@ -166,6 +167,50 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
     .await
 }
 
+/// Apply the configured provider-private response compatibility profile to a
+/// provider response payload.
+///
+/// This delegates to the single provider response compat owner
+/// (`build_provider_resp_compat_02_from_v3_provider_resp_inbound_01` ->
+/// `run_resp_inbound_stage3_compat`). The Direct path must never reimplement
+/// these rewrites; it only reaches the same owner Relay uses.
+pub(crate) fn apply_direct_provider_response_compat(
+    payload: serde_json::Value,
+    profile: &str,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    request_id: &str,
+) -> Result<serde_json::Value, V3Error01SourceRaised> {
+    use crate::hub_v1::{
+        build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
+        build_v3_provider_resp_inbound_01_raw_with_compat_profile, V3HubEntryProtocol,
+        V3HubExecutionMode, V3HubInvocationSource, V3HubTransportIntent,
+        V3ProviderRespInbound01RawContext,
+    };
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        V3ProviderRespInbound01RawContext::new(
+            V3HubEntryProtocol::OpenAiChat,
+            provider_protocol,
+            V3HubExecutionMode::Direct,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_compatibility_profile(Some(profile)),
+    );
+    let resp02 = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).map_err(
+        |error| {
+            build_v3_error_01_source_raised_internal(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3DirectResp14ProviderCompat",
+                "direct_provider_response_compat_failed",
+                format!("profile {profile} request_id {request_id}: {error}"),
+                V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+            )
+        },
+    )?;
+    Ok(resp02.raw().payload.0.as_ref().clone())
+}
+
 pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
     raw: V3ProviderResp14Raw,
     plan: &V3DirectResponseCompatPlan,
@@ -218,6 +263,12 @@ async fn project_provider_raw_to_client_payload_inner(
     // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
     let deepseek_console_go =
         compat_plan.has_block(V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape);
+    // Provider-private response compatibility (chat:* profiles) is applied by the
+    // single provider response compat owner, never reimplemented here.
+    let provider_response_compat = compat_plan
+        .has_block(V3DirectResponseCompatBlock::ProviderResponseCompat)
+        .then(|| compat_plan.provider_response_compat_profile())
+        .flatten();
     // The thinking-tag wrapper is a Responses event rewriter and requires a
     // Responses terminal event. Chat and Anthropic streams have different
     // terminal contracts; applying the wrapper there aborts the stream before
@@ -309,6 +360,14 @@ async fn project_provider_raw_to_client_payload_inner(
         }
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
+        }
+        if let Some(profile) = provider_response_compat.as_deref() {
+            parsed = apply_direct_provider_response_compat(
+                parsed,
+                profile,
+                compat_plan.provider_protocol,
+                &request_id,
+            )?;
         }
         if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
             compat_plan.provider_protocol,
@@ -1375,6 +1434,106 @@ mod tests {
             v3_direct_sse_frame_interval_timeout(None),
             v3_direct_sse_default_timeout()
         );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_applies_chat_profile_owner() {
+        // chat:minimax response compat strips the minimax provider sentinel.
+        // The Direct path must reach the same owner Relay uses, so the sentinel
+        // must be gone after the plan-selected compat step.
+        let payload = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": "hello ]<]minimax[>[ world" }
+            }]
+        });
+        let compat = apply_direct_provider_response_compat(
+            payload,
+            "chat:minimax",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-minimax-compat",
+        )
+        .expect("chat:minimax compat must apply on the Direct path");
+        assert_eq!(
+            compat["choices"][0]["message"]["content"],
+            serde_json::json!("hello  world")
+        );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_harvests_glm_text_tool_call_on_json() {
+        // `chat:glm` provider response compat harvests a text tool call from
+        // the assistant message's reasoning text. Before the Direct chat flip
+        // this ran on Relay; Direct must reach the same owner or a chat-wire
+        // GLM provider silently loses its tool call on the JSON path.
+        let payload = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "<tool_call><invoke name=\"exec_command\"><parameter name=\"cmd\">pwd</parameter></invoke></tool_call>"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let compat = apply_direct_provider_response_compat(
+            payload,
+            "chat:glm",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-glm-harvest",
+        )
+        .expect("chat:glm compat must apply on the Direct path");
+        let calls = compat["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap_or_else(|| panic!("chat:glm must harvest a tool call: {compat}"));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "exec_command");
+        assert_eq!(compat["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn direct_provider_response_compat_glm_sse_chunk_matches_relay_contract() {
+        // The SSE compat owner runs on the projected chat chunk on both Relay
+        // (`openai_chat_relay_runtime.rs` project_sse_event_payload) and Direct.
+        // A `chat.completion.chunk` carries `delta`, not `message`, so the GLM
+        // reasoning-text harvest is a no-op on a stream chunk for both paths.
+        // Pin that shared contract so the Direct SSE placement cannot silently
+        // drift away from Relay's ordering.
+        let chunk = serde_json::json!({
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "<tool_call><invoke name=\"exec_command\"><parameter name=\"cmd\">pwd</parameter></invoke></tool_call>"},
+                "finish_reason": null
+            }]
+        });
+        let compat = apply_direct_provider_response_compat(
+            chunk.clone(),
+            "chat:glm",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-glm-sse",
+        )
+        .expect("chat:glm compat must apply to a Direct SSE chunk");
+        assert_eq!(
+            compat, chunk,
+            "a delta-shaped chunk must pass through unchanged, matching Relay's projected-chunk placement"
+        );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_passthrough_leaves_payload_untouched() {
+        let payload = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "plain"}}]
+        });
+        let compat = apply_direct_provider_response_compat(
+            payload.clone(),
+            "chat:openai",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-openai-compat",
+        )
+        .expect("chat:openai compat must apply on the Direct path");
+        assert_eq!(compat, payload);
     }
 
     #[tokio::test]

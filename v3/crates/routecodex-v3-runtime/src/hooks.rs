@@ -768,6 +768,13 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
         V3DirectRequestProtocol::OpenAiChat,
         key_catalog,
     )?;
+    // Provider-private request compat (chat:*) has exactly one owner: the
+    // provider request compat stage. The Responses Direct hook already reaches
+    // it; the chat Direct hook must reach the same owner or chat-wire providers
+    // silently lose their declared request adjustments (for example
+    // `chat:glm-unsupported-prompt-cache-key-verbosity` dropping
+    // prompt_cache_key/verbosity, and `chat:glm` request compat). This is not a
+    // second implementation; the owner is invoked once here.
     let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
         candidate.compatibility_profile.as_deref(),
     );
