@@ -47,6 +47,7 @@ async fn guard_relay_sse_first_frame(
     provider_protocol: V3HubProviderWireProtocol,
     mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
+    allow_responses_incomplete: bool,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
     let mut decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
@@ -96,6 +97,29 @@ async fn guard_relay_sse_first_frame(
                         || crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(&data)
                     {
                         continue;
+                    }
+                    if allow_responses_incomplete
+                        && provider_protocol == V3HubProviderWireProtocol::Responses
+                    {
+                        let terminal = serde_json::from_str::<Value>(&data).ok();
+                        if terminal
+                            .as_ref()
+                            .and_then(|event| event.get("type"))
+                            .and_then(Value::as_str)
+                            == Some("response.incomplete")
+                            && matches!(
+                                terminal.as_ref().and_then(|event| {
+                                    event
+                                        .pointer("/response/incomplete_details/reason")
+                                        .or_else(|| event.pointer("/incomplete_details/reason"))
+                                        .and_then(Value::as_str)
+                                }),
+                                Some("max_output_tokens" | "content_filter")
+                            )
+                        {
+                            first_semantic_frame_seen = true;
+                            break;
+                        }
                     }
                     let outcome =
                         crate::hub_v1::classify_v3_provider_sse_json_data(provider_protocol, &data)
@@ -1084,6 +1108,7 @@ where
                         provider_wire_protocol,
                         stream,
                         sse_first_frame_timeout_ms,
+                        C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat,
                     ),
                 )
                 .await
