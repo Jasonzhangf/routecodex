@@ -1603,12 +1603,9 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         assert!(!tools.capabilities.contains("tools"));
 
         let web = classify("web_search", json!({"query":"latest release"}));
-        assert_eq!(web.route_classification.route_name, "web_search");
-        assert_eq!(
-            web.route_classification.candidates,
-            ["web_search", "default"]
-        );
-        assert!(web.capabilities.contains("web_search"));
+        assert_eq!(web.route_classification.route_name, "default");
+        assert_eq!(web.route_classification.candidates, ["default"]);
+        assert!(!web.capabilities.contains("web_search"));
     }
 
     #[test]
