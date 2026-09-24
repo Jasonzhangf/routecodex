@@ -691,7 +691,7 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn responses_provider_incomplete_reselects_before_chat_client_commit() {
+async fn responses_provider_incomplete_projects_chat_length_usage_and_done() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_responses_incomplete_reselect";
     let manifest = manifest_with_two_responses_providers_for_scope(server_id);
@@ -712,23 +712,17 @@ async fn responses_provider_incomplete_reselects_before_chat_client_commit() {
             payload: json!({
                 "model":"chat-client-alias",
                 "messages":[{"role":"user","content":"recover after incomplete"}],
-                "stream":true
+                "stream":true,
+                "stream_options":{"include_usage":true}
             }),
         },
         &transport,
     )
     .await
-    .expect("incomplete Responses provider attempt must reselect");
+    .expect("incomplete Responses provider terminal must project to Chat");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-    assert_eq!(
-        provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ]
-    );
+    assert_eq!(provider_ids, [format!("{server_id}_primary")]);
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
     };
@@ -739,12 +733,58 @@ async fn responses_provider_incomplete_reselects_before_chat_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-incomplete"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
-    assert!(
-        !text.contains("provider_response_incomplete_max_output_tokens"),
-        "{text}"
-    );
+    assert!(text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(text.contains("\"choices\":[]"), "{text}");
+    assert!(text.contains("\"prompt_tokens\":10"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+}
+
+#[tokio::test]
+async fn responses_provider_usage_respects_chat_client_opt_out() {
+    use futures_util::StreamExt;
+    let server_id = "openai_chat_responses_incomplete_reselect";
+    let manifest = manifest_with_two_responses_providers_for_scope(server_id);
+    let transport = ResponsesIncompleteThenChatSuccessTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-chat-usage-opt-out".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "stream":true,
+                "stream_options":{"include_usage":false}
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("incomplete Responses provider terminal must project to Chat");
+    assert_eq!(output.status, 200);
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(!text.contains("\"choices\":[]"), "{text}");
+    assert!(!text.contains("\"usage\":"), "{text}");
+    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
 }
 
 #[tokio::test]

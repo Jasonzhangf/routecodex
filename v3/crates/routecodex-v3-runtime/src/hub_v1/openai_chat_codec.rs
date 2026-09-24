@@ -704,6 +704,7 @@ pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     model: Option<String>,
     tool_call_index: usize,
     emitted_tool_call: bool,
+    include_usage: bool,
 }
 
 impl Default for V3OpenAiChatResponsesSseTransducer {
@@ -717,6 +718,7 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
             model: None,
             tool_call_index: 0,
             emitted_tool_call: false,
+            include_usage: true,
         }
     }
 }
@@ -724,6 +726,13 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
 impl V3OpenAiChatResponsesSseTransducer {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn new_with_usage_option(include_usage: bool) -> Self {
+        Self {
+            include_usage,
+            ..Self::default()
+        }
     }
 
     pub(crate) fn push_event(&mut self, event: Value) -> Result<Vec<Value>, String> {
@@ -990,6 +999,9 @@ impl V3OpenAiChatResponsesSseTransducer {
     }
 
     fn usage_chunk(&self, usage: &Value) -> Option<Value> {
+        if !self.include_usage {
+            return None;
+        }
         let normalized = project_v3_chat_usage_from_canonical(usage)?;
         let mut chunk = self.chunk(json!({}), None);
         let object = chunk.as_object_mut()?;
@@ -1182,6 +1194,19 @@ mod openai_chat_responses_sse_transducer_tests {
         assert_eq!(terminal[0]["choices"][0]["finish_reason"], "tool_calls");
         assert_eq!(terminal[1]["choices"], json!([]));
         transducer.finish().expect("complete tool call");
+    }
+
+    #[test]
+    fn responses_usage_is_not_sent_when_chat_client_opts_out() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new_with_usage_option(false);
+        transducer.push_event(created_event()).expect("created");
+        transducer.push_event(delta_event("OK")).expect("delta");
+        let chunks = transducer
+            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
+            .expect("completed");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+        assert!(chunks[0].get("usage").is_none());
     }
 
     #[test]
