@@ -1113,6 +1113,88 @@ fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
     assert!(!socket_path.exists());
 }
 
+/// Regression for bug 6a436a6: a managed child killed between the canonical
+/// control socket bind and the `control.json` write leaves an orphan socket
+/// that every `control.json`-gated path skips, so `start` then fails forever
+/// with `IdentityMismatch: control socket already exists without a verified
+/// stopped cleanup`.
+#[test]
+fn orphan_control_socket_without_control_record_is_reaped_when_no_live_owner() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Starting,
+        None,
+    )
+    .unwrap();
+    // The crash window: socket bound, `control.json` never written.
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"orphan control socket").unwrap();
+    assert!(!instance_dir.join("control.json").exists());
+
+    reap_inactive_runtime_files(&instance_dir, &declaration).unwrap();
+
+    assert!(
+        !socket_path.exists(),
+        "orphan control socket must be reaped"
+    );
+    assert!(!instance_dir.join("control.json").exists());
+}
+
+/// The orphan-socket reap must not remove a socket a live owner still holds.
+#[test]
+fn orphan_control_socket_with_live_cached_pid_is_preserved() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Starting,
+        None,
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            pid: std::process::id(),
+            start_nonce: "live-owner".to_string(),
+            started_at_epoch_ms: 1,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"live owner control socket").unwrap();
+
+    reap_unowned_managed_control_socket(&instance_dir, &declaration).unwrap();
+
+    assert!(
+        socket_path.exists(),
+        "a socket with a live cached pid must not be removed"
+    );
+    let _ = fs::remove_file(&socket_path);
+}
+
 #[test]
 fn running_instance_state_rejects_release_snapshot_executable_rollover() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
