@@ -525,6 +525,73 @@ fn assert_control_truth_isolated(body: &Value) {
 }
 
 #[tokio::test]
+async fn direct_kernel_preserves_named_unpaired_function_call_output_without_fabricated_call_id() {
+    // Bug f29d7db on the Direct path: entry=responses and the selected provider is a
+    // native Responses provider with process=direct (the live cc-sol shape). The
+    // named unpaired output must cross to the provider wire byte-for-byte and must
+    // never gain a fabricated call_id or enter Relay governance.
+    let transport = PassthroughTransport::default();
+    let body = json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+            }
+        ],
+        "stream": false
+    });
+
+    let output = execute_v3_responses_direct_runtime_kernel(
+        &manifest(),
+        request(body),
+        register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    assert_eq!(output.client_payload.status, 200, "{:#?}", output);
+    assert!(
+        !output
+            .node_trace
+            .contains(&"V3HubRespChatProcess03Governed"),
+        "named unpaired output on Direct must not enter Relay ChatProcess: {:?}",
+        output.node_trace
+    );
+    let wire = transport
+        .request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("direct provider wire captured");
+    let item = wire["input"]
+        .as_array()
+        .expect("responses input array")
+        .iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
+        .unwrap_or_else(|| panic!("named unpaired output missing from the wire: {wire}"));
+    assert_eq!(
+        item.get("call_id"),
+        None,
+        "call_id must not be fabricated on the Direct wire: {wire}"
+    );
+    assert_eq!(item["id"], "fco_01a0c969-72fc-7530-9f23-0181a8b116e3");
+    assert_eq!(item["name"], "send_message_to_thread");
+    assert_eq!(item["namespace"], "codex_tui");
+    assert_eq!(
+        item["output"],
+        "<codex_delegation>cross-thread notification</codex_delegation>"
+    );
+}
+
+#[tokio::test]
 async fn direct_kernel_preserves_tool_choice_parallel_tool_calls_and_tools_in_wire_payload() {
     let manifest = manifest();
     let transport = PassthroughTransport::default();

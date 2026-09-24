@@ -295,6 +295,74 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 }
 
 #[tokio::test]
+async fn responses_relay_named_unpaired_tool_output_reaches_anthropic_wire_without_fabricated_call_id(
+) {
+    // Live P0 shape (bug f29d7db): the standalone Codex notification output must
+    // reach the selected Anthropic target as client-visible text, not as a
+    // fabricated tool_result whose tool_use_id has no matching tool_use.
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-named-unpaired-output".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    },
+                    {
+                        "type":"function_call_output",
+                        "id":"fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                        "name":"send_message_to_thread",
+                        "namespace":"codex_tui",
+                        "output":"<codex_delegation>cross-thread notification</codex_delegation>"
+                    }
+                ],
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("named unpaired tool output must not be rejected before routing");
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let messages = captured["messages"].as_array().expect("anthropic messages");
+    let serialized = serde_json::to_string(messages).unwrap();
+    assert!(
+        serialized.contains("cross-thread notification"),
+        "the unpaired output text must reach the Anthropic wire: {captured}"
+    );
+    assert!(
+        !serialized.contains("fco_01a0c969-72fc-7530-9f23-0181a8b116e3"),
+        "the Responses item id must never become an Anthropic tool_use_id: {captured}"
+    );
+    assert!(
+        messages.iter().all(|message| {
+            message["content"]
+                .as_array()
+                .is_none_or(|blocks| blocks.iter().all(|block| block["type"] != "tool_result"))
+        }),
+        "an unpaired output must not fabricate an Anthropic tool_result: {captured}"
+    );
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
+}
+
+#[tokio::test]
 async fn responses_relay_anthropic_json_schema_name_is_consumed_at_provider_wire_boundary() {
     let transport = AnthropicProviderJsonTransport {
         captured_url: Mutex::new(None),

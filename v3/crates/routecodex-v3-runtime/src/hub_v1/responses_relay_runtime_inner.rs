@@ -1277,12 +1277,22 @@ pub(crate) fn find_responses_tool_output_ids(
             .get("call_id")
             .or_else(|| item.get("tool_call_id"))
             .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                V3ResponsesRelayRuntimeError::ClientInboundCanonical(
-                    "Responses tool output requires call_id".to_string(),
-                )
-            })?;
+            .filter(|value| !value.is_empty());
+        let Some(id) = id else {
+            // 命名无配对输出（name+namespace，无 call_id）是合法客户端语义：
+            // 它没有可消费的 call 身份，身份由 name/namespace 承载，下游 canonical
+            // 保留该身份且不得伪造 call_id。只有既无 call_id 又无 name 才是畸形输入。
+            if item
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                continue;
+            }
+            return Err(V3ResponsesRelayRuntimeError::ClientInboundCanonical(
+                "Responses tool output requires call_id".to_string(),
+            ));
+        };
         if !ids.consumed_ids.iter().any(|existing| existing == id) {
             ids.consumed_ids.push(id.to_owned());
         }
