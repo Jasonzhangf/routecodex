@@ -47,6 +47,7 @@ async fn guard_relay_sse_first_frame(
     provider_protocol: V3HubProviderWireProtocol,
     mut stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     sse_first_frame_timeout_ms: Option<u64>,
+    allow_responses_incomplete: bool,
 ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3ProviderError> {
     use futures_util::StreamExt;
     let mut decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
@@ -96,6 +97,29 @@ async fn guard_relay_sse_first_frame(
                         || crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(&data)
                     {
                         continue;
+                    }
+                    if allow_responses_incomplete
+                        && provider_protocol == V3HubProviderWireProtocol::Responses
+                    {
+                        let terminal = serde_json::from_str::<Value>(&data).ok();
+                        if terminal
+                            .as_ref()
+                            .and_then(|event| event.get("type"))
+                            .and_then(Value::as_str)
+                            == Some("response.incomplete")
+                            && matches!(
+                                terminal.as_ref().and_then(|event| {
+                                    event
+                                        .pointer("/response/incomplete_details/reason")
+                                        .or_else(|| event.pointer("/incomplete_details/reason"))
+                                        .and_then(Value::as_str)
+                                }),
+                                Some("max_output_tokens" | "content_filter")
+                            )
+                        {
+                            first_semantic_frame_seen = true;
+                            break;
+                        }
                     }
                     let outcome =
                         crate::hub_v1::classify_v3_provider_sse_json_data(provider_protocol, &data)
@@ -477,6 +501,7 @@ pub(crate) trait V3RelayProtocolCodec: Sized {
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
+        client_include_usage: bool,
         outcome: Self::SseOutcome,
     ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError>;
     /// 组装 JSON 成功输出（observability 由骨架统一构建，codec 只负责写入
@@ -551,6 +576,10 @@ where
     let requested_model = C::model_from_endpoint_path(endpoint_path)?;
     // 请求侧 hook profile（Mode B web-search 等）在 req01 之前计算，避免 payload move。
     let request_hook_profile = C::request_hook_profile(manifest, server_id, &payload)?;
+    let client_include_usage = payload
+        .pointer("/stream_options/include_usage")
+        .and_then(Value::as_bool)
+        == Some(true);
     let req01 = build_v3_hub_req_inbound_01_client_raw(
         payload,
         C::ENTRY_PROTOCOL,
@@ -1079,6 +1108,7 @@ where
                         provider_wire_protocol,
                         stream,
                         sse_first_frame_timeout_ms,
+                        C::ENTRY_PROTOCOL == V3HubEntryProtocol::OpenAiChat,
                     ),
                 )
                 .await
@@ -1159,6 +1189,7 @@ where
                     retain_response_cipher,
                     request_tool_thinking_enabled,
                     stream_observation.clone(),
+                    client_include_usage,
                     C::build_sse_outcome(
                         &provider_health,
                         &failure_session_scope,

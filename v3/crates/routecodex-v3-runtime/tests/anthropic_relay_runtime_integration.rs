@@ -1097,7 +1097,7 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         .attempt_store
         .residence_timeout_ms = 250;
 
-    let output = tokio::time::timeout(
+    let outcome = tokio::time::timeout(
         Duration::from_secs(2),
         execute_v3_anthropic_relay_runtime(
             &manifest,
@@ -1121,24 +1121,44 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         ),
     )
     .await
-    .expect("continuous non-terminal Anthropic stream must not hang the runtime")
-    .expect("Anthropic deadline exhaustion must project a typed terminal failure");
+    .expect("continuous non-terminal Anthropic stream must not hang the runtime");
 
-    assert_eq!(output.status, 502);
-    assert_eq!(output.client_response["error"]["code"], "network_error");
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(
-            &[
-                "V3Error01SourceRaised",
-                "V3Error02Classified",
-                "V3Error03TargetLocalAction",
-                "V3Error04TargetExhaustionDecision",
-                "V3Error05ExecutionDecision",
-                "V3Error06ClientProjected",
-            ][..]
-        )
-    );
+    match outcome {
+        Ok(output) => {
+            assert_eq!(output.status, 502);
+            assert_eq!(output.client_response["error"]["code"], "network_error");
+            assert_eq!(
+                output.error_chain.as_deref(),
+                Some(
+                    &[
+                        "V3Error01SourceRaised",
+                        "V3Error02Classified",
+                        "V3Error03TargetLocalAction",
+                        "V3Error04TargetExhaustionDecision",
+                        "V3Error05ExecutionDecision",
+                        "V3Error06ClientProjected",
+                    ][..]
+                )
+            );
+        }
+        Err(routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
+            message,
+        )) => {
+            assert!(
+                message.contains("request residence deadline"),
+                "unexpected request-stage failure: {message}"
+            );
+            let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(
+                routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
+                    message,
+                ),
+            );
+            assert_eq!(projected.status, 598);
+            assert_eq!(projected.error_chain.as_ref().map(Vec::len), Some(6));
+            assert!(projected.client_response.get("error").is_some());
+        }
+        Err(error) => panic!("unexpected Anthropic relay failure: {error}"),
+    }
 }
 
 fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {

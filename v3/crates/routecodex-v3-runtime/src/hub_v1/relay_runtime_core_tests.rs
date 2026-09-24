@@ -13,6 +13,7 @@ async fn guard_rejects_empty_sse_stream() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(result.is_err(), "empty SSE stream must fail the guard");
@@ -36,6 +37,7 @@ async fn guard_accepts_first_frame_and_replays_it() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await
     .expect("non-empty stream must pass the guard");
@@ -80,6 +82,7 @@ async fn guard_propagates_first_frame_provider_error() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(result.is_err(), "first frame error must propagate");
@@ -99,6 +102,7 @@ async fn guard_keeps_client_disconnect_out_of_provider_failure_policy() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(matches!(
@@ -117,6 +121,7 @@ async fn guard_honors_configured_first_frame_timeout() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(1),
+        false,
     )
     .await;
     assert!(
@@ -135,6 +140,7 @@ async fn guard_rejects_zero_first_frame_timeout() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(0),
+        false,
     )
     .await;
     assert!(result.is_err(), "zero first-frame timeout must fail fast");
@@ -152,6 +158,7 @@ async fn guard_rejects_chat_shape_from_responses_provider_before_client_commit()
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     let error = match result {
@@ -174,6 +181,7 @@ async fn guard_rejects_late_malformed_responses_frame_before_client_output() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(
