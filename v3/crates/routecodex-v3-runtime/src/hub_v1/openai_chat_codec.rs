@@ -703,6 +703,8 @@ pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_id: Option<String>,
     model: Option<String>,
     tool_call_index: usize,
+    emitted_tool_call: bool,
+    include_usage: bool,
 }
 
 impl Default for V3OpenAiChatResponsesSseTransducer {
@@ -715,6 +717,8 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
             response_id: None,
             model: None,
             tool_call_index: 0,
+            emitted_tool_call: false,
+            include_usage: true,
         }
     }
 }
@@ -722,6 +726,13 @@ impl Default for V3OpenAiChatResponsesSseTransducer {
 impl V3OpenAiChatResponsesSseTransducer {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn new_with_usage_option(include_usage: bool) -> Self {
+        Self {
+            include_usage,
+            ..Self::default()
+        }
     }
 
     pub(crate) fn push_event(&mut self, event: Value) -> Result<Vec<Value>, String> {
@@ -792,6 +803,7 @@ impl V3OpenAiChatResponsesSseTransducer {
                 }
                 let index = self.tool_call_index;
                 self.tool_call_index += 1;
+                self.emitted_tool_call = true;
                 self.emitted_content = true;
                 let call_id = item
                     .get("call_id")
@@ -819,23 +831,21 @@ impl V3OpenAiChatResponsesSseTransducer {
                     .and_then(|response| response.get("status"))
                     .and_then(Value::as_str);
                 let finish_reason = if status == Some("completed") {
-                    Some("stop")
+                    Some(if self.emitted_tool_call {
+                        "tool_calls"
+                    } else {
+                        "stop"
+                    })
                 } else {
                     None
                 };
-                // 终帧必须携带归一化 usage（provider Responses usage -> chat
-                // prompt_tokens/completion_tokens/total_tokens），否则 chat 客户端
-                // 与 console 观测都拿不到 token 消耗；只做语义归一化投影，不改
-                // 控制状态。
-                let mut chunk = self.chunk(json!({}), finish_reason);
+                let mut chunks = vec![self.chunk(json!({}), finish_reason)];
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
-                    if let Some(normalized) = project_v3_chat_usage_from_canonical(usage) {
-                        if let Some(object) = chunk.as_object_mut() {
-                            object.insert("usage".to_string(), normalized);
-                        }
+                    if let Some(chunk) = self.usage_chunk(usage) {
+                        chunks.push(chunk);
                     }
                 }
-                Ok(vec![chunk])
+                Ok(chunks)
             }
             // response.incomplete 是 Responses 协议合法终态（max_output_tokens
             // 截断 / content_filter 触发）：provider 已交付完整（截断）响应，必须
@@ -876,15 +886,13 @@ impl V3OpenAiChatResponsesSseTransducer {
                         );
                     }
                 };
-                let mut chunk = self.chunk(json!({}), Some(finish_reason));
+                let mut chunks = vec![self.chunk(json!({}), Some(finish_reason))];
                 if let Some(usage) = response.and_then(|response| response.get("usage")) {
-                    if let Some(normalized) = project_v3_chat_usage_from_canonical(usage) {
-                        if let Some(object) = chunk.as_object_mut() {
-                            object.insert("usage".to_string(), normalized);
-                        }
+                    if let Some(chunk) = self.usage_chunk(usage) {
+                        chunks.push(chunk);
                     }
                 }
-                Ok(vec![chunk])
+                Ok(chunks)
             }
             // 事件通知/参数收口帧由 Responses 语义层消费；Chat 投影没有
             // 对应的独立 chunk，但必须接受它们，直到 response.completed。
@@ -988,6 +996,18 @@ impl V3OpenAiChatResponsesSseTransducer {
             json!([{"index": 0, "delta": delta, "finish_reason": finish}]),
         );
         Value::Object(chunk)
+    }
+
+    fn usage_chunk(&self, usage: &Value) -> Option<Value> {
+        if !self.include_usage {
+            return None;
+        }
+        let normalized = project_v3_chat_usage_from_canonical(usage)?;
+        let mut chunk = self.chunk(json!({}), None);
+        let object = chunk.as_object_mut()?;
+        object.insert("choices".to_string(), Value::Array(Vec::new()));
+        object.insert("usage".to_string(), normalized);
+        Some(chunk)
     }
 }
 
@@ -1122,6 +1142,74 @@ mod openai_chat_responses_sse_transducer_tests {
     }
 
     #[test]
+    fn responses_usage_is_a_separate_chat_sse_chunk_without_choices() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        transducer.push_event(delta_event("OK")).expect("delta");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.completed",
+                "response": {
+                    "id": "resp_test_1",
+                    "status": "completed",
+                    "usage": {"input_tokens": 12, "output_tokens": 2}
+                }
+            }))
+            .expect("completed");
+        assert_eq!(
+            chunks.len(),
+            2,
+            "finish and usage need distinct Chat chunks"
+        );
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+        assert!(chunks[0].get("usage").is_none());
+        assert_eq!(chunks[1]["choices"], json!([]));
+        assert_eq!(
+            chunks[1]["usage"],
+            json!({
+                "prompt_tokens": 12,
+                "completion_tokens": 2,
+                "total_tokens": 14
+            })
+        );
+    }
+
+    #[test]
+    fn responses_function_call_finishes_with_tool_calls_before_usage() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let call = transducer
+            .push_event(json!({
+                "type": "response.output_item.done",
+                "item": {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"q\":\"alpha\"}"}
+            }))
+            .expect("function call");
+        assert_eq!(
+            call[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+            "{\"q\":\"alpha\"}"
+        );
+        let terminal = transducer
+            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 4, "output_tokens": 2}}}))
+            .expect("completed");
+        assert_eq!(terminal[0]["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(terminal[1]["choices"], json!([]));
+        transducer.finish().expect("complete tool call");
+    }
+
+    #[test]
+    fn responses_usage_is_not_sent_when_chat_client_opts_out() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new_with_usage_option(false);
+        transducer.push_event(created_event()).expect("created");
+        transducer.push_event(delta_event("OK")).expect("delta");
+        let chunks = transducer
+            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
+            .expect("completed");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+        assert!(chunks[0].get("usage").is_none());
+    }
+
+    #[test]
     fn transducer_maps_max_output_tokens_incomplete_to_length_terminal_chunk() {
         let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
         transducer.push_event(created_event()).expect("created");
@@ -1146,7 +1234,7 @@ mod openai_chat_responses_sse_transducer_tests {
                 }
             }))
             .expect("response.incomplete must project a terminal Chat chunk");
-        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks.len(), 2);
         let terminal = &chunks[0];
         assert_eq!(
             terminal["choices"][0]["finish_reason"],
@@ -1154,10 +1242,12 @@ mod openai_chat_responses_sse_transducer_tests {
             "max_output_tokens truncation must map to finish_reason=length: {terminal}"
         );
         assert_eq!(
-            terminal["usage"]["prompt_tokens"],
+            chunks[1]["usage"]["prompt_tokens"],
             json!(42),
-            "terminal chunk must carry normalized usage: {terminal}"
+            "usage chunk must carry normalized usage: {}",
+            chunks[1]
         );
+        assert_eq!(chunks[1]["choices"], json!([]));
         transducer
             .finish()
             .expect("finish accepts incomplete terminal");

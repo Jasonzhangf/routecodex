@@ -358,6 +358,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         _stream_observation: V3RuntimeStreamObservation,
+        _client_include_usage: bool,
         outcome: V3GeminiSseProviderOutcome,
     ) -> Result<V3RelayProjectedSseStream, V3RelayCoreError> {
         Ok(project_sse_stream(
