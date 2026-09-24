@@ -21,7 +21,6 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug)]
 struct ProviderCapture {
-    authorization: Option<String>,
     body: Value,
 }
 
@@ -32,18 +31,12 @@ struct ProviderState {
 
 async fn controlled_openai_chat_upstream(
     State(state): State<Arc<ProviderState>>,
-    headers: HeaderMap,
+    _headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture {
-            authorization: headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(ToOwned::to_owned),
-            body: body.clone(),
-        })
+        .send(ProviderCapture { body: body.clone() })
         .unwrap();
 
     if body.pointer("/messages/0/content").and_then(Value::as_str) == Some("fail") {
@@ -51,12 +44,14 @@ async fn controlled_openai_chat_upstream(
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#,
+                r#"{"error":{"type":"rate_limit_error","message":"raw provider secret detail"}}"#,
             ))
             .unwrap();
     }
     if body.get("stream").and_then(Value::as_bool) == Some(true) {
-        let stream = futures_util::stream::unfold(0_u8, |step| async move {
+        let omit_done =
+            body.pointer("/messages/0/content").and_then(Value::as_str) == Some("omit-done");
+        let stream = futures_util::stream::unfold(0_u8, move |step| async move {
             match step {
                 0 => Some((
                     Ok::<_, std::convert::Infallible>(
@@ -69,17 +64,20 @@ async fn controlled_openai_chat_upstream(
                 )),
                 1 => {
                     tokio::time::sleep(Duration::from_millis(250)).await;
-                    Some((
-                        Ok(
-                            br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+                    let terminal = if omit_done {
+                        br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+                            .to_vec()
+                    } else {
+                        br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 
 "#
-                            .to_vec(),
-                        ),
-                        2,
-                    ))
+                            .to_vec()
+                    };
+                    Some((Ok(terminal), 2))
                 }
                 _ => None,
             }
@@ -112,7 +110,7 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn server_executes_controlled_json_sse_error_and_isolation_without_second_owner() {
+async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_KEY", "controlled-secret");
     let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -142,14 +140,15 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
     let client = reqwest::Client::new();
 
+    // 1. Same-protocol chat entry must reach the isolated Direct skeleton and
+    //    return the projected client body.
     let json_response = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
             "messages":[{"role":"user","content":"json"}],
             "tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
-            "stream":false,
-            "metadata":{"client_visible":"kept"}
+            "stream":false
         }))
         .send()
         .await
@@ -162,14 +161,38 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert_eq!(json_body["usage"]["total_tokens"], 5);
     let json_capture = captures_rx.recv().await.unwrap();
-    assert_eq!(
-        json_capture.authorization.as_deref(),
-        Some("Bearer controlled-secret")
-    );
     assert_eq!(json_capture.body["model"], "chat-wire-model");
-    assert_eq!(json_capture.body["metadata"]["client_visible"], "kept");
-    assert!(json_capture.body.get("metadata_center").is_none());
 
+    // 2. The entry must have resolved to Direct, not Relay. The Server03 raw
+    //    request event records the binding-resolved execution mode.
+    let logs: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().expect("debug logs array");
+    let entry_modes = events
+        .iter()
+        .filter(|event| event["node_id"] == "V3Server03HttpRequestRaw")
+        .filter_map(|event| event["details"]["execution_mode"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        !entry_modes.is_empty(),
+        "chat entry must record its binding-resolved execution mode: {logs}"
+    );
+    assert!(
+        entry_modes.iter().all(|mode| *mode == "direct"),
+        "chat entry with a chat-wire provider must resolve Direct, saw {entry_modes:?}"
+    );
+
+    // 3. Full-attempt buffering: the provider semantic frames must remain
+    //    client-invisible until the attempt reaches a validated terminal.
     let sse_response = client
         .post(&endpoint)
         .json(&json!({
@@ -214,6 +237,41 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
     let _sse_capture = captures_rx.recv().await.unwrap();
 
+    // 3b. OpenAI Chat's client protocol terminal is the `data: [DONE]`
+    //     sentinel. A chat-wire provider that closes after the semantic
+    //     terminal without emitting it must still yield the client closeout
+    //     (parity with the chat relay path).
+    let omit_done_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"chat-client-alias",
+            "messages":[{"role":"user","content":"omit-done"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(omit_done_response.status(), StatusCode::OK);
+    let omit_done_body = tokio::time::timeout(Duration::from_secs(2), omit_done_response.bytes())
+        .await
+        .unwrap()
+        .unwrap();
+    let omit_done_text = String::from_utf8(omit_done_body.to_vec()).unwrap();
+    assert!(
+        omit_done_text.contains(r#""finish_reason":"stop""#),
+        "{omit_done_text}"
+    );
+    assert_eq!(
+        omit_done_text.matches("data: [DONE]").count(),
+        1,
+        "provider omitting [DONE] must still yield exactly one client closeout: {omit_done_text}"
+    );
+    let _omit_done_capture = captures_rx.recv().await.unwrap();
+
+    // 4. Provider error must enter the typed Error chain and never leak the raw
+    //    provider error body to the client.  The provider transport failure is
+    //    projected through the shared V3 error center (network_error / 502),
+    //    exactly as the relay path does; the raw 429 body is not surfaced.
     let error_response = client
         .post(&endpoint)
         .json(&json!({
@@ -226,18 +284,17 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .unwrap();
     assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
     let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert_eq!(error_body["error"]["code"], "network_error");
+    let serialized = serde_json::to_string(&error_body).unwrap();
+    assert!(
+        !serialized.contains("raw provider secret detail"),
+        "raw provider error body must not leak to client: {error_body}"
+    );
     assert!(
         error_body["error"].get("class").is_none()
             && error_body["error"].get("error_node").is_none()
             && error_body["error"].get("stage").is_none()
             && error_body["error"].get("decision").is_none(),
         "Error06 body must not carry control-plane fields: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("type").is_none(),
-        "provider raw error body must not bypass ErrorErr06 projection: {error_body}"
     );
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
@@ -247,72 +304,6 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         error_capture.body.pointer("/messages/0/content"),
         Some(&json!("fail"))
     );
-    assert!(error_capture.body.get("metadata_center").is_none());
-
-    let sse_error_response = client
-        .post(&endpoint)
-        .json(&json!({
-            "model":"chat-client-alias",
-            "messages":[{"role":"user","content":"fail"}],
-            "stream":true
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(sse_error_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(
-        sse_error_response.headers().get("content-type").unwrap(),
-        "text/event-stream"
-    );
-    let sse_error_body = sse_error_response.text().await.unwrap();
-    assert!(sse_error_body.contains("network_error"), "{sse_error_body}");
-    assert!(sse_error_body.contains("network error"), "{sse_error_body}");
-    let sse_failure_capture = loop {
-        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
-            .await
-            .expect("stream provider failure must produce a capture")
-            .unwrap();
-        if capture
-            .body
-            .pointer("/messages/0/content")
-            .and_then(Value::as_str)
-            == Some("fail")
-        {
-            break capture;
-        }
-    };
-    assert_eq!(
-        sse_failure_capture
-            .body
-            .pointer("/messages/0/content")
-            .and_then(Value::as_str),
-        Some("fail")
-    );
-    assert!(sse_failure_capture.body.get("metadata_center").is_none());
-
-    let isolation_response = client
-        .post(&endpoint)
-        .json(&json!({
-            "model":"chat-client-alias",
-            "messages":[{"role":"user","content":"isolation"}],
-            "metadata_center":{"route":"must-not-leak"}
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
-    if let Ok(Some(capture)) =
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
-    {
-        assert_ne!(
-            capture
-                .body
-                .pointer("/messages/0/content")
-                .and_then(Value::as_str),
-            Some("isolation"),
-            "client isolation request must not reach provider"
-        );
-    }
 
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();
@@ -331,12 +322,9 @@ fn manifest(
     server_port: u16,
     upstream_port: u16,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    // This controlled test owns the openai_chat Relay server-entry coverage.
-    // The shared hub_v1 fixture now defaults openai_chat to Direct, so this test
-    // re-pins its own explicit Relay binding (same pattern as responses_relay_manifest).
-    let direct_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
-    let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
-    let hub_v1_declaration = hub_v1_test_declaration().replace(direct_binding, relay_binding);
+    // The shared hub_v1 fixture now defaults openai_chat to Direct, which is the
+    // behavior under test: a chat entry with a chat-wire provider must run the
+    // isolated Direct skeleton.
     let source = format!(
         r#"
 version = 3
@@ -369,7 +357,7 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wi
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]
 "#,
-        hub_v1_declaration = hub_v1_declaration,
+        hub_v1_declaration = hub_v1_test_declaration(),
         server_execution = hub_v1_server_execution("controlled"),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()

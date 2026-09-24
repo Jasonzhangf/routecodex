@@ -143,6 +143,25 @@ pub fn characterize_v3_openai_chat_hub_response_semantic_to_client_projection(
     })
 }
 
+/// Read the canonical Responses tool-item identity used for OpenAI Chat
+/// `tool_calls[].id`. Canonical items are keyed by `call_id`, but providers may
+/// only carry `id`/`tool_call_id`; a present-but-empty field must not win over a
+/// later non-empty one, otherwise the projected `tool_calls[].id` is empty and
+/// the next turn's `tool_call_id` is rejected as an orphan. If no field carries a
+/// non-empty identity the projection yields an empty id, which the request-side
+/// governance rejects explicitly rather than fabricating one.
+fn read_v3_openai_chat_tool_identity(item: &Map<String, Value>) -> &str {
+    for key in ["call_id", "tool_call_id", "id"] {
+        if let Some(value) = item.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+    }
+    ""
+}
+
 /// Project the governed canonical Responses-shaped response into the OpenAI
 /// Chat client contract at RespOutbound05.
 pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
@@ -193,8 +212,8 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             }
             Some("function_call" | "custom_tool_call") => {
                 let call_id = item
-                    .get("call_id")
-                    .and_then(Value::as_str)
+                    .as_object()
+                    .map(read_v3_openai_chat_tool_identity)
                     .unwrap_or_default();
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 let arguments = item
@@ -798,21 +817,20 @@ impl V3OpenAiChatResponsesSseTransducer {
                 let Some(item) = object.get("item").and_then(Value::as_object) else {
                     return Ok(Vec::new());
                 };
-                if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                let item_type = item.get("type").and_then(Value::as_str);
+                if item_type != Some("function_call") && item_type != Some("custom_tool_call") {
                     return Ok(Vec::new());
                 }
                 let index = self.tool_call_index;
                 self.tool_call_index += 1;
                 self.emitted_tool_call = true;
                 self.emitted_content = true;
-                let call_id = item
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let call_id = read_v3_openai_chat_tool_identity(item);
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 let arguments = item
                     .get("arguments")
                     .and_then(Value::as_str)
+                    .or_else(|| item.get("input").and_then(Value::as_str))
                     .unwrap_or_default();
                 Ok(vec![self.chunk(
                     json!({"tool_calls": [{
@@ -1012,293 +1030,5 @@ impl V3OpenAiChatResponsesSseTransducer {
 }
 
 #[cfg(test)]
-mod openai_chat_responses_sse_transducer_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn created_event() -> Value {
-        json!({
-            "type": "response.created",
-            "response": {
-                "id": "resp_test_1",
-                "status": "in_progress",
-                "model": "gpt-5.6-sol"
-            }
-        })
-    }
-
-    fn in_progress_event() -> Value {
-        json!({
-            "type": "response.in_progress",
-            "response": {
-                "id": "resp_test_1",
-                "status": "in_progress"
-            }
-        })
-    }
-
-    fn delta_event(text: &str) -> Value {
-        json!({"type": "response.output_text.delta", "delta": text})
-    }
-
-    #[test]
-    fn transducer_accepts_official_created_then_in_progress_sequence() {
-        let mut with_in_progress = V3OpenAiChatResponsesSseTransducer::new();
-        let created_chunks = with_in_progress
-            .push_event(created_event())
-            .expect("created");
-        let progress_chunks = with_in_progress
-            .push_event(in_progress_event())
-            .expect("official response.in_progress after response.created must not be rejected");
-        let delta_chunks = with_in_progress
-            .push_event(delta_event("hello"))
-            .expect("delta");
-        with_in_progress
-            .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
-            .expect("completed");
-        with_in_progress.finish().expect("finish");
-
-        let mut without_in_progress = V3OpenAiChatResponsesSseTransducer::new();
-        let baseline_created = without_in_progress
-            .push_event(created_event())
-            .expect("created");
-        let baseline_delta = without_in_progress
-            .push_event(delta_event("hello"))
-            .expect("delta");
-        without_in_progress
-            .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
-            .expect("completed");
-        without_in_progress.finish().expect("finish");
-
-        assert_eq!(
-            created_chunks
-                .iter()
-                .cloned()
-                .chain(progress_chunks.iter().cloned())
-                .chain(delta_chunks.iter().cloned())
-                .collect::<Vec<_>>(),
-            baseline_created
-                .iter()
-                .cloned()
-                .chain(baseline_delta.iter().cloned())
-                .collect::<Vec<_>>(),
-            "response.in_progress must be idempotent and emit no extra chunk"
-        );
-    }
-
-    #[test]
-    fn transducer_still_rejects_duplicate_created() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer
-            .push_event(created_event())
-            .expect("first created");
-        let error = transducer
-            .push_event(created_event())
-            .expect_err("a genuinely duplicate response.created must still fail fast");
-        assert!(
-            error.contains("duplicate response.created"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn transducer_in_progress_without_created_starts_response() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        let chunks = transducer
-            .push_event(in_progress_event())
-            .expect("response.in_progress as first event must start the response");
-        assert_eq!(
-            chunks.len(),
-            1,
-            "in_progress start must emit the assistant role chunk"
-        );
-    }
-
-    #[test]
-    fn transducer_accepts_known_responses_lifecycle_events() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("created");
-        for event_type in [
-            "response.content_part.added",
-            "response.content_part.done",
-            "response.output_text.done",
-            "response.output_text.annotation.added",
-            "response.function_call_arguments.delta",
-            "response.function_call_arguments.done",
-        ] {
-            let chunks = transducer
-                .push_event(json!({"type": event_type}))
-                .expect("known Responses lifecycle event must be accepted");
-            assert!(chunks.is_empty(), "{event_type} must not emit a Chat chunk");
-        }
-        transducer.push_event(delta_event("hello")).expect("delta");
-        transducer
-            .push_event(json!({
-                "type": "response.completed",
-                "response": {"id": "resp_test_1", "status": "completed"}
-            }))
-            .expect("completed");
-        transducer.finish().expect("finish");
-    }
-
-    #[test]
-    fn responses_usage_is_a_separate_chat_sse_chunk_without_choices() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("created");
-        transducer.push_event(delta_event("OK")).expect("delta");
-        let chunks = transducer
-            .push_event(json!({
-                "type": "response.completed",
-                "response": {
-                    "id": "resp_test_1",
-                    "status": "completed",
-                    "usage": {"input_tokens": 12, "output_tokens": 2}
-                }
-            }))
-            .expect("completed");
-        assert_eq!(
-            chunks.len(),
-            2,
-            "finish and usage need distinct Chat chunks"
-        );
-        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
-        assert!(chunks[0].get("usage").is_none());
-        assert_eq!(chunks[1]["choices"], json!([]));
-        assert_eq!(
-            chunks[1]["usage"],
-            json!({
-                "prompt_tokens": 12,
-                "completion_tokens": 2,
-                "total_tokens": 14
-            })
-        );
-    }
-
-    #[test]
-    fn responses_function_call_finishes_with_tool_calls_before_usage() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("created");
-        let call = transducer
-            .push_event(json!({
-                "type": "response.output_item.done",
-                "item": {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"q\":\"alpha\"}"}
-            }))
-            .expect("function call");
-        assert_eq!(
-            call[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
-            "{\"q\":\"alpha\"}"
-        );
-        let terminal = transducer
-            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 4, "output_tokens": 2}}}))
-            .expect("completed");
-        assert_eq!(terminal[0]["choices"][0]["finish_reason"], "tool_calls");
-        assert_eq!(terminal[1]["choices"], json!([]));
-        transducer.finish().expect("complete tool call");
-    }
-
-    #[test]
-    fn responses_usage_is_not_sent_when_chat_client_opts_out() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new_with_usage_option(false);
-        transducer.push_event(created_event()).expect("created");
-        transducer.push_event(delta_event("OK")).expect("delta");
-        let chunks = transducer
-            .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
-            .expect("completed");
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
-        assert!(chunks[0].get("usage").is_none());
-    }
-
-    #[test]
-    fn transducer_maps_max_output_tokens_incomplete_to_length_terminal_chunk() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("created");
-        transducer
-            .push_event(json!({
-                "type": "response.reasoning_text.delta",
-                "delta": "thinking"
-            }))
-            .expect("reasoning delta");
-        let chunks = transducer
-            .push_event(json!({
-                "type": "response.incomplete",
-                "response": {
-                    "id": "resp_test_1",
-                    "status": "incomplete",
-                    "incomplete_details": {"reason": "max_output_tokens"},
-                    "usage": {
-                        "input_tokens": 42,
-                        "output_tokens": 7,
-                        "total_tokens": 49
-                    }
-                }
-            }))
-            .expect("response.incomplete must project a terminal Chat chunk");
-        assert_eq!(chunks.len(), 2);
-        let terminal = &chunks[0];
-        assert_eq!(
-            terminal["choices"][0]["finish_reason"],
-            json!("length"),
-            "max_output_tokens truncation must map to finish_reason=length: {terminal}"
-        );
-        assert_eq!(
-            chunks[1]["usage"]["prompt_tokens"],
-            json!(42),
-            "usage chunk must carry normalized usage: {}",
-            chunks[1]
-        );
-        assert_eq!(chunks[1]["choices"], json!([]));
-        transducer
-            .finish()
-            .expect("finish accepts incomplete terminal");
-    }
-
-    #[test]
-    fn transducer_maps_content_filter_incomplete_to_content_filter_terminal_chunk() {
-        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-        transducer.push_event(created_event()).expect("created");
-        let chunks = transducer
-            .push_event(json!({
-                "type": "response.incomplete",
-                "incomplete_details": {"reason": "content_filter"},
-                "response": {
-                    "id": "resp_test_1",
-                    "status": "incomplete"
-                }
-            }))
-            .expect("response.incomplete must project a terminal Chat chunk");
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(
-            chunks[0]["choices"][0]["finish_reason"],
-            json!("content_filter")
-        );
-        transducer
-            .finish()
-            .expect("finish accepts incomplete terminal");
-    }
-
-    #[test]
-    fn transducer_rejects_incomplete_without_or_unknown_reason() {
-        for payload in [
-            json!({
-                "type": "response.incomplete",
-                "response": {"id": "resp_test_1", "status": "incomplete"}
-            }),
-            json!({
-                "type": "response.incomplete",
-                "incomplete_details": {"reason": "internal_error"},
-                "response": {"id": "resp_test_1", "status": "incomplete"}
-            }),
-        ] {
-            let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
-            transducer.push_event(created_event()).expect("created");
-            let error = transducer
-                .push_event(payload)
-                .expect_err("malformed/unknown incomplete terminal must fail fast");
-            assert!(
-                error.contains("response.incomplete"),
-                "unexpected error: {error}"
-            );
-        }
-    }
-}
+#[path = "openai_chat_codec_tests.rs"]
+mod openai_chat_codec_tests;

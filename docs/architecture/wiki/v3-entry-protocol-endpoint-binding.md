@@ -32,7 +32,7 @@ flowchart TD
 | --- | --- | --- | --- | --- |
 | responses | `/v1/responses` | relay | implemented | `execute_v3_responses_relay_runtime_with_default_transport` |
 | anthropic | `/v1/messages` | relay | implemented | `execute_v3_anthropic_relay_runtime_with_default_transport` |
-| openai_chat | `/v1/chat/completions` | relay | implemented | `execute_v3_openai_chat_relay_runtime_with_default_transport` |
+| openai_chat | `/v1/chat/completions` | direct | implemented | `execute_v3_openai_chat_direct_server_outcome` |
 | gemini | `/v1beta/models/:model/generateContent` | relay | implemented | `execute_v3_gemini_relay_runtime_with_default_transport` |
 
 ## Mainline

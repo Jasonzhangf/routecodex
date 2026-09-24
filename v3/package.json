@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4810",
+  "version": "0.90.4811",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -148,7 +148,7 @@
     "test:v3-managed-server-lifecycle-red-fixtures": "cd .. && node v3/scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs",
     "test:v3-managed-server-lifecycle": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config config_source_identity_is_stable_sensitive_and_secret_free -- --exact && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-lifecycle -- --test-threads=1 && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test managed_lifecycle -- --test-threads=1 --nocapture",
     "test:v3-route-classifier-semantics": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-route-classifier --lib -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime nodes::tests --lib -- --nocapture && CARGO_NET_OFFLINE=true npm run test:v3-p5-router-target",
-    "test:v3-openai-chat-relay-runtime-integration": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test openai_chat_relay_controlled -- --nocapture",
+    "test:v3-openai-chat-relay-runtime-integration": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test openai_chat_relay_runtime_integration -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test openai_chat_relay_controlled -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test openai_chat_direct_isolation_controlled -- --nocapture",
     "test:v3-responses-function-call-arguments-regression": "node scripts/tests/v3-responses-function-call-arguments-regression.mjs",
     "test:v3-h2-p6-controlled-replay": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test h2_p6_controlled_replay -- --nocapture",
     "test:v3-responses-direct-unit": "node scripts/run-v3-cargo-test.mjs --workspace --lib -- --nocapture",

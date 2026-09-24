@@ -60,11 +60,11 @@ entry_protocol_bindings:
     forbidden_fallback_behavior: "Anthropic endpoint must not fall through to generic foundation pending."
   - entry_protocol: openai_chat
     endpoint_patterns: [/v1/chat/completions]
-    execution_mode: relay
+    execution_mode: direct
     implementation_status: implemented
     owner_feature_id: v3.openai_chat_relay_runtime_integration
-    runtime_owner_symbol: execute_v3_openai_chat_relay_runtime_with_default_transport
-    runtime_owner_path: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+    runtime_owner_symbol: execute_v3_openai_chat_direct_server_outcome
+    runtime_owner_path: v3/crates/routecodex-v3-server/src/executors.rs
     forbidden_fallback_behavior: "OpenAI Chat endpoint must not fall through to generic foundation pending."
   - entry_protocol: gemini
     endpoint_patterns: [/v1beta/models/:model/generateContent]
