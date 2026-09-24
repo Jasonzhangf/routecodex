@@ -2209,6 +2209,7 @@ features:
   - v3-openai-chat-relay-17
   entry_symbols:
   - execute_v3_openai_chat_completions_request
+  - execute_v3_openai_chat_direct_server_outcome
   - execute_v3_openai_chat_relay_runtime_with_default_transport
   - execute_v3_openai_chat_relay_runtime
   - project_v3_openai_chat_relay_runtime_failure
@@ -2224,6 +2225,7 @@ features:
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
   - docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md
   - docs/architecture/manifests/v3.openai_chat_relay.controlled_runtime.mainline.yml

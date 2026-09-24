@@ -1510,6 +1510,8 @@ features:
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
+  - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
   design:
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
   - docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md
