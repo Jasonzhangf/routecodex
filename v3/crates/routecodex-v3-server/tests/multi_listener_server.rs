@@ -4142,18 +4142,36 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     assert!(response_body.contains("network error"), "{response_body}");
     assert!(!response_body.contains("controlled_unavailable"));
 
-    let json_response = client
-        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
-        .header("anthropic-version", "2023-06-01")
-        .json(&json!({
-            "model":"anthropic-client",
-            "max_tokens":64,
-            "messages":[{"role":"user","content":"provider is unavailable"}],
-            "stream":false
-        }))
-        .send()
-        .await
-        .unwrap();
+    // Error projection is checked for both transports with fresh provider
+    // health. The streaming failure cools this sole provider, so another
+    // request on the same aggregate correctly waits for recovery.
+    handle.shutdown().await;
+    let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let json_response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!(
+                "http://{}/v1/messages",
+                json_handle.listeners[0].addr
+            ))
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model":"anthropic-client",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"provider is unavailable"}],
+                "stream":false
+            }))
+            .send(),
+    )
+    .await
+    .expect("fresh JSON request must receive a terminal provider error")
+    .unwrap();
     assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(json_response.headers()["content-type"], "application/json");
     let json_body: Value = json_response.json().await.unwrap();
@@ -4163,7 +4181,7 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     );
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
-    handle.shutdown().await;
+    json_handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
 }
 
