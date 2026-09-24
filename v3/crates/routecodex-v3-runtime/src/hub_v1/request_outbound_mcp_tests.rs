@@ -827,3 +827,25 @@ fn chat_default_target_drops_anthropic_hosted_search_shape() {
     assert!(wire.get("tools").is_none());
     assert!(wire.get("tool_choice").is_none());
 }
+
+#[test]
+fn chat_mode_b_without_selected_search_capability_drops_local_search() {
+    let payload = json!({
+        "model": "local-model",
+        "messages": [{"role": "user", "content": "summarize"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "function", "function": {"name": "read_file"}}
+        ],
+        "tool_choice": {"type": "web_search"}
+    });
+    let wire = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+        &payload,
+        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
+        false,
+    )
+    .unwrap();
+    assert_eq!(wire["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(wire["tools"][0]["function"]["name"], "read_file");
+    assert!(wire.get("tool_choice").is_none());
+}

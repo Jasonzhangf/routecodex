@@ -231,8 +231,8 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                         &format!("$.tools[{index}]"),
                     )?;
                 }
-            } else if web_search_execution_mode.is_metadata_center_local_search()
-                || (!is_gpt_model && has_web_search_capability)
+            } else if has_web_search_capability
+                && (web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model)
             {
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
