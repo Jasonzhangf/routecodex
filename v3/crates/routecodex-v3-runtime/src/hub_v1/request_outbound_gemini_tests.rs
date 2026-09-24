@@ -474,7 +474,9 @@ fn gemini_wire_consumes_live_codex_responses_extension_fields() {
     });
     let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect("declared default-safe Codex extension fields must be consumed before Gemini wire");
+            .expect(
+                "declared default-safe Codex extension fields must be consumed before Gemini wire",
+            );
     assert!(
         request.get("routecodex_chat_extension").is_none(),
         "RouteCodex extension must never reach the Gemini wire: {request}"

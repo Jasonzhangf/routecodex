@@ -160,15 +160,15 @@ locked_items:
     chain_id: v3.protocol_conversion_field_parity.outbound_helper_bindings
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-09-21T10:07:17-07:00'
+    locked_at: '2026-09-23T18:48:15-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
-    last_manual_authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
+    fingerprint: sha256:0b42b28ac8e3aad26a3681ffca0794f440a174664454f2fe6043f591a40f16c2
+    last_manual_authorization_id: auth-20260923-v3-protocol-parity-ci-outbound-owner
   - item_id: chain:v3.hub_pipeline.v1.relay_request_source_slice
     chain_id: v3.hub_pipeline.v1.relay_request_source_slice
     status: audited_locked
     reviewed_by: Jason
-    locked_at: '2026-09-15T00:00:00-07:00'
+    locked_at: '2026-09-23T18:48:15-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     fingerprint: sha256:d2e58f7b5e4d0b2a23480ca16f93e2cdb4eafd15f1ed85b280712bea43802892
     last_manual_authorization_id: auth-20260915-v3-remove-continuation-relay-request
@@ -282,8 +282,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-protocol-parity
+    fingerprint: sha256:74d8314c600585a6654dffeda67a43af5dcb2118dbaaae9196d26056d08b353f
+    last_manual_authorization_id: auth-20260923-v3-anthropic-chat-normalization-ci
   - item_id: chain:v3.responses_relay.source_server_entry
     chain_id: v3.responses_relay.source_server_entry
     status: audited_locked
@@ -445,6 +445,20 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260923-v3-protocol-parity-ci-outbound-owner
+    item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
+    approved_by: Jason
+    approved_at: '2026-09-23T18:48:15-07:00'
+    reason: "Jason requested completing PR merge and CI after the protocol repair. This refresh binds the unchanged OpenAI Chat outbound helper to its decomposed source file; request semantics and the outbound stage are unchanged."
+    fingerprint_before: sha256:9ea64f75f123e43d34390fb4befc4948e8dba9cfdfce84f4c84013ef92aecab5
+    fingerprint_after: sha256:0b42b28ac8e3aad26a3681ffca0794f440a174664454f2fe6043f591a40f16c2
+  - authorization_id: auth-20260923-v3-anthropic-chat-normalization-ci
+    item_id: chain:v3.protocol_conversion_field_parity
+    approved_by: Jason
+    approved_at: '2026-09-23T18:48:15-07:00'
+    reason: "Jason explicitly requested removing architecture violations and repairing Anthropic inbound normalization. This refresh binds Anthropic requests and provider responses to their Chat normalization owners, including the decomposed request file, while preserving the fixed request and response chains."
+    fingerprint_before: sha256:0912de537b49626d13b9eecd35fccd11571add788fa5184db9024cd3b123a6c5
+    fingerprint_after: sha256:74d8314c600585a6654dffeda67a43af5dcb2118dbaaae9196d26056d08b353f
   - authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
     item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
     approved_by: Jason

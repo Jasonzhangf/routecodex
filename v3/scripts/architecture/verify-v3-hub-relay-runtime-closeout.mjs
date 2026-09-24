@@ -291,7 +291,7 @@ requireOrderedSequence(
   responsesRuntimePath + '::inner',
   [
     'V3ProviderResponseBody::Sse(stream) => {',
-    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context',
+    'build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol',
     'let (mut finalized_provider_value, response_web_search_state) =',
     'run_json_response_hooks(',
   ],

@@ -922,7 +922,7 @@ async fn controlled_held_responses_upstream(
     .chain(futures_util::stream::once(async move {
         let _permit = release.acquire_owned().await.unwrap();
         Ok::<_, std::io::Error>(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"released\"}]}]}}\n\ndata: [DONE]\n\n"
                 .to_vec(),
         )
     }));

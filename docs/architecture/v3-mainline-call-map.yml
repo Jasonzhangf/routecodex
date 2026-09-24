@@ -1636,7 +1636,7 @@ chains:
     from_node: V3HubReqOutbound07ProviderSemantic
     to_node: ProviderReqCompat06ProviderCompat
     caller_symbol: normalize_openai_chat_messages_payload
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
     callee_symbol: project_openai_chat_provider_tools
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
     status: anchored
@@ -4233,7 +4233,7 @@ chains:
     caller_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
     callee_symbol: normalize_v3_anthropic_request_to_chat
-    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
     status: anchored
     binding_kind: adjacent_inbound_chat_normalizer
     owner_feature_id: v3.protocol_conversion_field_parity

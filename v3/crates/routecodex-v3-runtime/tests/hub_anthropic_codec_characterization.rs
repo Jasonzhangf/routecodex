@@ -1,9 +1,7 @@
 #![allow(clippy::bool_comparison)]
 
 use routecodex_v3_runtime::{
-    V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
-    V3AnthropicResponsesProjectionContext, V3HubEntryProtocol, V3HubProviderWireProtocol,
-    V3HubTransportIntent, characterize_v3_anthropic_client_input_to_hub_semantic,
+    characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
@@ -12,7 +10,9 @@ use routecodex_v3_runtime::{
     encode_v3_responses_semantic_as_anthropic_request, normalize_v3_anthropic_request_to_chat,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
-    project_v3_responses_json_as_anthropic_message,
+    project_v3_responses_json_as_anthropic_message, V3AnthropicChatShapeBranchSemantic,
+    V3AnthropicCodecError, V3AnthropicCodecStage, V3AnthropicResponsesProjectionContext,
+    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
 
@@ -663,11 +663,9 @@ fn responses_reasoning_summary_policy_is_local_hint_for_anthropic() {
     }))
     .expect("valid reasoning summary policy is consumed as local response-shaping context");
 
-    assert!(
-        !serde_json::to_string(&wire)
-            .unwrap()
-            .contains("reasoning_summary_policy")
-    );
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("reasoning_summary_policy"));
     assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
 }
 
@@ -681,11 +679,9 @@ fn responses_reasoning_summary_policy_enables_native_thinking_without_effort() {
     .expect("summary policy must statically enable native Anthropic thinking");
 
     assert_eq!(wire["thinking"], json!({"type":"adaptive"}));
-    assert!(
-        !serde_json::to_string(&wire)
-            .unwrap()
-            .contains("reasoning_summary_policy")
-    );
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("reasoning_summary_policy"));
 }
 
 #[test]
@@ -774,16 +770,12 @@ fn responses_claude_provider_request_replaces_system_with_claude_code_prompt_blo
         )),
         "full Claude Code prompt block must be present: {provider_request}"
     );
-    assert!(
-        system[2]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work"))
-    );
-    assert!(
-        !system[2]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("claude-code-capture.kJhuye"))
-    );
+    assert!(system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work")));
+    assert!(!system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("claude-code-capture.kJhuye")));
     assert_eq!(provider_request["messages"][0]["role"], "user");
     assert_eq!(
         provider_request["messages"][0]["content"][0]["text"],
@@ -1169,11 +1161,9 @@ fn responses_developer_messages_project_to_anthropic_system_not_message_role() {
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["role"], "user");
     assert_eq!(messages[1]["role"], "assistant");
-    assert!(
-        messages
-            .iter()
-            .all(|message| matches!(message["role"].as_str(), Some("user" | "assistant")))
-    );
+    assert!(messages
+        .iter()
+        .all(|message| matches!(message["role"].as_str(), Some("user" | "assistant"))));
     let system = provider_request["system"]
         .as_str()
         .expect("Anthropic top-level system");
@@ -2280,8 +2270,8 @@ fn anthropic_thinking_fields_require_valid_exact_shape() {
 }
 
 #[test]
-fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_and_rejects_unknown()
- {
+fn anthropic_client_metadata_projects_user_id_consumes_registered_local_context_and_rejects_unknown(
+) {
     let mut exact = base_chat_for_field_projection();
     exact["routecodex_chat_extension"] = json!({
         "responses_request":{"client_metadata":{"user_id":"opaque-user"}}
@@ -2332,11 +2322,9 @@ fn anthropic_consumes_registered_responses_cache_verbosity_store_false_and_rejec
     }});
     let wire = encode_v3_responses_semantic_as_anthropic_request(cache_key)
         .expect("valid prompt_cache_key is consumed as local cache hint");
-    assert!(
-        !serde_json::to_string(&wire)
-            .unwrap()
-            .contains("prompt_cache_key")
-    );
+    assert!(!serde_json::to_string(&wire)
+        .unwrap()
+        .contains("prompt_cache_key"));
 
     let mut verbosity = base_chat_for_field_projection();
     verbosity["routecodex_chat_extension"] =
@@ -2811,13 +2799,11 @@ fn anthropic_ordinary_text_json_wrapper_remains_text_through_client_projection()
         .expect("canonical ordinary text must project back to Anthropic");
     assert_eq!(client["stop_reason"], "end_turn");
     assert_eq!(client["content"], json!([{"type":"text","text":wrapper}]));
-    assert!(
-        client["content"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|part| part["type"] != "tool_use")
-    );
+    assert!(client["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|part| part["type"] != "tool_use"));
 }
 
 #[test]

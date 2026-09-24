@@ -461,7 +461,10 @@ fn reattach_updates_connection_binding_for_guard_cleanup() {
         .expect("front connection lease binding");
     let checkpoint = broker.freeze(now).pop().expect("front checkpoint");
     let restored = broker.reattach(&checkpoint, now + Duration::from_secs(1));
-    assert_ne!(restored.key, old_key, "reattach must bump the generation key");
+    assert_ne!(
+        restored.key, old_key,
+        "reattach must bump the generation key"
+    );
 
     let guard = V3FrontConnectionGuard {
         broker: broker.clone(),
@@ -507,12 +510,9 @@ async fn front_broker_unregisters_connection_on_all_exit_paths() {
         } else {
             &b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n"[..]
         };
-        tokio::io::AsyncWriteExt::write_all(
-            &mut client,
-            request,
-        )
-        .await
-        .unwrap();
+        tokio::io::AsyncWriteExt::write_all(&mut client, request)
+            .await
+            .unwrap();
         // Best-effort read of the `204 No Content` response, then hard-drop the
         // socket. The drop drives the server's read half to EOF, which is the
         // exit path the guard must cover; reading to end would hang because the

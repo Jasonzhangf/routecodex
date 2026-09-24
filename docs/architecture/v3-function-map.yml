@@ -1282,6 +1282,8 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     owner_boundary: provider-standard request format helpers; no lifecycle/node transition
       owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
+    owner_boundary: OpenAI Chat request normalization helper owned by request outbound formatting; no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
     owner_boundary: Gemini provider-standard request projection helpers included by
       request_outbound_format.rs; no lifecycle/node transition owner
@@ -1351,6 +1353,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
@@ -1796,6 +1799,7 @@ features:
   - characterize_v3_anthropic_hub_response_semantic_to_client_projection
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
@@ -2430,6 +2434,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests/late_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
@@ -2445,6 +2450,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
@@ -2536,7 +2542,9 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests/late_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_names.rs
@@ -2553,6 +2561,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_hop.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs

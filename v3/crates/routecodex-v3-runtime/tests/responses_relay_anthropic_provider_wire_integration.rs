@@ -5,10 +5,10 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    V3ResponsesRelayClientBody, V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
     execute_v3_responses_relay_runtime, execute_v3_responses_relay_runtime_with_retry_policy,
+    V3ResponsesRelayClientBody, V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::sync::Mutex;
 
 struct AnthropicProviderJsonTransport {
@@ -295,8 +295,8 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
 }
 
 #[tokio::test]
-async fn responses_relay_named_unpaired_tool_output_reaches_anthropic_wire_without_fabricated_call_id()
- {
+async fn responses_relay_named_unpaired_tool_output_reaches_anthropic_wire_without_fabricated_call_id(
+) {
     // Live P0 shape (bug f29d7db): the standalone Codex notification output must
     // reach the selected Anthropic target as client-visible text, not as a
     // fabricated tool_result whose tool_use_id has no matching tool_use.
@@ -642,11 +642,9 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
         headers["user-agent"],
         "claude-cli/2.1.220 (external, sdk-cli)"
     );
-    assert!(
-        headers["anthropic-beta"]
-            .as_str()
-            .is_some_and(|value| value.contains("claude-code-20250219"))
-    );
+    assert!(headers["anthropic-beta"]
+        .as_str()
+        .is_some_and(|value| value.contains("claude-code-20250219")));
     assert_eq!(headers["anthropic-dangerous-direct-browser-access"], "true");
     assert_eq!(headers["x-app"], "cli");
     assert_eq!(headers["x-stainless-lang"], "js");
@@ -667,16 +665,12 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
     assert!(system[2]["text"].as_str().is_some_and(|text| text.contains(
         "You are an interactive agent that helps users with software engineering tasks."
     )));
-    assert!(
-        system[2]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work"))
-    );
-    assert!(
-        !system[2]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("claude-code-capture.kJhuye"))
-    );
+    assert!(system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("/tmp/claude-code-standard-capture-1785077403/work")));
+    assert!(!system[2]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("claude-code-capture.kJhuye")));
     let serialized = serde_json::to_string(&projection["body"]).unwrap();
     assert!(
         !serialized.contains("this request instruction must be replaced"),
@@ -728,11 +722,9 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
         failure.error_type.as_deref(),
         Some("ANTHROPIC_CYBER_REFUSAL")
     );
-    assert!(
-        failure
-            .message
-            .contains("Anthropic cyber refusal is treated as retryable provider saturation")
-    );
+    assert!(failure
+        .message
+        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
     let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
         panic!("route exhaustion must project a typed JSON terminal error")
     };
@@ -785,11 +777,9 @@ async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation
         failure.error_type.as_deref(),
         Some("ANTHROPIC_CYBER_REFUSAL")
     );
-    assert!(
-        failure
-            .message
-            .contains("Anthropic cyber refusal is treated as retryable provider saturation")
-    );
+    assert!(failure
+        .message
+        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
 }
 
 #[tokio::test]
@@ -1044,11 +1034,9 @@ async fn responses_tool_search_call_and_output_project_through_chat_to_anthropic
         .unwrap_or_else(|| {
             panic!("tool_search output did not reach Anthropic tool_result: {captured}")
         });
-    assert!(
-        tool_result["content"]
-            .to_string()
-            .contains("mcp__node_repl")
-    );
+    assert!(tool_result["content"]
+        .to_string()
+        .contains("mcp__node_repl"));
     assert!(
         captured.to_string().contains("mcp__node_repl"),
         "discovered tool payload must remain in the Anthropic tool_result data plane: {captured}"
@@ -1104,11 +1092,9 @@ async fn responses_relay_reasoning_effort_projects_minimax_adaptive_thinking() {
         captured.get("output_config").is_none(),
         "MiniMax Anthropic wire must omit unsupported output_config.effort: {captured}"
     );
-    assert!(
-        !captured
-            .to_string()
-            .contains("routecodex_reasoning_request")
-    );
+    assert!(!captured
+        .to_string()
+        .contains("routecodex_reasoning_request"));
 }
 
 #[tokio::test]
@@ -1313,8 +1299,8 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client()
- {
+async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client(
+) {
     let output = execute_v3_responses_relay_runtime(
         &manifest(),
         V3ResponsesRelayRuntimeInput {

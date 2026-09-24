@@ -23,6 +23,7 @@ const paths = {
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  openaiChatRequestNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
@@ -42,6 +43,7 @@ const paths = {
   webSearchSidecar: 'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
   responsesOpenaiChatConversion: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   anthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  anthropicRequestNormalization: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs',
   anthropicProjectionContext: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs',
   anthropicCodecToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs',
   responsesToAnthropicCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs',
@@ -155,7 +157,7 @@ requireText(text.webSearchSidecar, `${paths.webSearchSidecar}::internal_sidecar_
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'provider_response_projection_failure_projects_internal_599');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::error_origin_reverse_tests`, 'internal_web_search_canonicalization_failure_is_not_client_invalid_request');
 requireText(text.responsesRuntimeTestsExtra, `${paths.responsesRuntimeTestsExtra}::anthropic_provider_chat_normalization`, 'anthropic_provider_sse_normalizes_custom_tools_to_chat_before_outbound');
-forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
+forbid(text.responsesRuntimeInner, `${paths.responsesRuntimeInner}::no_shared_client_error_variant`, [/\.map_err\(\|error\| \{\s*V3ResponsesRelayRuntimeError::ClientInboundCanonical\(error\.to_string\(\)\)/u]);
 forbid(text.webSearchSidecar, `${paths.webSearchSidecar}::no_shared_client_error_variant`, [/V3ResponsesRelayRuntimeError::InboundCanonical\(/u]);
 
 for (const phrase of [
@@ -391,6 +393,9 @@ forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_st
   /row\.remove\("include"\)/,
   /row\.remove\("reasoning"\)/,
 ]);
+forbid(text.openaiChatRequestNormalization, `${paths.openaiChatRequestNormalization}::no_silent_strip_projector`, [
+  /row\.remove\("client_metadata"\);\s*if\s*let\s*Some\(max_output_tokens\)/,
+]);
 requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::responses_client_metadata_projection`, 'pub(super) fn project_openai_client_metadata_to_metadata');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::client_metadata_user_id_only`, 'pub(super) fn unsupported_client_metadata_paths(');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, 'REGISTERED_CLIENT_LOCAL_METADATA_KEYS');
@@ -428,7 +433,7 @@ requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormat
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_unknown_client_metadata_rejected`, 'openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_does_not_reach_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
+requireText(text.openaiChatRequestNormalization, `${paths.openaiChatRequestNormalization}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
 for (const phrase of [
   'openai_chat_provider_wire_consumes_registered_codex_client_metadata_as_local_context',
   'openai_chat_function_tool_redacted_schema_placeholders_pass_through',
@@ -465,19 +470,19 @@ for (const phrase of [
 forbid(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, [/fallback/i, /MetadataCenter|metadata_center|runtime_control/i]);
 
 const anthropicRequestNormalizer = functionSlice(
-  text.anthropicCodec,
-  paths.anthropicCodec,
+  text.anthropicRequestNormalization,
+  paths.anthropicRequestNormalization,
   'pub fn normalize_v3_anthropic_request_to_chat',
-  'pub fn encode_v3_responses_semantic_as_anthropic_request',
+  'Ok(Value::Object(canonical))',
 );
 for (const phrase of [
   'pub fn normalize_v3_anthropic_request_to_chat',
-  'build_v3_chat_canonical_request_from_responses_payload',
-  'preserved_fields',
+  'characterize_v3_anthropic_client_input_to_hub_semantic',
+  'source_extensions',
   'reasoning_effort',
   'routecodex_chat_extension',
-]) requireText(anthropicRequestNormalizer, `${paths.anthropicCodec}::anthropic_to_chat_normalizer`, phrase);
-forbid(anthropicRequestNormalizer, `${paths.anthropicCodec}::anthropic_to_chat_normalizer`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
+]) requireText(anthropicRequestNormalizer, `${paths.anthropicRequestNormalization}::anthropic_to_chat_normalizer`, phrase);
+forbid(anthropicRequestNormalizer, `${paths.anthropicRequestNormalization}::anthropic_to_chat_normalizer`, [/fallback/i, /MetadataCenter|metadata_center|debug_snapshot|runtime_control/i]);
 
 const responsesRequestToAnthropic = functionSlice(
   text.anthropicCodec,
@@ -608,7 +613,7 @@ requireText(text.providerReqCompat, `${paths.providerReqCompat}::verbosity_value
 requireText(text.providerReqCompat, `${paths.providerReqCompat}::exact_anthropic_fields`, 'responses_exact_client_user_id_and_json_schema_project_to_anthropic_wire');
 requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_local_context`, 'responses_relay_consumes_registered_codex_client_metadata_before_provider_wire');
 forbid(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::codex_client_metadata_provider_wire_leak`, [/assert_eq!\(headers\["x-claude-code-session-id"\]/, /assert_eq!\(headers\["x-codex-turn-metadata"\]/]);
-requireText(text.anthropicTests, `${paths.anthropicTests}::structured_system_unmapped`, 'anthropic_structured_system_extension_is_not_silently_flattened_for_responses');
+requireText(text.anthropicTests, `${paths.anthropicTests}::structured_system_unmapped`, 'anthropic_structured_system_cache_is_rejected_for_responses_target');
 const openaiChatExtensionProjection = functionSlice(
   text.requestOutboundFormat,
   paths.requestOutboundFormat,

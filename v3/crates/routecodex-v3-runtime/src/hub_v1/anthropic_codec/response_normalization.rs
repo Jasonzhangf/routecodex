@@ -1,6 +1,6 @@
 use super::V3AnthropicCodecError;
-use crate::protocol_tables::{V3TableDirection, V3TableKind, map_value};
-use serde_json::{Map, Value, json};
+use crate::protocol_tables::{map_value, V3TableDirection, V3TableKind};
+use serde_json::{json, Map, Value};
 
 /// Normalize an Anthropic provider message into the runtime's Chat response
 /// semantic shape. Target-protocol projection happens after Chat Process.

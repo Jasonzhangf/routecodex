@@ -34,6 +34,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
@@ -49,6 +50,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/web_search_sidecar.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/request_normalization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_normalization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs',
@@ -80,9 +82,9 @@ const cases = [
   {
     name: 'Provider response projection is collapsed into the client inbound error variant',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(\n                                    error.to_string(),\n                                )',
-    to: 'V3ResponsesRelayRuntimeError::InboundCanonical(error.to_string())',
-    diagnostic: /no_shared_client_error_variant|InboundCanonical/u,
+    from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())',
+    to: 'V3ResponsesRelayRuntimeError::ClientInboundCanonical(error.to_string())',
+    diagnostic: /no_shared_client_error_variant|ClientInboundCanonical/u,
   },
   {
     name: 'Internal web search canonicalization is collapsed into the client inbound error variant',
@@ -108,8 +110,8 @@ const cases = [
   {
     name: 'OpenAI Chat custom response ignores the active tool name mapping',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_chat_conversion.rs',
-    from: 'if let Some(client_name) = custom_tool_names.get(name) {',
-    to: 'if let Some(client_name) = custom_tool_names.get("custom") {',
+    from: 'if let Some(custom_identity) = custom_tool_names.get(name) {',
+    to: 'if let Some(custom_identity) = custom_tool_names.get("custom") {',
     diagnostic: /custom_tool_names\.get\(name\)/u,
   },
   {
@@ -532,7 +534,7 @@ const cases = [
 
   {
     name: 'Responses max_output_tokens sent directly to OpenAI Chat wire',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs',
     from: 'row.entry("max_completion_tokens".to_string())\n                .or_insert(max_output_tokens);',
     to: 'row.insert("max_output_tokens".to_string(), max_output_tokens);',
     diagnostic: /max_output_tokens|max_completion_tokens/,
@@ -829,7 +831,7 @@ const cases = [
   },
   {
     name: 'Provider outbound silently deletes unsupported client metadata',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format/openai_chat_request_normalization.rs',
     from: 'if let Some(max_output_tokens) = row.remove("max_output_tokens") {',
     to: 'row.remove("client_metadata");\n        if let Some(max_output_tokens) = row.remove("max_output_tokens") {',
     diagnostic: /client_metadata|no_silent_strip_projector/u,
@@ -880,9 +882,9 @@ const cases = [
   {
     name: 'Structured Anthropic system explicit unmapped test is removed',
     file: 'v3/crates/routecodex-v3-runtime/tests/anthropic_relay_runtime_integration.rs',
-    from: 'anthropic_structured_system_extension_is_not_silently_flattened_for_responses',
+    from: 'anthropic_structured_system_cache_is_rejected_for_responses_target',
     to: 'anthropic_structured_system_extension_test_removed',
-    diagnostic: /structured_system_unmapped|anthropic_structured_system_extension/u,
+    diagnostic: /structured_system_unmapped|anthropic_structured_system_cache/u,
   },
   {
     name: 'OpenAI outbound drops registered non-Responses extension rejection',

@@ -1,6 +1,6 @@
 use super::V3AnthropicCodecError;
-use crate::protocol_tables::{V3TableDirection, V3TableKind, map_value as table_map_value};
-use serde_json::{Map, Value, json};
+use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
+use serde_json::{json, Map, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum V3AnthropicResponseContentBlockKind {
