@@ -953,11 +953,14 @@ pub(crate) fn projected_error_output_with_observability(
 
 pub(crate) fn projected_error_output_with_observability_and_snapshots(
     projected: routecodex_v3_error::V3Error06ClientProjected,
-    node_trace: Vec<&'static str>,
+    mut node_trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
     provider_request_snapshot: Option<serde_json::Value>,
     provider_response_snapshot: Option<serde_json::Value>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    if projected.pool_exhausted {
+        node_trace.push("V3Error04TargetPoolExhaustion");
+    }
     V3ResponsesDirectRuntimeOutput {
         observability,
         stream_observation: None,
@@ -971,6 +974,31 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
         node_trace,
         error_chain: Some(projected.chain.to_vec()),
         protocol_relay_handoff: None,
+    }
+}
+
+#[cfg(test)]
+mod target_exhaustion_disposition_tests {
+    use super::*;
+
+    #[test]
+    fn direct_target_exhaustion_reaches_transport_disconnect_witness() {
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted,
+            "V3Target10ConcreteProviderSelected",
+            "selected_target_exhausted",
+            "all route tiers unavailable",
+        );
+        let projected = routecodex_v3_error::V3ErrorHandlingCenter::handle(
+            routecodex_v3_error::V3ErrorHandlingCenterInput {
+                source,
+                action_scope: routecodex_v3_error::V3ErrorActionScope::None,
+                candidates_remaining: 0,
+                source_status: None,
+            },
+        );
+        let output = projected_error_output(projected, Vec::new());
+        assert!(output.node_trace.contains(&"V3Error04TargetPoolExhaustion"));
     }
 }
 

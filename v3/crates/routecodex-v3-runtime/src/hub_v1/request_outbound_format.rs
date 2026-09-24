@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use super::anthropic_request_field_projection::project_chat_store_to_anthropic_wire;
 use super::request_outbound_builtin_tool_projection::project_openai_chat_provider_tools_for_web_search_mode;
 use super::request_outbound_builtin_tool_projection::project_openai_responses_custom_tools_to_function_schema;
+use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_metadata::{
     project_openai_chat_reasoning_context_policy, project_openai_chat_reasoning_summary_policy,
@@ -27,7 +28,6 @@ pub(crate) fn build_v3_openai_chat_standard_request_from_chat_canonical(
         true,
     )
 }
-
 pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode(
     payload: &Value,
     web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -45,9 +45,15 @@ pub(crate) fn build_v3_openai_chat_standard_request_for_selected_web_search_mode
         has_web_search_capability,
     )
 }
-
 pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
     payload: &Value,
+) -> Result<Value, String> {
+    build_v3_openai_responses_standard_request_for_selected_target(payload, true)
+}
+
+pub(crate) fn build_v3_openai_responses_standard_request_for_selected_target(
+    payload: &Value,
+    has_web_search_capability: bool,
 ) -> Result<Value, String> {
     if payload.get("previous_response_id").is_some() {
         return Err(
@@ -55,7 +61,12 @@ pub(crate) fn build_v3_openai_responses_standard_request_from_chat_canonical(
                 .to_string(),
         );
     }
-    build_v3_openai_responses_request_from_chat_canonical(payload)
+    let mut projected = build_v3_openai_responses_request_from_chat_canonical(payload)?;
+    project_openai_responses_hosted_web_search_for_selected_target(
+        &mut projected,
+        has_web_search_capability,
+    );
+    Ok(projected)
 }
 
 fn build_v3_openai_responses_request_from_chat_canonical(payload: &Value) -> Result<Value, String> {

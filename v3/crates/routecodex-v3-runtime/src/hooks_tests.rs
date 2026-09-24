@@ -180,6 +180,33 @@ fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input(
 }
 
 #[test]
+fn direct_responses_default_target_drops_only_hosted_search() {
+    let mut policy = direct_policy_with_models("client", "canonical", "wire");
+    policy.request_body = json!({
+        "model": "client",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
+        ],
+        "tool_choice": {"type": "web_search"}
+    });
+    let wire = responses_direct_request_projection_hook(&policy).unwrap();
+    assert_eq!(wire.body()["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(wire.body()["tools"][0]["name"], "lookup");
+    assert!(wire.body().get("tool_choice").is_none());
+
+    policy
+        .target
+        .candidate
+        .model_capabilities
+        .push("web_search".to_string());
+    let hosted_wire = responses_direct_request_projection_hook(&policy).unwrap();
+    assert_eq!(hosted_wire.body()["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(hosted_wire.body()["tool_choice"]["type"], "web_search");
+}
+
+#[test]
 fn direct_hook_registry_mounts_request_key_catalog_at_runtime() {
     let mut policy = direct_policy_with_models(
         "client-route-alias",
@@ -343,6 +370,55 @@ fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
         .contains("direct tools hook"));
     assert_eq!(wire.body()["model"], "provider-wire-model");
     assert!(wire.body().get("metadata").is_none());
+}
+
+#[test]
+fn chat_direct_default_target_drops_unavailable_hosted_web_search_tool() {
+    let base = direct_policy_with_models("gpt-5.5", "deepseek-v4.1-flash", "deepseek-v4.1-flash");
+    let policy = V3ChatDirect11Policy {
+        target: base.target,
+        request_id: base.request_id,
+        request_body: json!({
+            "model": "gpt-5.5",
+            "messages": [{"role": "user", "content": "summarize this"}],
+            "tools": [
+                {"type": "web_search_20250305", "name": "web_search"},
+                {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
+            ],
+            "tool_choice": {"type": "web_search_20250305"}
+        }),
+    };
+    let wire = chat_direct_request_projection_hook(&policy).expect("default provider wire");
+    assert!(wire.body().get("web_search_options").is_none());
+    assert!(wire.body().get("tool_choice").is_none());
+    assert_eq!(wire.body()["tools"][0]["function"]["name"], "read_file");
+    assert_eq!(wire.body()["tools"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
+fn chat_direct_applies_declared_provider_compat_after_standard_projection() {
+    let base = direct_policy_with_models(
+        "client-route-alias",
+        "canonical-provider-model",
+        "provider-wire-model",
+    );
+    let mut target = base.target;
+    target.candidate.compatibility_profile = Some("chat:openai".to_string());
+    let policy = V3ChatDirect11Policy {
+        target,
+        request_id: base.request_id,
+        request_body: json!({
+            "model": "client-route-alias",
+            "messages": [{"role": "user", "content": "hello"}],
+            "prompt_cache_key": "session-1",
+            "verbosity": "high"
+        }),
+    };
+    let wire = chat_direct_request_projection_hook(&policy).expect("Direct Chat wire");
+    assert!(wire.body().get("prompt_cache_key").is_none());
+    assert!(wire.body().get("verbosity").is_none());
+    assert_eq!(wire.body()["model"], "provider-wire-model");
+    assert_eq!(wire.body()["messages"][0]["content"], "hello");
 }
 
 #[test]

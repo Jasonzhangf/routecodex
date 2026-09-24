@@ -9,6 +9,42 @@ use routecodex_v3_config::V3WebSearchExecutionMode;
 use super::is_v3_gpt_canonical_model;
 use super::request_outbound_mcp_names::provider_function_name;
 
+pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
+    payload: &mut Value,
+    has_web_search_capability: bool,
+) {
+    if has_web_search_capability {
+        return;
+    }
+    if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
+        tools.retain(|tool| {
+            !matches!(
+                tool.get("type").and_then(Value::as_str),
+                Some("web_search" | "web_search_preview" | "web_search_20250305")
+            )
+        });
+    }
+    if let Some(root) = payload.as_object_mut() {
+        root.remove("web_search_options");
+        if root
+            .get("tool_choice")
+            .is_some_and(is_hosted_web_search_choice)
+        {
+            root.remove("tool_choice");
+        }
+    }
+}
+
+fn is_hosted_web_search_choice(choice: &Value) -> bool {
+    matches!(
+        choice
+            .get("type")
+            .and_then(Value::as_str)
+            .or_else(|| choice.as_str()),
+        Some("web_search" | "web_search_preview" | "web_search_20250305")
+    )
+}
+
 pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     payload: &mut Value,
 ) -> Result<(), String> {
@@ -178,7 +214,10 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             }
             continue;
         }
-        if matches!(tool_type, Some("web_search" | "web_search_preview")) {
+        if matches!(
+            tool_type,
+            Some("web_search" | "web_search_preview" | "web_search_20250305")
+        ) {
             if web_search_execution_mode == V3WebSearchExecutionMode::NativeRemoteSearchToolMix {
                 // Mode A 与 Mode B 共用同一 capability 护栏：provider 未声明
                 // web_search 能力时不保留 hosted web_search 声明（工具与
@@ -192,7 +231,9 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                         &format!("$.tools[{index}]"),
                     )?;
                 }
-            } else if web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model {
+            } else if web_search_execution_mode.is_metadata_center_local_search()
+                || (!is_gpt_model && has_web_search_capability)
+            {
                 // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
                 // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
                 // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
@@ -237,6 +278,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             return Err("ConflictingOutboundFields target_protocol=openai_chat paths=$.web_search_options,$.tools[].type".to_string());
         }
         root.insert("web_search_options".to_string(), projected);
+    } else if !has_web_search_capability
+        && root
+            .get("tool_choice")
+            .is_some_and(is_hosted_web_search_choice)
+    {
+        root.remove("tool_choice");
     }
     Ok(())
 }

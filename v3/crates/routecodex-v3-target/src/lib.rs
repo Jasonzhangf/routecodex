@@ -238,7 +238,13 @@ impl V3TargetInterpreter {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
                 continue;
             };
-            let required_capabilities = route_required_capabilities.clone();
+            let mut required_capabilities = route_required_capabilities.clone();
+            // The default tier follows hosted search when that tier is
+            // unavailable. Its provider need not implement the hosted tool;
+            // Outbound removes that tool for a non-search-capable target.
+            if entry.pool_id == "default" {
+                required_capabilities.retain(|capability| capability != "web_search");
+            }
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
                 manifest,

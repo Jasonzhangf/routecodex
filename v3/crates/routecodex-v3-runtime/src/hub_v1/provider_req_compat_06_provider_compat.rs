@@ -4,7 +4,7 @@ use super::request_outbound_format::{
 use super::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
-    build_v3_openai_responses_standard_request_from_chat_canonical,
+    build_v3_openai_responses_standard_request_for_selected_target,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
     provider_protocol_compat_id, V3HubOpaquePayload, V3HubProviderWireProtocol,
     V3HubReqOutbound07ProviderSemantic, V3ProviderCompatError, V3ProviderCompatProfileId,
@@ -290,8 +290,12 @@ fn build_v3_provider_standard_protocol_payload_from_req07(
             )?
         }
         V3HubProviderWireProtocol::Responses => {
-            build_v3_openai_responses_standard_request_from_chat_canonical(
+            build_v3_openai_responses_standard_request_for_selected_target(
                 input.provider_semantic_payload(),
+                selected
+                    .model_capabilities
+                    .iter()
+                    .any(|capability| capability == "web_search"),
             )?
         }
         V3HubProviderWireProtocol::Anthropic => {
