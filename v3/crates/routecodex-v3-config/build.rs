@@ -20,7 +20,13 @@ fn source_package_version() -> String {
         std::env::var_os("CARGO_MANIFEST_DIR")
             .expect("CARGO_MANIFEST_DIR must identify the config crate"),
     );
-    let package_json = manifest_dir.join("../../../package.json");
+    // The V3 version truth is v3/package.json (see
+    // docs/architecture/v3-resource-operation-map.yml, v3.build.version_truth,
+    // canonical_path: v3/package.json, forbidden_paths: [package.json]). The
+    // config crate lives at v3/crates/routecodex-v3-config, so two levels up is
+    // v3/. The repository-root package.json is a different (stale) version and
+    // is a declared forbidden source for this resource.
+    let package_json = manifest_dir.join("../../package.json");
     println!("cargo:rerun-if-changed={}", package_json.display());
 
     read_package_version(&package_json).unwrap_or_else(|message| panic!("{message}"))
@@ -51,8 +57,7 @@ mod tests {
 
     #[test]
     fn package_version_parser_requires_non_empty_string_version() {
-        let root =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../package.json");
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../package.json");
         assert!(read_package_version(&root).is_ok());
     }
 }

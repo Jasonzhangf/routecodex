@@ -88,6 +88,7 @@ pub(crate) fn reap_inactive_runtime_files(
             fs::remove_file(socket_path)?;
         }
     }
+    reap_unowned_managed_control_socket(instance_dir, expected)?;
     for file in ["pid.cache", "control.json", HOOKS_SIDECAR_PROCESS_FILE] {
         if file == HOOKS_SIDECAR_PROCESS_FILE && hooks_record_uncertain {
             // Preserve the uncertain hooks process record: the main runtime can
@@ -195,6 +196,47 @@ pub(crate) fn same_instance_declaration_except_executable_path(
 
 pub(crate) fn managed_control_socket_path(instance_id: &str) -> PathBuf {
     std::env::temp_dir().join(format!("routecodex-{instance_id}.sock"))
+}
+
+/// Reconcile the canonical managed control socket when the `control.json`
+/// record that authorizes its cleanup was never written.
+///
+/// `run_managed_child_with_declaration` binds the canonical control socket
+/// before it writes `pid.cache` and `control.json`. A crash in that window
+/// leaves a bound socket that every `control.json`-gated path skips, and
+/// `run_managed_child_with_declaration` then refuses every later start with
+/// `IdentityMismatch: control socket already exists without a verified stopped
+/// cleanup`, permanently blocking the instance.
+///
+/// Only a provably unowned socket is removed: a cached pid that is still alive
+/// keeps the socket, exactly like `owned_unreachable_runtime_state_is_reapable`.
+/// A socket recorded in an existing `control.json` is already handled by that
+/// record's own identity and nonce checks, so this is a no-op there.
+pub(crate) fn reap_unowned_managed_control_socket(
+    instance_dir: &Path,
+    expected: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    if instance_dir.join("control.json").exists() {
+        return Ok(());
+    }
+    let socket_path = managed_control_socket_path(&expected.instance_id);
+    if !socket_path.exists() {
+        return Ok(());
+    }
+    let pid_path = instance_dir.join("pid.cache");
+    if pid_path.exists() {
+        let pid: V3ManagedPidCache = read_json(&pid_path)?;
+        if pid.instance_id != expected.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "refusing to reap unowned control socket for a different instance".to_string(),
+            ));
+        }
+        if pid_is_alive(pid.pid) {
+            return Ok(());
+        }
+    }
+    fs::remove_file(socket_path)?;
+    Ok(())
 }
 
 pub(crate) fn new_start_nonce(instance_id: &str) -> String {

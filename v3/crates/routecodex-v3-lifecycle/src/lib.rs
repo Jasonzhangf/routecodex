@@ -1210,6 +1210,10 @@ fn cleanup_forced_stopped_runtime_state(
         let _ = fs::remove_file(socket_path);
         fs::remove_file(control_path)?;
     }
+    // `control.json` authorizes socket cleanup; when a crash happened before it
+    // was written, reconcile the provably unowned canonical socket here too so
+    // a forced stop still releases the instance.
+    reap_unowned_managed_control_socket(instance_dir, declaration)?;
     let pid_path = instance_dir.join("pid.cache");
     if pid_path.exists() {
         let pid: V3ManagedPidCache = read_json(&pid_path)?;
