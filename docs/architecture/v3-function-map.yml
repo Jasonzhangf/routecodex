@@ -2775,7 +2775,8 @@ features:
   - responses binds only /v1/responses and V2/default projection points at Responses
     Direct; explicit Relay remains a controlled runtime binding, not the default
   - anthropic binds only /v1/messages to relay implemented runtime owner
-  - openai_chat binds only /v1/chat/completions to relay implemented runtime owner
+  - openai_chat binds only /v1/chat/completions to Direct implemented runtime owner;
+    cross-protocol chat entries handoff to the relay runtime inside the Direct outcome
   - gemini binds /v1beta/models/:model/generateContent to relay implemented Gemini
     runtime owner
   - duplicate protocols duplicate endpoint patterns unknown protocols missing runtime

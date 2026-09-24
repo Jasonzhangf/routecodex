@@ -143,6 +143,23 @@ pub fn characterize_v3_openai_chat_hub_response_semantic_to_client_projection(
     })
 }
 
+/// Read the canonical Responses tool-item identity used for OpenAI Chat
+/// `tool_calls[].id`. Canonical items are keyed by `call_id`, but providers may
+/// only carry `id`/`tool_call_id`; a present-but-empty field must not win over a
+/// later non-empty one, otherwise the projected `tool_calls[].id` is empty and
+/// the next turn's `tool_call_id` is rejected as an orphan.
+fn read_v3_openai_chat_tool_identity(item: &Map<String, Value>) -> &str {
+    for key in ["call_id", "tool_call_id", "id"] {
+        if let Some(value) = item.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+    }
+    ""
+}
+
 /// Project the governed canonical Responses-shaped response into the OpenAI
 /// Chat client contract at RespOutbound05.
 pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
@@ -193,8 +210,8 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             }
             Some("function_call" | "custom_tool_call") => {
                 let call_id = item
-                    .get("call_id")
-                    .and_then(Value::as_str)
+                    .as_object()
+                    .map(read_v3_openai_chat_tool_identity)
                     .unwrap_or_default();
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 let arguments = item
@@ -787,20 +804,19 @@ impl V3OpenAiChatResponsesSseTransducer {
                 let Some(item) = object.get("item").and_then(Value::as_object) else {
                     return Ok(Vec::new());
                 };
-                if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                let item_type = item.get("type").and_then(Value::as_str);
+                if item_type != Some("function_call") && item_type != Some("custom_tool_call") {
                     return Ok(Vec::new());
                 }
                 let index = self.tool_call_index;
                 self.tool_call_index += 1;
                 self.emitted_content = true;
-                let call_id = item
-                    .get("call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let call_id = read_v3_openai_chat_tool_identity(item);
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                 let arguments = item
                     .get("arguments")
                     .and_then(Value::as_str)
+                    .or_else(|| item.get("input").and_then(Value::as_str))
                     .unwrap_or_default();
                 Ok(vec![self.chunk(
                     json!({"tool_calls": [{
@@ -1210,5 +1226,135 @@ mod openai_chat_responses_sse_transducer_tests {
                 "unexpected error: {error}"
             );
         }
+    }
+
+    // Issue #2: the openai_chat outbound response must preserve tool-call
+    // pairing. A canonical Responses tool item is keyed by `call_id`, but some
+    // providers only carry `id` (and vice versa); reading only `call_id` with
+    // `unwrap_or_default()` produces an empty `tool_calls[].id`, which makes the
+    // next turn's `tool_call_id` an orphan.
+    #[test]
+    fn transducer_resolves_tool_call_identity_from_item_id() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "id": "fc_item_only",
+                    "name": "lookup",
+                    "arguments": "{\"q\":\"alpha\"}"
+                }
+            }))
+            .expect("output_item.done with only item.id must project");
+        let tool_call = chunks
+            .iter()
+            .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+            .expect("tool_call chunk");
+        assert_eq!(
+            tool_call["id"],
+            json!("fc_item_only"),
+            "tool_calls[].id must resolve from item.id, never empty: {chunks:?}"
+        );
+        assert_eq!(tool_call["function"]["name"], json!("lookup"));
+    }
+
+    #[test]
+    fn transducer_ignores_present_but_empty_call_id_before_using_item_id() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
+                    "call_id": "   ",
+                    "id": "fc_item_only",
+                    "name": "lookup",
+                    "arguments": "{}"
+                }
+            }))
+            .expect("output_item.done must project");
+        let tool_call = chunks
+            .iter()
+            .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+            .expect("tool_call chunk");
+        assert_eq!(
+            tool_call["id"],
+            json!("fc_item_only"),
+            "an empty call_id must not win over a non-empty id: {chunks:?}"
+        );
+    }
+
+    // Issue #2: `custom_tool_call` items must also project, otherwise the
+    // assistant turn that requested a custom tool loses its tool_call and the
+    // follow-up `tool_call_id` becomes an orphan.
+    #[test]
+    fn transducer_projects_custom_tool_call_items() {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "custom_tool_call",
+                    "call_id": "call_custom_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch"
+                }
+            }))
+            .expect("custom_tool_call must project");
+        let tool_call = chunks
+            .iter()
+            .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+            .expect("custom_tool_call must emit a tool_call chunk");
+        assert_eq!(tool_call["id"], json!("call_custom_1"));
+        assert_eq!(tool_call["function"]["name"], json!("apply_patch"));
+        assert_eq!(
+            tool_call["function"]["arguments"],
+            json!("*** Begin Patch"),
+            "custom_tool_call.input must project into function.arguments"
+        );
+    }
+
+    // Issue #2: the non-stream projection must apply the same identity resolution
+    // and custom_tool_call projection.
+    #[test]
+    fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
+        let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_item_only",
+                    "name": "lookup",
+                    "arguments": "{\"q\":\"alpha\"}"
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_custom_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch"
+                }
+            ]
+        }))
+        .expect("canonical tool items must project");
+        let tool_calls = projected["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .expect("tool_calls array");
+        assert_eq!(tool_calls.len(), 2, "{projected}");
+        assert_eq!(tool_calls[0]["id"], json!("fc_item_only"));
+        assert_eq!(tool_calls[0]["function"]["name"], json!("lookup"));
+        assert_eq!(tool_calls[1]["id"], json!("call_custom_1"));
+        assert_eq!(tool_calls[1]["function"]["name"], json!("apply_patch"));
+        assert_eq!(
+            tool_calls[1]["function"]["arguments"],
+            json!("*** Begin Patch")
+        );
+        assert_eq!(
+            projected["choices"][0]["finish_reason"],
+            json!("tool_calls")
+        );
     }
 }

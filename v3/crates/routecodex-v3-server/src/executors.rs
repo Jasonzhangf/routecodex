@@ -272,7 +272,9 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
     );
     let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
     let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
-    let raw = build_v3_server_03_http_request_raw_with_purpose_and_port(
+    // Same-protocol Direct transport handoff requires the request pipeline
+    // identity; without it the provider transport handoff scope is incomplete.
+    let raw = build_v3_server_03_http_request_raw_with_purpose_and_scope(
         state.server.id.clone(),
         provider_failure_session_scope.clone(),
         request_id.clone(),
@@ -281,6 +283,7 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         path.clone(),
         request_purpose,
         Some(state.server.port),
+        Some(request_identity.pipeline_id.clone()),
         payload.clone(),
     );
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {

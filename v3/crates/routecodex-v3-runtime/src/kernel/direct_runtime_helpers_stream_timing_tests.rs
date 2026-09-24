@@ -211,10 +211,13 @@ async fn openai_chat_direct_sse_releases_only_after_finish_reason_and_done() {
     .collect::<Vec<_>>()
     .await;
 
-    assert_eq!(frames.len(), 1);
-    assert!(String::from_utf8(frames[0].clone())
-        .unwrap()
-        .contains("finish_reason"));
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(text.contains("finish_reason"));
+    assert_eq!(
+        text.matches("data: [DONE]").count(),
+        1,
+        "chat closeout must be delivered exactly once: {text}"
+    );
 }
 
 #[test]
@@ -495,7 +498,16 @@ async fn direct_sse_seals_at_terminal_before_late_transport_close_error() {
     .expect("semantic terminal must seal before transport close noise")
     .collect::<Vec<_>>()
     .await;
-    assert_eq!(frames.len(), 1);
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(
+        text.contains(r#""finish_reason":"stop""#),
+        "terminal frame must be projected: {text}"
+    );
+    assert_eq!(
+        text.matches("data: [DONE]").count(),
+        1,
+        "chat closeout must be delivered exactly once: {text}"
+    );
 }
 
 #[tokio::test]
@@ -517,10 +529,14 @@ async fn direct_sse_terminal_does_not_validate_same_chunk_tail() {
     .collect::<Vec<_>>()
     .await;
 
-    assert_eq!(frames.len(), 1);
-    let output = String::from_utf8(frames[0].clone()).expect("SSE output is UTF-8");
+    let output = String::from_utf8(frames.concat()).expect("SSE output is UTF-8");
     assert!(output.contains("finish_reason"));
     assert!(!output.contains("not-json"));
+    assert_eq!(
+        output.matches("data: [DONE]").count(),
+        1,
+        "chat closeout must be delivered exactly once: {output}"
+    );
 }
 
 #[tokio::test]
@@ -567,4 +583,154 @@ fn direct_responses_terminal_without_usage_materializes_required_counters() {
     assert_eq!(value["response"]["usage"]["input_tokens"], 0);
     assert_eq!(value["response"]["usage"]["output_tokens"], 0);
     assert_eq!(value["response"]["usage"]["total_tokens"], 0);
+}
+
+#[tokio::test]
+async fn direct_chat_sse_keeps_terminal_done_when_provider_splits_closeout() {
+    // Provider transport frame-splits SSE events, so a chat-wire `[DONE]`
+    // arrives in a chunk AFTER the finish_reason terminal. The Direct
+    // observation wrapper must keep reading past SemanticTerminal so the
+    // following LegalCloseout is collected and the client protocol still
+    // receives its terminal `[DONE]` (parity with the relay path).
+    let provider = Box::pin(stream::iter(vec![
+        Ok(br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"first"},"finish_reason":null}]}
+
+"#
+            .to_vec()),
+        Ok(br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+            .to_vec()),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("seal")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(
+        text.contains(r#""finish_reason":"stop""#),
+        "terminal frame must be projected: {text}"
+    );
+    assert_eq!(
+        text.matches("[DONE]").count(),
+        1,
+        "split-chunk [DONE] must be delivered to the client: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_chat_sse_seals_at_terminal_when_done_splits_before_late_transport_error() {
+    // A chat-wire provider may emit the semantic terminal (finish_reason) and
+    // then close the transport without ever sending `[DONE]`; a late transport
+    // read error is post-terminal noise and must not reopen the completed
+    // attempt (parity with the relay path, which ignores post-terminal errors).
+    let provider = Box::pin(stream::iter(vec![
+        Ok(br#"data: {"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+"#
+        .to_vec()),
+        Err(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::ProviderFailure,
+            "test",
+            "late_transport_error",
+            "late provider read failed",
+        )),
+    ]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("post-terminal transport noise must not reopen a sealed chat attempt")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(
+        text.contains(r#""finish_reason":"stop""#),
+        "terminal frame must be projected: {text}"
+    );
+    assert_eq!(
+        text.matches("data: [DONE]").count(),
+        1,
+        "chat client closeout must be synthesized after a sealed terminal: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_chat_sse_seals_at_terminal_with_unterminated_tail_bytes() {
+    // Trailing partial bytes after the chat terminal leave the incremental
+    // decoder unterminated; that post-terminal tail must not fail the attempt.
+    let provider = Box::pin(stream::iter(vec![Ok(
+        br#"data: {"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+data: {"partial":"tail-without-blank-line""#
+            .to_vec(),
+    )]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("post-terminal tail bytes must not reopen a sealed chat attempt")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(
+        text.contains(r#""finish_reason":"stop""#),
+        "terminal frame must be projected: {text}"
+    );
+    assert_eq!(
+        text.matches("data: [DONE]").count(),
+        1,
+        "chat client closeout must be synthesized after a sealed terminal: {text}"
+    );
+}
+
+#[tokio::test]
+async fn direct_chat_sse_synthesizes_client_done_when_provider_omits_it() {
+    // OpenAI Chat's client protocol terminal is the `data: [DONE]` sentinel.
+    // A chat-wire provider may close after the semantic terminal without ever
+    // emitting it; the committed client stream must still end with the
+    // protocol closeout (parity with the chat relay path).
+    let provider = Box::pin(stream::iter(vec![Ok(
+        br#"data: {"id":"chatcmpl-controlled","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+"#
+        .to_vec(),
+    )]));
+    let frames = collect_direct_sse_attempt_after_terminal(
+        test_direct_sse_attempt_stream(
+            provider,
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        ),
+        crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("provider omitting [DONE] must still seal a valid chat attempt")
+    .collect::<Vec<_>>()
+    .await;
+    let text = String::from_utf8(frames.concat()).unwrap();
+    assert!(
+        text.ends_with("data: [DONE]\n\n"),
+        "chat client stream must end with the protocol [DONE] sentinel: {text}"
+    );
+    assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
 }

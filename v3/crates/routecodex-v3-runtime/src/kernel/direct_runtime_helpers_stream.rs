@@ -63,6 +63,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
         done: bool,
     }
 
+    let provider_wire_protocol = provider_protocol;
     let source = if thinking_tags {
         wrap_v3_direct_responses_thinking_tag_consumer_stream(source)
     } else {
@@ -91,7 +92,16 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
             semantic_state: V3DirectSseSemanticState::new(),
             done: false,
         },
-        |mut state| async move {
+        move |mut state| async move {
+            if let Some(closeout) = state.semantic_state.pending_closeout.take() {
+                return Some((
+                    Ok(V3SseAttemptFrame::new(
+                        closeout,
+                        V3SseFrameDisposition::LegalCloseout,
+                    )),
+                    state,
+                ));
+            }
             if state.done {
                 return None;
             }
@@ -112,43 +122,63 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
                                     V3SseFrameDisposition::SemanticTerminal
                                         | V3SseFrameDisposition::LegalCloseout
                                 );
-                                if terminal_observed {
+                                // The protocol terminal is complete once the
+                                // closeout is consumed: either the collector
+                                // returned a LegalCloseout frame, a chat-wire
+                                // `[DONE]` was already captured in this same
+                                // chunk (done_seen), or the provider protocol
+                                // has no `[DONE]` closeout at all (Responses).
+                                // Otherwise a chat `[DONE]` may still arrive in
+                                // a LATER transport chunk (the provider
+                                // transport frame-splits SSE events), so keep
+                                // reading so that following LegalCloseout is
+                                // collected and delivered to the client as the
+                                // observable protocol terminal.  Only a
+                                // LegalCloseout (or stream end) stops the
+                                // collection loop.
+                                let closeout_complete = terminal_observed
+                                    && (matches!(
+                                        frame.disposition,
+                                        V3SseFrameDisposition::LegalCloseout
+                                    ) || state.semantic_state.done_seen
+                                        || provider_wire_protocol
+                                            == crate::hub_v1::V3HubProviderWireProtocol::Responses);
+                                if closeout_complete {
                                     state.done = true;
-                                    if !state.runtime_timing.is_finished().unwrap_or(false) {
-                                        if let Err(error) =
-                                            state.runtime_timing.finish_external_if_active()
-                                        {
+                                }
+                                if terminal_observed
+                                    && !state.runtime_timing.is_finished().unwrap_or(false)
+                                {
+                                    if let Err(error) =
+                                        state.runtime_timing.finish_external_if_active()
+                                    {
+                                        return Some((
+                                            Err(runtime_source("V3RuntimeTimingExternal", error)),
+                                            state,
+                                        ));
+                                    }
+                                    let timing = match state.runtime_timing.finish_runtime() {
+                                        Ok(timing) => timing,
+                                        Err(error) => {
                                             return Some((
                                                 Err(runtime_source(
-                                                    "V3RuntimeTimingExternal",
+                                                    "V3RuntimeTimingTerminal",
                                                     error,
                                                 )),
                                                 state,
                                             ));
                                         }
-                                        let timing = match state.runtime_timing.finish_runtime() {
-                                            Ok(timing) => timing,
-                                            Err(error) => {
-                                                return Some((
-                                                    Err(runtime_source(
-                                                        "V3RuntimeTimingTerminal",
-                                                        error,
-                                                    )),
-                                                    state,
-                                                ));
-                                            }
-                                        };
-                                        if let Err(error) =
-                                            state.stream_observation.record_timing(timing)
-                                        {
-                                            return Some((
-                                                Err(runtime_source(
-                                                    "V3RuntimeTimingObservation",
-                                                    error,
-                                                )),
-                                                state,
-                                            ));
-                                        }
+                                    };
+                                    if let Err(error) =
+                                        state.stream_observation.record_timing(timing)
+                                    {
+                                        return Some((
+                                            Err(runtime_source(
+                                                "V3RuntimeTimingObservation",
+                                                error,
+                                            )),
+                                            state,
+                                        ));
                                     }
                                 }
                                 return Some((Ok(frame), state));
@@ -221,6 +251,7 @@ pub(crate) fn wrap_direct_sse_provider_event_json_observation_stream_with_compat
 struct V3DirectSseSemanticState {
     done_seen: bool,
     terminal_seen: bool,
+    pending_closeout: Option<Vec<u8>>,
 }
 
 impl V3DirectSseSemanticState {
@@ -228,6 +259,7 @@ impl V3DirectSseSemanticState {
         Self {
             done_seen: false,
             terminal_seen: false,
+            pending_closeout: None,
         }
     }
 }
@@ -249,7 +281,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal(
 
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
     mut stream: V3SseAttemptStream,
-    _provider_protocol: V3HubProviderWireProtocol,
+    provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
     request_id: Option<&str>,
@@ -265,7 +297,16 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         })?;
     let mut terminal_seen = false;
     while let Some(frame) = stream.next().await {
-        let frame = frame?;
+        // The attempt is complete at the protocol terminal.  A provider
+        // transport error or an unterminated tail after the terminal is
+        // post-terminal noise and must seal the already-validated attempt
+        // rather than reopen it (parity with the relay path, which ignores
+        // post-terminal read errors).
+        let frame = match frame {
+            Ok(frame) => frame,
+            Err(_) if terminal_seen => break,
+            Err(error) => return Err(error),
+        };
         let disposition = frame.disposition;
         if terminal_seen && disposition == V3SseFrameDisposition::Continue {
             return Err(build_v3_error_01_source_raised(
@@ -330,6 +371,24 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_memory(
         }
     }
     if terminal_seen {
+        // OpenAI Chat's client protocol terminal is the `data: [DONE]`
+        // sentinel. A chat-wire provider may close after the semantic
+        // terminal without ever emitting it; synthesize the protocol closeout
+        // so the committed client stream still ends with `[DONE]` (parity with
+        // the chat relay path).  A provider-supplied `[DONE]` returns above via
+        // the LegalCloseout branch and never reaches this point.
+        if provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
+            committed
+                .push(b"data: [DONE]\n\n".to_vec())
+                .map_err(|message| {
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ExecutionAttemptPayloadStore",
+                        "direct_sse_attempt_store_rejected",
+                        message.to_string(),
+                    )
+                })?;
+        }
         rewrite_direct_sse_memory(&mut committed, manifest, request_id).map_err(|message| {
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
@@ -627,19 +686,27 @@ fn record_direct_sse_provider_event_json_chunk(
         if semantic_state.terminal_seen {
             if data.trim() == "[DONE]" && !semantic_state.done_seen {
                 semantic_state.done_seen = true;
-                accepted.extend_from_slice(
-                    frame
-                        .frame()
-                        .raw_bytes()
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_else(|| {
-                            build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame)
-                                .into_bytes()
-                        })
-                        .as_slice(),
-                );
-                if disposition == V3SseFrameDisposition::Continue {
-                    disposition = V3SseFrameDisposition::LegalCloseout;
+                let done_bytes = frame
+                    .frame()
+                    .raw_bytes()
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| {
+                        build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame)
+                            .into_bytes()
+                    });
+                if accepted.is_empty() {
+                    // The closeout arrived in its own transport chunk; emit it
+                    // as the protocol terminal frame directly.
+                    accepted.extend_from_slice(&done_bytes);
+                    if disposition == V3SseFrameDisposition::Continue {
+                        disposition = V3SseFrameDisposition::LegalCloseout;
+                    }
+                } else {
+                    // The closeout shared a chunk with the semantic terminal.
+                    // Defer it so the terminal frame keeps its SemanticTerminal
+                    // disposition and the closeout is emitted as a distinct
+                    // LegalCloseout frame next, never merged ambiguously.
+                    semantic_state.pending_closeout = Some(done_bytes);
                 }
             }
             // The terminal frame is the last semantic input owned by this
