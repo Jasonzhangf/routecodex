@@ -32,8 +32,8 @@ rg -n "feature_id: ${rcc_task_feature}" \
 npm run verify:v3-architecture-ci
 ```
 
-9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay.
-10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. Review only after verification; do not repeat an unchanged replay solely for this step.
+9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero `restart` exit or a status that is not `running` is an incomplete step. Run `rccv3 start -c <active-config>`, then re-check `rccv3 status` and listener health before claiming any lifecycle evidence.
+10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
 
 ## Review Gate
 
