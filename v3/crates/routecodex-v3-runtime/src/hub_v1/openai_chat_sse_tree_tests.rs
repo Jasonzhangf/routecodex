@@ -374,6 +374,38 @@ fn chat_reducer_keeps_every_tool_call_emitted_in_one_delta() {
 }
 
 #[test]
+fn chat_reducer_keeps_late_tool_call_id_from_next_delta_after_multi_call_delta() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_late_tool_call_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"function":{"name":"lookup","arguments":"{}"}},
+                {"index":1,"id":"call_2","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_late_tool_call_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}}
+            ]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_1");
+    assert_eq!(calls[1]["id"], "call_2");
+}
+
+#[test]
 fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
     let mut reducer = V3OpenAiChatSseReducerState::default();
     reducer
