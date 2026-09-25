@@ -7,7 +7,7 @@ use provider_compat_core::namespace_tools::{
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Protocol name recognized by the shared namespace-tool flattener for Responses wire
 /// function shape (`{type:"function", name, description?, parameters?, strict?}`).
@@ -757,6 +757,7 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
 }
 
 fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
+    let declared_flat_dotted_names = collect_declared_flat_dotted_tool_names(body);
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
             let kind = item.get("type").and_then(Value::as_str);
@@ -769,7 +770,9 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
             let Some(name) = item.get("name").and_then(Value::as_str) else {
                 continue;
             };
-            if let Some(mapped) = map_known_provider_call_name(name) {
+            if let Some(mapped) =
+                map_known_provider_call_name_unless_declared(name, &declared_flat_dotted_names)
+            {
                 item["name"] = Value::String(mapped);
             }
         }
@@ -784,7 +787,7 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
                     if let Some(function) =
                         tool_call.get_mut("function").and_then(Value::as_object_mut)
                     {
-                        map_call_name_from_convention(function);
+                        map_call_name_from_convention(function, &declared_flat_dotted_names);
                     }
                 }
             }
@@ -797,6 +800,7 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
                         map_call_name_from_convention(
                             part.as_object_mut()
                                 .expect("matched tool call must be an object"),
+                            &declared_flat_dotted_names,
                         );
                     }
                 }
@@ -805,13 +809,54 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
     }
 }
 
-fn map_call_name_from_convention(object: &mut Map<String, Value>) {
+fn collect_declared_flat_dotted_tool_names(body: &Value) -> HashSet<String> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            let object = tool.as_object()?;
+            if object.get("type").and_then(Value::as_str) != Some("function") {
+                return None;
+            }
+            let name = object.get("name").and_then(Value::as_str).or_else(|| {
+                object
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+            })?;
+            if name.contains('.') {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn map_call_name_from_convention(
+    object: &mut Map<String, Value>,
+    declared_flat_dotted_names: &HashSet<String>,
+) {
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return;
     };
-    if let Some(mapped) = map_known_provider_call_name(name) {
+    if let Some(mapped) =
+        map_known_provider_call_name_unless_declared(name, declared_flat_dotted_names)
+    {
         object.insert("name".to_string(), Value::String(mapped));
     }
+}
+
+fn map_known_provider_call_name_unless_declared(
+    name: &str,
+    declared_flat_dotted_names: &HashSet<String>,
+) -> Option<String> {
+    if declared_flat_dotted_names.contains(name) {
+        return None;
+    }
+    map_known_provider_call_name(name)
 }
 
 fn map_known_provider_call_name(name: &str) -> Option<String> {
