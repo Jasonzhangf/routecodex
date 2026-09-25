@@ -151,7 +151,7 @@ protocol can reconstruct it. `unmapped` always returns the canonical Chat path.
 | `text.output_config` | rename to `text` | field-wise conditional projection to `verbosity` / `response_format` | conditional projection only where the semantic matrix declares an exact target field | conditional projection only where the semantic matrix declares an exact target field |
 | `reasoning_effort` | rename to `reasoning.effort` | same | conditional rename to `output_config.effort` | conditional enum-case projection to `thinkingLevel` |
 | `reasoning_budget_tokens` | unmapped | unmapped | conditional rename to `thinking.budget_tokens` | conditional rename to `thinkingBudget` |
-| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | unmapped |
+| `reasoning_summary_policy` | rename to `reasoning.summary` | unmapped | registered static compatibility: `auto`/`concise`/`detailed` all preserve Anthropic native thinking and project its complete text to Responses reasoning summary; no truncation or silent loss | default-safe outbound no-op only for `auto` as no extra constraint / no explicit summary request; non-`auto` remains unmapped; no Gemini summary support is claimed |
 | `reasoning_context_policy` | rename to `reasoning.context` | consumed before wire (source-roundtrip only) | unmapped | unmapped |
 | `reasoning_mode` | rename to `reasoning.mode` | unmapped | unmapped | unmapped |
 | `reasoning_include_thoughts` | unmapped | unmapped | unmapped | rename to `includeThoughts` |
@@ -392,8 +392,12 @@ These are separate semantics and are not mutually reconstructible:
 OpenAI `summary=auto|concise|detailed`, Anthropic
 `display=summarized|omitted`, and Gemini `includeThoughts:boolean` do not share
 the same value domain or continuation behavior. Cross-protocol conversion between
-them is therefore unmapped. In particular, no codec may encode summary, context,
-or mode as a system message or hidden prompt marker.
+them is therefore unmapped, except that Gemini outbound may consume
+`reasoning_summary_policy:"auto"` as default-safe no-op consumption: it does not
+declare Gemini summary support and does not encode a summary request. Non-auto,
+detailed, invalid, or extension summary semantics remain unmapped. In
+particular, no codec may encode summary, context, or mode as a system message or
+hidden prompt marker.
 
 ## Client metadata
 

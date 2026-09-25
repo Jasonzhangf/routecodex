@@ -162,18 +162,36 @@ fn gemini_wire_rejects_invalid_reasoning_summary_policy_as_unmapped() {
 }
 
 #[test]
-fn gemini_wire_rejects_parallel_tool_calls_true_as_unmapped() {
+fn gemini_wire_rejects_whitespace_reasoning_summary_policy_as_unmapped() {
+    let payload = json!({
+        "model": "gemini-test",
+        "contents": [{"role": "user", "parts": [{"text": "think"}]}],
+        "reasoning_summary_policy": " auto "
+    });
+    let error =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
+            .expect_err("Gemini must not trim canonical reasoning_summary_policy values");
+    assert_eq!(
+        error,
+        "UnmappedOutboundFields target_protocol=gemini paths=$.reasoning_summary_policy"
+    );
+}
+
+#[test]
+fn gemini_wire_consumes_parallel_tool_calls_true_as_default_safe() {
     let payload = json!({
         "model": "gemini-test",
         "contents": [{"role": "user", "parts": [{"text": "think"}]}],
         "parallel_tool_calls": true
     });
-    let error =
+    let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini has no exact parallel_tool_calls projection");
-    assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls"
+            .expect(
+            "parallel_tool_calls=true is the permissive default and should not constrain Gemini",
+        );
+    assert!(
+        request.get("parallel_tool_calls").is_none(),
+        "default-safe parallel_tool_calls must not reach Gemini wire: {request}"
     );
 }
 
@@ -327,11 +345,11 @@ fn gemini_wire_preserves_user_owned_routecodex_chat_extension_schema_property() 
     );
 }
 
-// Regression for the live 4444 failure shape: Gemini can consume/project only
-// fields with a declared exact mapping. Other Responses-origin Chat semantics
-// must remain explicit unmapped errors rather than being silently stripped.
+// Regression for the live 4444 failure shape: default-safe Responses-origin
+// fields must be consumed while non-default or constraining semantics remain
+// explicit unmapped errors.
 #[test]
-fn gemini_wire_rejects_unmapped_responses_origin_fields_reported_live() {
+fn gemini_wire_consumes_default_safe_responses_origin_fields_reported_live() {
     let payload = json!({
         "model": "gemini-3.8-flash",
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
@@ -342,13 +360,29 @@ fn gemini_wire_rejects_unmapped_responses_origin_fields_reported_live() {
         "tool_choice": "auto",
         "stream": true
     });
-    let error =
+    let request =
         project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Gemini)
-            .expect_err("Gemini must reject unmapped Responses-origin Chat fields");
+            .expect("Gemini must consume default-safe Responses-origin fields");
     assert_eq!(
-        error,
-        "UnmappedOutboundFields target_protocol=gemini paths=$.parallel_tool_calls,$.reasoning_summary_policy"
+        request.pointer("/generationConfig/thinkingConfig/thinkingLevel"),
+        Some(&json!("MEDIUM"))
     );
+    assert_eq!(
+        request.pointer("/toolConfig/functionCallingConfig/mode"),
+        Some(&json!("AUTO"))
+    );
+    for consumed in [
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "reasoning_summary_policy",
+        "routecodex_chat_extension",
+        "tool_choice",
+    ] {
+        assert!(
+            request.get(consumed).is_none(),
+            "consumed field {consumed} must not reach Gemini wire: {request}"
+        );
+    }
 }
 
 #[test]
