@@ -13,6 +13,7 @@ use routecodex_v3_error::{
     V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
+    adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderHealthStore, V3ProviderKeyHealthProjection,
@@ -27,7 +28,7 @@ use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::provider_action_gate::{
     V3ProviderActionAdmission, V3ProviderActionFailureRecorded, V3ProviderActionGate,

@@ -13,8 +13,8 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
-    V3Transport13ResponsesHttpRequest,
+    adaptive_concurrency::V3AdaptiveConcurrencyController, ResponsesTransport, V3ProviderError,
+    V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{execute_v3_anthropic_relay_runtime, V3AnthropicRelayRuntimeInput};
 use serde_json::{json, Value};
@@ -199,7 +199,8 @@ allowed_transports = ["json", "sse"]
 type = "openai_chat"
 base_url = "http://controlled.invalid/kdns"
 default_model = "gpt-5.5"
-auth = {{ type = "api_key", entries = [{{ alias = "kdns", env = "KDNS_TEST_KEY" }}] }}
+auth = {{ type = "api_key", entries = [{{ alias = "kdns", env = "KDNS_TEST_KEY" }}, {{ alias = "concurrency-test", env = "KDNS_CONCURRENCY_TEST_KEY" }}] }}
+concurrency = {{ max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }}
 
 [providers.kdns.models."gpt-5.5"]
 wire_name = "gpt-5.5"
@@ -212,8 +213,19 @@ base_url = "http://controlled.invalid/corealgos"
 default_model = "claude-fable-5"
 auth = {{ type = "api_key", entries = [{{ alias = "corealgos", env = "COREALGOS_TEST_KEY" }}] }}
 
-[providers.corealgos.models.claude-fable-5]
+[providers.corealgos.models."claude-fable-5"]
 wire_name = "claude-fable-5"
+supports_streaming = true
+capabilities = ["text", "tools"]
+
+[providers.idle]
+type = "openai_chat"
+base_url = "http://controlled.invalid/idle"
+default_model = "gpt-5.5"
+auth = {{ type = "api_key", entries = [{{ alias = "idle", env = "IDLE_TEST_KEY" }}] }}
+
+[providers.idle.models."gpt-5.5"]
+wire_name = "gpt-5.5"
 supports_streaming = true
 capabilities = ["text", "tools"]
 
@@ -277,13 +289,9 @@ async fn anthropic_relay_mixed_openai_chat_pool_is_served_without_abort() {
 
     assert_eq!(output.status, 200);
     assert_eq!(
-        transport.provider_ids(),
-        vec!["kdns".to_string()],
-        "the top-priority openai_chat candidate must service the request"
-    );
-    assert_eq!(
         transport.url().as_deref(),
-        Some("http://controlled.invalid/kdns/chat/completions")
+        Some("http://controlled.invalid/kdns/chat/completions"),
+        "the top-priority openai_chat candidate must service the request"
     );
     assert_eq!(
         output.client_response["content"][0]["text"],
@@ -295,6 +303,39 @@ async fn anthropic_relay_mixed_openai_chat_pool_is_served_without_abort() {
         json!({"input_tokens":7,"output_tokens":3})
     );
     assert_eq!(output.client_response["model"], json!("gpt-5.5"));
+}
+
+#[tokio::test]
+async fn anthropic_relay_busy_provider_concurrency_reselects_before_transport_send() {
+    let server_id = "mixed_pool_concurrency_failover";
+    let manifest = manifest(
+        server_id,
+        r#"  { kind = "provider_model", provider = "kdns", model = "gpt-5.5", key = "concurrency-test", priority = 20 },
+  { kind = "provider_model", provider = "idle", model = "gpt-5.5", key = "idle", priority = 10 },"#,
+    );
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller
+        .ensure_initial_budget("kdns:concurrency-test", 1)
+        .expect("test provider budget must be valid");
+    let held = controller
+        .try_acquire_business("kdns:concurrency-test")
+        .expect("test provider capacity must be saturated before request");
+    let transport = JsonChatCompletionTransport::new();
+
+    let output = execute_v3_anthropic_relay_runtime(
+        &manifest,
+        mixed_pool_input(server_id, "req-anthropic-mixed-pool", false),
+        &transport,
+    )
+    .await;
+    controller
+        .release(held.into_permit())
+        .expect("held test capacity must be released");
+    let output =
+        output.expect("busy provider candidate must be skipped for an idle pool candidate");
+
+    assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(transport.provider_ids(), vec!["idle"]);
 }
 
 #[tokio::test]

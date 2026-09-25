@@ -17,7 +17,7 @@ const cases = [
   ['missing Req06 edge', runtime, '    trace.push("V3HubReqTarget06Resolved");', '', /V3HubReqTarget06Resolved/],
   ['fabricated static trace', runtime, '    let mut trace = Vec::with_capacity(17);', '    const SUCCESS_TRACE: [&str; 0] = [];\n    let mut trace = Vec::with_capacity(17);', /SUCCESS_TRACE/],
   ['transport skipped', runtime, 'transport.send(transport_request),', 'transport.skip(transport_request),', /transport\.send/],
-  ['rescue target resolution skipped', runtime, 'resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await', 'resolve_v3_relay_target_outcome(target_resolution_input)', /resolve_v3_relay_target_outcome_with_rescue/],
+  ['rescue target resolution skipped', runtime, 'resolve_v3_relay_target_outcome_with_admission_rescue(\n                target_resolution_input,', 'resolve_v3_relay_target_outcome(\n                target_resolution_input,', /resolve_v3_relay_target_outcome_with_admission_rescue/],
   ['dynamic hooks', runtime, 'compile_v3_hub_v1_static_registry()', 'std::fs::read_dir(".").unwrap(); compile_v3_hub_v1_static_registry()', /dynamic|read_dir/],
   ['fallback added', runtime, 'let mut trace = Vec::with_capacity(17);', 'let fallback = true; let mut trace = Vec::with_capacity(17);', /fallback/],
   ['P6 extension', runtime, 'let mut trace = Vec::with_capacity(17);', 'let _ = "ResponsesDirect11Policy"; let mut trace = Vec::with_capacity(17);', /ResponsesDirect/],

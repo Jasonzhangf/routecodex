@@ -534,14 +534,24 @@ forbidMatch(
   /execute_local_web_search_hop|build_v3_provider_12_responses_wire_payload/u,
   "Web-search state machine must not reconstruct a provider request",
 );
+const anthropicRequestDryRun = extractBracedBlock(
+  source.anthropic,
+  "pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers",
+  "Anthropic request dry-run",
+);
+requireMatch(
+  anthropicRequestDryRun,
+  /execute_v3_anthropic_relay_runtime_inner\([\s\S]*V3RelayProviderFailureRetryPolicy::from_manifest\(manifest\),\s*false,/u,
+  "Anthropic request dry-run must pass the rescue-probe-disabled gate",
+);
 requireMatch(
   source.anthropic,
-  /execute_v3_anthropic_relay_runtime_inner\([\s\S]*V3RelayProviderFailureRetryPolicy::from_manifest\(manifest\),[\s\S]*false,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  /async fn execute_v3_anthropic_relay_runtime_inner[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Anthropic dry-run must disable provider rescue probes before target resolution",
 );
 requireMatch(
   source.relayCore,
-  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*if allow_exhaustion_rescue_probe[\s\S]*resolve_v3_relay_target_outcome_with_rescue[\s\S]*else[\s\S]*resolve_v3_relay_target_outcome/u,
+  /provider_header_overrides:\s*Vec<V3ProviderRequestHeader>,[\s\S]*allow_exhaustion_rescue_probe:\s*bool[\s\S]*resolve_v3_relay_target_outcome_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Generic relay core must require an explicit provider rescue-probe mode",
 );
 requireMatch(
@@ -556,7 +566,7 @@ requireMatch(
 );
 requireMatch(
   `${source.kernel}\n${source.v3DirectCore}`,
-  /select_v3_expanded_target_with_exhaustion_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
+  /select_v3_expanded_target_with_admission_rescue\([\s\S]*allow_exhaustion_rescue_probe/u,
   "Every direct kernel must pass the explicit rescue-probe gate to the shared owner",
 );
 requireMatch(
@@ -576,7 +586,7 @@ forbidMatch(
 );
 requireMatch(
   source.kernel,
-  /select_v3_expanded_target_with_exhaustion_rescue/u,
+  /select_v3_expanded_target_with_admission_rescue/u,
   "Direct provider selection must consume the shared exhaustion rescue owner",
 );
 const directSseMarker = "pub(crate) async fn project_and_collect_direct_sse_attempt";

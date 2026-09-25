@@ -551,7 +551,7 @@ function requireOrderedSequence(text, owner, phrases) {
 function requireRelayRuntimeUsesSharedProviderFailurePolicy(text, owner, entryKind) {
   for (const phrase of [
     'run_v3_relay_provider_failure_policy(',
-    'resolve_v3_relay_target_outcome_with_rescue(',
+    'resolve_v3_relay_target_outcome_with_admission_rescue(',
     'V3RelayProviderFailurePolicyContext',
     'V3RelayProviderFailurePolicyState',
     'V3Error05ExecutionAction::WaitThenReselect',

@@ -319,6 +319,16 @@ const cases = [
     diagnostic: /Web-search state machine must bind execution to the typed hooks-sidecar owner/u,
   },
   {
+    name: "Anthropic request dry-run enables provider rescue probe",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+    mutate: (source) =>
+      source.replace(
+        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        false,\n    )",
+        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        true,\n    )",
+      ),
+    diagnostic: /Anthropic request dry-run must pass the rescue-probe-disabled gate/u,
+  },
+  {
     name: "Shared rescue owner ignores dry-run gate",
     path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
     mutate: (source) =>
