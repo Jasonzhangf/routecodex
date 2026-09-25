@@ -1281,6 +1281,8 @@ pub(crate) fn resolve_v3_console_project_path_with_metadata(
     payload: &Value,
     turn_metadata: Option<&Value>,
 ) -> Option<String> {
+    let header_turn_metadata_text = read_v3_header_codex_turn_metadata_text(headers);
+    let body_turn_metadata_text = read_v3_body_codex_turn_metadata_text(payload);
     first_header_text(
         headers,
         &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
@@ -1290,6 +1292,8 @@ pub(crate) fn resolve_v3_console_project_path_with_metadata(
     .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
     .or_else(|| read_v3_environment_context_cwd_from_payload(payload))
+    .or_else(|| read_v3_turn_metadata_workspaces_root_text(header_turn_metadata_text.as_deref()?))
+    .or_else(|| read_v3_turn_metadata_workspaces_root_text(body_turn_metadata_text.as_deref()?))
     .or_else(|| console::read_injected_workspace_cwd_from_payload(payload))
 }
 
