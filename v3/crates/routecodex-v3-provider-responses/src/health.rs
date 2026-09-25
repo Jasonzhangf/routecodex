@@ -1080,9 +1080,7 @@ impl V3ProviderHealthStore {
                 }
                 persist_cooldown_state(state);
                 self.publish_availability_change();
-                return Err(V3ProviderHealthError::Poisoned(format!(
-                    "stale provider health probe generation: expected {expected_generation}, current {current_generation}"
-                )));
+                return Ok(());
             }
         }
         let next_probe_failure_count = existing_probe.probe_failure_count.saturating_add(1);
@@ -2128,9 +2126,7 @@ fn complete_provider_probe_success_at_generation(
                 probe_state.probe_in_flight = false;
                 probe_state.completion.send_replace(true);
             }
-            return Err(format!(
-                "stale provider key health probe generation: expected {expected_generation}, current {current_generation}"
-            ));
+            return Ok(());
         }
     }
 

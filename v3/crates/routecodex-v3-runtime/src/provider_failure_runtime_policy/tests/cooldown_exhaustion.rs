@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, oneshot, Notify};
 
 fn all_candidate_keys(expanded: &V3Target09CandidateSetExpanded) -> BTreeSet<String> {
     expanded
@@ -101,6 +101,53 @@ async fn serve_one_responses_probe(listener: TcpListener) {
         .write_all(response.as_bytes())
         .await
         .expect("provider probe response must be writable");
+}
+
+async fn serve_two_gated_responses_probes(
+    listener: TcpListener,
+    arrivals: mpsc::UnboundedSender<()>,
+    release: oneshot::Receiver<()>,
+) {
+    let mut sockets = Vec::with_capacity(2);
+    for _ in 0..2 {
+        let (mut socket, _) = listener
+            .accept()
+            .await
+            .expect("provider probe listener must accept both requests");
+        let mut request = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            let read = tokio::time::timeout(Duration::from_secs(1), socket.read(&mut chunk))
+                .await
+                .expect("provider probe request headers must arrive")
+                .expect("provider probe request must be readable");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        arrivals
+            .send(())
+            .expect("probe test must observe both requests");
+        sockets.push(socket);
+    }
+    release
+        .await
+        .expect("test must release both provider probes");
+    let body = r#"{"status":"completed"}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    for mut socket in sockets {
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("provider probe response must be writable");
+    }
 }
 
 #[test]
@@ -213,6 +260,119 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
         .await
         .expect("fresh cooldown exhaustion must run a rescue probe")
         .expect("provider probe task must not panic");
+}
+
+#[tokio::test]
+async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provider() {
+    let server_id = "stale_rescue_probe_completion";
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("provider probe listener must bind");
+    let base_url = format!(
+        "http://{}/v1",
+        listener
+            .local_addr()
+            .expect("provider probe listener address")
+    );
+    let mut manifest = global_pool_alive_manifest(server_id);
+    for provider_id in ["first", "second"] {
+        let provider = manifest
+            .providers
+            .get_mut(provider_id)
+            .expect("configured provider");
+        provider.base_url = base_url.clone();
+        provider.auth.entries[0].env = Some("ROUTECODEX_V3_STALE_RESCUE_PROBE_KEY".into());
+    }
+    std::env::set_var(
+        "ROUTECODEX_V3_STALE_RESCUE_PROBE_KEY",
+        "routecodex-test-key",
+    );
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, "stale-rescue-session")
+            .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+    let stale_candidate = expanded.candidates[0].clone();
+    let (arrivals_tx, mut arrivals_rx) = mpsc::unbounded_channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let probe_server = tokio::spawn(serve_two_gated_responses_probes(
+        listener,
+        arrivals_tx,
+        release_rx,
+    ));
+    let selection_manifest = manifest.clone();
+    let selection_expanded = expanded.clone();
+    let selection_scope = failure_session_scope.clone();
+    let selection_health = health.clone();
+    let selection = tokio::spawn(async move {
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &selection_manifest,
+            selection_expanded,
+            &selection_scope,
+            &selection_health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        )
+        .await
+    });
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(2), arrivals_rx.recv())
+            .await
+            .expect("both provider rescue probes must start")
+            .expect("probe arrival channel must stay open");
+    }
+
+    health
+        .store
+        .record_provider_failure_action(
+            &stale_candidate.provider_id,
+            &stale_candidate.auth_alias,
+            &stale_candidate.model_id,
+            &V3ProviderFailureAction::recoverable("transport"),
+            20_002,
+        )
+        .expect("newer provider failure must advance health generation");
+    release_tx
+        .send(())
+        .expect("both probes must be released after the generation advances");
+
+    let selection = tokio::time::timeout(Duration::from_secs(2), selection)
+        .await
+        .expect("stale probe completion must not hold target reselection")
+        .expect("selection task must not panic");
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(selected) => assert_ne!(
+            selected.candidate.provider_id, stale_candidate.provider_id,
+            "newer failure must keep the stale-probe provider excluded and select the next provider"
+        ),
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            panic!("stale rescue probe must not fail target reselection: {source:?}")
+        }
+        V3TargetSelectionAfterRescue::Exhausted(_) => {
+            panic!("successful next-provider probe must prevent pool exhaustion")
+        }
+    }
+    tokio::time::timeout(Duration::from_secs(1), probe_server)
+        .await
+        .expect("both rescue probes must finish")
+        .expect("provider probe server must not panic");
 }
 
 #[tokio::test]
