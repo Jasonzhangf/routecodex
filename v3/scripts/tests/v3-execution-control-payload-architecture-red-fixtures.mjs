@@ -254,7 +254,7 @@ const cases = [
   {
     name: 'Anthropic provider send skips request attempt admission',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
-    marker: '        attempt_budget.admit_transport_attempt().map_err(|error| {\n            V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())\n        })?;\n',
+    marker: '        if let Err(error) = attempt_budget.admit_transport_attempt() {\n            drop(_provider_action_permit.take());\n            return Ok(project_v3_anthropic_relay_runtime_failure_with_trace(\n                V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string()),\n                trace,\n            ));\n        }\n',
     replacement: '',
     diagnostic: /Anthropic provider send must consume the request transport-attempt budget/u,
   },

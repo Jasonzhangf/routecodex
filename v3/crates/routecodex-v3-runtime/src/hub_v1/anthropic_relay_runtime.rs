@@ -182,6 +182,7 @@ pub async fn execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
     )
     .await
     {
@@ -268,6 +269,7 @@ pub async fn execute_v3_anthropic_relay_response_dry_run_runtime(
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         false,
+        None,
     )
     .await
     {
@@ -376,6 +378,7 @@ pub async fn execute_v3_anthropic_relay_runtime_with_client_headers_provider_hea
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
+        None,
     )
     .await
 }
@@ -400,6 +403,7 @@ where
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         true,
+        None,
     )
     .await
 }
@@ -413,12 +417,15 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     allow_exhaustion_rescue_probe: bool,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
 ) -> Result<V3AnthropicRelayRuntimeOutput, V3AnthropicRelayRuntimeError> {
-    let request_execution_control =
-        crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+    let request_execution_control = match initial_request_execution_control {
+        Some(control) => control,
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
             .map_err(|error| {
                 V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
-            })?;
+            })?,
+    };
     let attempt_budget = request_execution_control.attempt_budget();
     response_hook_profile =
         response_hook_profile.with_toolreason_observation_request_id(input.request_id.clone());
@@ -732,9 +739,13 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
-        attempt_budget.admit_transport_attempt().map_err(|error| {
-            V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
-        })?;
+        if let Err(error) = attempt_budget.admit_transport_attempt() {
+            drop(_provider_action_permit.take());
+            return Ok(project_v3_anthropic_relay_runtime_failure_with_trace(
+                V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string()),
+                trace,
+            ));
+        }
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
