@@ -1683,6 +1683,7 @@ type = "{provider_type}"
 base_url = "http://controlled.invalid/v1beta"
 default_model = "gemini-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI_CONTROLLED_KEY" }}] }}
+concurrency = {{ max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }}
 [providers.controlled.models.gemini-wire]
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]

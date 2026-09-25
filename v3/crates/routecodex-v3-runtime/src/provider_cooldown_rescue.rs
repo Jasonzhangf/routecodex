@@ -4,6 +4,195 @@ pub(crate) enum V3TargetSelectionAfterRescue {
     Failed(routecodex_v3_error::V3Error01SourceRaised),
 }
 
+pub(crate) struct V3AdmittedTargetSelection {
+    pub(crate) selected: V3Target10ConcreteProviderSelected,
+    pub(crate) admission: V3RuntimeProviderAdmission,
+}
+
+pub(crate) struct V3RuntimeProviderAdmission {
+    controller: V3AdaptiveConcurrencyController,
+    lease: Option<V3AdaptiveConcurrencyLease>,
+}
+
+impl V3RuntimeProviderAdmission {
+    fn new(controller: V3AdaptiveConcurrencyController, lease: V3AdaptiveConcurrencyLease) -> Self {
+        Self {
+            controller,
+            lease: Some(lease),
+        }
+    }
+
+    pub(crate) fn into_lease(mut self) -> V3AdaptiveConcurrencyLease {
+        self.lease
+            .take()
+            .expect("runtime provider admission lease must be present")
+    }
+}
+
+impl Drop for V3RuntimeProviderAdmission {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            self.controller
+                .release(lease.into_permit())
+                .expect("runtime provider admission release must never underflow");
+        }
+    }
+}
+
+pub(crate) enum V3AdmittedTargetSelectionAfterRescue {
+    Selected(V3AdmittedTargetSelection),
+    Exhausted(V3TargetExhaustion),
+    Failed(routecodex_v3_error::V3Error01SourceRaised),
+}
+
+pub(crate) enum V3RelayProviderAdmittedTargetResolution {
+    Selected(V3AdmittedTargetSelection),
+    Exhausted { attempted_candidates: Vec<String> },
+    Failed(routecodex_v3_error::V3Error01SourceRaised),
+}
+
+fn v3_provider_concurrency_key(candidate: &V3TargetCandidate) -> String {
+    format!("{}:{}", candidate.provider_id, candidate.auth_alias)
+}
+
+pub(crate) fn try_admit_v3_selected_target(
+    selected: &V3Target10ConcreteProviderSelected,
+) -> Result<Option<V3RuntimeProviderAdmission>, String> {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let capacity_key = v3_provider_concurrency_key(&selected.candidate);
+    controller.ensure_initial_budget(
+        &capacity_key,
+        selected.candidate.initial_concurrency_budget,
+    )?;
+    Ok(controller.try_acquire_business(&capacity_key).map(|lease| {
+        V3RuntimeProviderAdmission::new(controller, lease)
+    }))
+}
+
+fn v3_provider_busy_target_exhaustion(
+    expanded: &V3Target09CandidateSetExpanded,
+    busy_candidates: &BTreeSet<String>,
+) -> V3TargetExhaustion {
+    V3TargetExhaustion {
+        route: Box::new(expanded.route.clone()),
+        attempted_candidates: expanded
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                let key = v3_relay_provider_candidate_key(candidate);
+                busy_candidates.contains(&key).then(|| {
+                    format!(
+                        "{}:{}:{}:concurrency_busy",
+                        candidate.provider_id, candidate.auth_alias, candidate.model_id
+                    )
+                })
+            })
+            .collect(),
+    }
+}
+
+pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
+    manifest: &V3Config05ManifestPublished,
+    expanded: V3Target09CandidateSetExpanded,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+    deterministic_sample: u64,
+    allow_exhaustion_rescue_probe: bool,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+    reselect_busy_candidate: bool,
+) -> V3AdmittedTargetSelectionAfterRescue {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let mut busy_candidates = BTreeSet::<String>::new();
+    let mut busy_selected_candidates =
+        BTreeMap::<String, (V3Target10ConcreteProviderSelected, String)>::new();
+    let mut preferred_selected = preferred_selected;
+    loop {
+        let mut exclusions = request_local_excluded_candidates.clone();
+        exclusions.extend(busy_candidates.iter().cloned());
+        let selection = match preferred_selected.take() {
+            Some(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+            None => {
+                select_v3_expanded_target_with_exhaustion_rescue(
+                    manifest,
+                    expanded.clone(),
+                    failure_session_scope,
+                    provider_health,
+                    &exclusions,
+                    now_ms,
+                    deterministic_sample,
+                    allow_exhaustion_rescue_probe,
+                )
+                .await
+            }
+        };
+        match selection {
+            V3TargetSelectionAfterRescue::Selected(selected) => {
+                let capacity_key = v3_provider_concurrency_key(&selected.candidate);
+                if let Err(reason) = controller.ensure_initial_budget(
+                    &capacity_key,
+                    selected.candidate.initial_concurrency_budget,
+                ) {
+                    return V3AdmittedTargetSelectionAfterRescue::Failed(
+                        build_v3_error_01_source_raised(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3Target10ConcreteProviderSelected",
+                            "provider_concurrency_admission_invalid_budget",
+                            reason,
+                        ),
+                    );
+                }
+                if let Some(admission) = controller.try_acquire_business(&capacity_key) {
+                    return V3AdmittedTargetSelectionAfterRescue::Selected(
+                        V3AdmittedTargetSelection {
+                            selected,
+                            admission: V3RuntimeProviderAdmission::new(
+                                controller.clone(),
+                                admission,
+                            ),
+                        },
+                    );
+                }
+                let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
+                busy_selected_candidates.insert(candidate_key.clone(), (selected, capacity_key));
+                busy_candidates.insert(candidate_key);
+                if !reselect_busy_candidate {
+                    return V3AdmittedTargetSelectionAfterRescue::Exhausted(
+                        v3_provider_busy_target_exhaustion(&expanded, &busy_candidates),
+                    );
+                }
+            }
+            V3TargetSelectionAfterRescue::Failed(source) => {
+                return V3AdmittedTargetSelectionAfterRescue::Failed(source);
+            }
+            V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
+                if busy_candidates.is_empty() {
+                    return V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted);
+                }
+                for (_candidate_key, (selected, capacity_key)) in &busy_selected_candidates {
+                    if let Some(admission) =
+                        controller.try_acquire_scheduled_probe(capacity_key, now_ms)
+                    {
+                        return V3AdmittedTargetSelectionAfterRescue::Selected(
+                            V3AdmittedTargetSelection {
+                                selected: selected.clone(),
+                                admission: V3RuntimeProviderAdmission::new(
+                                    controller.clone(),
+                                    admission,
+                                ),
+                            },
+                        );
+                    }
+                }
+                return V3AdmittedTargetSelectionAfterRescue::Exhausted(
+                    v3_provider_busy_target_exhaustion(&expanded, &busy_candidates),
+                );
+            }
+        }
+    }
+}
+
 impl V3ProviderFailureRuntimeHealth {
     async fn run_cooldown_rescue_probes_for_candidates(
         &self,
@@ -132,14 +321,28 @@ impl V3ProviderFailureRuntimeHealth {
     }
 }
 
-pub(crate) async fn resolve_v3_relay_target_outcome_with_rescue(
+pub(crate) async fn resolve_v3_relay_target_outcome_with_admission_rescue(
     input: V3RelayProviderTargetResolutionInput<'_>,
-) -> V3RelayProviderTargetResolution {
+    allow_exhaustion_rescue_probe: bool,
+    preferred_selected: Option<V3Target10ConcreteProviderSelected>,
+) -> V3RelayProviderAdmittedTargetResolution {
     let expanded = match build_v3_relay_target_candidates(&input) {
         Ok(expanded) => expanded,
-        Err(resolution) => return resolution,
+        Err(V3RelayProviderTargetResolution::Selected(_)) => {
+            unreachable!("target candidate expansion cannot return a selected target")
+        }
+        Err(V3RelayProviderTargetResolution::Exhausted {
+            attempted_candidates,
+        }) => {
+            return V3RelayProviderAdmittedTargetResolution::Exhausted {
+                attempted_candidates,
+            }
+        }
+        Err(V3RelayProviderTargetResolution::Failed(source)) => {
+            return V3RelayProviderAdmittedTargetResolution::Failed(source)
+        }
     };
-    match select_v3_expanded_target_with_exhaustion_rescue(
+    match select_v3_expanded_target_with_admission_rescue(
         input.manifest,
         expanded,
         input.failure_session_scope,
@@ -147,20 +350,22 @@ pub(crate) async fn resolve_v3_relay_target_outcome_with_rescue(
         input.request_local_excluded_candidates,
         input.now_ms,
         input.deterministic_sample,
+        allow_exhaustion_rescue_probe,
+        preferred_selected,
         true,
     )
     .await
     {
-        V3TargetSelectionAfterRescue::Selected(selected) => {
-            V3RelayProviderTargetResolution::Selected(selected)
+        V3AdmittedTargetSelectionAfterRescue::Selected(selected) => {
+            V3RelayProviderAdmittedTargetResolution::Selected(selected)
         }
-        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
-            V3RelayProviderTargetResolution::Exhausted {
+        V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3RelayProviderAdmittedTargetResolution::Exhausted {
                 attempted_candidates: exhausted.attempted_candidates,
             }
         }
-        V3TargetSelectionAfterRescue::Failed(source) => {
-            V3RelayProviderTargetResolution::Failed(source)
+        V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+            V3RelayProviderAdmittedTargetResolution::Failed(source)
         }
     }
 }
@@ -271,11 +476,7 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
             };
             if allow_exhaustion_rescue_probe && !rescue_candidates.is_empty() {
                 if let Err(error) = provider_health
-                    .run_cooldown_rescue_probes_for_candidates(
-                        manifest,
-                        &rescue_candidates,
-                        now_ms,
-                    )
+                    .run_cooldown_rescue_probes_for_candidates(manifest, &rescue_candidates, now_ms)
                     .await
                 {
                     return V3TargetSelectionAfterRescue::Failed(target_resolution_source(
@@ -451,28 +652,27 @@ fn v3_exhaustion_is_cooldown_only(
     let Some(first) = nonfailed_candidates.next() else {
         return false;
     };
-    std::iter::once(first).chain(nonfailed_candidates).all(|candidate| {
-        let projection = availability.availability(
-            &candidate.provider_id,
-            Some(&candidate.auth_alias),
-            Some(&candidate.model_id),
-            now_ms,
-        );
-        v3_availability_is_cooldown_recovery_only(&projection)
-    })
+    std::iter::once(first)
+        .chain(nonfailed_candidates)
+        .all(|candidate| {
+            let projection = availability.availability(
+                &candidate.provider_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                now_ms,
+            );
+            v3_availability_is_cooldown_recovery_only(&projection)
+        })
 }
 
 fn v3_availability_is_cooldown_recovery_only(
     projection: &V3ProviderAvailabilityProjection,
 ) -> bool {
     !projection.available
-        && projection
-            .blocked_scopes
-            .iter()
-            .all(|scope| {
-                scope == "provider_cooldown_probe_pending"
-                    || scope.starts_with(&format!("auth_key:{}:", projection.provider_id))
-            })
+        && projection.blocked_scopes.iter().all(|scope| {
+            scope == "provider_cooldown_probe_pending"
+                || scope.starts_with(&format!("auth_key:{}:", projection.provider_id))
+        })
         && projection
             .blocked_scopes
             .iter()

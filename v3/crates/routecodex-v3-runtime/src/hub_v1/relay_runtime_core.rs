@@ -14,11 +14,11 @@ use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome, resolve_v3_relay_target_outcome_with_rescue,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
+    resolve_v3_relay_target_outcome_with_admission_rescue, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderAdmittedTargetResolution, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
+    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
@@ -633,9 +633,11 @@ where
         deterministic_sample,
     };
     loop {
-        let selected = if let Some(selected) = retry_selected.take() {
-            selected
-        } else {
+        let preferred_selected = retry_selected.take();
+        let (selected, mut selected_admission): (
+            routecodex_v3_target::V3Target10ConcreteProviderSelected,
+            Option<V3RuntimeProviderAdmission>,
+        ) = {
             let target_resolution_input = V3RelayProviderTargetResolutionInput {
                 manifest,
                 server_id,
@@ -649,25 +651,28 @@ where
                     .map_err(V3RelayCoreError::Target)?,
                 deterministic_sample,
             };
-            let target_resolution = if allow_exhaustion_rescue_probe {
-                resolve_v3_relay_target_outcome_with_rescue(target_resolution_input).await
-            } else {
-                resolve_v3_relay_target_outcome(target_resolution_input)
-            };
+            let target_resolution = resolve_v3_relay_target_outcome_with_admission_rescue(
+                target_resolution_input,
+                allow_exhaustion_rescue_probe,
+                preferred_selected,
+            )
+            .await;
             match target_resolution {
-                V3RelayProviderTargetResolution::Selected(selected) => selected,
-                V3RelayProviderTargetResolution::Failed(source)
+                V3RelayProviderAdmittedTargetResolution::Selected(selected) => {
+                    (selected.selected, Some(selected.admission))
+                }
+                V3RelayProviderAdmittedTargetResolution::Failed(source)
                     if source.source_kind == V3ErrorSourceKind::ModelNotFound =>
                 {
                     return Err(V3RelayCoreError::ModelNotFound(source.message.clone()));
                 }
-                V3RelayProviderTargetResolution::Failed(source) => {
+                V3RelayProviderAdmittedTargetResolution::Failed(source) => {
                     return Err(V3RelayCoreError::Target(format!(
                         "{}: {}",
                         source.code, source.message
                     )));
                 }
-                V3RelayProviderTargetResolution::Exhausted {
+                V3RelayProviderAdmittedTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
                     return Err(V3RelayCoreError::ProviderPoolExhausted {
@@ -806,6 +811,9 @@ where
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
         let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
+        if pending_provider_action_recovery.is_some() {
+            drop(selected_admission.take());
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -852,6 +860,12 @@ where
         if let Err(timing_error) = runtime_timing.start_external() {
             return Err(V3RelayCoreError::Target(timing_error));
         }
+        let transport_request = match selected_admission.take() {
+            Some(admission) => {
+                transport_request.with_pre_acquired_admission(admission.into_lease())
+            }
+            None => transport_request,
+        };
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
         let attempt_deadline = tokio::time::Instant::now() + attempt_timeout;

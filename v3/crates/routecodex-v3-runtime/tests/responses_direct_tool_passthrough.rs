@@ -237,6 +237,7 @@ type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "m"
 auth = { type = "api_key", entries = [{ alias = "a", env = "TEST_KEY" }] }
+concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 responses = { process = "direct", streaming = "always", transport = "http" }
 [providers.p.models.m]
 wire_name = "wire-m"
