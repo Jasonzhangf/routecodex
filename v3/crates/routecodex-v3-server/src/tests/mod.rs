@@ -1301,6 +1301,46 @@ fn console_project_path_reads_codex_environment_context_cwd() {
 }
 
 #[test]
+fn console_project_path_reads_client_metadata_turn_metadata_workspaces() {
+    // dsh/codex responses payloads place turn metadata in the body under
+    // client_metadata.x-codex-turn-metadata (JSON string) with a workspaces
+    // map keyed by project root. When the request has no HTTP
+    // x-codex-turn-metadata and no inline cwd/input environment_context, the
+    // console project path must still resolve from the first workspaces key.
+    let payload = json!({
+        "model": "gpt-5.5",
+        "client_metadata": {
+            "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code/dsh\":{\"associated_remote_urls\":{\"origin\":\"https://github.com/Jasonzhangf/dsh.git\"}}}}"
+        }
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/Volumes/extension/code/dsh")
+    );
+}
+
+#[test]
+fn console_project_path_uses_first_workspaces_key_in_source_order() {
+    // serde_json::Map is a BTreeMap without preserve_order, so naive
+    // .keys().next() would return the lexicographically first key. The
+    // console project path must honor the workspaces map's source order.
+    let payload = json!({
+        "model": "gpt-5.5",
+        "client_metadata": {
+            "x-codex-turn-metadata": "{\"workspaces\":{\"zebra-root\":{\"associated_remote_urls\":{}},\"alpha-root\":{\"associated_remote_urls\":{}}}}"
+        }
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("zebra-root")
+    );
+}
+
+#[test]
 fn console_project_path_reads_injected_workspace_cwd_from_chat_system() {
     let payload = json!({
         "model": "deepseek-v4-flash",
