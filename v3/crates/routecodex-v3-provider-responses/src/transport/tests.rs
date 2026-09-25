@@ -544,6 +544,82 @@ async fn responses_http_transport_times_out_on_stalled_read_instead_of_waiting_f
     }
 }
 
+#[tokio::test]
+async fn responses_http_transport_uses_sse_first_frame_timeout_for_header_wait() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..n]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let body = "data: {\"type\":\"response.output_text.done\"}\n\n";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let mut request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-sse-header-wait",
+            "kdns-test",
+            format!("http://{addr}/v1/chat/completions"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-header-wait".into()),
+            },
+            V3ResponsesStreamIntent::Sse,
+            json!({"model":"deepseek-v4.1-flash","stream":true}),
+            Vec::new(),
+            Some(Duration::from_secs(5)),
+            60_000,
+        )
+        .unwrap();
+    if let V3Transport13ResponsesRequestKind::Http {
+        sse_first_frame_timeout_ms,
+        ..
+    } = &mut request.kind
+    {
+        *sse_first_frame_timeout_ms = Some(50);
+    }
+
+    let started = tokio::time::Instant::now();
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("SSE header wait must honor configured first-frame timeout");
+    server.abort();
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "SSE header wait should fail quickly"
+    );
+    match error {
+        V3ProviderError::Transport { reason, .. } => {
+            assert!(
+                reason.contains("SSE first-frame"),
+                "expected SSE first-frame timeout reason, got {reason}"
+            );
+        }
+        other => panic!("expected transport timeout, got {other:?}"),
+    }
+}
+
 async fn spawn_http_error_response(
     status: u16,
     headers: &[(&str, &str)],

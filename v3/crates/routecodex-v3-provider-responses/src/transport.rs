@@ -3,7 +3,9 @@ use crate::adaptive_concurrency::{
     V3AdaptiveConcurrencyProbeResult,
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
-use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
+use crate::shared::{
+    collect_response_headers, content_type, send_http_await, validated_sse_stream,
+};
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
 use crate::transport_admission::{
     provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
@@ -1089,22 +1091,17 @@ impl ProviderResponsesTransport {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
         }
         let send = request.json(&body).send();
-        let response = match cancellation.clone() {
-            Some(cancellation) => {
-                tokio::select! {
-                    _ = cancellation.cancelled() => {
-                        return Err(V3ProviderError::ClientDisconnect { request_id, provider_id });
-                    }
-                    response = send => response,
-                }
-            }
-            None => send.await,
-        }
-        .map_err(|error| V3ProviderError::Transport {
-            request_id: request_id.clone(),
-            provider_id: provider_id.clone(),
-            reason: error.to_string(),
-        })?;
+        let response = send_http_await(
+            request_id.clone(),
+            provider_id.clone(),
+            send,
+            cancellation.clone(),
+            match stream_intent {
+                V3ResponsesStreamIntent::Sse => sse_first_frame_timeout_ms,
+                V3ResponsesStreamIntent::Json => None,
+            },
+        )
+        .await?;
         let status = response.status().as_u16();
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());
