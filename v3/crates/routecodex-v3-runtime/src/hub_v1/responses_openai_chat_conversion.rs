@@ -446,16 +446,33 @@ fn parse_v3_openai_chat_custom_tool_input(
     name: &str,
     arguments: &str,
 ) -> Result<String, V3ResponsesRelayRuntimeError> {
-    let parsed = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-    parsed
-        .get("input")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat custom tool {name} function arguments must contain string input"
-            ))
-        })
+    // Provider may not honor the `{"input":"..."}` Chat-freeform schema and may
+    // return the raw free-form text directly. For a governed custom tool the
+    // client contract is a raw string, so accept either shape explicitly.
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("OpenAI Chat custom tool {name} function arguments must not be empty"),
+        ));
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(parsed)) => parsed
+            .get("input")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "OpenAI Chat custom tool {name} function arguments must contain string input"
+                ))
+            }),
+        Ok(Value::String(value)) => Ok(value),
+        Ok(_) => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!(
+                "OpenAI Chat custom tool {name} function arguments must be an object or string"
+            ),
+        )),
+        Err(_) => Ok(trimmed.to_string()),
+    }
 }
 
 pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
