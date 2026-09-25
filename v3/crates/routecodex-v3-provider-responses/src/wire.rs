@@ -834,7 +834,9 @@ fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {
         return None;
     }
     match namespace {
-        "servertool" | "mcp" | "native" | "multi_agent_v1" => Some(format!("{namespace}__{child}")),
+        "functions" | "servertool" | "mcp" | "native" | "multi_agent_v1" => {
+            Some(format!("{namespace}__{child}"))
+        }
         _ => None,
     }
 }

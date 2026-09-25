@@ -22,9 +22,35 @@ fn openai_chat_namespace_custom_tool_response_restores_client_name() {
     )
     .expect("namespace custom declaration must reverse the provider function call");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "functions.exec");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "exec");
     assert_eq!(response["output"][0]["input"], "pwd");
     assert_eq!(response["output"][0]["call_id"], "call_namespace_exec");
+}
+
+#[test]
+fn openai_chat_nested_namespace_custom_tool_restores_client_identity() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_nested_exec",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_nested_exec",
+                "type":"function",
+                "function":{"name":"functions__inner__exec","arguments":"{\"input\":\"pwd\"}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"namespace","name":"inner","tools":[
+                {"type":"custom","name":"exec","format":{"type":"text"}}
+            ]}
+        ]}]}),
+    )
+    .expect("nested custom declaration must reverse the provider function call");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["namespace"], "functions.inner");
+    assert_eq!(response["output"][0]["name"], "exec");
+    assert_eq!(response["output"][0]["input"], "pwd");
+    assert_eq!(response["output"][0]["call_id"], "call_nested_exec");
 }
 
 #[test]
@@ -47,7 +73,8 @@ fn openai_chat_namespace_custom_tool_accepts_raw_freeform_arguments() {
     )
     .expect("raw free-form custom arguments must project to custom_tool_call");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
-    assert_eq!(response["output"][0]["name"], "functions.apply_patch");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
         response["output"][0]["input"],
         "*** Begin Patch\n*** Update File: /tmp/x\n+ hi\n*** End Patch"
