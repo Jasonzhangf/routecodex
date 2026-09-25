@@ -29,7 +29,7 @@ fn probe_sse_fixture(
     V3ProviderTransportAttemptKey,
 ) {
     let provider_key = "probe-sse-provider:key1";
-    let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+    let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
     let held = controller.try_acquire(provider_key, 0).unwrap();
     controller.observe_rate_limit(provider_key, 0).unwrap();
     let probe = controller
@@ -250,15 +250,16 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
 async fn saturated_provider_admission_returns_typed_transport_failure() {
     let provider_key = "admission-timeout-provider:key1";
     let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 1).unwrap();
-    let held = controller.acquire(provider_key, 0).await;
-    let probe = controller.acquire(provider_key, 0).await;
-    assert!(probe.is_probe());
+    controller.ensure_initial_budget(provider_key, 2).unwrap();
+    let first = controller.acquire(provider_key, 0).await;
+    let second = controller.acquire(provider_key, 0).await;
+    assert!(!first.is_probe());
+    assert!(!second.is_probe());
 
     let mut target = responses_http_target();
     target.provider_id = "admission-timeout-provider".into();
     target.auth.alias = "key1".into();
-    target.initial_concurrency_budget = 1;
+    target.initial_concurrency_budget = 2;
     target.concurrency_acquire_timeout_ms = 20;
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-admission-timeout",
@@ -277,8 +278,8 @@ async fn saturated_provider_admission_returns_typed_transport_failure() {
             if reason == "provider concurrency admission timed out after 20ms"
     ));
 
-    controller.release(held.into_permit()).unwrap();
-    controller.release(probe.into_permit()).unwrap();
+    controller.release(first.into_permit()).unwrap();
+    controller.release(second.into_permit()).unwrap();
 }
 
 #[test]

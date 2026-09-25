@@ -65,6 +65,7 @@ impl V3ProviderHealthStore {
         Ok(state
             .provider_cooldown_probes
             .get(&key)
+            .filter(|probe_state| !probe_state.probe_in_flight)
             .and_then(|probe_state| probe_state.next_probe_at_ms))
     }
 
@@ -133,7 +134,6 @@ impl V3ProviderHealthStore {
             return Ok(None);
         }
         probe_state.probe_in_flight = true;
-        probe_state.completion.send_replace(false);
         let expected_generation = state
             .adaptive_history
             .get(&key)
@@ -172,7 +172,6 @@ impl V3ProviderHealthStore {
         }
         probe_state.probe_in_flight = true;
         probe_state.rescue_probe_attempted = true;
-        probe_state.completion.send_replace(false);
         let expected_generation = state
             .adaptive_history
             .get(&key)
@@ -219,8 +218,8 @@ impl V3ProviderHealthStore {
             .filter(|probe_state| probe_state.probe_in_flight)
         {
             probe_state.probe_in_flight = false;
-            probe_state.completion.send_replace(true);
             persist_cooldown_state(state);
+            self.publish_availability_change();
         }
         Ok(())
     }

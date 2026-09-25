@@ -248,15 +248,9 @@ impl V3ProviderFailureRuntimeHealth {
                 .transpose();
             probes.push(async move {
                 let Some(permit) = permit else {
-                    return health
-                        .store
-                        .wait_for_provider_cooldown_probe_completion(
-                            &provider_id,
-                            Some(&auth_alias),
-                            Some(&model_id),
-                        )
-                        .await
-                        .map_err(|error| error.to_string());
+                    // Keep the candidate cooled while another request owns its
+                    // probe, then let target selection use a later tier.
+                    return Ok(());
                 };
                 let permit_provider_id = permit.provider_id().to_string();
                 let permit_auth_alias = permit.auth_alias().map(str::to_string);

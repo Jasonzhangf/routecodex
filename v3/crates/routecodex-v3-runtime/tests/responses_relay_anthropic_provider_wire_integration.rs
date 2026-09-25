@@ -1372,6 +1372,9 @@ base_url = "http://controlled.invalid/anthropic"
 default_model = "MiniMax-M3"
 compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
+# This suite checks Anthropic wire projection; keep parallel tests outside the
+# provider admission path they are not intended to exercise.
+concurrency = { max_in_flight = 32, acquire_timeout_ms = 5000, stale_lease_ms = 300000 }
 
 [providers.minimax.models.MiniMax-M3]
 wire_name = "MiniMax-M3"

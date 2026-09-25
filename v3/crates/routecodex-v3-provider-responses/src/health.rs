@@ -473,7 +473,6 @@ impl V3ProviderHealthStore {
                         probe_in_flight: false,
                         probe_model_id: probe_key.model_id.clone(),
                         rescue_probe_attempted: false,
-                        completion: tokio::sync::watch::channel(false).0,
                     },
                 );
             }
@@ -936,43 +935,6 @@ impl V3ProviderHealthStore {
         self.acquire_provider_cooldown_rescue_probe_impl(provider_id, auth_alias, model_id)
     }
 
-    /// 并发耗尽请求等待同一 key 的单飞 probe 收口，不重复发送 probe。
-    pub async fn wait_for_provider_cooldown_probe_completion(
-        &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-    ) -> Result<(), V3ProviderHealthError> {
-        loop {
-            let mut completion = {
-                let state = self
-                    .state
-                    .read()
-                    .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-                let key = resolve_provider_cooldown_probe_key(
-                    &state.provider_cooldown_probes,
-                    provider_id,
-                    auth_alias,
-                    model_id,
-                );
-                state
-                    .provider_cooldown_probes
-                    .get(&key)
-                    .filter(|probe_state| probe_state.probe_in_flight)
-                    .map(|probe_state| probe_state.completion.subscribe())
-            };
-            let Some(mut completion) = completion.take() else {
-                return Ok(());
-            };
-            if !*completion.borrow_and_update() {
-                completion
-                    .changed()
-                    .await
-                    .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-            }
-        }
-    }
-
     /// probe 通过：清除 provider 级冷却，provider 复活（业务路由恢复可达）。
     pub fn complete_provider_cooldown_probe_success(
         &self,
@@ -1017,15 +979,16 @@ impl V3ProviderHealthStore {
             auth_alias,
             model_id,
         );
-        let completion = complete_provider_probe_success_at_generation(
+        complete_provider_probe_success_at_generation(
             &mut state,
             &key,
             now_ms,
             expected_generation,
-        );
+        )
+        .map_err(V3ProviderHealthError::Poisoned)?;
         persist_cooldown_state(state);
         self.publish_availability_change();
-        completion.map_err(V3ProviderHealthError::Poisoned)
+        Ok(())
     }
 
     /// probe 失败：保持冷却，推后下一次探针。
@@ -1076,7 +1039,6 @@ impl V3ProviderHealthStore {
             if expected_generation != current_generation {
                 if let Some(probe_state) = state.provider_cooldown_probes.get_mut(&key) {
                     probe_state.probe_in_flight = false;
-                    probe_state.completion.send_replace(true);
                 }
                 persist_cooldown_state(state);
                 self.publish_availability_change();
@@ -1115,7 +1077,6 @@ impl V3ProviderHealthStore {
         // scheduled probe cadence above is the recovery path; allowing every
         // exhausted request to re-open the same failed generation creates a
         // probe storm and keeps the session in select/exhaust churn.
-        probe_state.completion.send_replace(true);
         persist_cooldown_state(state);
         self.publish_availability_change();
         Ok(())
@@ -1226,11 +1187,8 @@ impl V3ProviderHealthStore {
         // 全局复活（bug 61863a0）：冷却中的 key 收到真实成功调用时立即解除
         // 全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
         // （complete_probe_success）仍是无人成功调用时的恢复路径。
-        let completion = state
-            .provider_cooldown_probes
-            .remove(&key)
-            .map(|probe_state| probe_state.completion);
-        if completion.is_some() {
+        let had_probe_state = state.provider_cooldown_probes.remove(&key).is_some();
+        if had_probe_state {
             if let Some(history) = state.adaptive_history.get_mut(&key) {
                 history.failure_streak = 0;
                 history.success_streak = history.success_streak.saturating_add(1);
@@ -1256,9 +1214,6 @@ impl V3ProviderHealthStore {
         }
         let auth_key = provider_cooldown_probe_key(provider_id, Some(auth_alias), None);
         state.auth_key_consecutive_failures.remove(&auth_key);
-        if let Some(completion) = completion {
-            let _ = completion.send_replace(true);
-        }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();
@@ -1588,10 +1543,7 @@ impl V3ProviderHealthStore {
                     state.auth_key_consecutive_failures.remove(&key);
                 }
                 if kind == "probe" || kind == "auth_key" {
-                    if let Some(probe) = state.provider_cooldown_probes.remove(&key) {
-                        removed = true;
-                        probe.completion.send_replace(true);
-                    }
+                    removed |= state.provider_cooldown_probes.remove(&key).is_some();
                 }
                 if kind == "probe" || kind == "auth_key" {
                     removed |= state.auth_key_cooldowns.remove(&key).is_some();
@@ -2124,7 +2076,6 @@ fn complete_provider_probe_success_at_generation(
         if expected_generation != current_generation {
             if let Some(probe_state) = state.provider_cooldown_probes.get_mut(key) {
                 probe_state.probe_in_flight = false;
-                probe_state.completion.send_replace(true);
             }
             return Ok(());
         }
@@ -2143,15 +2094,9 @@ fn complete_provider_probe_success_at_generation(
         history.score_generation = history.score_generation.saturating_add(1);
     }
 
-    let completion = state
-        .provider_cooldown_probes
-        .remove(key)
-        .map(|probe_state| probe_state.completion);
+    state.provider_cooldown_probes.remove(key);
     state.auth_key_cooldowns.remove(key);
     state.auth_key_consecutive_failures.remove(key);
-    if let Some(completion) = completion {
-        completion.send_replace(true);
-    }
     Ok(())
 }
 
@@ -2198,9 +2143,6 @@ fn upsert_provider_cooldown_probe_with_interval(
         .unwrap_or(blocked_until_ms);
     let rescue_probe_attempted =
         existing.is_some_and(|probe_state| probe_state.rescue_probe_attempted);
-    let completion = existing
-        .map(|probe_state| probe_state.completion.clone())
-        .unwrap_or_else(|| tokio::sync::watch::channel(false).0);
     state.provider_cooldown_probes.insert(
         provider_cooldown_probe_key(provider_id, auth_alias, model_id),
         V3ProviderCooldownProbeState {
@@ -2217,7 +2159,6 @@ fn upsert_provider_cooldown_probe_with_interval(
             probe_in_flight,
             probe_model_id: model_id.map(str::to_string),
             rescue_probe_attempted,
-            completion,
         },
     );
 }

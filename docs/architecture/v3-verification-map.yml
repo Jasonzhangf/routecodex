@@ -1154,7 +1154,9 @@ features:
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately; at budget, Runtime reserves the selected candidate before Provider transport and an eligible Busy candidate is skipped for the next candidate without waiting'
+  - 'Configured maxInFlight is a hard ceiling for business requests and scheduled probes; successful adaptive probes cannot raise the budget above that ceiling'
   - 'Direct and Relay immediately skip Busy candidates; if every eligible candidate is Busy, a due scheduled probe may be selected without waiting, otherwise typed provider-pool exhaustion is returned immediately with no provider send or health mutation'
+  - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
   required_contract:

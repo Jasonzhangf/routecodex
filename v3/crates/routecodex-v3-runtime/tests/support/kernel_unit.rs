@@ -332,6 +332,21 @@ fn provider_concurrency_two_provider_manifest(
     )
 }
 
+fn provider_concurrency_two_provider_manifest_with_max_in_flight(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+    max_in_flight: u32,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        r#""direct""#,
+        max_in_flight,
+    )
+}
+
 fn provider_concurrency_two_provider_relay_manifest(
     first_provider: &str,
     second_provider: &str,
@@ -351,6 +366,22 @@ fn provider_concurrency_two_provider_manifest_with_modes(
     acquire_timeout_ms: u64,
     allowed_modes: &str,
 ) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        allowed_modes,
+        1,
+    )
+}
+
+fn provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+    allowed_modes: &str,
+    max_in_flight: u32,
+) -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(&format!(
         r#"
 version = 3
@@ -369,7 +400,7 @@ type = "responses"
 base_url = "http://{first_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{first_provider}.models.test]
 wire_name = "wire-first"
 
@@ -378,7 +409,7 @@ type = "responses"
 base_url = "http://{second_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{second_provider}.models.test]
 wire_name = "wire-second"
 
@@ -2323,7 +2354,9 @@ async fn provider_concurrency_all_busy_uses_due_scheduled_probe_for_admission() 
     V3AdaptiveConcurrencyController::process_shared()
         .observe_rate_limit(&first_key, 0)
         .expect("rate limit must schedule an adaptive recovery probe");
-    let manifest = provider_concurrency_two_provider_manifest(first, second, 80);
+    let manifest = provider_concurrency_two_provider_manifest_with_max_in_flight(
+        first, second, 80, 2,
+    );
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let transport = ProviderConcurrencyRecordingTransport::default();
     let raw = test_responses_raw(

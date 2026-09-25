@@ -175,14 +175,14 @@ const cases = [
     diagnostic: /Provider Health must key failure-derived state/u,
   },
   {
-    name: "Health drops single-flight rescue owner",
-    path: copied[1],
+    name: "Runtime rescue drops single-flight health probe owner",
+    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
     mutate: (source) =>
       source.replaceAll(
         "acquire_provider_cooldown_rescue_probe",
         "rescue_without_atomic_owner",
       ),
-    diagnostic: /Provider Health must own single-flight cooldown rescue admission/u,
+    diagnostic: /Runtime rescue owner must require a successful provider probe/u,
   },
   {
     name: "ActionGate key drops session",

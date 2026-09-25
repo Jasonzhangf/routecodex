@@ -929,7 +929,7 @@ async fn auth_key_cooldown_holds_selection_until_successful_probe_recovery() {
 }
 
 #[tokio::test]
-async fn later_tier_selection_probes_preceding_cooled_candidate_before_fallback() {
+async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
     let server_id = "later_tier_probe";
     let mut manifest = global_pool_alive_manifest(server_id);
     manifest
@@ -1066,8 +1066,11 @@ async fn later_tier_selection_probes_preceding_cooled_candidate_before_fallback(
         }
     }
 
+    let first_probe = acquire_rescue_probe(&health, "first", "key1", "gpt-test");
+    let second_probe = acquire_rescue_probe(&health, "second", "key1", "gpt-test");
+
     let selection = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_millis(500),
         select_v3_expanded_target_with_exhaustion_rescue(
             &manifest,
             expanded,
@@ -1082,28 +1085,26 @@ async fn later_tier_selection_probes_preceding_cooled_candidate_before_fallback(
     .await
     .expect("preceding-tier probe must not hang");
     let V3TargetSelectionAfterRescue::Selected(selected) = selection else {
-        panic!("a later tier must remain selectable after probe failure");
+        panic!("a later tier must remain selectable while prior probes are in flight");
     };
     assert_eq!(selected.candidate.provider_id, "third");
-    for provider_id in ["first", "second"] {
-        assert!(
-            health
-                .store
-                .acquire_provider_cooldown_rescue_probe(
-                    provider_id,
-                    Some("key1"),
-                    Some("gpt-test"),
-                )
-                .expect("rescue probe state")
-                .is_none(),
-            "every preceding tier must be probed before a later-tier selection"
-        );
+    for (provider_id, permit) in [("first", first_probe), ("second", second_probe)] {
+        health
+            .store
+            .complete_provider_cooldown_probe_failure_at_generation(
+                provider_id,
+                Some("key1"),
+                Some("gpt-test"),
+                20_001,
+                Some(permit.expected_generation()),
+            )
+            .expect("finish the pre-existing rescue probe");
         assert!(
             !health
                 .store
                 .availability(provider_id, Some("key1"), Some("gpt-test"), 20_001)
                 .available,
-            "a failed probe must preserve the preceding candidate cooldown"
+            "skipping a probe in flight must preserve the preceding candidate cooldown"
         );
     }
 }
