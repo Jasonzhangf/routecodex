@@ -1533,7 +1533,14 @@ async fn openai_chat_http_entry_completes_responses_tool_round_trip() {
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_responses_relay_tool_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-chat-tool-round-trip");
-    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    let port_a = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port_b = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut manifest = responses_relay_manifest(
+        port_a.local_addr().unwrap().port(),
+        port_b.local_addr().unwrap().port(),
+        &provider_base_url,
+    );
+    drop((port_a, port_b));
     for server in manifest.servers.values_mut() {
         server.endpoints.push("openai_chat".to_string());
     }
