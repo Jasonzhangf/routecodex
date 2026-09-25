@@ -233,7 +233,11 @@ impl V3OpenAiChatSseReducerState {
             .or(self.system_fingerprint.take());
         let semantic = classify_v3_openai_chat_sse_chunk(chunk)?;
         for choice in semantic.choices {
-            if let Some(reason) = choice.finish_reason.as_deref() {
+            if let Some(reason) = choice
+                .finish_reason
+                .as_deref()
+                .filter(|reason| !reason.is_empty())
+            {
                 self.terminal = Some(parse_terminal_state(reason)?);
             }
             self.choices.push(choice);
@@ -516,6 +520,8 @@ pub enum V3OpenAiChatSseTreeError {
     UsageNotObject,
     #[error("OpenAI Chat SSE finish reason is unsupported: {finish_reason}")]
     UnknownFinishReason { finish_reason: String },
+    #[error("OpenAI Chat SSE finish reason must be a string or null")]
+    FinishReasonNotString,
     #[error("OpenAI Chat SSE content rewrite is incompatible with the delta")]
     IncompatibleContentRewrite,
     #[error("OpenAI Chat SSE projection failed: {0}")]
@@ -695,10 +701,15 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
         V3OpenAiChatSseDelta::Empty
     };
     let extensions = object_extensions(object, &["index", "delta", "finish_reason"]);
+    let finish_reason = match object.get("finish_reason") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(reason)) => Some(reason.clone()),
+        Some(_) => return Err(V3OpenAiChatSseTreeError::FinishReasonNotString),
+    };
     Ok(V3OpenAiChatSseChoice {
         index,
         delta: semantic_delta,
-        finish_reason: string_field(object, "finish_reason"),
+        finish_reason,
         extensions,
         delta_extensions,
     })

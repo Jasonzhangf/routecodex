@@ -732,6 +732,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_chat_sse_reason_waits_for_real_terminal() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(concat!(
+            "data: {\"id\":\"chatcmpl_empty\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"\"}]}\n\n",
+            "data: {\"id\":\"chatcmpl_empty\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ).as_bytes().to_vec())]));
+        let response = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect("empty intermediate reason must not reject the complete SSE stream");
+        assert_eq!(response["choices"][0]["message"]["content"], "ok");
+        assert_eq!(response["choices"][0]["finish_reason"], "stop");
+    }
+
+    #[tokio::test]
+    async fn empty_chat_sse_reason_without_terminal_fails_as_incomplete_stream() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(b"data: {\"id\":\"chatcmpl_empty\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"\"}]}\n\ndata: [DONE]\n\n".to_vec())]));
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("empty reason and transport closeout cannot authorize success");
+        assert!(
+            matches!(error, V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+            if message.contains("EOF") && message.contains("terminal"))
+        );
+    }
+
+    #[tokio::test]
+    async fn nonstring_chat_sse_reason_fails_before_later_terminal() {
+        let observation = V3RuntimeStreamObservation::default();
+        let provider = Box::pin(stream::iter(vec![Ok(concat!(
+            "data: {\"id\":\"chatcmpl_invalid\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":7}]}\n\n",
+            "data: {\"id\":\"chatcmpl_invalid\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+        ).as_bytes().to_vec())]));
+        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+            provider,
+            &observation,
+        )
+        .await
+        .expect_err("malformed reason cannot be repaired by a later terminal");
+        assert!(
+            matches!(error, V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message)
+            if message.contains("finish reason") && message.contains("string"))
+        );
+    }
+
+    #[tokio::test]
     async fn done_without_content_still_fails_closed() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(b"data: [DONE]\n\n".to_vec())]));

@@ -1231,7 +1231,8 @@ fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result
     for choice in choices {
         if choice
             .get("finish_reason")
-            .is_some_and(|value| !value.is_null())
+            .and_then(Value::as_str)
+            .is_some_and(|reason| !reason.is_empty())
         {
             terminal = true;
         }
