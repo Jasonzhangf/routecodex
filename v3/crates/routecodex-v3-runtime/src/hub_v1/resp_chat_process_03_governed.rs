@@ -228,7 +228,7 @@ fn parse_v3_toolreason_fields_at_resp03(reason: &str) -> Option<V3ToolreasonFiel
     parse_v3_tool_thinking_fields_from_object_at_resp03(object).ok()
 }
 
-fn json_object_has_duplicate_keys_at_resp03(raw: &str) -> bool {
+pub(crate) fn json_object_has_duplicate_keys_at_resp03(raw: &str) -> bool {
     struct DuplicateKeyVisitor<'a> {
         duplicate: &'a mut bool,
     }

@@ -2424,12 +2424,32 @@ features:
     - responses_inbound_does_not_rewrite_string_session_id_schema
     - responses_inbound_does_not_rewrite_same_named_user_tool_schema
     - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
+  - exception_id: v3.responses_relay.codex_builtin_integer_values
+    status: source_controlled
+    owner_symbol: normalize_v3_codex_integer_tool_values_at_resp03
+    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
+    allowed_stage: V3HubRespChatProcess03Governed
+    source_contract: A registered Codex exec_command or write_stdin integer parameter may arrive from a Relay provider as an integral JSON float that Codex rejects before tool execution
+    allowed_tools: [exec_command, write_stdin]
+    allowed_fields:
+    - exec_command.yield_time_ms
+    - exec_command.max_output_tokens
+    - write_stdin.session_id
+    - write_stdin.yield_time_ms
+    - write_stdin.max_output_tokens
+    rewrite: exact_registered_integer_field_integral_float_to_integer
+    forbidden: [generic_numeric_coercion, user_tool_rewrite, fractional_value_rewrite, invalid_json_repair, duplicate_key_rewrite, sse_transport_rewrite, metadata_projection]
+    required_tests:
+    - resp03_restores_registered_codex_integer_argument_values
   owner_files:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
