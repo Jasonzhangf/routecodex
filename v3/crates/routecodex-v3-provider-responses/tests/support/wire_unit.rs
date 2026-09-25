@@ -813,6 +813,29 @@ mod tests {
     }
 
     #[test]
+    fn wire_fails_closed_on_additional_tools_flat_dotted_tool_call_name() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "additional_tools", "tools": [
+                    {"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-flat-dotted-additional-tool",
+            target(),
+            body,
+        )
+        .expect_err("flat dotted additional tool call must fail closed");
+        assert!(
+            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
     fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
         let body = json!({
             "model": "upstream-model",

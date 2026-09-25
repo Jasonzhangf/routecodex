@@ -810,29 +810,43 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
 }
 
 fn collect_declared_flat_dotted_tool_names(body: &Value) -> HashSet<String> {
-    body.get("tools")
+    let mut names = HashSet::new();
+    collect_flat_dotted_tool_names(body.get("tools"), &mut names);
+    for item in body
+        .get("input")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|tool| {
-            let object = tool.as_object()?;
-            if object.get("type").and_then(Value::as_str) != Some("function") {
-                return None;
-            }
-            let name = object.get("name").and_then(Value::as_str).or_else(|| {
-                object
-                    .get("function")
-                    .and_then(Value::as_object)
-                    .and_then(|function| function.get("name"))
-                    .and_then(Value::as_str)
-            })?;
-            if name.contains('.') {
-                Some(name.to_string())
-            } else {
-                None
-            }
-        })
-        .collect()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_flat_dotted_tool_names(item.get("tools"), &mut names);
+        }
+    }
+    names
+}
+
+fn collect_flat_dotted_tool_names(tools: Option<&Value>, names: &mut HashSet<String>) {
+    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+        let Some(object) = tool.as_object() else {
+            continue;
+        };
+        if object.get("type").and_then(Value::as_str) != Some("function") {
+            continue;
+        }
+        let name = object.get("name").and_then(Value::as_str).or_else(|| {
+            object
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|function| function.get("name"))
+                .and_then(Value::as_str)
+        });
+        let Some(name) = name else {
+            continue;
+        };
+        if name.contains('.') {
+            names.insert(name.to_string());
+        }
+    }
 }
 
 fn map_call_name_from_convention(
