@@ -1533,7 +1533,10 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         )
         .expect("default must serve when hosted search is cooled");
     assert_eq!(selected.candidate.provider_id, "text");
-    assert_eq!(selected.route.pool_id, "default", "an empty web_search pool must not remain the selected pool");
+    assert_eq!(
+        selected.route.pool_id, "default",
+        "an empty web_search pool must not remain the selected pool"
+    );
     assert!(selected.candidate.required_capabilities.is_empty());
 }
 
