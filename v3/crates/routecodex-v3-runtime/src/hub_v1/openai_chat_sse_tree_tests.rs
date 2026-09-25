@@ -37,7 +37,7 @@ fn chat_sse_keeps_text_and_tool_call_semantics_distinct() {
     ));
     assert!(matches!(
         semantic.choices[1].delta,
-        V3OpenAiChatSseDelta::ToolCall(_)
+        V3OpenAiChatSseDelta::ToolCalls(_)
     ));
 }
 
@@ -347,6 +347,30 @@ fn chat_reducer_still_rejects_tool_call_that_never_has_a_name() {
 
     let error = reducer.materialize_completion().unwrap_err();
     assert!(error.to_string().contains("missing function name"));
+}
+
+#[test]
+fn chat_reducer_keeps_every_tool_call_emitted_in_one_delta() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_two_calls",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}},
+                {"index":1,"id":"call_2","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+            ]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_1");
+    assert_eq!(calls[1]["id"], "call_2");
+    assert_eq!(calls[1]["function"]["name"], "exec_command");
 }
 
 #[test]
