@@ -1,6 +1,7 @@
 use super::*;
+use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
@@ -322,7 +323,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeSet<String>,
+    custom_tool_names: &BTreeMap<String, String>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -360,12 +361,12 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                         .to_string(),
                 )
             })?;
-        if !custom_tool_names.contains(name) {
+        let Some(client_name) = custom_tool_names.get(name) else {
             return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool response requires an active governed custom declaration"
                     .to_string(),
             ));
-        }
+        };
         let input = custom.get("input").and_then(Value::as_str).ok_or_else(|| {
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "OpenAI Chat custom tool input must be a string before Responses projection"
@@ -375,7 +376,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         return Ok(json!({
             "type":"custom_tool_call",
             "call_id":call_id,
-            "name":name,
+            "name":client_name,
             "input":input
         }));
     }
@@ -411,7 +412,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             "arguments":arguments
         }));
     }
-    if custom_tool_names.contains(name) {
+    if let Some(client_name) = custom_tool_names.get(name) {
         // 请求侧 custom -> function 扁平化后，provider 返回 function tool_call；
         // 按客户端声明的 custom 名归类回 custom_tool_call，保持客户端契约。
         // provider function arguments 必须是我们发出的对象 schema；只把
@@ -421,7 +422,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         return Ok(json!({
             "type":"custom_tool_call",
             "call_id":call_id,
-            "name":name,
+            "name":client_name,
             "input":input
         }));
     }
@@ -445,16 +446,33 @@ fn parse_v3_openai_chat_custom_tool_input(
     name: &str,
     arguments: &str,
 ) -> Result<String, V3ResponsesRelayRuntimeError> {
-    let parsed = parse_v3_openai_chat_tool_call_arguments_object(name, arguments)?;
-    parsed
-        .get("input")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
-                "OpenAI Chat custom tool {name} function arguments must contain string input"
-            ))
-        })
+    // Provider may not honor the `{"input":"..."}` Chat-freeform schema and may
+    // return the raw free-form text directly. For a governed custom tool the
+    // client contract is a raw string, so accept either shape explicitly.
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!("OpenAI Chat custom tool {name} function arguments must not be empty"),
+        ));
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(parsed)) => parsed
+            .get("input")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(format!(
+                    "OpenAI Chat custom tool {name} function arguments must contain string input"
+                ))
+            }),
+        Ok(Value::String(value)) => Ok(value),
+        Ok(_) => Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+            format!(
+                "OpenAI Chat custom tool {name} function arguments must be an object or string"
+            ),
+        )),
+        Err(_) => Ok(trimmed.to_string()),
+    }
 }
 
 pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
@@ -481,8 +499,8 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
     ))
 }
 
-pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMap<String, String> {
+    let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
     for item in payload
         .get("input")
@@ -499,9 +517,16 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeSe
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
-    names: &mut BTreeSet<String>,
+    names: &mut BTreeMap<String, String>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            if let Ok(Some(namespace_names)) = namespace_tool_name_map(tool) {
+                let namespace = tool.get("name").and_then(Value::as_str).unwrap_or_default();
+                collect_namespace_custom_tool_names(tool, namespace, &namespace_names, names);
+            }
+            continue;
+        }
         if tool.get("type").and_then(Value::as_str) != Some("custom") {
             continue;
         }
@@ -511,7 +536,37 @@ pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            names.insert(name.to_string());
+            names.insert(name.to_string(), name.to_string());
+        }
+    }
+}
+
+fn collect_namespace_custom_tool_names(
+    namespace: &Value,
+    client_namespace: &str,
+    namespace_names: &std::collections::HashMap<String, String>,
+    names: &mut BTreeMap<String, String>,
+) {
+    for child in namespace
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(name) = child.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let client_name = format!("{client_namespace}.{name}");
+        match child.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                collect_namespace_custom_tool_names(child, &client_name, namespace_names, names)
+            }
+            Some("custom") => {
+                if let Some(provider_name) = namespace_names.get(&client_name) {
+                    names.insert(provider_name.clone(), client_name);
+                }
+            }
+            _ => {}
         }
     }
 }
