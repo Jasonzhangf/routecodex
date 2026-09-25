@@ -6,6 +6,28 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn openai_chat_namespace_custom_tool_response_restores_client_name() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_namespace_exec",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_namespace_exec",
+                "type":"function",
+                "function":{"name":"functions__exec","arguments":"{\"input\":\"pwd\"}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"exec","format":{"type":"text"}}
+        ]}]}),
+    )
+    .expect("namespace custom declaration must reverse the provider function call");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "functions.exec");
+    assert_eq!(response["output"][0]["input"], "pwd");
+    assert_eq!(response["output"][0]["call_id"], "call_namespace_exec");
+}
+
+#[test]
 fn zero_input_usage_uses_request_tiktoken_estimate() {
     let request = json!({
         "model": "gpt-5.5",

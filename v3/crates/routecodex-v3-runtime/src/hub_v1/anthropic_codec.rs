@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
 mod message_encoding;
+mod namespace_tool_names;
 mod projection_context;
 mod response_projection;
 mod responses_to_anthropic;
@@ -118,6 +119,8 @@ pub enum V3AnthropicCodecError {
     MalformedProviderError,
     #[error("Anthropic codec malformed {field}")]
     MalformedField { field: &'static str },
+    #[error("Anthropic tool dispatch identity is ambiguous: {reason}")]
+    AmbiguousToolDispatch { reason: String },
     #[error("Anthropic terminal field {field} is invalid: {reason}")]
     InvalidTerminalField { field: &'static str, reason: String },
     #[error("Anthropic stop_reason '{stop_reason}' is unsupported for Responses projection")]
@@ -416,8 +419,11 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
     reject_side_channel_fields(&input)?;
+    namespace_tool_names::validate_anthropic_declared_tool_names(&input)
+        .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
     let mut input = input;
     strip_unmapped_responses_reasoning_extensions(&mut input);
+    namespace_tool_names::rewrite_anthropic_declared_tool_history(&mut input);
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
