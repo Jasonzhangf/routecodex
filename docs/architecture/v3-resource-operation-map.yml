@@ -500,7 +500,9 @@ resources:
     semantic_contract:
       source: existing provider concurrency acquireTimeoutMs is compiled into the published manifest and remains the sole admission deadline truth
       propagation: Target carries maxInFlight and acquireTimeoutMs into the selected Provider transport target
-      timeout: an admission wait that reaches acquireTimeoutMs becomes a typed provider transport failure and enters the existing Error/Target switch chain
+      admission: Runtime reserves the selected provider+authAlias lease before Provider transport; Busy stays request-local and health-neutral
+      selection: Target scans eligible candidates and skips Busy candidates immediately; when every eligible candidate is Busy, it may consume an already-due scheduled probe, otherwise it returns typed provider-pool exhaustion immediately
+      timeout: concurrency acquireTimeoutMs never delays Target reselection or all-Busy exhaustion; no provider request is sent and provider health is unchanged
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
