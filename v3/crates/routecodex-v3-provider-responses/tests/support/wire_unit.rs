@@ -783,9 +783,56 @@ mod tests {
             "input": [{"type": "function_call", "call_id": "call_old", "name": "billing.charge", "arguments": "{}"}]
         });
         let error = build_v3_provider_12_responses_wire_payload(
-            "req-unrelated-dotted-history", target(), body,
-        ).expect_err("unrelated historical name must not adopt a flat tool identity");
-        assert!(matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }), "{error:?}");
+            "req-unrelated-dotted-history",
+            target(),
+            body,
+        )
+        .expect_err("unrelated historical name must not adopt a flat tool identity");
+        assert!(
+            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn wire_fails_closed_on_declared_flat_dotted_tool_call_name() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}],
+            "input": [{"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}]
+        });
+        let error =
+            build_v3_provider_12_responses_wire_payload("req-flat-dotted-tool", target(), body)
+                .expect_err(
+                "flat dotted tool call must fail closed instead of diverging from its declaration",
+            );
+        assert!(
+            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn wire_fails_closed_on_additional_tools_flat_dotted_tool_call_name() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "additional_tools", "tools": [
+                    {"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}
+            ]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-flat-dotted-additional-tool",
+            target(),
+            body,
+        )
+        .expect_err("flat dotted additional tool call must fail closed");
+        assert!(
+            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
+            "{error:?}"
+        );
     }
 
     #[test]
