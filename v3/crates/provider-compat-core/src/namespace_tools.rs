@@ -51,6 +51,17 @@ pub fn push_unique_provider_function_tool(
 /// for a namespace declaration. The same traversal rules as flattening are
 /// used, so nested declarations cannot drift from their wire names.
 pub fn namespace_tool_name_map(tool: &Value) -> Result<Option<HashMap<String, String>>, String> {
+    Ok(namespace_tool_dispatch_map(tool)?.map(|entries| {
+        entries
+            .into_iter()
+            .map(|(client, (provider, _))| (client, provider))
+            .collect()
+    }))
+}
+
+fn namespace_tool_dispatch_map(
+    tool: &Value,
+) -> Result<Option<HashMap<String, (String, Value)>>, String> {
     let Some(namespace) = tool.as_object() else {
         return Ok(None);
     };
@@ -88,9 +99,14 @@ pub fn validate_namespace_tool_dispatch_names(request: &Value) -> Result<(), Str
     );
     for tools in tool_lists {
         for tool in tools.as_array().into_iter().flatten() {
-            if let Some(names) = namespace_tool_name_map(tool)? {
-                for (client_name, provider_name) in names {
-                    insert_dispatch_identity(&mut identities, &provider_name, &client_name, tool)?;
+            if let Some(names) = namespace_tool_dispatch_map(tool)? {
+                for (client_name, (provider_name, declaration)) in names {
+                    insert_dispatch_identity(
+                        &mut identities,
+                        &provider_name,
+                        &client_name,
+                        &declaration,
+                    )?;
                 }
             } else if matches!(
                 tool.get("type").and_then(Value::as_str),
@@ -103,7 +119,21 @@ pub fn validate_namespace_tool_dispatch_names(request: &Value) -> Result<(), Str
                         } else {
                             name.to_string()
                         };
-                    insert_dispatch_identity(&mut identities, &provider_name, name, tool)?;
+                    let mut declaration = tool.clone();
+                    if let Some(function) = declaration
+                        .get_mut("function")
+                        .and_then(Value::as_object_mut)
+                    {
+                        function.insert("name".to_string(), Value::String(provider_name.clone()));
+                    } else if let Some(row) = declaration.as_object_mut() {
+                        row.insert("name".to_string(), Value::String(provider_name.clone()));
+                    }
+                    insert_dispatch_identity(
+                        &mut identities,
+                        &provider_name,
+                        &provider_name,
+                        &declaration,
+                    )?;
                 }
             }
         }
@@ -136,7 +166,7 @@ fn collect_namespace_tool_names(
     qualified_namespace: &str,
     client_namespace: &str,
     tools: &[Value],
-    map: &mut HashMap<String, String>,
+    map: &mut HashMap<String, (String, Value)>,
 ) -> Result<(), String> {
     for (index, tool) in tools.iter().enumerate() {
         let object = tool.as_object().ok_or_else(|| {
@@ -167,7 +197,21 @@ fn collect_namespace_tool_names(
                 } else {
                     format!("{qualified_namespace}__{child}")
                 };
-                map.insert(client_path, provider_name);
+                let mut declaration = Value::Object(object.clone());
+                if let Some(function) = declaration.get_mut("function").and_then(Value::as_object_mut) {
+                    function.insert("name".to_string(), Value::String(provider_name.clone()));
+                } else if let Some(row) = declaration.as_object_mut() {
+                    row.insert("name".to_string(), Value::String(provider_name.clone()));
+                }
+                if let Some(existing) = map.get(&client_path) {
+                    if existing != &(provider_name.clone(), declaration.clone()) {
+                        return Err(format!(
+                            "provider namespace tool {client_path} has conflicting declarations"
+                        ));
+                    }
+                } else {
+                    map.insert(client_path, (provider_name, declaration));
+                }
             }
             _ => return Err(format!("provider namespace tool {client_namespace}.tools[{index}].type must be namespace, function, or custom")),
         }
@@ -691,6 +735,32 @@ mod tests {
         .expect_err("additional_tools collision must be rejected before provider send");
         assert!(error.contains("functions.exec"), "{error}");
         assert!(error.contains("functions__exec"), "{error}");
+    }
+
+    #[test]
+    fn dispatch_names_compare_matching_children_not_unrelated_catalog_siblings() {
+        let exec = json!({"type":"custom","name":"exec","format":{"type":"text"}});
+        validate_namespace_tool_dispatch_names(&json!({
+            "tools":[{"type":"namespace","name":"functions","tools":[
+                exec.clone(), {"type":"custom","name":"apply_patch","format":{"type":"text"}}
+            ]}],
+            "input":[{"type":"additional_tools","tools":[
+                {"type":"namespace","name":"functions","tools":[exec]}
+            ]}]
+        }))
+        .expect("the same child dispatch remains valid when catalog siblings differ");
+    }
+
+    #[test]
+    fn dispatch_names_reject_conflicting_children_inside_one_namespace() {
+        let error = validate_namespace_tool_dispatch_names(&json!({"tools":[{
+            "type":"namespace","name":"functions","tools":[
+                {"type":"function","name":"exec","parameters":openai_chat_freeform_custom_tool_parameters()},
+                {"type":"custom","name":"exec","format":{"type":"text"}}
+            ]
+        }]}))
+        .expect_err("function and custom cannot share one client dispatch path");
+        assert!(error.contains("functions.exec"), "{error}");
     }
 
     #[test]
