@@ -1374,7 +1374,7 @@ fn normalize_v3_codex_integer_tool_schema(tool: &mut Value) {
     }
 }
 
-fn is_registered_codex_tool_schema(
+pub(crate) fn is_registered_codex_tool_schema(
     tool: &Map<String, Value>,
     property_names: &[&str],
     required_names: &[&str],

@@ -1704,11 +1704,23 @@ features:
     - npm run verify:v3-protocol-conversion-field-parity
     - npm run verify:v3-module-boundaries
     - install_restart_and_online_responses_replay
+  - compatibility_id: v3.responses_relay.codex_builtin_integer_values
+    status: source_controlled
+    runtime_evidence: pending_current_entry_replay
+    owner: v3.protocol_conversion_field_parity
+    required_gates:
+    - cargo test -p routecodex-v3-runtime resp03_restores_registered_codex_integer_argument_values --lib
+    - npm run verify:v3-protocol-conversion-field-parity
+    - npm run verify:v3-module-boundaries
+    - install_restart_and_online_responses_tool_replay
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
