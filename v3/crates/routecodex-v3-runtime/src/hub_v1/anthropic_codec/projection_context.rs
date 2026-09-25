@@ -1,12 +1,12 @@
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::V3AnthropicCodecError;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct V3AnthropicResponsesProjectionContext {
     metadata: Option<Value>,
-    custom_tool_names: BTreeSet<String>,
+    custom_tool_names: BTreeMap<String, String>,
     reasoning_summary_policy: Option<String>,
 }
 
@@ -32,8 +32,8 @@ impl V3AnthropicResponsesProjectionContext {
         })
     }
 
-    pub(crate) fn is_governed_custom_tool(&self, name: &str) -> bool {
-        self.custom_tool_names.contains(name)
+    pub(crate) fn governed_custom_tool_client_name(&self, name: &str) -> Option<&str> {
+        self.custom_tool_names.get(name).map(String::as_str)
     }
 
     pub(super) fn metadata(&self) -> Option<&Value> {
@@ -54,7 +54,9 @@ fn valid_responses_reasoning_summary_policy(value: &Value) -> Result<&str, V3Ant
         })
 }
 
-fn governed_custom_tool_names(request: &Value) -> Result<BTreeSet<String>, V3AnthropicCodecError> {
+fn governed_custom_tool_names(
+    request: &Value,
+) -> Result<BTreeMap<String, String>, V3AnthropicCodecError> {
     let mut names = BTreeSet::new();
     collect_governed_custom_tool_names(request.get("tools"), &mut names)?;
     for item in request
@@ -67,7 +69,11 @@ fn governed_custom_tool_names(request: &Value) -> Result<BTreeSet<String>, V3Ant
             collect_governed_custom_tool_names(item.get("tools"), &mut names)?;
         }
     }
-    Ok(names)
+    let mut mapped = super::namespace_tool_names::anthropic_declared_tool_names(request).1;
+    for name in names {
+        mapped.entry(name.clone()).or_insert(name);
+    }
+    Ok(mapped)
 }
 
 fn collect_governed_custom_tool_names(

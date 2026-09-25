@@ -1,4 +1,75 @@
 #[test]
+fn responses_namespace_custom_tool_projects_to_chat_provider_function() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.6-luna",
+                "input":[{"role":"user","content":"run pwd"}],
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}}
+                ]}]
+            }),
+        )
+        .expect("Responses namespace custom declaration must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("namespace custom declaration must project to Chat function wire");
+    assert_eq!(request["tools"][0]["type"], "function");
+    assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
+    assert_eq!(request["tools"][0]["function"]["parameters"]["required"], json!(["input"]));
+}
+
+#[test]
+fn responses_namespace_custom_history_uses_provider_name_on_followup() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.6-luna",
+                "input":[
+                    {"role":"user","content":"run pwd"},
+                    {"type":"custom_tool_call","call_id":"call_exec","name":"functions.exec","input":"pwd"},
+                    {"type":"custom_tool_call_output","call_id":"call_exec","output":"/tmp"}
+                ],
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}}
+                ]}]
+            }),
+        )
+        .expect("Responses custom tool followup must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("custom tool followup must project to Chat wire");
+    assert_eq!(request["messages"][1]["tool_calls"][0]["function"]["name"], "functions__exec");
+    assert_eq!(request["messages"][1]["tool_calls"][0]["function"]["arguments"], "{\"input\":\"pwd\"}");
+}
+
+#[test]
+fn additional_tools_namespace_custom_history_uses_provider_name() {
+    let mut request = json!({
+        "messages":[{"role":"assistant","tool_calls":[{"id":"call_exec","function":{"name":"functions.exec","arguments":"{\"input\":\"pwd\"}"}}]}],
+        "input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]
+    });
+    super::super::request_outbound_mcp_names::rewrite_openai_chat_declared_namespace_history(&mut request).unwrap();
+    assert_eq!(request["messages"][0]["tool_calls"][0]["function"]["name"], "functions__exec");
+}
+
+#[test]
+fn responses_namespace_custom_tool_choice_uses_declared_chat_provider_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.6-luna", "input":"run pwd",
+                "tool_choice":{"type":"function","name":"functions.exec"},
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}}
+                ]}]
+            }),
+        ).expect("Responses tool choice must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("namespace custom choice must project");
+    assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
+    assert_eq!(request["tool_choice"]["name"], "functions__exec");
+}
+
+#[test]
 fn openai_chat_provider_normalizes_dotted_mcp_history_content_names() {
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
         "model":"glm-5.3","messages":[{"role":"tool","tool_call_id":"call_search","content":[{"type":"tool_result","name":"mcp__mcpx.workspace","content":"{}"}]}]
@@ -217,6 +288,24 @@ fn openai_chat_provider_tools_reject_conflicting_duplicate_function_names() {
         .expect_err("conflicting provider tool declarations must fail explicitly");
     assert!(error.contains("ConflictingOutboundFields"), "{error}");
     assert!(error.contains("mcp__mcpx__workspace"), "{error}");
+}
+
+#[test]
+fn openai_chat_rejects_distinct_custom_tools_with_same_provider_name() {
+    let payload = json!({
+        "model": "glm-5.3",
+        "messages": [{"role": "user", "content": "use a tool"}],
+        "tools": [
+            {"type": "namespace", "name": "functions", "tools": [
+                {"type": "custom", "name": "exec", "format": {"type": "text"}}
+            ]},
+            {"type": "custom", "name": "functions__exec", "format": {"type": "text"}}
+        ]
+    });
+    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect_err("two client tools must not share one provider dispatch name");
+    assert!(error.contains("functions__exec"), "{error}");
+    assert!(error.contains("functions.exec"), "{error}");
 }
 
 #[test]

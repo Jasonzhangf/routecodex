@@ -1,22 +1,11 @@
 use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, provider_function_tool_name,
+    flatten_namespace_tool_for_provider, namespace_tool_name_map, provider_function_tool_name,
 };
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn provider_function_name(name: &str) -> String {
-    let name = name
-        .strip_prefix("functions.mcp__")
-        .map(|rest| format!("mcp__{rest}"))
-        .unwrap_or_else(|| name.to_owned());
-    if let Some(dot) = name.strip_prefix("mcp__").and_then(|value| value.find('.')) {
-        let dot = dot + "mcp__".len();
-        let mut normalized = name;
-        normalized.replace_range(dot..=dot, "__");
-        normalized
-    } else {
-        name
-    }
+    provider_compat_core::namespace_tools::normalize_provider_function_name(name)
 }
 
 fn provider_function_name_preserving_mcp_namespace(name: &str) -> String {
@@ -180,6 +169,95 @@ pub(super) fn qualify_openai_chat_missing_mcp_tool_call_names(payload: &mut Valu
             }
         }
     }
+}
+
+pub(super) fn rewrite_openai_chat_declared_namespace_history(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let mut names = HashMap::new();
+    for tool in payload
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(mapping) = namespace_tool_name_map(tool)? {
+            names.extend(mapping);
+        }
+    }
+    for item in payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
+            continue;
+        }
+        for tool in item
+            .get("tools")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(mapping) = namespace_tool_name_map(tool)? {
+                names.extend(mapping);
+            }
+        }
+    }
+    if names.is_empty() {
+        return Ok(());
+    }
+    if let Some(choice) = payload
+        .get_mut("tool_choice")
+        .and_then(Value::as_object_mut)
+    {
+        if let Some(name) = choice
+            .get("name")
+            .and_then(Value::as_str)
+            .and_then(|name| names.get(name))
+        {
+            choice.insert("name".to_string(), Value::String(name.clone()));
+        }
+        if let Some(function) = choice.get_mut("function").and_then(Value::as_object_mut) {
+            if let Some(name) = function
+                .get("name")
+                .and_then(Value::as_str)
+                .and_then(|name| names.get(name))
+            {
+                function.insert("name".to_string(), Value::String(name.clone()));
+            }
+        }
+    }
+    for message in payload
+        .get_mut("messages")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        for call in message
+            .get_mut("tool_calls")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(function) = call.get_mut("function").and_then(Value::as_object_mut) {
+                if let Some(name) = function.get("name").and_then(Value::as_str) {
+                    if let Some(provider_name) = names.get(name) {
+                        function.insert("name".to_string(), Value::String(provider_name.clone()));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn normalize_openai_chat_namespace_history_names(
+    payload: &mut Value,
+) -> Result<(), String> {
+    qualify_openai_chat_missing_mcp_tool_call_names(payload);
+    rewrite_openai_chat_declared_namespace_history(payload)
 }
 
 fn is_custom_tool_call(tool_call: &Map<String, Value>) -> bool {

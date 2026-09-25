@@ -894,12 +894,11 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
                     if child_object.get("type").and_then(Value::as_str) != Some("namespace") {
                         child_object.insert(
                             "name".to_string(),
-                            Value::String(format!(
-                                "{namespace}__{}",
-                                super::super::request_outbound_mcp_names::provider_function_name(
-                                    child_name
-                                )
-                            )),
+                            Value::String(
+                                super::namespace_tool_names::anthropic_namespace_wire_name(
+                                    namespace, child_name,
+                                ),
+                            ),
                         );
                     }
                 }
@@ -1290,6 +1289,76 @@ mod tests {
             .expect("custom namespace child must have a legal Anthropic projection");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
+    }
+
+    #[test]
+    fn anthropic_namespace_custom_history_uses_the_declared_provider_name() {
+        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model": "glm-5.3",
+            "messages": [
+                {"role": "assistant", "tool_calls": [{"id": "call_exec", "type": "function", "function": {"name": "functions.exec", "arguments": "{\"input\":\"pwd\"}"}}]},
+                {"role": "tool", "tool_call_id": "call_exec", "content": "/tmp"}
+            ],
+            "tools": [{"type": "namespace", "name": "functions", "tools": [
+                {"type": "custom", "name": "exec", "format": {"type": "text"}}
+            ]}]
+        }))
+        .expect("declared custom history must project to Anthropic");
+        assert_eq!(request["tools"][0]["name"], "functions__exec");
+        assert_eq!(
+            request["messages"][0]["content"][0]["name"],
+            "functions__exec"
+        );
+        assert_eq!(
+            request["messages"][1]["content"][0]["tool_use_id"],
+            "call_exec"
+        );
+    }
+
+    #[test]
+    fn anthropic_nested_namespace_custom_history_matches_its_declaration() {
+        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"glm-5.3",
+            "messages":[{"role":"assistant","tool_calls":[{"id":"call_nested","function":{"name":"functions.mcp__mcpx.exec","arguments":"{\"input\":\"pwd\"}"}}]}],
+            "tools":[{"type":"namespace","name":"functions","tools":[{"type":"namespace","name":"mcp__mcpx","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]
+        })).expect("nested custom history must project");
+        assert_eq!(request["tools"][0]["name"], "mcp__mcpx__exec");
+        assert_eq!(
+            request["messages"][0]["content"][0]["name"],
+            "mcp__mcpx__exec"
+        );
+    }
+
+    #[test]
+    fn anthropic_namespace_custom_choice_uses_declared_provider_name() {
+        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"glm-5.3", "input":"run pwd",
+            "tool_choice":{"type":"custom","name":"functions.exec"},
+            "tools":[{"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","format":{"type":"text"}}
+            ]}]
+        }))
+        .expect("namespace custom choice must project to Anthropic");
+        assert_eq!(request["tools"][0]["name"], "functions__exec");
+        assert_eq!(request["tool_choice"]["name"], "functions__exec");
+    }
+
+    #[test]
+    fn anthropic_namespace_tool_call_history_uses_declared_provider_name() {
+        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
+            "model":"glm-5.3",
+            "input":[
+                {"type":"tool_call","call_id":"call_exec","name":"functions.exec","arguments":"{\"input\":\"pwd\"}"},
+                {"type":"tool_call_output","call_id":"call_exec","output":"/tmp"}
+            ],
+            "tools":[{"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","format":{"type":"text"}}
+            ]}]
+        })).expect("tool_call history must project to Anthropic");
+        assert_eq!(
+            request["messages"][0]["content"][0]["name"],
+            "functions__exec"
+        );
     }
 
     #[test]

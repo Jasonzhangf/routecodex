@@ -426,8 +426,17 @@ impl V3TargetInterpreter {
             point = point.saturating_sub(projection.effective_weight_milli);
         }
         let (index, candidate, _) = tier.swap_remove(chosen);
+        let mut route = expanded.route;
+        if let Some(pool_id) = route
+            .target_plan
+            .iter()
+            .find(|entry| candidate.pool_ids.contains(&entry.pool_id))
+            .map(|entry| entry.pool_id.clone())
+        {
+            route.pool_id = pool_id;
+        }
         Ok(V3Target10ConcreteProviderSelected {
-            route: expanded.route,
+            route,
             candidate: candidate.clone(),
             candidate_count,
             unavailable_candidates: unavailable,

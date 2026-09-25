@@ -6,6 +6,56 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn openai_chat_namespace_custom_tool_response_restores_client_name() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_namespace_exec",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_namespace_exec",
+                "type":"function",
+                "function":{"name":"functions__exec","arguments":"{\"input\":\"pwd\"}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"exec","format":{"type":"text"}}
+        ]}]}),
+    )
+    .expect("namespace custom declaration must reverse the provider function call");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "functions.exec");
+    assert_eq!(response["output"][0]["input"], "pwd");
+    assert_eq!(response["output"][0]["call_id"], "call_namespace_exec");
+}
+
+#[test]
+fn openai_chat_namespace_custom_tool_accepts_raw_freeform_arguments() {
+    // Live error sample: kdns-freesail returned apply_patch as a raw free-form
+    // string instead of the {"input":"..."} Chat function schema. The client
+    // contract is a raw custom input, so this must project instead of 502.
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_raw_apply_patch",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_raw_apply_patch",
+                "type":"function",
+                "function":{"name":"functions__apply_patch","arguments":"*** Begin Patch\n*** Update File: /tmp/x\n+ hi\n*** End Patch"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"functions","tools":[
+            {"type":"custom","name":"apply_patch","format":{"type":"text"}}
+        ]}]}),
+    )
+    .expect("raw free-form custom arguments must project to custom_tool_call");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["name"], "functions.apply_patch");
+    assert_eq!(
+        response["output"][0]["input"],
+        "*** Begin Patch\n*** Update File: /tmp/x\n+ hi\n*** End Patch"
+    );
+    assert_eq!(response["output"][0]["call_id"], "call_raw_apply_patch");
+}
+
+#[test]
 fn zero_input_usage_uses_request_tiktoken_estimate() {
     let request = json!({
         "model": "gpt-5.5",
