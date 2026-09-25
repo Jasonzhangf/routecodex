@@ -3,6 +3,29 @@ use provider_compat_core::namespace_tools::namespace_tool_name_map;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
+#[derive(Clone, Debug)]
+pub(crate) struct V3ClientCustomToolName {
+    name: String,
+    namespace: Option<String>,
+}
+
+fn client_custom_tool_call(
+    call_id: &str,
+    client_tool: &V3ClientCustomToolName,
+    input: &str,
+) -> Value {
+    let mut call = json!({
+        "type":"custom_tool_call",
+        "call_id":call_id,
+        "name":client_tool.name,
+        "input":input
+    });
+    if let Some(namespace) = &client_tool.namespace {
+        call["namespace"] = Value::String(namespace.clone());
+    }
+    call
+}
+
 pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload(
     payload: &Value,
     provider_semantic_body: &Value,
@@ -323,7 +346,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
-    custom_tool_names: &BTreeMap<String, String>,
+    custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -373,12 +396,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
                     .to_string(),
             )
         })?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":client_name,
-            "input":input
-        }));
+        return Ok(client_custom_tool_call(call_id, client_name, input));
     }
     let function = object
         .get("function")
@@ -419,12 +437,7 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
         // schema 的 input 字段恢复成原始 free-form 字符串，三个治理字段
         // 只在 provider wire 存在，不能泄露到客户端 custom input。
         let input = parse_v3_openai_chat_custom_tool_input(name, arguments)?;
-        return Ok(json!({
-            "type":"custom_tool_call",
-            "call_id":call_id,
-            "name":client_name,
-            "input":input
-        }));
+        return Ok(client_custom_tool_call(call_id, client_name, &input));
     }
     let mut item = Map::from_iter([
         (
@@ -499,7 +512,9 @@ pub(crate) fn parse_v3_openai_chat_tool_call_arguments_object(
     ))
 }
 
-pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMap<String, String> {
+pub(crate) fn collect_v3_responses_custom_tool_names(
+    payload: &Value,
+) -> BTreeMap<String, V3ClientCustomToolName> {
     let mut names = BTreeMap::new();
     collect_v3_responses_custom_tool_names_from_tools(payload.get("tools"), &mut names);
     for item in payload
@@ -517,7 +532,7 @@ pub(crate) fn collect_v3_responses_custom_tool_names(payload: &Value) -> BTreeMa
 
 pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
     tools: Option<&Value>,
-    names: &mut BTreeMap<String, String>,
+    names: &mut BTreeMap<String, V3ClientCustomToolName>,
 ) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         if tool.get("type").and_then(Value::as_str) == Some("namespace") {
@@ -536,7 +551,13 @@ pub(crate) fn collect_v3_responses_custom_tool_names_from_tools(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            names.insert(name.to_string(), name.to_string());
+            names.insert(
+                name.to_string(),
+                V3ClientCustomToolName {
+                    name: name.to_string(),
+                    namespace: None,
+                },
+            );
         }
     }
 }
@@ -545,7 +566,7 @@ fn collect_namespace_custom_tool_names(
     namespace: &Value,
     client_namespace: &str,
     namespace_names: &std::collections::HashMap<String, String>,
-    names: &mut BTreeMap<String, String>,
+    names: &mut BTreeMap<String, V3ClientCustomToolName>,
 ) {
     for child in namespace
         .get("tools")
@@ -563,7 +584,13 @@ fn collect_namespace_custom_tool_names(
             }
             Some("custom") => {
                 if let Some(provider_name) = namespace_names.get(&client_name) {
-                    names.insert(provider_name.clone(), client_name);
+                    names.insert(
+                        provider_name.clone(),
+                        V3ClientCustomToolName {
+                            name: name.to_string(),
+                            namespace: Some(client_namespace.to_string()),
+                        },
+                    );
                 }
             }
             _ => {}

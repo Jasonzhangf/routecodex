@@ -362,7 +362,11 @@ mod tests {
         )
         .expect("identical provider declarations must collapse to one wire tool");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "duplicate provider tools must be removed: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "duplicate provider tools must be removed: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
     }
 
@@ -381,7 +385,11 @@ mod tests {
         )
         .expect("identical flat Responses provider declarations must collapse to one wire tool");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "duplicate flat provider tools must be removed: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "duplicate flat provider tools must be removed: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
     }
 
@@ -399,8 +407,14 @@ mod tests {
             body,
         )
         .expect_err("conflicting flat provider declarations must fail explicitly");
-        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
-        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+        assert!(
+            error.to_string().contains("ConflictingOutboundFields"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("mcp__mcpx__workspace"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -421,8 +435,14 @@ mod tests {
             body,
         )
         .expect_err("conflicting provider declarations must fail explicitly");
-        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
-        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+        assert!(
+            error.to_string().contains("ConflictingOutboundFields"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("mcp__mcpx__workspace"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -442,7 +462,11 @@ mod tests {
         )
         .expect("Chat normalization must not leave duplicate provider tool names");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "normalized provider tools must be unique: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "normalized provider tools must be unique: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
         assert_eq!(tools[0]["function"]["name"], "mcp__mcpx__workspace");
     }
@@ -715,6 +739,53 @@ mod tests {
             wire.body()["input"][0]["name"],
             "mcp__codex_review__review_start"
         );
+    }
+
+    #[test]
+    fn wire_maps_historical_codex_namespace_call_for_both_provider_shapes() {
+        for provider_type in ["responses", "openai_chat"] {
+            let mut provider = target();
+            provider.provider_type = provider_type.into();
+            let body = json!({
+                "model": "upstream-model",
+                "tools": [],
+                "input": [
+                    {"type": "function_call", "name": "functions.exec", "call_id": "call_exec", "arguments": "{}"},
+                    {"type": "custom_tool_call", "name": "functions.exec", "call_id": "call_custom_exec", "input": "pwd"}
+                ],
+                "messages": [{"role": "assistant", "content": [{"type": "tool_use", "name": "functions.exec"}],
+                    "tool_calls": [{"type": "function", "function": {"name": "functions.exec", "arguments": "{}"}}]}]
+            });
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-historical-codex-namespace",
+                provider,
+                body,
+            )
+            .expect("historical Codex namespace calls must project to legal provider names");
+            assert_eq!(wire.body()["input"][0]["name"], "functions__exec");
+            assert_eq!(wire.body()["input"][1]["name"], "functions__exec");
+            assert_eq!(
+                wire.body()["messages"][0]["content"][0]["name"],
+                "functions__exec"
+            );
+            assert_eq!(
+                wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+                "functions__exec"
+            );
+        }
+    }
+
+    #[test]
+    fn wire_does_not_guess_unrelated_dotted_history_from_colliding_flat_tool() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "function", "name": "billing__charge", "parameters": {"type": "object"}}],
+            "input": [{"type": "function_call", "call_id": "call_old", "name": "billing.charge", "arguments": "{}"}]
+        });
+        let error = build_v3_provider_12_responses_wire_payload(
+            "req-unrelated-dotted-history", target(), body,
+        ).expect_err("unrelated historical name must not adopt a flat tool identity");
+        assert!(matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }), "{error:?}");
     }
 
     #[test]

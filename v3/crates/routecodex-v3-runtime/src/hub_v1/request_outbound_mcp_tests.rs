@@ -15,7 +15,10 @@ fn responses_namespace_custom_tool_projects_to_chat_provider_function() {
         .expect("namespace custom declaration must project to Chat function wire");
     assert_eq!(request["tools"][0]["type"], "function");
     assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
-    assert_eq!(request["tools"][0]["function"]["parameters"]["required"], json!(["input"]));
+    assert_eq!(
+        request["tools"][0]["function"]["parameters"]["required"],
+        json!(["input"])
+    );
 }
 
 #[test]
@@ -26,7 +29,7 @@ fn responses_namespace_custom_history_uses_provider_name_on_followup() {
                 "model":"gpt-5.6-luna",
                 "input":[
                     {"role":"user","content":"run pwd"},
-                    {"type":"custom_tool_call","call_id":"call_exec","name":"functions.exec","input":"pwd"},
+                    {"type":"custom_tool_call","call_id":"call_exec","namespace":"functions","name":"exec","input":"pwd"},
                     {"type":"custom_tool_call_output","call_id":"call_exec","output":"/tmp"}
                 ],
                 "tools":[{"type":"namespace","name":"functions","tools":[
@@ -37,8 +40,45 @@ fn responses_namespace_custom_history_uses_provider_name_on_followup() {
         .expect("Responses custom tool followup must canonicalize");
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
         .expect("custom tool followup must project to Chat wire");
-    assert_eq!(request["messages"][1]["tool_calls"][0]["function"]["name"], "functions__exec");
-    assert_eq!(request["messages"][1]["tool_calls"][0]["function"]["arguments"], "{\"input\":\"pwd\"}");
+    assert_eq!(
+        request["messages"][1]["tool_calls"][0]["function"]["name"],
+        "functions__exec"
+    );
+    assert_eq!(
+        request["messages"][1]["tool_calls"][0]["function"]["arguments"],
+        "{\"input\":\"pwd\"}"
+    );
+}
+
+#[test]
+fn responses_nested_namespace_custom_history_uses_declared_provider_name() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-6-luna",
+                "input":[
+                    {"role":"user","content":"run pwd"},
+                    {"type":"custom_tool_call","call_id":"call_nested","namespace":"functions.inner","name":"exec","input":"pwd"},
+                    {"type":"custom_tool_call_output","call_id":"call_nested","output":"/tmp"}
+                ],
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"namespace","name":"inner","tools":[
+                        {"type":"custom","name":"exec","format":{"type":"text"}}
+                    ]}
+                ]}]
+            }),
+        )
+        .expect("nested custom tool followup must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("nested custom tool followup must project to Chat wire");
+    assert_eq!(
+        request["messages"][1]["tool_calls"][0]["function"]["name"],
+        "functions__inner__exec"
+    );
+    assert_eq!(
+        request["messages"][2]["tool_call_id"],
+        request["messages"][1]["tool_calls"][0]["id"]
+    );
 }
 
 #[test]
@@ -47,8 +87,14 @@ fn additional_tools_namespace_custom_history_uses_provider_name() {
         "messages":[{"role":"assistant","tool_calls":[{"id":"call_exec","function":{"name":"functions.exec","arguments":"{\"input\":\"pwd\"}"}}]}],
         "input":[{"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]
     });
-    super::super::request_outbound_mcp_names::rewrite_openai_chat_declared_namespace_history(&mut request).unwrap();
-    assert_eq!(request["messages"][0]["tool_calls"][0]["function"]["name"], "functions__exec");
+    super::super::request_outbound_mcp_names::rewrite_openai_chat_declared_namespace_history(
+        &mut request,
+    )
+    .unwrap();
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        "functions__exec"
+    );
 }
 
 #[test]
@@ -156,7 +202,10 @@ fn openai_chat_provider_normalizes_mcp_declaration_and_history_names_consistentl
     .expect("MCP declaration and history names must share the provider identity");
     let expected = json!("mcp__codex_review__review_start");
     assert_eq!(request["tools"][0]["function"]["name"], expected);
-    assert_eq!(request["messages"][0]["tool_calls"][0]["function"]["name"], expected);
+    assert_eq!(
+        request["messages"][0]["tool_calls"][0]["function"]["name"],
+        expected
+    );
     assert_eq!(request["messages"][1]["content"][0]["name"], expected);
 }
 
@@ -329,7 +378,10 @@ fn openai_chat_provider_preserves_non_mcp_functions_prefix() {
         }]
     }))
     .expect("non-MCP function names must not use the MCP legacy rewrite");
-    assert_eq!(request["tools"][0]["function"]["name"], "functions.exec_command");
+    assert_eq!(
+        request["tools"][0]["function"]["name"],
+        "functions.exec_command"
+    );
     assert_eq!(
         request["messages"][0]["tool_calls"][0]["function"]["name"],
         "functions.exec_command"
@@ -538,7 +590,8 @@ fn openai_chat_provider_preserves_custom_tool_output_names() {
             "content":[{"type":"tool_result","name":"functions.custom.render","content":"{}"}],
             "routecodex_chat_extension":{"responses_tool_output_type":"custom_tool_call_output"}
         }]
-    })).expect("custom tool output names must remain exact");
+    }))
+    .expect("custom tool output names must remain exact");
     assert_eq!(
         request["messages"][0]["content"][0]["name"],
         json!("functions.custom.render")
@@ -685,10 +738,10 @@ fn responses_tool_search_output_promotes_namespace_to_openai_chat_provider_tools
         .expect("discovered namespace tools must remain provider-visible");
 
     assert!(
-        request["tools"].as_array().is_some_and(|tools| tools.iter().any(
-            |tool| tool["type"] == "function"
-                && tool["function"]["name"] == "mcp__mcpx__workspace"
-        )),
+        request["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "function"
+                && tool["function"]["name"] == "mcp__mcpx__workspace")),
         "provider tools must expose the discovered namespace child: {request}"
     );
 }
@@ -737,10 +790,10 @@ fn responses_tool_search_output_promotes_namespace_before_chat_projection_strips
         .expect("discovered namespace tools must survive Chat provider projection");
 
     assert!(
-        request["tools"].as_array().is_some_and(|tools| tools.iter().any(
-            |tool| tool["type"] == "function"
-                && tool["function"]["name"] == "mcp__mcpx__workspace"
-        )),
+        request["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "function"
+                && tool["function"]["name"] == "mcp__mcpx__workspace")),
         "provider tools must expose the discovered namespace child after projection: {request}"
     );
 }
