@@ -117,13 +117,64 @@ pub struct V3OpenAiChatSseMaterializedChoice {
     pub refusal: String,
     pub finish_reason: Option<String>,
     pub tool_calls: BTreeMap<usize, V3OpenAiChatSseMaterializedToolCall>,
+    pub active_tool_call_by_wire_index: BTreeMap<usize, usize>,
+    pub tool_call_by_wire_index_and_id: BTreeMap<(usize, String), usize>,
 }
 
 impl V3OpenAiChatSseMaterializedChoice {
+    fn record_tool_call_for_wire_index(
+        &mut self,
+        wire_index: usize,
+        incoming_id: Option<&str>,
+    ) -> usize {
+        let active_index = self
+            .active_tool_call_by_wire_index
+            .get(&wire_index)
+            .copied();
+        let active_id_is_empty = active_index
+            .and_then(|index| self.tool_calls.get(&index))
+            .and_then(|call| call.call_id.as_deref())
+            .map_or(true, str::is_empty);
+        let materialized_index = if let Some(id) = incoming_id {
+            let identity = (wire_index, id.to_string());
+            if let Some(&index) = self.tool_call_by_wire_index_and_id.get(&identity) {
+                index
+            } else if let Some(index) = active_index.filter(|_| active_id_is_empty) {
+                self.tool_call_by_wire_index_and_id.insert(identity, index);
+                index
+            } else {
+                let index = self.tool_calls.len();
+                self.tool_calls
+                    .insert(index, V3OpenAiChatSseMaterializedToolCall::default());
+                self.tool_call_by_wire_index_and_id.insert(identity, index);
+                index
+            }
+        } else if let Some(index) = active_index {
+            index
+        } else {
+            let index = self.tool_calls.len();
+            self.tool_calls
+                .insert(index, V3OpenAiChatSseMaterializedToolCall::default());
+            index
+        };
+        self.active_tool_call_by_wire_index
+            .insert(wire_index, materialized_index);
+        materialized_index
+    }
+
     fn apply_tool_call(&mut self, call: &V3OpenAiChatSseToolCall) {
-        let tool_call = self.tool_calls.entry(call.position).or_default();
-        if call.call_id.is_some() {
-            tool_call.call_id = call.call_id.clone();
+        let incoming_id = call
+            .call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let materialized_index = self.record_tool_call_for_wire_index(call.position, incoming_id);
+        let tool_call = self
+            .tool_calls
+            .get_mut(&materialized_index)
+            .expect("materialized call slot must exist");
+        if let Some(id) = incoming_id {
+            tool_call.call_id = Some(id.to_string());
         }
         if call
             .name
@@ -225,14 +276,12 @@ impl Default for V3OpenAiChatSseReducerState {
 
 impl V3OpenAiChatSseReducerState {
     pub fn has_tool_calls(&self) -> bool {
-        self.choices
-            .iter()
-            .any(|choice| {
-                matches!(
-                    choice.delta,
-                    V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_)
-                )
-            })
+        self.choices.iter().any(|choice| {
+            matches!(
+                choice.delta,
+                V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_)
+            )
+        })
     }
 
     pub fn apply_chunk(&mut self, chunk: &Value) -> Result<(), V3OpenAiChatSseTreeError> {
@@ -461,15 +510,17 @@ impl V3OpenAiChatSseChoice {
                 delta.insert("refusal".to_owned(), Value::String(refusal.clone()));
             }
             V3OpenAiChatSseDelta::ToolCall(call) => {
-                delta.insert(
-                    "tool_calls".to_owned(),
-                    Value::Array(vec![call.to_value()]),
-                );
+                delta.insert("tool_calls".to_owned(), Value::Array(vec![call.to_value()]));
             }
             V3OpenAiChatSseDelta::ToolCalls(calls) => {
                 delta.insert(
                     "tool_calls".to_owned(),
-                    Value::Array(calls.iter().map(V3OpenAiChatSseToolCall::to_value).collect()),
+                    Value::Array(
+                        calls
+                            .iter()
+                            .map(V3OpenAiChatSseToolCall::to_value)
+                            .collect(),
+                    ),
                 );
             }
             V3OpenAiChatSseDelta::Empty | V3OpenAiChatSseDelta::Role(_) => {}
@@ -621,10 +672,7 @@ pub fn rewrite_v3_openai_chat_sse_content(
             V3OpenAiChatSseDelta::ToolCalls(calls),
             V3OpenAiChatSseContentRewrite::FunctionArguments(rewritten),
         ) => {
-            if let Some(call) = calls
-                .iter_mut()
-                .find(|call| call.arguments.is_some())
-            {
+            if let Some(call) = calls.iter_mut().find(|call| call.arguments.is_some()) {
                 call.arguments = Some(rewritten);
                 Ok(())
             } else {
