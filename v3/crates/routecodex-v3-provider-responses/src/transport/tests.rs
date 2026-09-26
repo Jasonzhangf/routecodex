@@ -118,6 +118,7 @@ fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
             vec![],
             None,
             100,
+            None,
         )
         .unwrap()
         .with_pre_acquired_admission(lease);
@@ -155,6 +156,7 @@ fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
             vec![],
             None,
             100,
+            None,
         )
         .unwrap()
         .with_pre_acquired_admission(lease);
