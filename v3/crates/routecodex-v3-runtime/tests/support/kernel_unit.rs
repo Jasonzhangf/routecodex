@@ -1265,9 +1265,8 @@ async fn provider_failure_reselects_without_router_reentry() {
         &[
             "first:key:test".to_string(),
             "second:key:test".to_string(),
-            "second:key:test".to_string(),
         ],
-        "Target must revalidate the recovered provider after its action permit is admitted"
+        "Target must select the recovered provider once after its action permit is admitted"
     );
     assert_eq!(realtime_events.lock().unwrap().len(), 1);
     assert_eq!(
