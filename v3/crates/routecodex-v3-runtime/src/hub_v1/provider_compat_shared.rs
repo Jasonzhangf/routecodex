@@ -66,6 +66,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
 ) -> Result<V3Transport13ResponsesHttpRequest, String> {
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
+    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let stream_intent = wire.stream_intent();
     let body = wire.body().clone();
     let timeout = Some(Duration::from_millis(target.request_timeout_ms));
@@ -81,6 +82,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
             Vec::new(),
             timeout,
             target.concurrency_acquire_timeout_ms,
+            sse_first_frame_timeout_ms,
         )
         .map_err(|error| error.to_string());
     }
@@ -94,6 +96,7 @@ pub(crate) fn build_v3_anthropic_messages_transport_request_from_v3_provider_08_
         provider_headers,
         timeout,
         target.concurrency_acquire_timeout_ms,
+        sse_first_frame_timeout_ms,
     )
     .map_err(|error| error.to_string())
 }
@@ -139,6 +142,7 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
 ) -> Result<V3Transport13ResponsesHttpRequest, String> {
     let request_id = wire.request_id().to_string();
     let target = wire.target().clone();
+    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let stream_intent = wire.stream_intent();
     let mut body = wire.body().clone();
     if is_v3_deepseek_reasoning_target(&target.canonical_model_id) {
@@ -158,6 +162,7 @@ fn build_v3_openai_chat_transport_request_from_v3_provider_08(
         Vec::new(),
         Some(Duration::from_millis(target.request_timeout_ms)),
         target.concurrency_acquire_timeout_ms,
+        sse_first_frame_timeout_ms,
     )
     .map_err(|error| error.to_string())
 }
@@ -246,6 +251,120 @@ mod tests {
         assert_eq!(
             request.body()["messages"][0]["tool_calls"][0]["function"]["arguments"],
             "{\"cmd\":\"pwd\""
+        );
+    }
+
+    #[test]
+    fn protocol_transport_request_keeps_provider_sse_first_frame_timeout() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-sse-first-frame-timeout",
+            V3ResponsesProviderTarget {
+                provider_id: "kdns-test".into(),
+                provider_type: "openai_chat".into(),
+                base_url: "http://upstream.invalid/v1".into(),
+                canonical_model_id: "deepseek-v4.1-flash".into(),
+                wire_model: "deepseek-v4.1-flash".into(),
+                compatibility_profile: None,
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::Environment("K1".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: Some(123_000),
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "deepseek-v4.1-flash"}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::OpenAiChat,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.sse_first_frame_timeout_ms(),
+            Some(123_000),
+            "the configured SSE first-frame timeout must reach the HTTP transport request"
+        );
+    }
+
+    #[test]
+    fn anthropic_transport_request_keeps_provider_sse_first_frame_timeout() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-sse-first-frame-timeout-anthropic",
+            V3ResponsesProviderTarget {
+                provider_id: "anthropic-test".into(),
+                provider_type: "anthropic".into(),
+                base_url: "http://upstream.invalid".into(),
+                canonical_model_id: "claude-sonnet-5".into(),
+                wire_model: "claude-sonnet-5".into(),
+                compatibility_profile: None,
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::Environment("A1".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: Some(456_000),
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "claude-sonnet-5", "max_tokens": 100}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.sse_first_frame_timeout_ms(),
+            Some(456_000),
+            "the configured SSE first-frame timeout must reach the Anthropic HTTP transport request"
+        );
+    }
+
+    #[test]
+    fn gemini_transport_request_keeps_provider_sse_first_frame_timeout() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-sse-first-frame-timeout-gemini",
+            V3ResponsesProviderTarget {
+                provider_id: "gemini-test".into(),
+                provider_type: "gemini".into(),
+                base_url: "http://upstream.invalid".into(),
+                canonical_model_id: "gemini-2.5-flash".into(),
+                wire_model: "gemini-2.5-flash".into(),
+                compatibility_profile: None,
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::Environment("G1".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: Some(789_000),
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "gemini-2.5-flash", "contents": []}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::Gemini,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.sse_first_frame_timeout_ms(),
+            Some(789_000),
+            "the configured SSE first-frame timeout must reach the Gemini HTTP transport request"
         );
     }
 }

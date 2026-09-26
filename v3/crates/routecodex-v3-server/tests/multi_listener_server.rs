@@ -599,6 +599,7 @@ fn p6_remote_continuation_manifest(
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let auth_alias = format!("key-{port_a}");
     let source = format!(
         r#"
 version = 3
@@ -618,7 +619,7 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+auth = {{ type = "api_key", entries = [{{ alias = "{auth_alias}", env = "V3_P6_TEST_KEY" }}] }}
 responses = {{ process = "chat", streaming = "always", transport = "websocket_v2", websocket_v2_url = "{websocket_v2_url}" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -637,10 +638,10 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "{auth_alias}", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "{auth_alias}", priority = 1 }}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()

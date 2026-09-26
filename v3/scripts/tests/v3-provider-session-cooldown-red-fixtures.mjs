@@ -175,14 +175,14 @@ const cases = [
     diagnostic: /Provider Health must key failure-derived state/u,
   },
   {
-    name: "Health drops single-flight rescue owner",
-    path: copied[1],
+    name: "Runtime rescue drops single-flight health probe owner",
+    path: "v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs",
     mutate: (source) =>
       source.replaceAll(
         "acquire_provider_cooldown_rescue_probe",
         "rescue_without_atomic_owner",
       ),
-    diagnostic: /Provider Health must own single-flight cooldown rescue admission/u,
+    diagnostic: /Runtime rescue owner must require a successful provider probe/u,
   },
   {
     name: "ActionGate key drops session",
@@ -317,6 +317,16 @@ const cases = [
         "ControlRequest::ExecuteLocalWebSearch",
       ),
     diagnostic: /Web-search state machine must bind execution to the typed hooks-sidecar owner/u,
+  },
+  {
+    name: "Anthropic request dry-run enables provider rescue probe",
+    path: "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs",
+    mutate: (source) =>
+      source.replace(
+        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        false,\n    )",
+        "V3RelayProviderFailureRetryPolicy::from_manifest(manifest),\n        true,\n    )",
+      ),
+    diagnostic: /Anthropic request dry-run must pass the rescue-probe-disabled gate/u,
   },
   {
     name: "Shared rescue owner ignores dry-run gate",

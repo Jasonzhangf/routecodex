@@ -14,8 +14,9 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    select_v3_expanded_target_with_exhaustion_rescue, select_v3_target_with_session_then_global,
-    V3ProviderFailureRuntimeHealth, V3TargetSelectionAfterRescue,
+    select_v3_expanded_target_with_admission_rescue, select_v3_target_with_session_then_global,
+    try_admit_v3_selected_target, V3AdmittedTargetSelectionAfterRescue,
+    V3ProviderFailureRuntimeHealth, V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -320,61 +321,100 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut pending_provider_action_recovery = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
-        let selected = match pinned_selected.take() {
-            Some(selected) => selected,
-            None => match initial_selected_target.take() {
-                Some(selected) => selected,
-                None => match retry_selected.take() {
-                    Some(selected) => selected,
-                    None => {
-                        let captured_expanded = match expanded.as_ref() {
-                            Some(expanded) => expanded.clone(),
-                            None => {
-                                return error_output(
-                                    runtime_source(
-                                        "V3Target09CandidateSetExpanded",
-                                        "routed candidate set missing",
-                                    ),
-                                    trace,
-                                    &hook_registry,
-                                )
-                            }
-                        };
-                        match select_v3_expanded_target_with_exhaustion_rescue(
-                            manifest,
-                            captured_expanded.clone(),
-                            &direct_failure_session_scope,
-                            &provider_health,
-                            &failed_candidates,
-                            now_epoch_ms,
-                            0,
-                            allow_exhaustion_rescue_probe,
-                        )
-                        .await
-                        {
-                            V3TargetSelectionAfterRescue::Selected(value) => value,
-                            V3TargetSelectionAfterRescue::Failed(source) => {
-                                return error_output(source, trace, &hook_registry);
-                            }
-                            V3TargetSelectionAfterRescue::Exhausted(error) => {
-                                return error_output(
-                                    build_v3_error_01_source_raised(
-                                        V3ErrorSourceKind::TargetPoolExhausted,
-                                        "V3Target10ConcreteProviderSelected",
-                                        "selected_target_exhausted",
-                                        format!(
-                                            "{} candidates unavailable",
-                                            error.attempted_candidates.len()
-                                        ),
-                                    ),
-                                    trace,
-                                    &hook_registry,
-                                )
-                            }
-                        }
+        let (selected, mut selected_admission): (
+            routecodex_v3_target::V3Target10ConcreteProviderSelected,
+            Option<V3RuntimeProviderAdmission>,
+        ) = {
+            let pinned = pinned_selected.take();
+            let preferred = pinned
+                .as_ref()
+                .cloned()
+                .or_else(|| initial_selected_target.take())
+                .or_else(|| retry_selected.take());
+            if let Some(captured_expanded) = expanded.as_ref() {
+                match Box::pin(select_v3_expanded_target_with_admission_rescue(
+                    manifest,
+                    captured_expanded.clone(),
+                    &direct_failure_session_scope,
+                    &provider_health,
+                    &failed_candidates,
+                    now_epoch_ms,
+                    0,
+                    allow_exhaustion_rescue_probe,
+                    preferred,
+                    pinned.is_none(),
+                ))
+                .await
+                {
+                    V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
+                        (value.selected, Some(value.admission))
                     }
-                },
-            },
+                    V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+                        return error_output(source, trace, &hook_registry);
+                    }
+                    V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+                        let detail = if error.attempted_candidates.is_empty() {
+                            "no candidates".to_string()
+                        } else {
+                            error.attempted_candidates.join(", ")
+                        };
+                        let exhausted_observability = V3RuntimeObservability {
+                            entry_protocol: "responses".to_string(),
+                            routing_group_id: Some(error.route.routing_group_id.clone()),
+                            pool_id: Some(error.route.pool_id.clone()),
+                            response_status: Some("error".to_string()),
+                            unavailable_candidates: error.attempted_candidates.clone(),
+                            ..V3RuntimeObservability::default()
+                        };
+                        return direct_runtime_helpers_stream::error_output_with_observability(
+                            build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::TargetPoolExhausted,
+                                "V3Target10ConcreteProviderSelected",
+                                "selected_target_exhausted",
+                                format!(
+                                    "{} candidates unavailable: {detail}",
+                                    error.attempted_candidates.len()
+                                ),
+                            ),
+                            trace,
+                            &hook_registry,
+                            Some(exhausted_observability),
+                        );
+                    }
+                }
+            } else if let Some(selected) = preferred {
+                match try_admit_v3_selected_target(&selected) {
+                    Ok(Some(admission)) => (selected, Some(admission)),
+                    Ok(None) => {
+                        return error_output(
+                            build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::TargetPoolExhausted,
+                                "V3Target10ConcreteProviderSelected",
+                                "concurrency_busy",
+                                "selected provider concurrency capacity is busy",
+                            ),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                    Err(reason) => {
+                        return error_output(
+                            runtime_source("V3Target10ConcreteProviderSelected", reason),
+                            trace,
+                            &hook_registry,
+                        )
+                    }
+                }
+            } else {
+                return error_output(
+                    runtime_source(
+                        "V3Target09CandidateSetExpanded",
+                        "routed candidate set missing",
+                    ),
+                    trace,
+                    &hook_registry,
+                );
+            }
         };
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
@@ -401,6 +441,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             sink(&observability);
         }
         let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
+        if pending_provider_action_recovery.is_some() {
+            drop(selected_admission.take());
+        }
         if let Some(recovery) = pending_provider_action_recovery.take() {
             match provider_health
                 .wait_for_error05_recovery(&recovery, &selected)
@@ -683,6 +726,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &hook_registry,
                 )
             }
+        };
+        let transport_request = match selected_admission.take() {
+            Some(admission) => {
+                transport_request.with_pre_acquired_admission(admission.into_lease())
+            }
+            None => transport_request,
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());

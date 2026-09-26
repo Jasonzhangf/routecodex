@@ -578,7 +578,7 @@ fn stale_probe_generation_cannot_clear_newer_failure_state() {
     store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 103)
         .expect("newer failure");
-    let error = store
+    store
         .complete_probe_success_at_generation(
             "provider-a",
             "key-a",
@@ -586,8 +586,7 @@ fn stale_probe_generation_cannot_clear_newer_failure_state() {
             104,
             Some(permit.expected_generation()),
         )
-        .expect_err("stale probe must not clear newer state");
-    assert!(error.contains("stale provider key health probe generation"));
+        .expect("stale probe completion is ignored without clearing newer state");
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .expect("stale completion releases single-flight permit")
@@ -611,7 +610,7 @@ fn stale_failed_probe_cannot_mutate_newer_failure_state() {
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 103)
         .expect("newer failure");
 
-    let error = store
+    store
         .complete_provider_cooldown_probe_failure_at_generation(
             "provider-a",
             Some("key-a"),
@@ -619,10 +618,7 @@ fn stale_failed_probe_cannot_mutate_newer_failure_state() {
             104,
             Some(permit.expected_generation()),
         )
-        .expect_err("stale failed probe must not mutate newer state");
-    assert!(error
-        .to_string()
-        .contains("stale provider health probe generation"));
+        .expect("stale failed-probe completion is ignored without mutating newer state");
     let after = store
         .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 104)
         .expect("projection after stale failed probe");

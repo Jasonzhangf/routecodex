@@ -419,6 +419,7 @@ pub(crate) fn build_v3_gemini_transport_09(
     transport_intent: V3HubTransportIntent,
     body: Value,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3GeminiRelayRuntimeError> {
+    let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
     let stream_intent = match transport_intent {
         V3HubTransportIntent::Json => V3ResponsesStreamIntent::Json,
         V3HubTransportIntent::Sse => V3ResponsesStreamIntent::Sse,
@@ -455,6 +456,7 @@ pub(crate) fn build_v3_gemini_transport_09(
         Vec::new(),
         Some(Duration::from_millis(target.request_timeout_ms)),
         target.concurrency_acquire_timeout_ms,
+        sse_first_frame_timeout_ms,
     )
     .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
 }
