@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 75 functional paths, 445 caller edges.
+Generated view: 75 functional paths, 446 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -49,7 +49,7 @@ flowchart TD
   module_v3_lifecycle -->|7 edges / 2 paths| module_v3_lifecycle
   module_v3_lifecycle -->|2 edges / 2 paths| module_v3_server
   module_v3_provider_responses -->|1 edges / 1 paths| module_routecodex_v3_sse
-  module_v3_provider_responses -->|9 edges / 6 paths| module_v3_provider_responses
+  module_v3_provider_responses -->|10 edges / 7 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|3 edges / 3 paths| module_provider_compat_core
   module_v3_runtime__hub_v1 -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_hooks
@@ -97,7 +97,7 @@ flowchart TD
 | v3-lifecycle | v3-lifecycle | 7 | `v3.rcc_internal_hooks_sidecar`<br/>`v3.server.managed_lifecycle` |
 | v3-lifecycle | v3-server | 2 | `v3.server.managed_lifecycle`<br/>`v3.web_search_servertool_state_machine` |
 | v3-provider-responses | routecodex-v3-sse | 1 | `v3.sse.transport_boundary` |
-| v3-provider-responses | v3-provider-responses | 9 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
+| v3-provider-responses | v3-provider-responses | 10 | `v3-provider-admission-lease-lifecycle`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime::hub_v1 | provider-compat-core | 3 | `v3.provider_compat_profile.request`<br/>`v3.provider_compat_profile.response`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime::hub_v1 | routecodex-v3-hooks | 1 | `v3.web_search_servertool_state_machine` |
@@ -566,7 +566,7 @@ flowchart TD
 
 ## v3.config.provider_sse_timeout_projection.mainline
 
-Config compiles and publishes the validated per-provider SSE first-frame timeout consumed by the shared Relay guard.
+Config compiles and publishes the validated per-provider SSE first-frame timeout consumed by the shared Relay guard and Provider HTTP header-wait transport.
 
 Owner feature: `v3.config_interpreter_contract`
 
@@ -576,18 +576,24 @@ flowchart TD
     c_14_v3_config_provider_sse_timeout_projection_mainline_0["v3-config<br/>compile_providers<br/><small>routecodex-v3-config/src/validate.rs</small>"]
     c_14_v3_config_provider_sse_timeout_projection_mainline_1["v3-config<br/>V3ProviderManifest<br/><small>routecodex-v3-config/src/types.rs</small>"]
   end
+  subgraph c_14_v3_config_provider_sse_timeout_projection_mainline_m_v3_provider_responses["v3-provider-responses"]
+    c_14_v3_config_provider_sse_timeout_projection_mainline_4["v3-provider-responses<br/>ProviderResponsesTransport::send_http<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_14_v3_config_provider_sse_timeout_projection_mainline_5["v3-provider-responses<br/>send_http_await<br/><small>routecodex-v3-provider-responses/src/shared.rs</small>"]
+  end
   subgraph c_14_v3_config_provider_sse_timeout_projection_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_14_v3_config_provider_sse_timeout_projection_mainline_2["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
     c_14_v3_config_provider_sse_timeout_projection_mainline_3["v3-runtime::hub_v1<br/>guard_relay_sse_first_frame<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
   end
   c_14_v3_config_provider_sse_timeout_projection_mainline_0 -->|v3-config-provider-sse-timeout-01<br/>V3ProviderAuthoringConfig → V3ProviderManifest| c_14_v3_config_provider_sse_timeout_projection_mainline_1
   c_14_v3_config_provider_sse_timeout_projection_mainline_2 -->|v3-config-provider-sse-timeout-02<br/>V3Config05ManifestPublished → V3RelaySseFirstFrameGuard| c_14_v3_config_provider_sse_timeout_projection_mainline_3
+  c_14_v3_config_provider_sse_timeout_projection_mainline_4 -->|v3-config-provider-sse-timeout-03<br/>V3Transport13ResponsesHttpRequest → V3ProviderResp14Raw| c_14_v3_config_provider_sse_timeout_projection_mainline_5
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-config-provider-sse-timeout-01` | `V3ProviderAuthoringConfig` → `V3ProviderManifest` | anchored | compile_providers<br/><small>routecodex-v3-config/src/validate.rs</small> | V3ProviderManifest<br/><small>routecodex-v3-config/src/types.rs</small> | `v3.config_interpreter_contract` |
 | `v3-config-provider-sse-timeout-02` | `V3Config05ManifestPublished` → `V3RelaySseFirstFrameGuard` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | guard_relay_sse_first_frame<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | `v3.relay_runtime_core` |
+| `v3-config-provider-sse-timeout-03` | `V3Transport13ResponsesHttpRequest` → `V3ProviderResp14Raw` | anchored | ProviderResponsesTransport::send_http<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | send_http_await<br/><small>routecodex-v3-provider-responses/src/shared.rs</small> | `v3.responses_provider_runtime` |
 
 ## v3.config.compact_hub_v1_defaults
 
