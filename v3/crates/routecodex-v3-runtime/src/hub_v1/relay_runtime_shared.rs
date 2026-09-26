@@ -21,6 +21,7 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
     V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
     V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
@@ -355,6 +356,11 @@ pub fn provider_runtime_failure(
         };
     }
     let error_code = match &error {
+        V3ProviderError::Transport { reason, .. }
+            if routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason) =>
+        {
+            V3_TRANSIENT_TRANSPORT_HANG_CODE
+        }
         // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
         // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
         // provider_error，否则 relay 会按 transient 同 provider 重试后直接投影给客户端。
