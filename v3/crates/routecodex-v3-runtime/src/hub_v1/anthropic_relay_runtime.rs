@@ -722,11 +722,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
-                        V3AdmitAfterRecovery::Exhausted(error) => {
-                            return Err(V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
-                                attempted_candidates: error.attempted_candidates,
-                            })
-                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3AnthropicRelayRuntimeError::Target(reason))
                         }

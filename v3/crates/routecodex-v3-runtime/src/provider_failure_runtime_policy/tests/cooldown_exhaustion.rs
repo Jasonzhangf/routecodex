@@ -1283,7 +1283,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
 }
 
 #[tokio::test]
-async fn pinned_busy_candidate_reselects_to_next_provider_before_admission() {
+async fn pinned_over_budget_candidate_stays_selected_without_admission_reselection() {
     let server_id = "pinned_busy_candidate_reselect";
     let mut manifest = global_pool_alive_manifest(server_id);
     manifest
@@ -1372,9 +1372,9 @@ async fn pinned_busy_candidate_reselects_to_next_provider_before_admission() {
     )
     .await;
     let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selected else {
-        panic!("a busy preferred provider must reselect the next tier");
+        panic!("an over-budget preferred provider must remain selected");
     };
-    assert_eq!(selected.selected.candidate.provider_id, "second");
+    assert_eq!(selected.selected.candidate.provider_id, "first");
     drop(selected);
     controller
         .release(active_business_lease.into_permit())

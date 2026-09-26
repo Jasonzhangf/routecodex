@@ -346,6 +346,31 @@ impl V3AdaptiveConcurrencyController {
         None
     }
 
+    pub fn try_acquire_business_soft(&self, provider_key: &str) -> V3AdaptiveConcurrencyLease {
+        let mut states = self
+            .inner
+            .states
+            .lock()
+            .expect("adaptive concurrency state lock should not be poisoned");
+        let state =
+            states
+                .entry(provider_key.to_string())
+                .or_insert_with(|| V3AdaptiveConcurrencyState {
+                    budget: self.inner.initial_budget,
+                    hard_max_in_flight: self.inner.hard_max_in_flight,
+                    ..V3AdaptiveConcurrencyState::default()
+                });
+        state.in_flight = state.in_flight.saturating_add(1);
+        V3AdaptiveConcurrencyLease {
+            admission: V3AdaptiveConcurrencyAdmission::Lease,
+            permit: V3AdaptiveConcurrencyPermit {
+                provider_key: provider_key.to_string(),
+                probe: false,
+            },
+            controller: self.clone(),
+        }
+    }
+
     pub fn try_acquire_probe(
         &self,
         provider_key: &str,
@@ -536,6 +561,21 @@ mod tests {
             )
             .unwrap();
         assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 3);
+    }
+
+    #[test]
+    fn soft_business_leases_exceed_the_adaptive_budget_without_waiting() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 1).unwrap();
+        let first = controller.try_acquire_business_soft("opencode-go:key1");
+        let second = controller.try_acquire_business_soft("opencode-go:key1");
+        assert!(!first.is_probe());
+        assert!(!second.is_probe());
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().in_flight,
+            2
+        );
+        controller.release(first.into_permit()).unwrap();
+        controller.release(second.into_permit()).unwrap();
     }
 
     #[test]

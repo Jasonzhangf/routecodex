@@ -498,12 +498,12 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [providerId, transportKind, websocketEndpoint, maxInFlight, acquireTimeoutMs, staleLeaseMs]
     semantic_contract:
-      source: existing provider concurrency acquireTimeoutMs is compiled into the published manifest and remains the sole admission deadline truth
-      propagation: Target carries maxInFlight and acquireTimeoutMs into the selected Provider transport target
-      admission: Runtime reserves the selected provider+authAlias lease before Provider transport; Busy stays request-local and health-neutral
-      hard_limit: maxInFlight is a hard cap for business requests and scheduled concurrency probes; the learned adaptive budget never exceeds that cap
-      selection: Target scans eligible candidates and skips Busy candidates immediately; when every eligible candidate is Busy, it may consume an already-due scheduled probe, otherwise it returns typed provider-pool exhaustion immediately
-      timeout: concurrency acquireTimeoutMs never delays Target reselection or all-Busy exhaustion; no provider request is sent and provider health is unchanged
+      source: provider concurrency maxInFlight is a soft adaptive signal, while acquireTimeoutMs bounds background probe admission only
+      propagation: Target carries the configured provider concurrency signal into the selected Provider transport target
+      admission: Runtime always selects the highest-priority health-eligible candidate and immediately records an in-flight lease, even when current in-flight work meets or exceeds the adaptive budget
+      hard_limit: maxInFlight is not a business request ceiling; scheduled probes remain bounded independently
+      selection: concurrency state never excludes a business candidate or advances routing tiers; only typed provider failures such as HTTP 429 enter Error recovery and may select the next eligible provider
+      timeout: business request selection and transport never wait for concurrency capacity; acquireTimeoutMs cannot delay a client request or change its selected provider
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
@@ -518,13 +518,13 @@ resources:
     owner_node: V3AdaptiveConcurrencyController
     identity: [providerId, authAlias, lease]
     semantic_contract:
-      capacity: configured maxInFlight is a hard ceiling for all business and scheduled-probe leases; adaptive budget is clamped to the same ceiling
-      acquisition: Runtime acquires a selected provider+authAlias lease before Provider transport and immediately reselects when a candidate is Busy
+      capacity: configured maxInFlight is a soft adaptive signal for business traffic; leases track all in-flight business requests even above that budget, while scheduled probes remain independently bounded
+      acquisition: Runtime acquires a selected provider+authAlias tracking lease immediately before Provider transport and never reselects or waits because of concurrency state
       websocket_order: For WebSocketV2, Provider transport releases Runtime's pre-acquired lease before waiting for the shared session connection slot, then acquires provider admission only after it owns that slot; if admission loses a race, it releases the slot before retrying
       handoff: Provider consumes a matching Runtime lease exactly once; a mismatched lease is released and rejected
       release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
-    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
+    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business_soft, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
     allowed_readers: [V3AdaptiveConcurrencyController::snapshot, select_v3_expanded_target_with_admission_rescue, V3ProviderResponsesTransport::send]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false

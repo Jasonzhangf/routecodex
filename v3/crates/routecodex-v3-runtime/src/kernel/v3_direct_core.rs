@@ -433,22 +433,6 @@ where
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
-                        V3AdmitAfterRecovery::Exhausted(error) => {
-                            let detail = error.attempted_candidates.join(", ");
-                            return error_output(
-                                build_v3_error_01_source_raised(
-                                    V3ErrorSourceKind::TargetPoolExhausted,
-                                    "V3Target10ConcreteProviderSelected",
-                                    "concurrency_busy",
-                                    format!(
-                                        "{} candidates unavailable: {detail}",
-                                        error.attempted_candidates.len()
-                                    ),
-                                ),
-                                trace,
-                                &crate::hooks::register_responses_direct_hooks(),
-                            )
-                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),

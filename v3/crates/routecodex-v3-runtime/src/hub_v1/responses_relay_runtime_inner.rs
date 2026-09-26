@@ -382,11 +382,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         V3AdmitAfterRecovery::Admitted(admission) => {
                             selected_admission = Some(admission)
                         }
-                        V3AdmitAfterRecovery::Exhausted(error) => {
-                            return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
-                                attempted_candidates: error.attempted_candidates,
-                            })
-                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return Err(V3ResponsesRelayRuntimeError::Target(reason))
                         }

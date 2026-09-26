@@ -6849,7 +6849,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay Runtime entry points call the admission-aware provider rescue wrappers so provider cooldown exhaustion rescue and provider concurrency admission share one pre-transport selection boundary.
+  summary: Direct and Relay Runtime entry points use one pre-transport selection boundary where health and request-local Error exclusions determine the candidate; concurrency is an observational soft signal and never alters provider or tier selection.
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -6862,9 +6862,9 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - A busy provider+authAlias capacity key is request-local and health-neutral; Direct excludes that candidate, scans sibling candidates, and preserves the existing cooldown exhaustion rescue path.
+      - Provider+authAlias concurrency is an observational soft signal; Direct keeps the highest-priority health-eligible candidate selected and sends it without waiting or skipping.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - If every eligible candidate is busy, Direct considers any already-due scheduled probe and otherwise reports concurrency_busy exhaustion immediately without waiting, provider send, or provider health mutation.
+      - Concurrency state never exhausts Direct selection or advances a route tier; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -6881,7 +6881,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Busy concurrency candidates are not provider failures and do not mutate session or global cooldown health.
+      - Concurrency state never excludes a Responses Direct candidate or advances tiers; it only tracks in-flight request leases.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -6899,9 +6899,9 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
-      - Relay busy-candidate exclusion is request-local and health-neutral, then delegates selected-candidate choice to the same session/global and exhaustion-rescue selector as Direct.
+      - Relay selects the highest-priority health-eligible candidate; concurrency is an observational soft signal and cannot exclude candidates or advance tiers.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Relay all-busy admission immediately projects provider-pool exhaustion with concurrency_busy attempted candidates when no due scheduled probe is admitted; it never waits or sends a provider request on that exhaustion path.
+      - Concurrency state cannot exhaust Relay selection; only an actual typed provider failure such as HTTP 429 enters Error recovery and may select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
@@ -6918,7 +6918,7 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
-      - Busy provider admission stays outside the provider failure policy and cannot cool the provider, auth key, or model.
+      - Concurrency state stays outside provider failure policy and does not alter the selected provider, auth key, model, or cooldown state.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -6936,9 +6936,9 @@ chains:
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
       - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
-      - Busy provider admission remains request-local and health-neutral; an idle configured candidate is selected immediately.
+      - Concurrency is an observational soft signal; Anthropic Relay sends the highest-priority health-eligible provider without waiting or switching early.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - If all eligible candidates are Busy, Runtime considers any already-due scheduled probe and otherwise immediately exhausts without waiting or Provider send.
+      - Concurrency state cannot exhaust Anthropic Relay selection; only an actual typed provider failure such as HTTP 429 may enter Error recovery and select a later candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
       produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]

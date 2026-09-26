@@ -2319,7 +2319,7 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
 }
 
 #[tokio::test]
-async fn provider_concurrency_busy_reselects_second_provider_before_transport_send() {
+async fn provider_concurrency_at_budget_still_sends_highest_priority_provider() {
     let first = "conc_busy_a_first";
     let second = "conc_busy_a_second";
     let held = saturate_capacity_key(&format!("{first}:key"));
@@ -2348,7 +2348,7 @@ async fn provider_concurrency_busy_reselects_second_provider_before_transport_se
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[format!("{second}:key:wire-second")]
+        &[format!("{first}:key:wire-first")]
     );
     assert!(
         provider_health
@@ -2359,25 +2359,26 @@ async fn provider_concurrency_busy_reselects_second_provider_before_transport_se
 }
 
 #[tokio::test]
-async fn recovery_gate_reselects_when_selected_provider_becomes_busy() {
+async fn only_provider_429_reselects_and_soft_limit_never_skips_a_busy_candidate() {
     let first = "conc_recovery_first";
     let second = "conc_recovery_second";
-    let third = "conc_recovery_third";
-    let manifest = provider_concurrency_three_provider_manifest(first, second, third, 100);
+    let held_first = saturate_capacity_key(&format!("{first}:key"));
+    let held_second = saturate_capacity_key(&format!("{second}:key"));
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 100);
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = Arc::new(ProviderActionRecoveryConcurrencyTransport {
+    let transport = ProviderActionRecoveryConcurrencyTransport {
         first_provider: first.to_string(),
         first_send: tokio::sync::Notify::new(),
         sends: Mutex::new(Vec::new()),
-    });
+    };
     let raw = test_responses_raw(
         "default",
         "req-recovery-reselect-busy",
         "exec-recovery-reselect-busy",
         json!({"model":"client-model","input":"hello"}),
     );
-    let run_transport = transport.clone();
-    let run = tokio::spawn(async move {
+    let output = tokio::time::timeout(
+        Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 1_000),
         execute_v3_responses_direct_runtime_kernel_core(
             V3ResponsesDirectRuntimeCoreState::new()
                 .with_provider_health(provider_health)
@@ -2385,36 +2386,24 @@ async fn recovery_gate_reselects_when_selected_provider_becomes_busy() {
             &manifest,
             raw,
             crate::register_responses_direct_hooks(),
-            run_transport.as_ref(),
-        )
-        .await
-    });
-    transport.first_send.notified().await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let held = saturate_capacity_key(&format!("{second}:key"));
-    let output = tokio::time::timeout(
-        Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 1_000),
-        run,
+            &transport,
+        ),
     )
     .await;
-    release_capacity_leases(held);
-    let output = output
-        .expect("recovery should not block on the provider that became busy")
-        .expect("runtime task should complete");
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+    let output = output.expect("soft concurrency must not block the business request");
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[
-            format!("{first}:key"),
-            format!("{third}:key"),
-        ],
-        "the target occupied during recovery must be skipped before transport"
+        &[format!("{first}:key"), format!("{second}:key")],
+        "the first over-budget request must be sent; only its actual 429 may select the next provider, even when that provider is also over budget"
     );
 }
 
 #[tokio::test]
-async fn provider_concurrency_busy_reselects_sibling_auth_key() {
+async fn provider_concurrency_budget_does_not_reselect_sibling_auth_key() {
     let provider = "conc_busy_key_provider";
     let held = saturate_capacity_key(&format!("{provider}:key1"));
     let manifest = provider_concurrency_two_key_manifest(provider, 80);
@@ -2442,18 +2431,19 @@ async fn provider_concurrency_busy_reselects_sibling_auth_key() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[format!("{provider}:key2:wire-test")]
+        &[format!("{provider}:key1:wire-test")],
+        "reaching the soft budget must not skip the highest-priority auth key"
     );
     assert!(
         provider_health
             .availability(provider, Some("key1"), Some("test"), 20)
             .available,
-        "busy key1 must stay health-neutral while key2 is selected"
+            "sending an over-budget request must stay health-neutral"
     );
 }
 
 #[tokio::test]
-async fn provider_concurrency_all_busy_exhausts_immediately_without_provider_failure_health() {
+async fn provider_concurrency_saturated_candidates_still_send_first_provider() {
     let first = "conc_all_busy_timeout_first";
     let second = "conc_all_busy_timeout_second";
     let held_first = saturate_capacity_key(&format!("{first}:key"));
@@ -2468,46 +2458,23 @@ async fn provider_concurrency_all_busy_exhausts_immediately_without_provider_fai
         json!({"model":"client-model","input":"hello"}),
     );
 
-    let output = tokio::time::timeout(
-        Duration::from_millis(100),
-        execute_v3_responses_direct_runtime_kernel_core(
-            V3ResponsesDirectRuntimeCoreState::new()
-                .with_provider_health(provider_health.clone())
-                .with_now_epoch_ms(10),
-            &manifest,
-            raw,
-            crate::register_responses_direct_hooks(),
-            &transport,
-        ),
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
     )
     .await;
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
-    let output = output.expect("all-busy Direct admission must exhaust without waiting for acquireTimeoutMs");
-
-    assert!(
-        transport.sends.lock().unwrap().is_empty(),
-        "all-busy exhaustion must not send a provider request"
-    );
-    assert!(
-        !output
-            .node_trace
-            .contains(&"V3Transport13ResponsesHttpRequest"),
-        "{:?}",
-        output.node_trace
-    );
-    assert!(
-        output.client_payload.status >= 500,
-        "all-busy exhaustion should project an error payload: {output:?}"
-    );
-    let unavailable = &output
-        .observability
-        .as_ref()
-        .expect("all-busy exhaustion should retain unavailable candidates")
-        .unavailable_candidates;
-    assert!(
-        unavailable.iter().any(|candidate| candidate.contains("concurrency_busy")),
-        "all-busy exhaustion should preserve the attempted-candidate reason: {unavailable:?}"
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{first}:key:wire-first")],
+        "concurrency saturation must neither skip provider one nor exhaust the pool"
     );
     assert!(
         provider_health
@@ -2522,7 +2489,7 @@ async fn provider_concurrency_all_busy_exhausts_immediately_without_provider_fai
 }
 
 #[tokio::test]
-async fn provider_concurrency_all_busy_uses_due_scheduled_probe_for_admission() {
+async fn provider_concurrency_due_probe_does_not_change_business_selection() {
     let first = "conc_all_busy_due_probe_a";
     let second = "conc_all_busy_due_probe_b";
     let first_key = format!("{first}:key");
@@ -2560,7 +2527,7 @@ async fn provider_concurrency_all_busy_uses_due_scheduled_probe_for_admission() 
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
         &[format!("{first}:key:wire-first")],
-        "all-busy scan must consume the due scheduled probe instead of timing out"
+        "business traffic keeps the first eligible provider; a due probe does not change route selection"
     );
     let snapshot = V3AdaptiveConcurrencyController::process_shared()
         .snapshot(&first_key)
@@ -2623,9 +2590,10 @@ async fn provider_concurrency_exact_pin_uses_due_scheduled_probe_before_exhausti
         .unwrap();
     assert!(snapshot.saturated);
     assert!(!snapshot.probe_in_flight);
+}
 
 #[tokio::test]
-async fn provider_concurrency_recovery_readmission_does_not_fall_back_to_transport_acquire_timeout() {
+async fn provider_concurrency_recovery_sends_saturated_later_candidate_without_waiting() {
     struct FirstFailsSecondMustNotSend {
         sends: Arc<Mutex<Vec<String>>>,
     }
@@ -2650,9 +2618,16 @@ async fn provider_concurrency_recovery_readmission_does_not_fall_back_to_transpo
                     }),
                 })
             } else {
-                panic!(
-                    "recovery readmission must never reach provider transport for {provider_id} without a pre-acquired lease"
-                );
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_saturated_recovery","object":"response","status":"completed","output":[{"id":"msg_saturated_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ))
             }
         }
     }
@@ -2694,22 +2669,17 @@ async fn provider_concurrency_recovery_readmission_does_not_fall_back_to_transpo
     let elapsed = started.elapsed();
     release_capacity_leases(held);
 
-    let output = output.expect(
-        "recovery readmission must exhaust immediately after the gate, not wait through acquireTimeoutMs",
-    );
+    let output = output.expect("recovery to a saturated candidate must not wait for concurrency");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[first.to_string()],
-        "only the failed first provider may reach transport"
+        &[first.to_string(), second.to_string()],
+        "after the first provider fails, a full later provider must still receive the request"
     );
     assert!(
         elapsed < Duration::from_millis(2_500),
         "recovery readmission must not fall back to transport acquire_timeout: {elapsed:?}"
     );
-    assert!(
-        output.client_payload.status >= 500,
-        "busy recovery readmission must project typed pool exhaustion: {output:?}"
-    );
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert!(
         provider_health
             .availability(second, Some("key"), Some("test"), 600_001)
@@ -2719,7 +2689,7 @@ async fn provider_concurrency_recovery_readmission_does_not_fall_back_to_transpo
 }
 
 #[tokio::test]
-async fn provider_concurrency_relay_busy_reselects_second_provider_before_transport_send() {
+async fn provider_concurrency_relay_budget_does_not_reselect_second_provider() {
     let first = "conc_relay_busy_a_first";
     let second = "conc_relay_busy_a_second";
     let held = saturate_capacity_key(&format!("{first}:key"));
@@ -2737,11 +2707,11 @@ async fn provider_concurrency_relay_busy_reselects_second_provider_before_transp
     .await;
     release_capacity_leases(held);
 
-    let output = output.expect("relay busy selection should use idle second provider");
+    let output = output.expect("relay should send the highest-priority provider while over budget");
     assert_eq!(output.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[format!("{second}:key:wire-second")]
+        &[format!("{first}:key:wire-first")]
     );
     assert!(
         provider_health
@@ -2753,7 +2723,7 @@ async fn provider_concurrency_relay_busy_reselects_second_provider_before_transp
 }
 
 #[tokio::test]
-async fn provider_concurrency_relay_busy_reselects_sibling_auth_key() {
+async fn provider_concurrency_relay_budget_does_not_reselect_sibling_auth_key() {
     let provider = "conc_relay_busy_key_provider";
     let held = saturate_capacity_key(&format!("{provider}:key1"));
     let manifest = provider_concurrency_two_key_relay_manifest(provider, 80);
@@ -2770,11 +2740,11 @@ async fn provider_concurrency_relay_busy_reselects_sibling_auth_key() {
     .await;
     release_capacity_leases(held);
 
-    let output = output.expect("relay busy key1 selection should use idle sibling key2");
+    let output = output.expect("relay should send the highest-priority auth key while over budget");
     assert_eq!(output.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.lock().unwrap().as_slice(),
-        &[format!("{provider}:key2:wire-test")]
+        &[format!("{provider}:key1:wire-test")]
     );
     assert!(
         provider_health
@@ -2786,7 +2756,7 @@ async fn provider_concurrency_relay_busy_reselects_sibling_auth_key() {
 }
 
 #[tokio::test]
-async fn provider_concurrency_relay_all_busy_exhausts_immediately_without_provider_failure_health() {
+async fn provider_concurrency_relay_saturated_candidates_still_send_first_provider() {
     let first = "conc_relay_all_busy_timeout_first";
     let second = "conc_relay_all_busy_timeout_second";
     let held_first = saturate_capacity_key(&format!("{first}:key"));
@@ -2795,36 +2765,21 @@ async fn provider_concurrency_relay_all_busy_exhausts_immediately_without_provid
     let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = ProviderConcurrencyRecordingTransport::default();
 
-    let output = tokio::time::timeout(
-        Duration::from_millis(100),
-        execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-            &manifest,
-            provider_concurrency_relay_input("req-conc-relay-timeout"),
-            &transport,
-            &provider_health,
-            V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
-        ),
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-timeout"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
     )
     .await;
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
-    let output = output.expect("all-busy Relay admission must exhaust without waiting for acquireTimeoutMs");
-
-    assert!(
-        transport.sends.lock().unwrap().is_empty(),
-        "all-busy relay timeout must not send a provider request"
-    );
-    let attempted_candidates = match output {
-        Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted { attempted_candidates }) => {
-            attempted_candidates
-        }
-        other => panic!("all-busy relay timeout must project pool exhaustion: {other:?}"),
-    };
-    assert!(
-        attempted_candidates
-            .iter()
-            .all(|candidate| candidate.ends_with(":concurrency_busy")),
-        "{attempted_candidates:?}"
+    let output = output.expect("saturated Relay candidates must not exhaust the business pool");
+    assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{first}:key:wire-first")]
     );
     for provider in [first, second] {
         assert!(

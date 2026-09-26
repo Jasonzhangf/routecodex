@@ -2493,7 +2493,7 @@ flowchart TD
 
 ## v3.provider_admission_rescue_entrypoints
 
-Direct and Relay Runtime entry points call the admission-aware provider rescue wrappers so provider cooldown exhaustion rescue and provider concurrency admission share one pre-transport selection boundary.
+Direct and Relay Runtime entry points use one pre-transport selection boundary where health and request-local Error exclusions determine the candidate; concurrency is an observational soft signal and never alters provider or tier selection.
 
 Owner feature: `v3.provider_global_subscription_probe`
 

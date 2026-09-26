@@ -386,19 +386,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             } else if let Some(selected) = preferred {
                 match try_admit_v3_selected_target(&selected) {
-                    Ok(Some(admission)) => (selected, Some(admission)),
-                    Ok(None) => {
-                        return error_output(
-                            build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::TargetPoolExhausted,
-                                "V3Target10ConcreteProviderSelected",
-                                "concurrency_busy",
-                                "selected provider concurrency capacity is busy",
-                            ),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                    Ok(admission) => (selected, Some(admission)),
                     Err(reason) => {
                         return error_output(
                             runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -466,22 +454,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     provider_action_permit_target = Some(selected.candidate.clone());
                     selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
                         V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
-                        V3AdmitAfterRecovery::Exhausted(error) => {
-                            let detail = error.attempted_candidates.join(", ");
-                            return error_output(
-                                build_v3_error_01_source_raised(
-                                    V3ErrorSourceKind::TargetPoolExhausted,
-                                    "V3Target10ConcreteProviderSelected",
-                                    "concurrency_busy",
-                                    format!(
-                                        "{} candidates unavailable: {detail}",
-                                        error.attempted_candidates.len()
-                                    ),
-                                ),
-                                trace,
-                                &hook_registry,
-                            );
-                        }
                         V3AdmitAfterRecovery::Failed(reason) => {
                             return error_output(
                                 runtime_source("V3Target10ConcreteProviderSelected", reason),

@@ -57,21 +57,19 @@ fn v3_provider_concurrency_key(candidate: &V3TargetCandidate) -> String {
 
 pub(crate) fn try_admit_v3_selected_target(
     selected: &V3Target10ConcreteProviderSelected,
-) -> Result<Option<V3RuntimeProviderAdmission>, String> {
+) -> Result<V3RuntimeProviderAdmission, String> {
     let controller = V3AdaptiveConcurrencyController::process_shared();
     let capacity_key = v3_provider_concurrency_key(&selected.candidate);
     controller.ensure_initial_budget(
         &capacity_key,
         selected.candidate.initial_concurrency_budget,
     )?;
-    Ok(controller.try_acquire_business(&capacity_key).map(|lease| {
-        V3RuntimeProviderAdmission::new(controller, lease)
-    }))
+    let lease = controller.try_acquire_business_soft(&capacity_key);
+    Ok(V3RuntimeProviderAdmission::new(controller, lease))
 }
 
 pub(crate) enum V3AdmitAfterRecovery {
     Admitted(V3RuntimeProviderAdmission),
-    Exhausted(V3TargetExhaustion),
     Failed(String),
 }
 
@@ -79,39 +77,8 @@ pub(crate) fn admit_v3_selected_target_after_recovery(
     selected: &V3Target10ConcreteProviderSelected,
 ) -> V3AdmitAfterRecovery {
     match try_admit_v3_selected_target(selected) {
-        Ok(Some(admission)) => V3AdmitAfterRecovery::Admitted(admission),
-        Ok(None) => V3AdmitAfterRecovery::Exhausted(V3TargetExhaustion {
-            route: Box::new(selected.route.clone()),
-            attempted_candidates: vec![format!(
-                "{}:{}:{}:concurrency_busy",
-                selected.candidate.provider_id,
-                selected.candidate.auth_alias,
-                selected.candidate.model_id
-            )],
-        }),
+        Ok(admission) => V3AdmitAfterRecovery::Admitted(admission),
         Err(reason) => V3AdmitAfterRecovery::Failed(reason),
-    }
-}
-
-fn v3_provider_busy_target_exhaustion(
-    expanded: &V3Target09CandidateSetExpanded,
-    busy_candidates: &BTreeSet<String>,
-) -> V3TargetExhaustion {
-    V3TargetExhaustion {
-        route: Box::new(expanded.route.clone()),
-        attempted_candidates: expanded
-            .candidates
-            .iter()
-            .filter_map(|candidate| {
-                let key = v3_relay_provider_candidate_key(candidate);
-                busy_candidates.contains(&key).then(|| {
-                    format!(
-                        "{}:{}:{}:concurrency_busy",
-                        candidate.provider_id, candidate.auth_alias, candidate.model_id
-                    )
-                })
-            })
-            .collect(),
     }
 }
 
@@ -127,86 +94,49 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
 ) -> V3AdmittedTargetSelectionAfterRescue {
     let controller = V3AdaptiveConcurrencyController::process_shared();
-    let mut busy_candidates = BTreeSet::<String>::new();
-    let mut busy_selected_candidates =
-        BTreeMap::<String, (V3Target10ConcreteProviderSelected, String)>::new();
-    let mut preferred_selected = preferred_selected;
-    loop {
-        let mut exclusions = request_local_excluded_candidates.clone();
-        exclusions.extend(busy_candidates.iter().cloned());
-        let selection = match preferred_selected.take() {
-            Some(selected) => V3TargetSelectionAfterRescue::Selected(selected),
-            None => {
-                select_v3_expanded_target_with_exhaustion_rescue(
-                    manifest,
-                    expanded.clone(),
-                    failure_session_scope,
-                    provider_health,
-                    &exclusions,
-                    now_ms,
-                    deterministic_sample,
-                    allow_exhaustion_rescue_probe,
-                )
-                .await
-            }
-        };
-        match selection {
-            V3TargetSelectionAfterRescue::Selected(selected) => {
-                let capacity_key = v3_provider_concurrency_key(&selected.candidate);
-                if let Err(reason) = controller.ensure_initial_budget(
-                    &capacity_key,
-                    selected.candidate.initial_concurrency_budget,
-                ) {
-                    return V3AdmittedTargetSelectionAfterRescue::Failed(
-                        build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::RuntimeFailure,
-                            "V3Target10ConcreteProviderSelected",
-                            "provider_concurrency_admission_invalid_budget",
-                            reason,
-                        ),
-                    );
-                }
-                if let Some(admission) = controller.try_acquire_business(&capacity_key) {
-                    return V3AdmittedTargetSelectionAfterRescue::Selected(
-                        V3AdmittedTargetSelection {
-                            selected,
-                            admission: V3RuntimeProviderAdmission::new(
-                                controller.clone(),
-                                admission,
-                            ),
-                        },
-                    );
-                }
-                let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
-                busy_selected_candidates.insert(candidate_key.clone(), (selected, capacity_key));
-                busy_candidates.insert(candidate_key);
-            }
-            V3TargetSelectionAfterRescue::Failed(source) => {
-                return V3AdmittedTargetSelectionAfterRescue::Failed(source);
-            }
-            V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
-                if busy_candidates.is_empty() {
-                    return V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted);
-                }
-                for (_candidate_key, (selected, capacity_key)) in &busy_selected_candidates {
-                    if let Some(admission) =
-                        controller.try_acquire_scheduled_probe(capacity_key, now_ms)
-                    {
-                        return V3AdmittedTargetSelectionAfterRescue::Selected(
-                            V3AdmittedTargetSelection {
-                                selected: selected.clone(),
-                                admission: V3RuntimeProviderAdmission::new(
-                                    controller.clone(),
-                                    admission,
-                                ),
-                            },
-                        );
-                    }
-                }
-                return V3AdmittedTargetSelectionAfterRescue::Exhausted(
-                    v3_provider_busy_target_exhaustion(&expanded, &busy_candidates),
+    let selection = match preferred_selected {
+        Some(selected) => V3TargetSelectionAfterRescue::Selected(selected),
+        None => {
+            select_v3_expanded_target_with_exhaustion_rescue(
+                manifest,
+                expanded,
+                failure_session_scope,
+                provider_health,
+                request_local_excluded_candidates,
+                now_ms,
+                deterministic_sample,
+                allow_exhaustion_rescue_probe,
+            )
+            .await
+        }
+    };
+    match selection {
+        V3TargetSelectionAfterRescue::Selected(selected) => {
+            let capacity_key = v3_provider_concurrency_key(&selected.candidate);
+            if let Err(reason) = controller.ensure_initial_budget(
+                &capacity_key,
+                selected.candidate.initial_concurrency_budget,
+            ) {
+                return V3AdmittedTargetSelectionAfterRescue::Failed(
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3Target10ConcreteProviderSelected",
+                        "provider_concurrency_admission_invalid_budget",
+                        reason,
+                    ),
                 );
             }
+            let lease = controller.try_acquire_business_soft(&capacity_key);
+            V3AdmittedTargetSelectionAfterRescue::Selected(V3AdmittedTargetSelection {
+                selected,
+                admission: V3RuntimeProviderAdmission::new(controller, lease),
+            })
+        }
+        V3TargetSelectionAfterRescue::Exhausted(exhausted) => {
+            V3AdmittedTargetSelectionAfterRescue::Exhausted(exhausted)
+        }
+        V3TargetSelectionAfterRescue::Failed(source) => {
+            V3AdmittedTargetSelectionAfterRescue::Failed(source)
         }
     }
 }
