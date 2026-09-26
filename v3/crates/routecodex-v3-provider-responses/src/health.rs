@@ -824,6 +824,7 @@ impl V3ProviderHealthStore {
         // cooldown remains blocked until the typed probe owner reports probe
         // success; business traffic must never resurrect it.
         persist_cooldown_state(state);
+        self.publish_availability_change();
         Ok(())
     }
 

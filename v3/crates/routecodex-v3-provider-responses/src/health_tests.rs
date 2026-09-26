@@ -352,6 +352,42 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
     );
 }
 
+#[tokio::test]
+async fn success_in_any_session_publishes_availability_change_for_waiters() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_failure_in_session(
+            &session("session-a"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            100,
+        )
+        .unwrap();
+    let observed_generation = store.availability_generation();
+    store
+        .record_provider_success_in_session(
+            &session("session-b"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            101,
+        )
+        .unwrap();
+    let changed = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        store.wait_for_availability_change(observed_generation),
+    )
+    .await
+    .expect("session success must wake anyone waiting for availability change")
+    .expect("availability watch must remain live");
+    assert_ne!(
+        changed, observed_generation,
+        "success in any session must publish a new availability generation"
+    );
+}
+
 #[test]
 fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
     let store = V3ProviderHealthStore::default();

@@ -176,6 +176,26 @@ async fn cancelled_scheduled_probe_releases_single_flight_permit() {
 }
 
 fn global_pool_alive_manifest(scope: &str) -> V3Config05ManifestPublished {
+    global_pool_alive_manifest_with_rescue_timeout(scope, None)
+}
+
+fn global_pool_alive_manifest_with_rescue_timeout(
+    scope: &str,
+    residence_timeout_ms: Option<u64>,
+) -> V3Config05ManifestPublished {
+    let execution = match residence_timeout_ms {
+        Some(residence_timeout_ms) => format!(
+            r#"
+[servers.__SCOPE__.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+[servers.__SCOPE__.execution.attempt_store]
+residence_timeout_ms = {residence_timeout_ms}
+"#
+        ),
+        None => String::new(),
+    };
     let source = r#"
 version = 3
 [servers.__SCOPE__]
@@ -183,6 +203,7 @@ bind = "127.0.0.1"
 port = 5555
 routing_group = "__SCOPE__"
 endpoints = ["responses"]
+__EXECUTION__
 [providers.first]
 type = "responses"
 base_url = "http://first.invalid/v1"
@@ -213,6 +234,7 @@ targets = [
   { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
 ]
 "#
+    .replace("__EXECUTION__", &execution)
     .replace("__SCOPE__", scope);
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(&source).expect("global-pool-alive authoring"),

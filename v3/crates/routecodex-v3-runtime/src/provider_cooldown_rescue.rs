@@ -187,6 +187,8 @@ pub(crate) async fn select_v3_expanded_target_with_admission_rescue(
     }
 }
 
+const V3_PROVIDER_RESCUE_DEFAULT_TIMEOUT_MS: u64 = 600_000;
+
 impl V3ProviderFailureRuntimeHealth {
     async fn run_cooldown_rescue_probes_for_candidates(
         &self,
@@ -517,7 +519,18 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
     if !allow_exhaustion_rescue_probe {
         return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
     }
+    let rescue_deadline = manifest
+        .servers
+        .get(failure_session_scope.server_id())
+        .and_then(|server| server.execution.as_ref())
+        .map(|execution| execution.attempt_store.residence_timeout_ms)
+        .unwrap_or(V3_PROVIDER_RESCUE_DEFAULT_TIMEOUT_MS);
+    let rescue_deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_millis(rescue_deadline);
     loop {
+        if tokio::time::Instant::now() >= rescue_deadline {
+            return V3TargetSelectionAfterRescue::Exhausted(initial_exhaustion);
+        }
         let retry_now_ms = match v3_relay_provider_policy_now_epoch_ms() {
             Ok(now_ms) => now_ms,
             Err(error) => {
@@ -598,15 +611,18 @@ pub(crate) async fn select_v3_expanded_target_with_exhaustion_rescue(
                             result.map(|_| ()).map_err(|error| error.to_string())
                         }
                         _ = tokio::time::sleep(std::time::Duration::from_millis(sleep_ms)) => Ok(()),
+                        _ = tokio::time::sleep_until(rescue_deadline) => Ok(()),
                     }
                 }
             }
-            Ok(None) => provider_health
-                .store
-                .wait_for_availability_change(observed_generation)
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string()),
+            Ok(None) => {
+                tokio::select! {
+                    result = provider_health.store.wait_for_availability_change(observed_generation) => {
+                        result.map(|_| ()).map_err(|error| error.to_string())
+                    }
+                    _ = tokio::time::sleep_until(rescue_deadline) => Ok(()),
+                }
+            }
             Err(error) => Err(error.to_string()),
         };
         if let Err(error) = wait_result {

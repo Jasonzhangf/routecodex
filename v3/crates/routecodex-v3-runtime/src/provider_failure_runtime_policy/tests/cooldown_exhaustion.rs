@@ -689,6 +689,55 @@ async fn cooldown_only_exhaustion_retries_when_next_probe_is_due() {
 }
 
 #[tokio::test]
+async fn cooldown_only_exhaustion_bounds_rescue_wait_with_residence_deadline() {
+    let server_id = "cooldown_only_exhaustion_rescue_deadline";
+    let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(100));
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope = test_provider_failure_scope(
+        server_id,
+        server_id,
+        "cooldown-only-rescue-deadline-session",
+    )
+    .expect("failure session scope");
+    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+        manifest: &manifest,
+        server_id,
+        failure_session_scope: &failure_session_scope,
+        entry_kind: "responses",
+        endpoint_path: "/v1/responses",
+        body: &json!({"model":"client-responses","input":"hello"}),
+        request_local_excluded_candidates: &BTreeSet::new(),
+        provider_health: &health,
+        now_ms: 20_001,
+        deterministic_sample: 0,
+    }) {
+        Ok(expanded) => expanded,
+        Err(_) => panic!("expanded candidates failed"),
+    };
+    put_all_candidates_in_provider_cooldown(&health, &expanded);
+
+    let selection = tokio::time::timeout(
+        Duration::from_secs(2),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("cooldown-only rescue must honor its configured residence deadline");
+    assert!(
+        matches!(selection, V3TargetSelectionAfterRescue::Exhausted(_)),
+        "cooldown-only rescue must return terminal exhaustion after the residence deadline"
+    );
+}
+
+#[tokio::test]
 async fn request_local_exclusion_without_cooldown_probe_success_stays_terminal() {
     let server_id = "request_local_exclusion_without_probe";
     let manifest = global_pool_alive_manifest(server_id);
