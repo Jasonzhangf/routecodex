@@ -2623,6 +2623,99 @@ async fn provider_concurrency_exact_pin_uses_due_scheduled_probe_before_exhausti
         .unwrap();
     assert!(snapshot.saturated);
     assert!(!snapshot.probe_in_flight);
+
+#[tokio::test]
+async fn provider_concurrency_recovery_readmission_does_not_fall_back_to_transport_acquire_timeout() {
+    struct FirstFailsSecondMustNotSend {
+        sends: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for FirstFailsSecondMustNotSend {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let provider_id = request.provider_id().to_string();
+            self.sends.lock().unwrap().push(provider_id.clone());
+            if provider_id == "conc_recov_first" {
+                Err(V3ProviderError::HttpStatus {
+                    response: Box::new(V3ProviderHttpFailure {
+                        request_id: request.request_id().to_string(),
+                        provider_id,
+                        status: 500,
+                        headers: Vec::new(),
+                        body: br#"{"error":{"type":"server_error","message":"first provider failed"}}"#.to_vec(),
+                        body_read_failure: None,
+                    }),
+                })
+            } else {
+                panic!(
+                    "recovery readmission must never reach provider transport for {provider_id} without a pre-acquired lease"
+                );
+            }
+        }
+    }
+
+    let first = "conc_recov_first";
+    let second = "conc_recov_second";
+    let second_key = format!("{second}:key");
+    let held = saturate_capacity_key(&second_key);
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_rate_limit(&second_key, 0)
+        .expect("rate limit must schedule a due recovery probe");
+
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = FirstFailsSecondMustNotSend {
+        sends: Arc::new(Mutex::new(Vec::new())),
+    };
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-recovery-busy",
+        "exec-conc-recovery-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let started = std::time::Instant::now();
+    let output = tokio::time::timeout(
+        Duration::from_millis(2_500),
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::new()
+                .with_provider_health(provider_health.clone())
+                .with_now_epoch_ms(600_000),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            &transport,
+        ),
+    )
+    .await;
+    let elapsed = started.elapsed();
+    release_capacity_leases(held);
+
+    let output = output.expect(
+        "recovery readmission must exhaust immediately after the gate, not wait through acquireTimeoutMs",
+    );
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[first.to_string()],
+        "only the failed first provider may reach transport"
+    );
+    assert!(
+        elapsed < Duration::from_millis(2_500),
+        "recovery readmission must not fall back to transport acquire_timeout: {elapsed:?}"
+    );
+    assert!(
+        output.client_payload.status >= 500,
+        "busy recovery readmission must project typed pool exhaustion: {output:?}"
+    );
+    assert!(
+        provider_health
+            .availability(second, Some("key"), Some("test"), 600_001)
+            .available,
+        "busy recovery readmission must stay health-neutral for the second provider"
+    );
 }
 
 #[tokio::test]

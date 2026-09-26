@@ -2,6 +2,9 @@ use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
+use crate::provider_failure_runtime_policy::{
+    admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
+};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -375,9 +378,20 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     _provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    retry_selected = Some(selected.clone());
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Exhausted(error) => {
+                            return Err(V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                                attempted_candidates: error.attempted_candidates,
+                            })
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3ResponsesRelayRuntimeError::Target(reason))
+                        }
+                    }
                     trace.push("V3ProviderActionGateAdmission");
-                    continue;
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
                     pending_provider_action_recovery = Some(handle_error_before_resp03!(ticket

@@ -14,9 +14,10 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    select_v3_expanded_target_with_admission_rescue, select_v3_target_with_session_then_global,
-    try_admit_v3_selected_target, V3AdmittedTargetSelectionAfterRescue,
-    V3ProviderFailureRuntimeHealth, V3RuntimeProviderAdmission,
+    admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
+    select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
+    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
+    V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -463,9 +464,33 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    retry_selected = Some(selected.clone());
+                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Exhausted(error) => {
+                            let detail = error.attempted_candidates.join(", ");
+                            return error_output(
+                                build_v3_error_01_source_raised(
+                                    V3ErrorSourceKind::TargetPoolExhausted,
+                                    "V3Target10ConcreteProviderSelected",
+                                    "concurrency_busy",
+                                    format!(
+                                        "{} candidates unavailable: {detail}",
+                                        error.attempted_candidates.len()
+                                    ),
+                                ),
+                                trace,
+                                &hook_registry,
+                            );
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return error_output(
+                                runtime_source("V3Target10ConcreteProviderSelected", reason),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
+                    };
                     trace.push("V3ProviderActionGateAdmission");
-                    continue;
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
                     pending_provider_action_recovery = match ticket.recovery_witness() {

@@ -14,11 +14,12 @@ use super::*;
 use crate::nodes::{V3AttemptStoreError, V3CommittedClientSseBuilder, V3RequestExecutionControl};
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    resolve_v3_relay_target_outcome_with_admission_rescue, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderAdmittedTargetResolution, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
+    admit_v3_selected_target_after_recovery, resolve_v3_relay_target_outcome_with_admission_rescue,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3AdmitAfterRecovery, V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
+    V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
+    V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::V3RuntimeTimingState;
 use futures_util::StreamExt;
@@ -835,9 +836,20 @@ where
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    retry_selected = Some(selected.clone());
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Exhausted(error) => {
+                            return Err(V3RelayCoreError::ProviderPoolExhausted {
+                                attempted_candidates: error.attempted_candidates,
+                            })
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3RelayCoreError::Target(reason))
+                        }
+                    }
                     trace.push("V3ProviderActionGateAdmission");
-                    continue;
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
                     pending_provider_action_recovery = Some(

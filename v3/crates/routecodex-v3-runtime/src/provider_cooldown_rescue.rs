@@ -69,6 +69,30 @@ pub(crate) fn try_admit_v3_selected_target(
     }))
 }
 
+pub(crate) enum V3AdmitAfterRecovery {
+    Admitted(V3RuntimeProviderAdmission),
+    Exhausted(V3TargetExhaustion),
+    Failed(String),
+}
+
+pub(crate) fn admit_v3_selected_target_after_recovery(
+    selected: &V3Target10ConcreteProviderSelected,
+) -> V3AdmitAfterRecovery {
+    match try_admit_v3_selected_target(selected) {
+        Ok(Some(admission)) => V3AdmitAfterRecovery::Admitted(admission),
+        Ok(None) => V3AdmitAfterRecovery::Exhausted(V3TargetExhaustion {
+            route: Box::new(selected.route.clone()),
+            attempted_candidates: vec![format!(
+                "{}:{}:{}:concurrency_busy",
+                selected.candidate.provider_id,
+                selected.candidate.auth_alias,
+                selected.candidate.model_id
+            )],
+        }),
+        Err(reason) => V3AdmitAfterRecovery::Failed(reason),
+    }
+}
+
 fn v3_provider_busy_target_exhaustion(
     expanded: &V3Target09CandidateSetExpanded,
     busy_candidates: &BTreeSet<String>,

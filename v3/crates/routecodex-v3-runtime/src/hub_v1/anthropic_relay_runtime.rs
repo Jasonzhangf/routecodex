@@ -2,9 +2,10 @@ use super::*;
 mod response_closeout;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect, provider_runtime_failure_stage,
-    resolve_v3_relay_target_outcome_with_admission_rescue, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    admit_v3_selected_target_after_recovery, project_v3_client_disconnect,
+    provider_runtime_failure_stage, resolve_v3_relay_target_outcome_with_admission_rescue,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3AdmitAfterRecovery,
     V3ProviderFailureRuntimeHealth, V3RelayProviderAdmittedTargetResolution,
     V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     V3RelayProviderFailureRetryPolicy, V3RelayProviderTargetResolutionInput,
@@ -717,9 +718,20 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     _provider_action_permit = admission.take_permit();
                     provider_action_permit_target = Some(selected.candidate.clone());
-                    retry_selected = Some(selected.clone());
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Exhausted(error) => {
+                            return Err(V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
+                                attempted_candidates: error.attempted_candidates,
+                            })
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3AnthropicRelayRuntimeError::Target(reason))
+                        }
+                    }
                     trace.push("V3ProviderActionGateAdmission");
-                    continue;
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
                     pending_provider_action_recovery = Some(
