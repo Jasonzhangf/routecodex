@@ -291,4 +291,80 @@ mod tests {
             "the configured SSE first-frame timeout must reach the HTTP transport request"
         );
     }
+
+    #[test]
+    fn anthropic_transport_request_keeps_provider_sse_first_frame_timeout() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-sse-first-frame-timeout-anthropic",
+            V3ResponsesProviderTarget {
+                provider_id: "anthropic-test".into(),
+                provider_type: "anthropic".into(),
+                base_url: "http://upstream.invalid".into(),
+                canonical_model_id: "claude-sonnet-5".into(),
+                wire_model: "claude-sonnet-5".into(),
+                compatibility_profile: None,
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::Environment("A1".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: Some(456_000),
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "claude-sonnet-5", "max_tokens": 100}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::Anthropic,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.sse_first_frame_timeout_ms(),
+            Some(456_000),
+            "the configured SSE first-frame timeout must reach the Anthropic HTTP transport request"
+        );
+    }
+
+    #[test]
+    fn gemini_transport_request_keeps_provider_sse_first_frame_timeout() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-sse-first-frame-timeout-gemini",
+            V3ResponsesProviderTarget {
+                provider_id: "gemini-test".into(),
+                provider_type: "gemini".into(),
+                base_url: "http://upstream.invalid".into(),
+                canonical_model_id: "gemini-2.5-flash".into(),
+                wire_model: "gemini-2.5-flash".into(),
+                compatibility_profile: None,
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::Environment("G1".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: Some(789_000),
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "gemini-2.5-flash", "contents": []}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::Gemini,
+            wire,
+        )
+        .unwrap();
+        assert_eq!(
+            request.sse_first_frame_timeout_ms(),
+            Some(789_000),
+            "the configured SSE first-frame timeout must reach the Gemini HTTP transport request"
+        );
+    }
 }
