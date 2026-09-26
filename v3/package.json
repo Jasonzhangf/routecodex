@@ -157,6 +157,7 @@
     "test:v3-responses-process-execution-decision": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib responses_provider_process_ -- --nocapture",
     "test:v3-error-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --test error_chain_contract -- --nocapture",
     "test:v3-provider-health-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses health::tests -- --nocapture",
+    "test:v3-provider-sse-header-timeout": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses responses_http_transport_uses_sse_first_frame_timeout_for_header_wait -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib sse_header_wait_timeout_is_health_neutral_relay_hang -- --nocapture",
     "test:v3-provider-adaptive-concurrency": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1",
     "test:v3-p5-server-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-vr-full-function-cli": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",

@@ -4,6 +4,7 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
+use routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX;
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseIncrementalDecoder,
@@ -36,20 +37,18 @@ pub(crate) async fn send_http_await(
     header_timeout_ms: Option<u64>,
 ) -> Result<reqwest::Response, V3ProviderError> {
     match header_timeout_ms {
-        Some(header_timeout_ms) if header_timeout_ms > 0 => {
-            tokio::time::timeout(
-                std::time::Duration::from_millis(header_timeout_ms),
-                send_http_await_inner(request_id.clone(), provider_id.clone(), send, cancellation),
-            )
-            .await
-            .map_err(|_| V3ProviderError::Transport {
-                request_id,
-                provider_id,
-                reason: format!(
-                    "provider did not return response headers within configured SSE first-frame timeout ({header_timeout_ms}ms)"
-                ),
-            })?
-        }
+        Some(header_timeout_ms) if header_timeout_ms > 0 => tokio::time::timeout(
+            std::time::Duration::from_millis(header_timeout_ms),
+            send_http_await_inner(request_id.clone(), provider_id.clone(), send, cancellation),
+        )
+        .await
+        .map_err(|_| V3ProviderError::Transport {
+            request_id,
+            provider_id,
+            reason: format!(
+                "{V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX} ({header_timeout_ms}ms)"
+            ),
+        })?,
         _ => send_http_await_inner(request_id, provider_id, send, cancellation).await,
     }
 }

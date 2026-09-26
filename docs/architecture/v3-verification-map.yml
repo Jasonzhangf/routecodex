@@ -1160,6 +1160,8 @@ features:
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
+  - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
+  - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
   required_contract:
   - Provider concurrency admission policy is Config-owned: acquireTimeoutMs and maxInFlight are published once in V3Config05ManifestPublished, consumed by Target, and carried into Provider transport; they are not reconstructed by Runtime, Server, Router, Error, payload, MetadataCenter, or Debug
   - Provider concurrency admission is a request-local Target selection condition, not a provider transport failure: Busy candidates are excluded before transport and do not mutate health, cooldown, or client payload
@@ -1175,6 +1177,7 @@ features:
   - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
   - npm run test:v3-provider-health-contract
+  - npm run test:v3-provider-sse-header-timeout
   - npm run verify:v3-module-boundaries
   - npm run test:v3-source-gate-red-fixtures
   - npm run test:v3-compile-fail
@@ -2340,6 +2343,7 @@ features:
   - V3 SSE transport preserves arbitrary UTF-8 chunks, multiline data, comments, id/retry, unknown fields, opaque [DONE], and normal EOF.
   - V3 SSE transport rejects invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation, and upstream failure with typed transport errors.
   - V3 server closeout emits only transport EOF/error/drop outcomes and does not parse SSE event names or data JSON.
+  - Provider HTTP response-header wait applies the configured SSE first-frame timeout as a typed transport hang and never hangs on the shared request timeout.
   required_gates:
   - npm run verify:sse-architecture-boundary
   - npm run test:v3-sse-transport-core

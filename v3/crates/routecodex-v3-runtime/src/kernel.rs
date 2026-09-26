@@ -798,6 +798,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &error,
                     V3ProviderError::Transport { reason, .. }
                         if reason == default_transport::V3_DIRECT_TRANSPORT_HANG_REASON
+                            || routecodex_v3_error::is_v3_provider_response_header_timeout_reason(
+                                reason,
+                            )
                 );
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);

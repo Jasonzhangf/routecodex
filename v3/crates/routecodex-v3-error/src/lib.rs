@@ -788,6 +788,19 @@ pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> b
 
 pub const V3_TRANSIENT_TRANSPORT_HANG_CODE: &str = "provider_response_header_timeout";
 
+/// Canonical prefix for a provider response-header timeout. Direct and relay
+/// policies classify any transport error carrying this reason prefix as the
+/// health-neutral transient transport hang instead of an ordinary provider
+/// transport failure.
+pub const V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX: &str =
+    "provider did not return response headers within configured SSE first-frame timeout";
+
+/// Returns whether a provider transport reason denotes the canonical
+/// response-header wait timeout shared by direct and relay failure policies.
+pub fn is_v3_provider_response_header_timeout_reason(reason: &str) -> bool {
+    reason.starts_with(V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX)
+}
+
 pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     classified: V3Error02Classified,
     scope: V3ErrorActionScope,
