@@ -8,11 +8,14 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_global_probe_request, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    adaptive_concurrency::V3AdaptiveConcurrencyController, build_v3_provider_global_probe_request,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle,
+    V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
 };
 
-use crate::provider_failure_runtime_policy::V3ProviderHealthProbeFailure;
+use crate::provider_failure_runtime_policy::{
+    v3_relay_provider_policy_now_epoch_ms, V3ProviderHealthProbeFailure,
+};
 
 pub fn build_v3_provider_global_probe_target(
     manifest: &V3Config05ManifestPublished,
@@ -142,13 +145,24 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
 ) -> Result<(), V3ProviderHealthProbeFailure> {
     let provider_id = target.provider_id.clone();
     let provider_type = target.provider_type.clone();
+    let provider_key = format!("{}:{}", target.provider_id, target.auth.alias);
+    let initial_concurrency_budget = target.initial_concurrency_budget;
     let request = build_v3_provider_global_probe_request(
         target,
         format!("provider-global-probe-{provider_id}"),
     )
     .map_err(V3ProviderHealthProbeFailure::Internal)?;
+    let concurrency = V3AdaptiveConcurrencyController::process_shared();
+    concurrency
+        .ensure_initial_budget(&provider_key, initial_concurrency_budget)
+        .map_err(V3ProviderHealthProbeFailure::Internal)?;
+    let now_ms =
+        v3_relay_provider_policy_now_epoch_ms().map_err(V3ProviderHealthProbeFailure::Internal)?;
+    let admission = concurrency
+        .try_acquire(&provider_key, now_ms)
+        .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
     let response = ReqwestResponsesTransport::default()
-        .send(request)
+        .send(request.with_pre_acquired_admission(admission))
         .await
         .map_err(provider_probe_error)?;
     if !(200..=299).contains(&response.status()) {

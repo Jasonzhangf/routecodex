@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 75 functional paths, 444 caller edges.
+Generated view: 75 functional paths, 445 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -49,7 +49,7 @@ flowchart TD
   module_v3_lifecycle -->|7 edges / 2 paths| module_v3_lifecycle
   module_v3_lifecycle -->|2 edges / 2 paths| module_v3_server
   module_v3_provider_responses -->|1 edges / 1 paths| module_routecodex_v3_sse
-  module_v3_provider_responses -->|8 edges / 6 paths| module_v3_provider_responses
+  module_v3_provider_responses -->|9 edges / 6 paths| module_v3_provider_responses
   module_v3_runtime__hub_v1 -->|3 edges / 3 paths| module_provider_compat_core
   module_v3_runtime__hub_v1 -->|2 edges / 1 paths| module_routecodex_v3_agent_memory
   module_v3_runtime__hub_v1 -->|1 edges / 1 paths| module_routecodex_v3_hooks
@@ -97,7 +97,7 @@ flowchart TD
 | v3-lifecycle | v3-lifecycle | 7 | `v3.rcc_internal_hooks_sidecar`<br/>`v3.server.managed_lifecycle` |
 | v3-lifecycle | v3-server | 2 | `v3.server.managed_lifecycle`<br/>`v3.web_search_servertool_state_machine` |
 | v3-provider-responses | routecodex-v3-sse | 1 | `v3.sse.transport_boundary` |
-| v3-provider-responses | v3-provider-responses | 8 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
+| v3-provider-responses | v3-provider-responses | 9 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.responses.websocket_v2.transport_hardening`<br/>`v3.responses_direct.required_mainline` |
 | v3-runtime::hub_v1 | provider-compat-core | 3 | `v3.provider_compat_profile.request`<br/>`v3.provider_compat_profile.response`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime::hub_v1 | routecodex-v3-agent-memory | 2 | `v3.memory_raw_capture` |
 | v3-runtime::hub_v1 | routecodex-v3-hooks | 1 | `v3.web_search_servertool_state_machine` |
@@ -2521,7 +2521,7 @@ flowchart TD
 
 ## v3-provider-admission-lease-lifecycle
 
-Runtime acquires one provider+authAlias capacity lease before transport, hands the same lease to Provider, and releases it through the owning RAII boundary on every early exit, cancellation, or response terminal.
+Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, while every path releases owned resources through RAII.
 
 Owner feature: `v3.provider_global_subscription_probe`
 
@@ -2530,31 +2530,34 @@ flowchart TD
   subgraph c_62_v3_provider_admission_lease_lifecycle_m_v3_provider_responses["v3-provider-responses"]
     c_62_v3_provider_admission_lease_lifecycle_1["v3-provider-responses<br/>V3AdaptiveConcurrencyController::try_acquire_business<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
     c_62_v3_provider_admission_lease_lifecycle_3["v3-provider-responses<br/>V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_9["v3-provider-responses<br/>V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_10["v3-provider-responses<br/>V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_11["v3-provider-responses<br/>V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_12["v3-provider-responses<br/>V3AdaptiveConcurrencyPermitGuard::drop<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_7["v3-provider-responses<br/>V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_8["v3-provider-responses<br/>acquire_admission_and_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_11["v3-provider-responses<br/>V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_12["v3-provider-responses<br/>V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_13["v3-provider-responses<br/>V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_14["v3-provider-responses<br/>V3AdaptiveConcurrencyPermitGuard::drop<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small>"]
   end
   subgraph c_62_v3_provider_admission_lease_lifecycle_m_v3_runtime["v3-runtime"]
     c_62_v3_provider_admission_lease_lifecycle_0["v3-runtime<br/>select_v3_expanded_target_with_admission_rescue<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
     c_62_v3_provider_admission_lease_lifecycle_2["v3-runtime<br/>execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small>"]
     c_62_v3_provider_admission_lease_lifecycle_4["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_8["v3-runtime<br/>V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_10["v3-runtime<br/>V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
   end
   subgraph c_62_v3_provider_admission_lease_lifecycle_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_62_v3_provider_admission_lease_lifecycle_5["v3-runtime::hub_v1<br/>execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small>"]
     c_62_v3_provider_admission_lease_lifecycle_6["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
-    c_62_v3_provider_admission_lease_lifecycle_7["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
+    c_62_v3_provider_admission_lease_lifecycle_9["v3-runtime::hub_v1<br/>execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small>"]
   end
   c_62_v3_provider_admission_lease_lifecycle_0 -->|v3-provider-admission-lease-acquire<br/>V3Target10ConcreteProviderSelected → V3RuntimeProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_1
   c_62_v3_provider_admission_lease_lifecycle_2 -->|v3-provider-admission-lease-direct-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
   c_62_v3_provider_admission_lease_lifecycle_4 -->|v3-provider-admission-lease-responses-direct-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
   c_62_v3_provider_admission_lease_lifecycle_5 -->|v3-provider-admission-lease-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
   c_62_v3_provider_admission_lease_lifecycle_6 -->|v3-provider-admission-lease-responses-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
-  c_62_v3_provider_admission_lease_lifecycle_7 -->|v3-provider-admission-lease-anthropic-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
-  c_62_v3_provider_admission_lease_lifecycle_8 -->|v3-provider-admission-lease-runtime-early-release<br/>V3RuntimeProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_9
-  c_62_v3_provider_admission_lease_lifecycle_10 -->|v3-provider-admission-lease-request-drop-release<br/>V3PreAcquiredProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_11
-  c_62_v3_provider_admission_lease_lifecycle_12 -->|v3-provider-admission-lease-provider-terminal-release<br/>V3ProviderResponsesTransportSend → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_9
+  c_62_v3_provider_admission_lease_lifecycle_7 -->|v3-provider-admission-lease-websocket-v2-slot-order<br/>V3PreAcquiredProviderAdmission → V3ProviderResponsesWebSocketSessionSlot| c_62_v3_provider_admission_lease_lifecycle_8
+  c_62_v3_provider_admission_lease_lifecycle_9 -->|v3-provider-admission-lease-anthropic-relay-handoff<br/>V3RuntimeProviderAdmission → V3PreAcquiredProviderAdmission| c_62_v3_provider_admission_lease_lifecycle_3
+  c_62_v3_provider_admission_lease_lifecycle_10 -->|v3-provider-admission-lease-runtime-early-release<br/>V3RuntimeProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_11
+  c_62_v3_provider_admission_lease_lifecycle_12 -->|v3-provider-admission-lease-request-drop-release<br/>V3PreAcquiredProviderAdmission → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_13
+  c_62_v3_provider_admission_lease_lifecycle_14 -->|v3-provider-admission-lease-provider-terminal-release<br/>V3ProviderResponsesTransportSend → V3AdaptiveConcurrencyPermitReleased| c_62_v3_provider_admission_lease_lifecycle_11
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2564,6 +2567,7 @@ flowchart TD
 | `v3-provider-admission-lease-responses-direct-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_responses_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_relay_runtime_core<br/><small>routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-responses-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
+| `v3-provider-admission-lease-websocket-v2-slot-order` | `V3PreAcquiredProviderAdmission` → `V3ProviderResponsesWebSocketSessionSlot` | anchored | V3ProviderResponsesTransport::send<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | acquire_admission_and_connection_slot<br/><small>routecodex-v3-provider-responses/src/transport/websocket.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-anthropic-relay-handoff` | `V3RuntimeProviderAdmission` → `V3PreAcquiredProviderAdmission` | anchored | execute_v3_anthropic_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs</small> | V3Transport13ResponsesRequest::with_pre_acquired_admission<br/><small>routecodex-v3-provider-responses/src/transport.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-runtime-early-release` | `V3RuntimeProviderAdmission` → `V3AdaptiveConcurrencyPermitReleased` | anchored | V3RuntimeProviderAdmission::drop<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3AdaptiveConcurrencyController::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-admission-lease-request-drop-release` | `V3PreAcquiredProviderAdmission` → `V3AdaptiveConcurrencyPermitReleased` | anchored | V3PreAcquiredProviderAdmission::drop<br/><small>routecodex-v3-provider-responses/src/transport_admission.rs</small> | V3AdaptiveConcurrencyLease::release<br/><small>routecodex-v3-provider-responses/src/adaptive_concurrency.rs</small> | `v3.provider_global_subscription_probe` |

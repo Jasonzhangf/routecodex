@@ -430,6 +430,70 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
     compile_v3_config_05_manifest(authoring).unwrap()
 }
 
+fn provider_concurrency_three_provider_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    third_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{first_provider}]
+type = "responses"
+base_url = "http://{first_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{first_provider}.models.test]
+wire_name = "wire-first"
+
+[providers.{second_provider}]
+type = "responses"
+base_url = "http://{second_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{second_provider}.models.test]
+wire_name = "wire-second"
+
+[providers.{third_provider}]
+type = "responses"
+base_url = "http://{third_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "THIRD_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{third_provider}.models.test]
+wire_name = "wire-third"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "{second_provider}", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "{third_provider}", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .expect("three-provider concurrency manifest");
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
 fn provider_concurrency_two_key_manifest(
     provider: &str,
     acquire_timeout_ms: u64,
@@ -530,6 +594,51 @@ fn provider_concurrency_relay_input(request_id: &str) -> V3ResponsesRelayRuntime
 #[derive(Default)]
 struct ProviderConcurrencyRecordingTransport {
     sends: Arc<Mutex<Vec<String>>>,
+}
+
+struct ProviderActionRecoveryConcurrencyTransport {
+    first_provider: String,
+    first_send: tokio::sync::Notify,
+    sends: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ProviderActionRecoveryConcurrencyTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends
+            .lock()
+            .unwrap()
+            .push(request.provider_key().to_string());
+        if request.provider_id() == self.first_provider {
+            self.first_send.notify_one();
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    headers: vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    status: 429,
+                    body: br#"{"error":{"message":"rate limited"}}"#.to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_concurrency_recovery","object":"response","status":"completed","output":[{"id":"msg_concurrency_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -1114,7 +1223,7 @@ async fn provider_failure_reselects_without_router_reentry() {
     };
     let routing_group = "provider_failure_reselection";
     let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let raw = test_responses_raw(
         routing_group,
         "req",
@@ -1145,8 +1254,21 @@ async fn provider_failure_reselects_without_router_reentry() {
     .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
-    assert_eq!(route_events.lock().unwrap().len(), 2);
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        2,
+        "provider attempts must not duplicate during recovery admission; route selections: {:?}",
+        route_events.lock().unwrap().as_slice()
+    );
+    assert_eq!(
+        route_events.lock().unwrap().as_slice(),
+        &[
+            "first:key:test".to_string(),
+            "second:key:test".to_string(),
+            "second:key:test".to_string(),
+        ],
+        "Target must revalidate the recovered provider after its action permit is admitted"
+    );
     assert_eq!(realtime_events.lock().unwrap().len(), 1);
     assert_eq!(
         output
@@ -2237,6 +2359,61 @@ async fn provider_concurrency_busy_reselects_second_provider_before_transport_se
 }
 
 #[tokio::test]
+async fn recovery_gate_reselects_when_selected_provider_becomes_busy() {
+    let first = "conc_recovery_first";
+    let second = "conc_recovery_second";
+    let third = "conc_recovery_third";
+    let manifest = provider_concurrency_three_provider_manifest(first, second, third, 100);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = Arc::new(ProviderActionRecoveryConcurrencyTransport {
+        first_provider: first.to_string(),
+        first_send: tokio::sync::Notify::new(),
+        sends: Mutex::new(Vec::new()),
+    });
+    let raw = test_responses_raw(
+        "default",
+        "req-recovery-reselect-busy",
+        "exec-recovery-reselect-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let run_transport = transport.clone();
+    let run = tokio::spawn(async move {
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::new()
+                .with_provider_health(provider_health)
+                .with_now_epoch_ms(10),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            run_transport.as_ref(),
+        )
+        .await
+    });
+    transport.first_send.notified().await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let held = saturate_capacity_key(&format!("{second}:key"));
+    let output = tokio::time::timeout(
+        Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 1_000),
+        run,
+    )
+    .await;
+    release_capacity_leases(held);
+    let output = output
+        .expect("recovery should not block on the provider that became busy")
+        .expect("runtime task should complete");
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[
+            format!("{first}:key"),
+            format!("{third}:key"),
+        ],
+        "the target occupied during recovery must be skipped before transport"
+    );
+}
+
+#[tokio::test]
 async fn provider_concurrency_busy_reselects_sibling_auth_key() {
     let provider = "conc_busy_key_provider";
     let held = saturate_capacity_key(&format!("{provider}:key1"));
@@ -2395,6 +2572,56 @@ async fn provider_concurrency_all_busy_uses_due_scheduled_probe_for_admission() 
         snapshot.saturated,
         "runtime-only mock must not mark a provider probe recovered"
     );
+    assert!(!snapshot.probe_in_flight);
+}
+
+#[tokio::test]
+async fn provider_concurrency_exact_pin_uses_due_scheduled_probe_before_exhaustion() {
+    let provider = "conc_pinned_due_probe";
+    let provider_key = format!("{provider}:key");
+    let held = saturate_capacity_key(&provider_key);
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_rate_limit(&provider_key, 0)
+        .expect("rate limit must schedule an adaptive recovery probe");
+    let manifest = provider_concurrency_two_provider_manifest_with_max_in_flight(
+        provider,
+        "conc_pinned_due_probe_alternate",
+        80,
+        2,
+    );
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-pinned-due-probe",
+        "exec-conc-pinned-due-probe",
+        // Direct provider.model pins expand to exactly the requested provider;
+        // busy admission is retried against that same candidate before exhaustion.
+        json!({"model":"conc_pinned_due_probe.test","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_now_epoch_ms(600_000),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held);
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{provider}:key:wire-first")],
+        "an exact provider pin must try its due scheduled probe, without switching providers"
+    );
+    let snapshot = V3AdaptiveConcurrencyController::process_shared()
+        .snapshot(&provider_key)
+        .unwrap();
+    assert!(snapshot.saturated);
     assert!(!snapshot.probe_in_flight);
 }
 

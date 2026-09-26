@@ -319,6 +319,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
+    let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
+    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         let (selected, mut selected_admission): (
@@ -342,7 +344,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     0,
                     allow_exhaustion_rescue_probe,
                     preferred,
-                    pinned.is_none(),
                 ))
                 .await
                 {
@@ -416,6 +417,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
         };
+        if provider_action_permit_target
+            .as_ref()
+            .is_some_and(|target| {
+                target.provider_id != selected.candidate.provider_id
+                    || target.auth_alias != selected.candidate.auth_alias
+                    || target.model_id != selected.candidate.model_id
+            })
+        {
+            drop(provider_action_permit.take());
+            provider_action_permit_target = None;
+        }
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
@@ -440,7 +452,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
-        let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
@@ -451,7 +462,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
+                    provider_action_permit_target = Some(selected.candidate.clone());
+                    retry_selected = Some(selected.clone());
                     trace.push("V3ProviderActionGateAdmission");
+                    continue;
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
                     pending_provider_action_recovery = match ticket.recovery_witness() {

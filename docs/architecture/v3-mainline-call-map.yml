@@ -6933,7 +6933,7 @@ chains:
 
 - chain_id: v3-provider-admission-lease-lifecycle
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Runtime acquires one provider+authAlias capacity lease before transport, hands the same lease to Provider, and releases it through the owning RAII boundary on every early exit, cancellation, or response terminal.
+  summary: Runtime acquires one provider+authAlias capacity lease before transport and hands it to Provider; WebSocketV2 releases that lease before waiting for a shared session slot and reacquires it only after slot ownership, while every path releases owned resources through RAII.
   edges:
   - step_id: v3-provider-admission-lease-acquire
     from_node: V3Target10ConcreteProviderSelected
@@ -7005,6 +7005,24 @@ chains:
       produces: [v3.provider.transport_request]
       side_channel_reads: [v3.provider.adaptive_concurrency_admission]
       side_channel_writes: [v3.provider.adaptive_concurrency_admission]
+  - step_id: v3-provider-admission-lease-websocket-v2-slot-order
+    from_node: V3PreAcquiredProviderAdmission
+    to_node: V3ProviderResponsesWebSocketSessionSlot
+    caller_symbol: V3ProviderResponsesTransport::send
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+    callee_symbol: acquire_admission_and_connection_slot
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
+    status: anchored
+    owner_feature_id: v3.provider_global_subscription_probe
+    semantic_contract:
+      - WebSocketV2 releases any Runtime pre-acquired provider lease before it waits for the shared session slot.
+      - After it owns the session slot, transport acquires provider admission; a losing admission race releases the slot and retries without holding provider capacity while queued.
+      - Cancellation or admission failure releases the resources already owned by this request and cannot retain a provider lease while waiting for another request's WebSocket session.
+    resource_flow:
+      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
+      produces: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
+      side_channel_reads: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
+      side_channel_writes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
   - step_id: v3-provider-admission-lease-anthropic-relay-handoff
     from_node: V3RuntimeProviderAdmission
     to_node: V3PreAcquiredProviderAdmission

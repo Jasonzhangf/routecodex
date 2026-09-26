@@ -1,0 +1,137 @@
+{
+  "evidence_id": "v3-provider-concurrency-reselect-runtime-delivery-20260926",
+  "feature_id": "v3.provider_action_gate",
+  "related_feature_ids": ["v3.responses_websocket_v2_transport_hardening"],
+  "captured_at": "2026-09-26T02:05:49Z",
+  "source": {
+    "origin_main": "6a3829360c2f7ab1958b1e9148d6adf9ce50f0ec",
+    "candidate_head": "33a13553002e529c4c1734cadd9ea7e9078cafb3",
+    "candidate_branch": "bug/provider-concurrency-repair-0925",
+    "candidate_worktree": "playground/concurrency-repair-0925",
+    "runtime_and_test_diff_sha256": "a9793daabbcea6d44e25d4bd818cdd023187101d672f30430fefe292c55ae5e8",
+    "runtime_binary_sha256": "74bbb6f697058345503ec3e6858ad3ed3d5e9f0116d55b0717e4aa8799a52c97"
+  },
+  "tests": [
+    {
+      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture",
+      "result": "pass",
+      "tests": "8 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-provider-adaptive-concurrency",
+      "result": "pass",
+      "tests": "15 passed; 0 failed"
+    },
+    {
+      "command": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_busy_provider_concurrency_reselects_before_transport_send -- --exact --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed"
+    },
+    {
+      "command": "npm run test:v3-responses-websocket-v2-transport-hardening",
+      "result": "pass",
+      "tests": "14 passed; 0 failed, including mixed message/reasoning/function_call output reconstruction"
+    },
+    {
+      "command": "npm run test:v3-provider-action-gate",
+      "result": "pass",
+      "tests": "provider action gate contract 24 passed; error contract tests passed"
+    },
+    {
+      "command": "npm run test:v3-provider-session-cooldown",
+      "result": "pass",
+      "tests": "provider health 15, session isolation 2, server entry 1 passed"
+    },
+    {
+      "command": "npm run test:v3-workspace",
+      "result": "pass",
+      "details": "all V3 workspace unit, integration, and doc tests passed"
+    },
+    {
+      "command": "npm run verify:v3-clippy",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-responses-websocket-v2-transport-hardening && npm run test:v3-responses-websocket-v2-transport-hardening-red-fixtures",
+      "result": "pass",
+      "details": "WebSocket owner/verifier passed; 11 forbidden mutations rejected"
+    },
+    {
+      "command": "npm run verify:v3-provider-action-gate && npm run test:v3-provider-action-gate-red-fixtures && npm run verify:v3-provider-session-cooldown && npm run test:v3-provider-session-cooldown-red-fixtures",
+      "result": "pass",
+      "details": "48 required machine edges; 55 provider action mutations and 31 session cooldown mutations rejected"
+    },
+    {
+      "command": "npm run verify:v3-architecture-docs && npm run verify:v3-resource-map && npm run verify:v3-module-boundaries && npm run verify:v3-rust-only",
+      "result": "pass"
+    },
+    {
+      "command": "npm run verify:v3-cargo-fmt && git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "npm run compile:v3-build-admission",
+      "result": "pass",
+      "details": "487 files admitted; digest 1a3108763305bb872821e1bd3e52e2a00e3d17b904e2709fb00d08ac52bdcf16"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "details": "39/39 sub-gates green"
+    }
+  ],
+  "build_install": {
+    "command": "npm run install:v3",
+    "result": "pass",
+    "version": "rccv3 0.90.4818 (crate 0.1.0)",
+    "binary": "/Users/fanzhang/.local/bin/rccv3"
+  },
+  "restart": {
+    "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
+    "result": "pass",
+    "completed_at": "2026-09-26T01:11:41.395Z",
+    "instance_id": "v3-fa51089c47a7d46bfde0",
+    "state": "running",
+    "loaded_binary": "/Users/fanzhang/.local/bin/rccv3",
+    "loaded_binary_sha256": "74bbb6f697058345503ec3e6858ad3ed3d5e9f0116d55b0717e4aa8799a52c97",
+    "status_detail": "hooks sidecar unavailable: crashed; managed lifecycle validation failed because hooks sidecar exited before readiness; V3 runtime instance remains running"
+  },
+  "config": {
+    "active": "/Volumes/extension/.rcc/config.toml",
+    "check": "pass: version=3 servers=2"
+  },
+  "health": [
+    {
+      "port": 4444,
+      "url": "http://127.0.0.1:4444/health",
+      "http_status": 200,
+      "build_version": "0.90.4818"
+    },
+    {
+      "port": 7777,
+      "url": "http://127.0.0.1:7777/health",
+      "http_status": 200,
+      "build_version": "0.90.4818"
+    }
+  ],
+  "same_entry_replay": {
+    "entry": "HTTP POST http://127.0.0.1:4444/v1/responses",
+    "request_id": "openai-responses-router-gpt-5.5-20260925T185959076-466881-14733",
+    "http_status": 200,
+    "provider": "goaichat_model:key1:deepseek-v4.1-flash",
+    "execution_mode": "relay",
+    "transport": "json",
+    "response_status": "completed",
+    "finish_reason": "stop",
+    "duration_ms": 2524,
+    "client_result": "ROUTECODEX_FINAL_CANDIDATE_OK",
+    "usage": {"input_tokens": 124, "output_tokens": 40, "total_tokens": 164}
+  },
+  "concurrent_live_observation": {
+    "entry": "HTTP POST /v1/responses through listener 4444, AppsSDK sessions",
+    "captured_at": "2026-09-26T01:14:40Z",
+    "observed_requests_older_than_60s_still_in_flight": 0,
+    "in_flight_query": "latest request ledger state per request_id, started after restart; no unfinished request older than 60 seconds",
+    "note": "Natural overlapping requests captured before the final restart were excluded. Deterministic saturation and sibling reselect are covered by the runtime regression tests above."
+  }
+}

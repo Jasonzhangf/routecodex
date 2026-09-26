@@ -500,6 +500,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut failed_candidates = BTreeSet::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
+    let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
+    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
     let failure_context = V3RelayProviderFailurePolicyContext {
@@ -561,6 +563,17 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }
             }
         };
+        if provider_action_permit_target
+            .as_ref()
+            .is_some_and(|target| {
+                target.provider_id != selected.candidate.provider_id
+                    || target.auth_alias != selected.candidate.auth_alias
+                    || target.model_id != selected.candidate.model_id
+            })
+        {
+            drop(_provider_action_permit.take());
+            provider_action_permit_target = None;
+        }
         let selected_target_provider_id = selected.candidate.provider_id.clone();
         let selected_target_auth_alias = selected.candidate.auth_alias.clone();
         let selected_target_model_id = selected.candidate.model_id.clone();
@@ -692,7 +705,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         trace.push("V3ProviderReqOutbound09TransportRequest");
         let provider_request_snapshot = transport_request.provider_request_projection();
-        let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
@@ -704,7 +716,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             {
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     _provider_action_permit = admission.take_permit();
+                    provider_action_permit_target = Some(selected.candidate.clone());
+                    retry_selected = Some(selected.clone());
                     trace.push("V3ProviderActionGateAdmission");
+                    continue;
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {
                     pending_provider_action_recovery = Some(

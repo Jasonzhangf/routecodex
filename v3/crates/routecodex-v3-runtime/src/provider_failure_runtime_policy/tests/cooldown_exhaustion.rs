@@ -1108,3 +1108,226 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
         );
     }
 }
+
+#[tokio::test]
+async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
+    let server_id = "later_tier_probe_transport_busy";
+    let mut manifest = global_pool_alive_manifest(server_id);
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .base_url = "http://127.0.0.1:1/v1".to_string();
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+        max_in_flight: 1,
+        acquire_timeout_ms: 60_000,
+        stale_lease_ms: 300_000,
+    });
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope = test_provider_failure_scope(
+        server_id,
+        server_id,
+        "later-tier-probe-transport-busy-session",
+    )
+    .expect("failure session scope");
+    let body = json!({"model":"client-responses","input":"hello"});
+    let mut expanded =
+        match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id,
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &body,
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 20_001,
+            deterministic_sample: 0,
+        }) {
+            Ok(expanded) => expanded,
+            Err(_) => panic!("expanded candidates"),
+        };
+    let first = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "first")
+        .expect("first candidate");
+    first.pool_ids = vec!["client_responses".to_string()];
+    let second = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "second")
+        .expect("second candidate");
+    second.pool_ids = vec!["default".to_string()];
+    let target_kind = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("initial target plan")
+        .target_kind
+        .clone();
+    expanded.route.target_plan.push(
+        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
+            tier_index: 1,
+            pool_id: "default".to_string(),
+            target_index: 0,
+            target_kind,
+            target_id: None,
+            priority: 1,
+            weight: 1,
+            direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
+        },
+    );
+    health
+        .store
+        .record_provider_cooldown_failure(
+            "first",
+            Some("key1"),
+            Some("gpt-test"),
+            "preceding tier is cooled",
+            20_000,
+            100_000,
+        )
+        .expect("first provider cooldown");
+
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller
+        .ensure_initial_budget("first:key1", 1)
+        .expect("first provider concurrency budget");
+    let active_business_lease = controller
+        .try_acquire_business("first:key1")
+        .expect("first provider busy lease");
+
+    let selection = tokio::time::timeout(
+        Duration::from_millis(500),
+        select_v3_expanded_target_with_exhaustion_rescue(
+            &manifest,
+            expanded,
+            &failure_session_scope,
+            &health,
+            &BTreeSet::new(),
+            20_001,
+            0,
+            true,
+        ),
+    )
+    .await
+    .expect("a busy probe transport must not block later-tier selection");
+    let V3TargetSelectionAfterRescue::Selected(selected) = selection else {
+        panic!("the available later tier must remain selectable");
+    };
+    assert_eq!(selected.candidate.provider_id, "second");
+    assert!(
+        !health
+            .store
+            .availability("first", Some("key1"), Some("gpt-test"), 20_001)
+            .available,
+        "skipping a capacity-blocked probe must preserve provider cooldown"
+    );
+    controller
+        .release(active_business_lease.into_permit())
+        .expect("release first provider busy lease");
+}
+
+#[tokio::test]
+async fn pinned_busy_candidate_reselects_to_next_provider_before_admission() {
+    let server_id = "pinned_busy_candidate_reselect";
+    let mut manifest = global_pool_alive_manifest(server_id);
+    manifest
+        .providers
+        .get_mut("first")
+        .expect("first provider")
+        .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+        max_in_flight: 1,
+        acquire_timeout_ms: 60_000,
+        stale_lease_ms: 300_000,
+    });
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let scope = test_provider_failure_scope(server_id, server_id, "pinned-busy-session")
+        .expect("failure session scope");
+    let body = json!({"model":"client-responses","input":"hello"});
+    let mut expanded =
+        match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id,
+            failure_session_scope: &scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &body,
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 20_001,
+            deterministic_sample: 0,
+        }) {
+            Ok(expanded) => expanded,
+            Err(_) => panic!("expanded candidates"),
+        };
+    let first = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "first")
+        .expect("first candidate");
+    first.pool_ids = vec!["client_responses".to_string()];
+    let second = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "second")
+        .expect("second candidate");
+    second.pool_ids = vec!["default".to_string()];
+    let target_kind = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("initial target plan")
+        .target_kind
+        .clone();
+    expanded.route.target_plan.push(
+        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
+            tier_index: 1,
+            pool_id: "default".to_string(),
+            target_index: 0,
+            target_kind,
+            target_id: None,
+            priority: 1,
+            weight: 1,
+            direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
+        },
+    );
+    let preferred = V3TargetInterpreter::default()
+        .select_available(expanded.clone(), &health.store, 20_001)
+        .expect("first tier selected");
+    assert_eq!(preferred.candidate.provider_id, "first");
+
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    controller
+        .ensure_initial_budget("first:key1", 1)
+        .expect("first provider concurrency budget");
+    let active_business_lease = controller
+        .try_acquire_business("first:key1")
+        .expect("first provider busy lease");
+
+    let selected = select_v3_expanded_target_with_admission_rescue(
+        &manifest,
+        expanded,
+        &scope,
+        &health,
+        &BTreeSet::new(),
+        20_001,
+        0,
+        false,
+        Some(preferred),
+    )
+    .await;
+    let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selected else {
+        panic!("a busy preferred provider must reselect the next tier");
+    };
+    assert_eq!(selected.selected.candidate.provider_id, "second");
+    drop(selected);
+    controller
+        .release(active_business_lease.into_permit())
+        .expect("release first provider busy lease");
+}

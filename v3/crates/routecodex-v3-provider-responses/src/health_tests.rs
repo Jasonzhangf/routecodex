@@ -510,9 +510,11 @@ async fn cancelled_probe_wakes_cooldown_exhaustion_waiter() {
     let observed_generation = store.availability_generation();
     let wait = store.wait_for_availability_change(observed_generation);
     tokio::pin!(wait);
-    assert!(tokio::time::timeout(std::time::Duration::from_millis(5), &mut wait)
-        .await
-        .is_err());
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut wait)
+            .await
+            .is_err()
+    );
 
     store
         .cancel_provider_cooldown_probe_at_generation(

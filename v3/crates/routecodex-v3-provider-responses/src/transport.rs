@@ -782,47 +782,18 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 ..
             } => *concurrency_acquire_timeout_ms,
         };
-        // Queue for this WebSocket session before taking a provider permit. A request that
-        // waits for the shared connection must not consume provider capacity while queued.
-        let websocket_connection = websocket::acquire_connection_slot(
-            &self.websocket_sessions,
-            &mut request,
-            &self.handoff,
-            attempt_key.as_ref(),
-        )
-        .await?;
-        // Release the session lock before provider admission: another request may already own
-        // admission and need this connection. Re-acquire after admission for the actual send.
-        drop(websocket_connection);
-        let admission = take_or_acquire_provider_admission(
-            request.pre_acquired_admission.take(),
-            controller.clone(),
-            provider_key.clone(),
-            current_epoch_ms(),
-            Duration::from_millis(acquire_timeout_ms),
-            cancellation,
-        )
-        .await;
-        if admission.is_err() {
-            if let Some(attempt_key) = &attempt_key {
-                let _ = self
-                    .handoff
-                    .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-            }
-        }
-        let lease = admission.map_err(|error| {
-            provider_admission_error(error, &request_id, &provider_id, acquire_timeout_ms)
-        })?;
-        let was_probe = lease.is_probe();
-        let permit = lease.into_permit();
-        let permit_guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), permit);
-        let websocket_connection = websocket::acquire_connection_slot(
-            &self.websocket_sessions,
-            &mut request,
-            &self.handoff,
-            attempt_key.as_ref(),
-        )
-        .await?;
+        let (permit_guard, was_probe, websocket_connection) =
+            websocket::acquire_admission_and_connection_slot(
+                &self.websocket_sessions,
+                &mut request,
+                &self.handoff,
+                attempt_key.as_ref(),
+                controller.clone(),
+                provider_key.clone(),
+                acquire_timeout_ms,
+                cancellation.clone(),
+            )
+            .await?;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,

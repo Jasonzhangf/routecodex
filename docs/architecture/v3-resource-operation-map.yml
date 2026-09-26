@@ -520,6 +520,7 @@ resources:
     semantic_contract:
       capacity: configured maxInFlight is a hard ceiling for all business and scheduled-probe leases; adaptive budget is clamped to the same ceiling
       acquisition: Runtime acquires a selected provider+authAlias lease before Provider transport and immediately reselects when a candidate is Busy
+      websocket_order: For WebSocketV2, Provider transport releases Runtime's pre-acquired lease before waiting for the shared session connection slot, then acquires provider admission only after it owns that slot; if admission loses a race, it releases the slot before retrying
       handoff: Provider consumes a matching Runtime lease exactly once; a mismatched lease is released and rejected
       release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
       boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
@@ -537,6 +538,10 @@ resources:
     owner_crate: routecodex-v3-provider-responses
     owner_node: ProviderResponsesTransport
     identity: [providerId, modelId, authAlias, websocketEndpoint]
+    semantic_contract:
+      serialization: A shared session slot serializes WebSocketV2 request/response use for the provider, model, auth alias, and endpoint identity
+      admission_order: A request waiting for the slot holds no provider concurrency lease; after taking the slot it acquires a provider lease, and releases the slot before retrying if that lease cannot be acquired
+      release: Cancellation, provider errors, and failed admission release the request's owned slot and any provider lease exactly once
     allowed_writers: [ProviderResponsesTransport]
     allowed_readers: [ProviderResponsesTransport]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server]

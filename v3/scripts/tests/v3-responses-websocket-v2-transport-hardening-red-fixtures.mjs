@@ -29,7 +29,7 @@ const cases = [
   ['JSON missing type keeps socket', transport, 'None => {\n                    *connection = None;\n                    return Err(websocket_protocol_error(', 'None => {\n                    return Err(websocket_protocol_error(', /connection/],
   ['WebSocket event accumulation', transport, '        if connection.is_none() {', '        let mut response_events = Vec::new(); response_events.push(1);\n        if connection.is_none() {', /Vec/],
   ['WebSocket JSON accumulator removed', websocket, 'struct V3ResponsesWebSocketProtocolAggregate', 'struct V3WsProtocolAggregateRemoved', /V3ResponsesWebSocketProtocolAggregate/],
-  ['ASXS-shaped function-call aggregation test removed', tests, 'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty', 'websocket_v2_json_aggregation_case_removed', /json_aggregates_function_call_item|terminal_output_is_empty|V3_WS_KEY_ASXS_SHAPE/],
+  ['mixed output aggregation test removed', tests, 'websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty', 'websocket_v2_json_aggregation_case_removed', /json_preserves_mixed_output_items|terminal_output_is_empty|V3_WS_KEY_ASXS_SHAPE/],
   ['WebSocket beta header removed', transport, 'handshake.headers_mut().insert(\n                OPENAI_BETA_HEADER,\n                HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),\n            );', '// mutated: missing beta header', /OPENAI_BETA_HEADER|responses_websockets/],
   ['HTTP retry fallback', transport, '        if connection.is_none() {', '        let _fallback_http_retry = true;\n        if connection.is_none() {', /fallback/i],
   ['Codex status_code parsing removed', websocket, '.or_else(|| server_event.get("status_code"))', '', /status_code/],

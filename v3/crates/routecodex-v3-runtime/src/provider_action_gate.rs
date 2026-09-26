@@ -412,7 +412,7 @@ impl V3ProviderActionGate {
         provider_scope: &V3ProviderActionProviderScope,
     ) -> Result<(), String> {
         let now = Instant::now();
-        let removed = {
+        let (removed, sibling_notifications) = {
             let mut states = self.lock_states()?;
             let keys = states
                 .iter()
@@ -422,6 +422,7 @@ impl V3ProviderActionGate {
                     .then_some(key.clone())
                 })
                 .collect::<Vec<_>>();
+            let has_matching_action = !keys.is_empty();
             let mut removed = Vec::new();
             for key in keys {
                 let retain_for_waiters = states
@@ -445,10 +446,30 @@ impl V3ProviderActionGate {
                     removed.push(state);
                 }
             }
-            removed
+            let sibling_notifications = if has_matching_action {
+                states
+                    .iter()
+                    .filter(|(key, _)| {
+                        key.provider_scope.server_id == provider_scope.server_id
+                            && key.provider_scope.routing_group == provider_scope.routing_group
+                            && key.provider_scope.session_id == provider_scope.session_id
+                    })
+                    .map(|(_, state)| (state.change_tx.clone(), state.generation))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            (removed, sibling_notifications)
         };
         for state in removed {
-            let _ = state.change_tx.send(state.generation.saturating_add(1));
+            let _ = state
+                .change_tx
+                .send_replace(state.generation.saturating_add(1));
+        }
+        // Admission is serialized across a session group. A success that frees
+        // one lane must wake recovery waiters parked on its sibling lanes.
+        for (change_tx, generation) in sibling_notifications {
+            let _ = change_tx.send_replace(generation);
         }
         Ok(())
     }
@@ -960,4 +981,89 @@ fn required_scope_part(value: String, field: &str) -> Result<String, String> {
         return Err(format!("provider action gate {field} cannot be empty"));
     }
     Ok(normalized.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn provider_success_wakes_same_session_sibling_recovery_waiter() {
+        let session = V3ProviderFailureSessionScope::new("server", "routing", "session")
+            .expect("valid provider failure scope");
+        let gate = V3ProviderActionGate::default();
+        let active_key = V3ProviderActionGateKey::new(&session, "active-provider", "active-error")
+            .expect("valid active provider lane");
+        let active_failure = gate
+            .record_failure(&active_key)
+            .expect("active provider failure is recorded");
+        {
+            let mut states = gate.lock_states().expect("gate state is available");
+            states
+                .get_mut(&active_key)
+                .expect("active provider lane exists")
+                .next_admission_at = Instant::now();
+        }
+        let mut active_admission = match gate
+            .wait_for_recovery_witness(
+                &active_failure
+                    .recovery_witness()
+                    .expect("active recovery witness"),
+                active_key.provider_scope.clone(),
+            )
+            .await
+            .expect("active provider action is admitted")
+        {
+            V3ProviderActionRecoveryTransition::Admitted(admission) => admission,
+            transition => panic!("expected active admission, got {transition:?}"),
+        };
+        let _active_permit = active_admission
+            .take_permit()
+            .expect("active provider admission owns its permit");
+
+        let waiting_key = V3ProviderActionGateKey::new(&session, "failed-provider", "codec-error")
+            .expect("valid recovery lane");
+        let waiting_failure = gate
+            .record_failure(&waiting_key)
+            .expect("failed provider lane is recorded");
+        {
+            let mut states = gate.lock_states().expect("gate state is available");
+            states
+                .get_mut(&waiting_key)
+                .expect("recovery lane exists")
+                .next_admission_at = Instant::now();
+        }
+        let recovery = waiting_failure
+            .recovery_witness()
+            .expect("waiting recovery witness");
+        let selected_provider_scope =
+            V3ProviderActionProviderScope::new(&session, "selected-provider")
+                .expect("valid selected provider scope");
+        let waiter_gate = gate.clone();
+        let mut waiter = tokio::spawn(async move {
+            waiter_gate
+                .wait_for_recovery_witness(&recovery, selected_provider_scope)
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "sibling admission must block the recovery waiter"
+        );
+
+        gate.record_provider_success(&active_key.provider_scope)
+            .expect("sibling provider success is recorded");
+        let transition = tokio::time::timeout(Duration::from_secs(1), &mut waiter).await;
+        if transition.is_err() {
+            waiter.abort();
+        }
+        let transition = transition
+            .expect("provider success must wake a recovery waiter blocked by its sibling lane")
+            .expect("recovery waiter task must complete")
+            .expect("recovery wait must not fail");
+        assert!(
+            matches!(transition, V3ProviderActionRecoveryTransition::Admitted(_)),
+            "recovery lane must admit after the sibling provider succeeds"
+        );
+    }
 }

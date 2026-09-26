@@ -228,6 +228,10 @@ where
     let mut pending_provider_action_recovery = None;
     let mut provider_request_snapshot = None;
     let mut provider_response_snapshot = None;
+    let mut provider_action_permit: Option<
+        crate::provider_action_gate::V3ProviderActionPermit,
+    > = None;
+    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
@@ -244,7 +248,6 @@ where
                 0,
                 allow_exhaustion_rescue_probe,
                 retry_selected.take(),
-                true,
             )
             .await
             {
@@ -292,6 +295,14 @@ where
                     );
                 }
             };
+        if provider_action_permit_target.as_ref().is_some_and(|target| {
+            target.provider_id != selected.candidate.provider_id
+                || target.auth_alias != selected.candidate.auth_alias
+                || target.model_id != selected.candidate.model_id
+        }) {
+            drop(provider_action_permit.take());
+            provider_action_permit_target = None;
+        }
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
             let transport_label = if C::body(&standardized)
@@ -409,9 +420,6 @@ where
         };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
-        let mut provider_action_permit: Option<
-            crate::provider_action_gate::V3ProviderActionPermit,
-        > = None;
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
@@ -422,7 +430,10 @@ where
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
+                    provider_action_permit_target = Some(selected.candidate.clone());
+                    retry_selected = Some(selected.clone());
                     trace.push("V3ProviderActionGateAdmission");
+                    continue;
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
                     pending_provider_action_recovery = match ticket.recovery_witness() {

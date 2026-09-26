@@ -1156,6 +1156,7 @@ features:
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: below budget leases send immediately; at budget, Runtime reserves the selected candidate before Provider transport and an eligible Busy candidate is skipped for the next candidate without waiting'
   - 'Configured maxInFlight is a hard ceiling for business requests and scheduled probes; successful adaptive probes cannot raise the budget above that ceiling'
   - 'Direct and Relay immediately skip Busy candidates; if every eligible candidate is Busy, a due scheduled probe may be selected without waiting, otherwise typed provider-pool exhaustion is returned immediately with no provider send or health mutation'
+  - 'A WebSocketV2 request waiting for a shared provider session slot holds no provider concurrency lease; it reacquires the lease after slot ownership and releases the slot before retrying a losing admission race'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
   - A successful ten-minute probe increases the budget, a 429 probe decreases it, and SSE leases release only when the raw stream is dropped or exhausted
@@ -3025,6 +3026,7 @@ features:
   - model-less auth-key cooldown state never enters provider or client payload or MetadataCenter
   - Busy admission never records provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
   - All-busy immediate exhaustion cannot send a provider request, leak a held admission lease, or convert local admission pressure into a typed provider health failure
+  - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --lib
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test provider_probe_backoff_ladder_contract -- --nocapture
@@ -3033,6 +3035,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime runtime_policy_maps_account_and_recoverable_http_classes_to_global_health -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime cooldown_exhaustion --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_admission_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures

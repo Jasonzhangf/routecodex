@@ -174,7 +174,7 @@ requireMatch(
 );
 requireMatch(
   source.cooldownRescue,
-  /let Some\(permit\) = permit else \{[\s\S]*return Ok\(\(\)\);/u,
+  /let Some\(permit\) = permit else \{[\s\S]*return Ok\(true\);/u,
   "in-flight cooldown probes must not block target selection from using a later tier",
 );
 forbidMatch(
