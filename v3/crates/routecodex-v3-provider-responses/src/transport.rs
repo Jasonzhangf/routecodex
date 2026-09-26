@@ -151,7 +151,7 @@ fn normalize_provider_header_name(name: String) -> String {
 #[derive(Debug)]
 pub struct V3Transport13ResponsesRequest {
     _sealed: (),
-    kind: V3Transport13ResponsesRequestKind,
+    pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
 }
@@ -469,19 +469,18 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 Vec::new(),
                 Some(Duration::from_millis(request_timeout_ms)),
                 concurrency_acquire_timeout_ms,
+                sse_first_frame_timeout_ms,
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
                 concurrency_acquire_timeout_ms: timeout_ms,
                 compatibility_profile: request_compatibility_profile,
-                sse_first_frame_timeout_ms: sse_timeout,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
                 *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
-                *sse_timeout = sse_first_frame_timeout_ms;
             }
             Ok(request)
         }
@@ -639,6 +638,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         provider_headers,
         timeout,
         60_000,
+        None,
     )
 }
 

@@ -297,6 +297,7 @@ fn direct_http_builder_preserves_target_admission_timeout() {
             Vec::new(),
             Some(std::time::Duration::from_secs(5)),
             target.concurrency_acquire_timeout_ms,
+            None,
         )
         .unwrap();
 
@@ -574,7 +575,7 @@ async fn responses_http_transport_uses_sse_first_frame_timeout_for_header_wait()
         stream.write_all(response.as_bytes()).await.unwrap();
     });
 
-    let mut request =
+    let request =
         build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
             "req-sse-header-wait",
             "kdns-test",
@@ -588,15 +589,9 @@ async fn responses_http_transport_uses_sse_first_frame_timeout_for_header_wait()
             Vec::new(),
             Some(Duration::from_secs(5)),
             60_000,
+            Some(50),
         )
         .unwrap();
-    if let V3Transport13ResponsesRequestKind::Http {
-        sse_first_frame_timeout_ms,
-        ..
-    } = &mut request.kind
-    {
-        *sse_first_frame_timeout_ms = Some(50);
-    }
 
     let started = tokio::time::Instant::now();
     let error = ProviderResponsesTransport::default()

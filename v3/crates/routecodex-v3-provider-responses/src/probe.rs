@@ -81,6 +81,7 @@ pub fn build_v3_provider_global_probe_request(
         headers,
         Some(std::time::Duration::from_millis(target.request_timeout_ms)),
         target.concurrency_acquire_timeout_ms,
+        None,
     )
     .map_err(|error| error.to_string())
 }

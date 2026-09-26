@@ -1,7 +1,8 @@
 use crate::adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease};
 use crate::transport::{
     v3_transport_13_request, V3ProviderCancellation, V3ProviderRequestHeader,
-    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequestKind,
+    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
+    V3Transport13ResponsesRequestKind,
 };
 use crate::wire::{V3ProviderAuthHandle, V3ResponsesStreamIntent};
 use crate::V3ProviderError;
@@ -69,6 +70,18 @@ pub(crate) async fn acquire_provider_admission(
         None => tokio::time::timeout(timeout, acquire)
             .await
             .map_err(|_| V3ProviderAdmissionError::Timeout),
+    }
+}
+
+impl V3Transport13ResponsesRequest {
+    pub fn sse_first_frame_timeout_ms(&self) -> Option<u64> {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                sse_first_frame_timeout_ms,
+                ..
+            } => *sse_first_frame_timeout_ms,
+            V3Transport13ResponsesRequestKind::WebSocketV2 { .. } => None,
+        }
     }
 }
 
@@ -198,6 +211,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_
     provider_headers: Vec<V3ProviderRequestHeader>,
     timeout: Option<Duration>,
     concurrency_acquire_timeout_ms: u64,
+    sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
     let request_id = request_id.into();
     let provider_id = provider_id.into();
@@ -220,7 +234,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_
             timeout,
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms,
-            sse_first_frame_timeout_ms: None,
+            sse_first_frame_timeout_ms,
             cancellation: None,
             compatibility_profile: None,
         },
