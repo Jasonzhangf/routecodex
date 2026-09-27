@@ -143,7 +143,8 @@ fn project_reasoning_effort_for_selected_target(
     let is_deepseek = matches!(
         selected.compatibility_profile.as_deref(),
         Some("chat:deepseek-max" | "responses:deepseek-console-go")
-    );
+    ) || is_v3_deepseek_v4_compat_model(&selected.model_id)
+        || is_v3_deepseek_v4_compat_model(&selected.wire_model);
     let is_minimax = selected.compatibility_profile.as_deref() == Some("chat:minimax");
     let is_opencode_go_zen = selected.provider_id == "opencode-go-zen";
 
@@ -236,6 +237,7 @@ fn project_reasoning_effort_for_selected_target(
         match effort.as_str() {
             "none" => "none",
             "xhigh" | "max" => "max",
+            "ultra" => "max",
             _ => "high",
         }
     } else {
@@ -771,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_openai_chat_non_thinking_keeps_required_tool_choice() {
+    fn deepseek_openai_chat_non_thinking_preserves_required_tool_choice() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::OpenAiChat,
             json!({
@@ -788,7 +790,7 @@ mod tests {
         req07.previous.selected_target.wire_model = "deepseek-v4-flash".to_string();
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("non-thinking DeepSeek request must preserve required choice");
+            .expect("non-thinking DeepSeek request must preserve the client tool choice");
         assert_eq!(
             req_compat.provider_semantic_payload()["tool_choice"],
             "required"
@@ -1066,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_max_profile_maps_explicit_xhigh_to_max() {
+    fn deepseek_max_profile_maps_explicit_xhigh_to_official_max_domain() {
         let mut req07 = relay_req07_for_entry(
             V3HubEntryProtocol::Responses,
             json!({
@@ -1080,12 +1082,84 @@ mod tests {
             Some("chat:deepseek-max".to_string());
 
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
-            .expect("explicit xhigh must use the registered DeepSeek max projection");
+            .expect("explicit xhigh must use the official DeepSeek max projection");
 
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning_effort"],
             "max"
         );
+    }
+
+    #[test]
+    fn deepseek_max_profile_maps_explicit_ultra_to_max() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "ultra", "summary": "detailed"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.compatibility_profile =
+            Some("chat:deepseek-max".to_string());
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("explicit ultra must use the official DeepSeek max projection");
+
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "max"
+        );
+    }
+
+    #[test]
+    fn openai_chat_deepseek_v4_model_maps_official_effort_domain() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "reasoning": {"effort": "medium"}
+            }),
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
+        req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
+        req07.previous.selected_target.wire_model = "DeepSeek-V4.1-Flash".to_string();
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("OpenAI Chat DeepSeek model must use the official DeepSeek high projection");
+
+        assert_eq!(
+            req_compat.provider_semantic_payload()["reasoning_effort"],
+            "high"
+        );
+    }
+
+    #[test]
+    fn deepseek_max_profile_maps_lower_effort_values_to_high() {
+        for effort in ["minimal", "low", "medium", "unknown"] {
+            let mut req07 = relay_req07_for_entry(
+                V3HubEntryProtocol::Responses,
+                json!({
+                    "model": "client-route-alias",
+                    "input": "hello",
+                    "reasoning": {"effort": effort, "summary": "detailed"}
+                }),
+                V3HubProviderWireProtocol::OpenAiChat,
+            );
+            req07.previous.selected_target.compatibility_profile =
+                Some("chat:deepseek-max".to_string());
+
+            let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+                .expect("DeepSeek lower/unknown effort must project to the registered high value");
+
+            assert_eq!(
+                req_compat.provider_semantic_payload()["reasoning_effort"],
+                "high"
+            );
+        }
     }
 
     #[test]

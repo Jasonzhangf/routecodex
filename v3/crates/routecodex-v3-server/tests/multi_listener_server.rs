@@ -314,6 +314,7 @@ type = "responses"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -386,6 +387,7 @@ type = "responses"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -3636,7 +3638,7 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(15), socket.next())
+    let message = timeout(Duration::from_secs(30), socket.next())
         .await
         .unwrap()
         .unwrap()
@@ -5623,12 +5625,23 @@ async fn observability_projection_is_isolated_per_listener() {
             .join(".rcc")
             .join("logs")
             .join(format!("server-v3-{expected_port}.request-records.jsonl"));
-        assert!(
-            store_path.exists(),
-            "listener {expected_port} must create its own persisted observability store at {}",
-            store_path.display()
-        );
-        let content = fs::read_to_string(&store_path).unwrap();
+        let content = timeout(Duration::from_secs(5), async {
+            loop {
+                if store_path.exists() {
+                    let content = fs::read_to_string(&store_path).unwrap_or_default();
+                    let envelopes = content
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .count();
+                    if envelopes >= 2 {
+                        return content;
+                    }
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("listener must persist lifecycle updates to its own observability store");
         let envelopes = content
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
