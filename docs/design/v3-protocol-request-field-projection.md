@@ -218,6 +218,13 @@ does not authorize reuse of the source object or of another target's mapping.
 | `truncation` | Responses context policy extension | preserve `auto`/`disabled`; no silent history deletion in Chat Process | exact Responses only | unmapped | unmapped |
 | `user` | upstream user identifier payload | preserve separately from `client_metadata.user_id` and `safety_identifier` | exact | exact `user` | unmapped; never relabel as metadata user_id |
 
+DeepSeek Chat-compatible providers accept only `none` and `auto` for
+`tool_choice` in thinking mode; `required`, named function, and custom object
+forms are rejected with a generic upstream 400. This is a registered
+provider-private compatibility exception: provider-compat normalizes those
+unsupported forms to `auto` before the provider wire and documents the
+downgrade at the compatibility owner so it is not treated as silent fallback.
+
 The matrix is closed-world: a source field absent from this table is not
 implicitly pass-through. It must be added with the same six-column treatment,
 including a named owner and positive/negative tests, before implementation.
