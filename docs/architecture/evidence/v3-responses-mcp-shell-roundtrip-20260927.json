@@ -198,21 +198,21 @@
     "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
   },
   "latest_candidate_runtime_reverification": {
-    "source_commit": "50dfeed16a9fe7023a01424ccc82dcb71c355c3c",
+    "source_commit": "9a762ad53c747a1546dd795f3fe92f04ea03fb1e",
     "candidate_diff_sha256_excluding_this_receipt": "0fbed9d2bde6173374a05f0c3317af2a92ad995258bf17db18efbbec13bd5ef2",
     "artifact": {
       "command": "npm run install:v3",
       "result": "pass",
       "version": "rccv3 0.90.4819 (crate 0.1.0)",
       "binary": "/Users/fanzhang/.local/bin/rccv3",
-      "sha256": "6e46ffaca2faf713fd18b5f93d65ee3859860dc37bb15c019a6a87ea3b62b631"
+      "sha256": "d9af30db3861041e0508b2947b1f48c1c2ed9dbe8e59679d71617937268d1ba4"
     },
     "restart": {
       "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
       "result": "pass",
       "instance_id": "v3-8d7d60058ba4158f0ab0",
       "state": "running",
-      "loaded_binary_sha256": "6e46ffaca2faf713fd18b5f93d65ee3859860dc37bb15c019a6a87ea3b62b631",
+      "loaded_binary_sha256": "d9af30db3861041e0508b2947b1f48c1c2ed9dbe8e59679d71617937268d1ba4",
       "listeners": "4444 and 7777 returned HTTP 200 with build_version 0.90.4819",
       "status_detail": "hooks sidecar unavailable/crashed; request and tool paths verified through 4444"
     },
@@ -220,39 +220,39 @@
       "entry": "HTTP JSON client -> RCC 4444 /v1/responses",
       "tool_declaration": "mcp__mcpx.foo__bar declared in both tools and additional_tools with different schemas",
       "tool_call_request": {
-        "request_id": "openai-responses-router-gpt-5.5-20260927T154059762-514731-12030",
-        "route": "coding",
+        "request_id": "openai-responses-router-gpt-5.5-20260927T155600885-514810-12109",
+        "route": "thinking",
         "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
         "http_status": 200,
         "response_status": "requires_action",
         "provider_status": 200,
         "namespace": "mcp__mcpx",
         "name": "foo__bar",
-        "call_id": "call_6b9285a6774044719aba3c3e",
-        "arguments": "{\"value\": \"roundtrip-ok\"}"
+        "call_id": "call_d383c5520a9c48f482ca568d",
+        "arguments": "{\"value\": \"post-restart-ok\"}"
       },
       "client_execution": {
         "command": "printf '%s' 'roundtrip-ok'",
-        "stdout": "roundtrip-ok",
+        "stdout": "post-restart-ok",
         "exit_status": 0
       },
       "followup_request": {
-        "request_id": "openai-responses-router-gpt-5.5-20260927T154326812-514743-12042",
-        "submitted_call_id": "call_6b9285a6774044719aba3c3e",
-        "submitted_output": "roundtrip-ok",
+        "request_id": "openai-responses-router-gpt-5.5-20260927T155614355-514813-12112",
+        "submitted_call_id": "call_d383c5520a9c48f482ca568d",
+        "submitted_output": "post-restart-ok",
         "http_status": 200,
         "response_status": "completed",
         "provider_status": 200,
-        "client_text": "roundtrip-ok"
+        "client_text": "post-restart-ok"
       }
     },
     "codex_cli_shell_roundtrip": {
       "entry": "Codex CLI --profile gcm -> RCC 4444 /v1/responses",
-      "client_thread": "01a0e50a-d9b9-7e00-9539-1e8c6923f4d6",
-      "client_tool_receipt": "Codex executed printf '%s' 'roundtrip-ok' and returned stdout roundtrip-ok",
+      "client_thread": "01a0e515-78cb-7cd0-9f14-ab10e4b99b8b",
+      "client_tool_receipt": "Codex executed printf '%s' 'post-restart-ok' and returned stdout post-restart-ok",
       "requests": [
         {
-          "request_id": "openai-responses-router-gpt-5.5-20260927T154455306-514747-12046",
+          "request_id": "openai-responses-router-gpt-5.5-20260927T155630067-514816-12115",
           "route": "tools",
           "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
           "provider_status": 200,
@@ -260,7 +260,7 @@
           "finish_reason": "tool_calls"
         },
         {
-          "request_id": "openai-responses-router-gpt-5.5-20260927T154459871-514748-12047",
+          "request_id": "openai-responses-router-gpt-5.5-20260927T155634811-514817-12116",
           "route": "tools",
           "provider_model": "xmcc2:key1:deepseek-v4.1-flash",
           "provider_status": 200,
