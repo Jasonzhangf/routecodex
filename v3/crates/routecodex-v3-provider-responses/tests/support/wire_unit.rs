@@ -1042,7 +1042,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_compat_does_not_strip_tool_choice_outside_thinking_mode() {
+    fn deepseek_compat_projects_tool_choice_outside_thinking_mode() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
         selected.provider_type = "responses".into();
@@ -1058,8 +1058,8 @@ mod tests {
                     "tools": [{"type": "function", "name": "exec_command"}]
             }),
         )
-        .expect("non-thinking DeepSeek request must remain valid");
-        assert_eq!(wire.body().get("tool_choice"), Some(&json!("required")));
+        .expect("non-thinking DeepSeek request must remain provider-valid");
+        assert_eq!(wire.body().get("tool_choice"), Some(&json!("auto")));
     }
 
     fn target() -> V3ResponsesProviderTarget {

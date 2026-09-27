@@ -199,9 +199,7 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
 pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
     apply_deepseek_function_call_arguments_compat(payload);
     apply_deepseek_v4_thinking_chat_compat(payload);
-    if deepseek_chat_thinking_mode(payload) {
-        apply_deepseek_v4_tool_choice_compat(payload);
-    }
+    apply_deepseek_v4_tool_choice_compat(payload);
 }
 
 /// DeepSeek's Chat-compatible gateway requires every function-call argument
@@ -307,11 +305,9 @@ fn deepseek_chat_thinking_mode(payload: &Value) -> bool {
 
 /// DeepSeek's Chat-compatible relay accepts only `none` and `auto` for
 /// `tool_choice`; `required` and named function objects are rejected with a
-/// generic `inference request is invalid` 400.  This provider-boundary compat
+/// generic `inference request is invalid` 400. This provider-boundary compat
 /// maps unsupported forms to the closest supported enum value instead of
-/// letting the request fail upstream. The mapping is a registered
-/// provider-private compatibility exception documented in
-/// `docs/design/v3-protocol-request-field-projection.md`.
+/// letting the request fail upstream.
 pub fn apply_deepseek_v4_tool_choice_compat(payload: &mut Value) {
     let Some(root) = payload.as_object_mut() else {
         return;
@@ -418,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn non_thinking_chat_preserves_required_tool_choice() {
+    fn non_thinking_chat_projects_required_tool_choice() {
         let mut body = json!({
             "model": "deepseek-v4-flash",
             "reasoning_effort": "none",
@@ -428,12 +424,12 @@ mod tests {
 
         apply_deepseek_v4_request_compat(&mut body);
 
-        assert_eq!(body["tool_choice"], "required");
+        assert_eq!(body["tool_choice"], "auto");
         assert!(body["messages"][0].get("reasoning_content").is_none());
     }
 
     #[test]
-    fn non_thinking_named_function_object_is_preserved() {
+    fn non_thinking_named_function_object_is_projected_to_auto() {
         let mut body = json!({
             "model": "deepseek-v4.1-flash",
             "reasoning_effort": "none",
@@ -443,10 +439,7 @@ mod tests {
 
         apply_deepseek_v4_request_compat(&mut body);
 
-        assert_eq!(
-            body["tool_choice"],
-            json!({"type":"function", "function": {"name":"exec_command"}})
-        );
+        assert_eq!(body["tool_choice"], "auto");
     }
 
     #[test]
@@ -454,8 +447,8 @@ mod tests {
         for (input, expected) in [
             (json!("none"), json!("none")),
             (json!("auto"), json!("auto")),
-            (json!({"type":"auto"}), json!({"type":"auto"})),
-            (json!({"type":"none"}), json!({"type":"none"})),
+            (json!({"type":"auto"}), json!("auto")),
+            (json!({"type":"none"}), json!("none")),
         ] {
             let mut body = json!({
                 "model": "deepseek-v4.1-flash",
