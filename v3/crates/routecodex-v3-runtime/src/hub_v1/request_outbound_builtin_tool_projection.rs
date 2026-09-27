@@ -1,9 +1,10 @@
 use provider_compat_core::namespace_tools::{
     flatten_namespace_tool_for_provider, openai_chat_freeform_custom_tool_parameters,
-    push_unique_provider_function_tool, validate_namespace_tool_dispatch_names,
+    provider_function_tool_name, push_unique_provider_function_tool,
+    replace_provider_function_tool, validate_namespace_tool_dispatch_names,
 };
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
@@ -181,7 +182,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<(), String> {
-    validate_namespace_tool_dispatch_names(payload)?;
+    let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };
@@ -207,11 +208,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                 .map_err(|error| format!("$.tools[{index}]: {error}"))?
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
             for tool in flattened {
-                push_unique_provider_function_tool(
+                push_provider_tool_with_refresh_precedence(
                     &mut normalized_tools,
                     &mut normalized_tool_indexes,
                     tool,
                     "openai_chat",
+                    &refreshed_provider_tool_names,
                 )?;
             }
             continue;
@@ -260,11 +262,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             // 避免未知字段/误调用）。
         } else {
             let normalized = normalize_openai_chat_provider_tool(tool, index)?;
-            push_unique_provider_function_tool(
+            push_provider_tool_with_refresh_precedence(
                 &mut normalized_tools,
                 &mut normalized_tool_indexes,
                 normalized,
                 "openai_chat",
+                &refreshed_provider_tool_names,
             )?;
         }
     }
@@ -288,6 +291,23 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
         root.remove("tool_choice");
     }
     Ok(())
+}
+
+fn push_provider_tool_with_refresh_precedence(
+    tools: &mut Vec<Value>,
+    tool_indexes: &mut HashMap<String, usize>,
+    tool: Value,
+    target_protocol: &str,
+    refreshed_provider_tool_names: &BTreeSet<String>,
+) -> Result<(), String> {
+    if provider_function_tool_name(&tool)
+        .is_some_and(|name| refreshed_provider_tool_names.contains(name))
+    {
+        replace_provider_function_tool(tools, tool_indexes, tool);
+        Ok(())
+    } else {
+        push_unique_provider_function_tool(tools, tool_indexes, tool, target_protocol)
+    }
 }
 
 fn build_local_web_search_function_tool(

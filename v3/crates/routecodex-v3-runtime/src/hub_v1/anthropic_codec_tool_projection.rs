@@ -123,7 +123,10 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             })?),
         ),
     ]);
-    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut output);
+    super::request_outbound_mcp_names::restore_responses_mcp_namespace(
+        &mut output,
+        context.mcp_tool_identities(),
+    );
     Ok(Value::Object(output))
 }
 

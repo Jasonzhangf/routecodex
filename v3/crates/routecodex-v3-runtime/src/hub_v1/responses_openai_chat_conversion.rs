@@ -76,6 +76,9 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body);
+    let mcp_tool_identities = super::request_outbound_mcp_names::
+        responses_mcp_dispatch_identities(provider_semantic_body)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
@@ -100,6 +103,7 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
                     output.push(build_v3_responses_function_call_from_openai_chat_tool_call(
                         call,
                         &custom_tool_names,
+                        &mcp_tool_identities,
                     )?);
                 }
             }
@@ -347,6 +351,7 @@ pub(crate) fn normalize_v3_hub_responses_usage_from_openai_chat_usage(
 pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
     call: &Value,
     custom_tool_names: &BTreeMap<String, V3ClientCustomToolName>,
+    mcp_tool_identities: &std::collections::HashMap<String, (String, String)>,
 ) -> Result<Value, V3ResponsesRelayRuntimeError> {
     let object = call.as_object().ok_or_else(|| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
@@ -451,7 +456,10 @@ pub(crate) fn build_v3_responses_function_call_from_openai_chat_tool_call(
             Value::String(arguments.to_string()),
         ),
     ]);
-    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut item);
+    super::request_outbound_mcp_names::restore_responses_mcp_namespace(
+        &mut item,
+        mcp_tool_identities,
+    );
     Ok(Value::Object(item))
 }
 

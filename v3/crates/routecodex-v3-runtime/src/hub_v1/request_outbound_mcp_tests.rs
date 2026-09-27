@@ -22,6 +22,88 @@ fn responses_namespace_custom_tool_projects_to_chat_provider_function() {
 }
 
 #[test]
+fn responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.5",
+                "input":[
+                    {"type":"additional_tools","tools":[{"type":"namespace","name":"mcp__collab","tools":[
+                        {"type":"function","name":"collab_context","description":"loaded tool","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}
+                    ]}]},
+                    {"role":"user","content":"inspect current collaboration"}
+                ],
+                "tools":[{"type":"namespace","name":"mcp__collab","tools":[
+                    {"type":"function","name":"collab_context","description":"deferred tool","parameters":{"type":"object","properties":{"placeholder":{"type":"string"}}}}
+                ]}]
+            }),
+        )
+        .expect("Responses tool declarations with one client identity must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("later additional_tools declaration must refresh the provider schema");
+    assert_eq!(request["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(request["tools"][0]["function"]["name"], "mcp__collab__collab_context");
+    assert_eq!(request["tools"][0]["function"]["description"], "loaded tool");
+    assert_eq!(request["tools"][0]["function"]["parameters"]["properties"]["query"]["type"], "string");
+    assert!(request["tools"][0]["function"]["parameters"]["properties"]["placeholder"].is_null());
+}
+
+#[test]
+fn responses_additional_tools_refreshes_nested_mcpx_alias_before_chat_projection() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.5",
+                "input":[
+                    {"type":"additional_tools","tools":[{
+                        "type":"function","name":"mcp__mcpx__workspace__read",
+                        "description":"current read schema","parameters":{"type":"object","properties":{"path":{"type":"string"}}}
+                    }]},
+                    {"role":"user","content":"read a file"}
+                ],
+                "tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
+                    {"type":"namespace","name":"workspace","tools":[
+                        {"type":"function","name":"read","description":"deferred schema","parameters":{"type":"object","properties":{"placeholder":{"type":"string"}}}}
+                    ]}
+                ]}]
+            }),
+        )
+        .expect("nested namespace and flat alias must share one client identity");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("additional nested alias must refresh provider projection");
+    assert_eq!(request["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(request["tools"][0]["function"]["name"], "mcp__mcpx__workspace__read");
+    assert_eq!(request["tools"][0]["function"]["description"], "current read schema");
+    assert_eq!(request["tools"][0]["function"]["parameters"]["properties"]["path"]["type"], "string");
+    assert!(request["tools"][0]["function"]["parameters"]["properties"]["placeholder"].is_null());
+}
+
+#[test]
+fn responses_additional_tools_refreshes_functions_exec_shell_wrapper() {
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &json!({
+                "model":"gpt-5.5",
+                "input":[
+                    {"type":"additional_tools","tools":[{"type":"namespace","name":"functions","tools":[
+                        {"type":"custom","name":"exec","description":"current shell tool","format":{"type":"text"}}
+                    ]}]},
+                    {"role":"user","content":"run pwd"}
+                ],
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"custom","name":"exec","description":"deferred shell tool","format":{"type":"text"}}
+                ]}]
+            }),
+        )
+        .expect("Responses shell tool declarations with one identity must canonicalize");
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("repeated shell tool declaration must project as one Chat function");
+    assert_eq!(request["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(request["tools"][0]["function"]["name"], "functions__exec");
+    assert_eq!(request["tools"][0]["function"]["description"], "current shell tool");
+}
+
+#[test]
 fn responses_namespace_custom_history_uses_provider_name_on_followup() {
     let canonical =
         super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
@@ -314,7 +396,7 @@ fn responses_tool_search_output_dedupes_same_flattened_provider_tool_name() {
 }
 
 #[test]
-fn openai_chat_provider_tools_reject_conflicting_duplicate_function_names() {
+fn openai_chat_provider_tools_reject_conflicting_same_source_mcp_identity() {
     let payload = json!({
         "model": "gpt-5.5",
         "messages": [{"role": "user", "content": "use workspace"}],
@@ -334,9 +416,12 @@ fn openai_chat_provider_tools_reject_conflicting_duplicate_function_names() {
         ]
     });
     let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("conflicting provider tool declarations must fail explicitly");
-    assert!(error.contains("ConflictingOutboundFields"), "{error}");
-    assert!(error.contains("mcp__mcpx__workspace"), "{error}");
+        .expect_err("same-source declarations with conflicting schemas are ambiguous");
+    assert!(
+        error.contains("ConflictingOutboundFields")
+            && error.contains("mcp__mcpx__workspace"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

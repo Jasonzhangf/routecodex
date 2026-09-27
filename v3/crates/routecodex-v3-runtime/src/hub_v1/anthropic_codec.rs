@@ -12,7 +12,7 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod message_encoding;

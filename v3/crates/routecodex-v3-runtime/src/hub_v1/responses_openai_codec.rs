@@ -1,4 +1,5 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
+use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
@@ -32,12 +33,8 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     {
         messages.push(json!({"role":"system","content":instructions}));
     }
-    let original_tools = root.get("tools").cloned();
-    let mut tools = original_tools
-        .as_ref()
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+
+    let mut tools = resolve_responses_tool_declarations(payload)?;
     for (input_index, item) in input.iter().enumerate() {
         let item = item.as_object().ok_or_else(|| {
             "Responses input item must be an object before OpenAI Chat encoding".to_string()
@@ -250,8 +247,8 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     request.insert("messages".to_string(), Value::Array(messages));
     if !tools.is_empty() {
         request.insert("tools".to_string(), Value::Array(tools));
-    } else if let Some(value) = original_tools.filter(|value| !value.is_null()) {
-        request.insert("tools".to_string(), value);
+    } else if let Some(value) = root.get("tools").filter(|value| !value.is_null()) {
+        request.insert("tools".to_string(), value.clone());
     }
     for key in [
         "tool_choice",
@@ -316,6 +313,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     project_responses_reasoning_to_chat_fields(root, &mut request)?;
     Ok(Value::Object(request))
 }
+
 fn project_responses_reasoning_to_chat_fields(
     root: &Map<String, Value>,
     request: &mut Map<String, Value>,

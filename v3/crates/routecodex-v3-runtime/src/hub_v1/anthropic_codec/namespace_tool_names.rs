@@ -8,8 +8,8 @@ pub(super) fn anthropic_namespace_wire_name(namespace: &str, name: &str) -> Stri
 }
 
 pub(super) fn validate_anthropic_declared_tool_names(request: &Value) -> Result<(), String> {
-    let mut identities = BTreeMap::<String, (String, Value)>::new();
-    collect_dispatch_identities(request.get("tools"), &mut identities)?;
+    let mut identities = BTreeMap::<String, (String, String, Value, bool)>::new();
+    collect_dispatch_identities(request.get("tools"), &mut identities, false)?;
     for item in request
         .get("input")
         .and_then(Value::as_array)
@@ -17,7 +17,7 @@ pub(super) fn validate_anthropic_declared_tool_names(request: &Value) -> Result<
         .flatten()
     {
         if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_dispatch_identities(item.get("tools"), &mut identities)?;
+            collect_dispatch_identities(item.get("tools"), &mut identities, true)?;
         }
     }
     Ok(())
@@ -25,7 +25,8 @@ pub(super) fn validate_anthropic_declared_tool_names(request: &Value) -> Result<
 
 fn collect_dispatch_identities(
     tools: Option<&Value>,
-    identities: &mut BTreeMap<String, (String, Value)>,
+    identities: &mut BTreeMap<String, (String, String, Value, bool)>,
+    is_additional_tools: bool,
 ) -> Result<(), String> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         let kind = tool.get("type").and_then(Value::as_str);
@@ -33,7 +34,13 @@ fn collect_dispatch_identities(
             let Some(name) = tool.get("name").and_then(Value::as_str) else {
                 continue;
             };
-            collect_namespace_dispatch_identities(tool, name, name, identities)?;
+            collect_namespace_dispatch_identities(
+                tool,
+                name,
+                name,
+                identities,
+                is_additional_tools,
+            )?;
         } else if matches!(kind, Some("function" | "custom")) {
             let name = tool
                 .get("name")
@@ -48,7 +55,16 @@ fn collect_dispatch_identities(
                 } else {
                     name.to_string()
                 };
-                insert_dispatch_identity(identities, &provider_name, name, tool)?;
+                insert_dispatch_identity(
+                    identities,
+                    &provider_name,
+                    &provider_compat_core::namespace_tools::normalize_client_tool_dispatch_name(
+                        name,
+                    ),
+                    kind.unwrap_or_default(),
+                    tool,
+                    is_additional_tools,
+                )?;
             }
         }
     }
@@ -59,7 +75,8 @@ fn collect_namespace_dispatch_identities(
     namespace: &Value,
     client_namespace: &str,
     wire_namespace: &str,
-    identities: &mut BTreeMap<String, (String, Value)>,
+    identities: &mut BTreeMap<String, (String, String, Value, bool)>,
+    is_additional_tools: bool,
 ) -> Result<(), String> {
     for child in namespace
         .get("tools")
@@ -81,13 +98,21 @@ fn collect_namespace_dispatch_identities(
         let client_name = format!("{client_namespace}.{name}");
         match child.get("type").and_then(Value::as_str) {
             Some("namespace") => {
-                collect_namespace_dispatch_identities(child, &client_name, name, identities)?
+                collect_namespace_dispatch_identities(
+                    child,
+                    &client_name,
+                    name,
+                    identities,
+                    is_additional_tools,
+                )?
             }
-            Some("function" | "custom") => insert_dispatch_identity(
+            Some(kind @ ("function" | "custom")) => insert_dispatch_identity(
                 identities,
                 &anthropic_namespace_wire_name(wire_namespace, name),
                 &client_name,
+                kind,
                 child,
+                is_additional_tools,
             )?,
             _ => {}
         }
@@ -96,21 +121,35 @@ fn collect_namespace_dispatch_identities(
 }
 
 fn insert_dispatch_identity(
-    identities: &mut BTreeMap<String, (String, Value)>,
+    identities: &mut BTreeMap<String, (String, String, Value, bool)>,
     provider_name: &str,
     client_name: &str,
+    kind: &str,
     declaration: &Value,
+    is_additional_tools: bool,
 ) -> Result<(), String> {
-    if let Some((existing, previous)) = identities.get(provider_name) {
-        if existing != client_name || previous != declaration {
+    if let Some((existing, existing_kind, previous, previous_is_additional_tools)) =
+        identities.get(provider_name)
+    {
+        if existing != client_name || existing_kind != kind {
             return Err(format!(
                 "Anthropic provider tool name {provider_name} has conflicting declarations for {existing} and {client_name}"
+            ));
+        }
+        if previous != declaration && (*previous_is_additional_tools || !is_additional_tools) {
+            return Err(format!(
+                "Anthropic provider tool name {provider_name} has conflicting schemas within the same declaration source"
             ));
         }
     }
     identities.insert(
         provider_name.to_string(),
-        (client_name.to_string(), declaration.clone()),
+        (
+            client_name.to_string(),
+            kind.to_string(),
+            declaration.clone(),
+            is_additional_tools,
+        ),
     );
     Ok(())
 }
@@ -332,22 +371,43 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_rejects_conflicting_same_name_declarations_across_tool_lists() {
-        let first = json!({"type":"namespace","name":"functions","tools":[
-            {"type":"custom","name":"exec","format":{"type":"grammar","syntax":"lark","definition":"start: \"pwd\""}}
+    fn anthropic_uses_latest_declaration_for_same_namespace_tool_identity() {
+        let first = json!({"type":"namespace","name":"mcp__collab","tools":[
+            {"type":"function","name":"collab_context","parameters":{"type":"object","properties":{"old":{"type":"string"}}}}
         ]});
-        let second = json!({"type":"namespace","name":"functions","tools":[
-            {"type":"custom","name":"exec","format":{"type":"grammar","syntax":"lark","definition":"start: \"ls\""}}
+        let second = json!({"type":"namespace","name":"mcp__collab","tools":[
+            {"type":"function","name":"collab_context","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}
         ]});
-        for (tools, additional) in [(first.clone(), second.clone()), (second, first)] {
-            let input = json!({"model":"glm-5.3","tools":[tools],"input":[
-                {"type":"additional_tools","tools":[additional]},
-                {"role":"user","content":"use a tool"}
-            ]});
-            let error = super::super::encode_v3_responses_semantic_as_anthropic_request(input)
-                .expect_err("conflicting declarations must not be deduplicated");
-            assert!(error.to_string().contains("functions__exec"), "{error}");
-        }
+        let input = json!({"model":"glm-5.3","tools":[first],"input":[
+            {"type":"additional_tools","tools":[second]},
+            {"role":"user","content":"use a tool"}
+        ]});
+        let projected = super::super::encode_v3_responses_semantic_as_anthropic_request(input)
+            .expect("same namespace tool identity must not fail because its schema was refreshed");
+        assert_eq!(projected["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(projected["tools"][0]["name"], "mcp__collab__collab_context");
+        assert_eq!(
+            projected["tools"][0]["input_schema"]["properties"]["query"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn anthropic_rejects_conflicting_schema_within_same_tools_declaration_source() {
+        let input = json!({"tools":[
+            {"type":"namespace","name":"mcp__collab","tools":[
+                {"type":"function","name":"collab_context","description":"old","parameters":{"type":"object","properties":{"old":{"type":"string"}}}}
+            ]},
+            {"type":"namespace","name":"mcp__collab","tools":[
+                {"type":"function","name":"collab_context","description":"new","parameters":{"type":"object","properties":{"new":{"type":"string"}}}}
+            ]}
+        ]});
+
+        let error = super::validate_anthropic_declared_tool_names(&input)
+            .expect_err("same-source schema conflicts must not select the later schema");
+
+        assert!(error.contains("mcp__collab__collab_context"), "{error}");
+        assert!(error.contains("same declaration source"), "{error}");
     }
 
     #[test]

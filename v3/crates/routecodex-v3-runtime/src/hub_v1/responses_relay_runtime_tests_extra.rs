@@ -6,6 +6,176 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
+fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
+    let request = json!({
+        "tools": [{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","parameters":{"type":"object"}}
+            ]}
+        ]}]
+    });
+    let projection_context =
+        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
+            .expect("request tool declaration must establish response identity context");
+    let provider_response = json!({
+        "id":"resp_mcpx_json_read",
+        "status":"requires_action",
+        "output":[{
+            "type":"function_call",
+            "id":"fc_mcpx_json_read",
+            "call_id":"call_mcpx_json_read",
+            "name":"mcp__mcpx__workspace__read",
+            "arguments":"{\"path\":\"README.md\"}"
+        }]
+    });
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let mut trace = Vec::new();
+    let (response, _) = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "mcp-json-roundtrip",
+            request_id: "mcp-json-roundtrip",
+            provider_value: &provider_response,
+            provider_semantic_body: &request,
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("openai_second"),
+            expected_model_id: "chat-test",
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            projection_context: &projection_context,
+            provider_response_transport_intent: V3HubTransportIntent::Json,
+            compatibility_profile: None,
+            web_search_execution_mode:
+                routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut trace,
+    )
+    .expect("Responses provider JSON must restore identity from the request declaration");
+
+    assert_eq!(response["output"][0]["call_id"], "call_mcpx_json_read");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
+    assert_eq!(response["output"][0]["name"], "read");
+    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+
+    let followup = json!({
+        "tools": request["tools"],
+        "input": [
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_mcpx_json_read","output":"README contents"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client followup must canonicalize with the restored tool identity");
+    let chat = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("client followup must project back to the declared provider tool identity");
+
+    assert_eq!(
+        chat["messages"][0]["tool_calls"][0]["id"],
+        "call_mcpx_json_read"
+    );
+    assert_eq!(
+        chat["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx__workspace__read"
+    );
+    assert_eq!(
+        chat["messages"][1]["tool_call_id"],
+        "call_mcpx_json_read"
+    );
+    assert_eq!(chat["messages"][1]["content"], "README contents");
+}
+
+#[tokio::test]
+async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup() {
+    let observation = V3RuntimeStreamObservation::default();
+    let request = json!({
+        "tools": [{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","parameters":{"type":"object"}}
+            ]}
+        ]}]
+    });
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
+        .expect("request tool declaration must establish response identity context");
+    let provider = Box::pin(stream::iter(vec![
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_mcpx_read\",\"name\":\"mcp__mcpx__workspace__read\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mcpx_read\",\"status\":\"requires_action\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n".to_vec()),
+    ]));
+
+    let response =
+        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+            V3HubProviderWireProtocol::Responses,
+            provider,
+            &observation,
+            &context,
+        )
+        .await
+        .expect("Responses provider SSE must restore identity from the request declaration");
+
+    assert_eq!(response["output"][0]["call_id"], "call_mcpx_read");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
+    assert_eq!(response["output"][0]["name"], "read");
+    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+
+    let followup = json!({
+        "tools": request["tools"],
+        "input": [
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_mcpx_read","output":"README contents"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client followup must canonicalize with the restored tool identity");
+    let chat = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("client followup must project back to the declared provider tool identity");
+
+    assert_eq!(chat["messages"][0]["tool_calls"][0]["id"], "call_mcpx_read");
+    assert_eq!(
+        chat["messages"][0]["tool_calls"][0]["function"]["name"],
+        "mcp__mcpx__workspace__read"
+    );
+    assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_read");
+    assert_eq!(chat["messages"][1]["content"], "README contents");
+}
+
+#[test]
+fn openai_chat_functions_exec_call_restores_shell_namespace_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"id":"chatcmpl_functions_exec","choices":[{
+            "message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_functions_exec","type":"function",
+                "function":{"name":"functions__exec","arguments":"{\"input\":\"pwd\"}"}
+            }]},"finish_reason":"tool_calls"
+        }]}),
+        &json!({"tools":[
+            {"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","description":"deferred shell tool","format":{"type":"text"}}
+            ]},
+            {"type":"namespace","name":"functions","tools":[
+                {"type":"custom","name":"exec","description":"current shell tool","format":{"type":"text"}}
+            ]}
+        ]}),
+    )
+    .expect("flattened shell call must restore its client namespace");
+
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response["output"][0]["namespace"], "functions");
+    assert_eq!(response["output"][0]["name"], "exec");
+    assert_eq!(response["output"][0]["call_id"], "call_functions_exec");
+}
+
+#[test]
 fn openai_chat_namespace_custom_tool_response_restores_client_name() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
@@ -51,6 +221,57 @@ fn openai_chat_nested_namespace_custom_tool_restores_client_identity() {
     assert_eq!(response["output"][0]["name"], "exec");
     assert_eq!(response["output"][0]["input"], "pwd");
     assert_eq!(response["output"][0]["call_id"], "call_nested_exec");
+}
+
+#[test]
+fn openai_chat_nested_mcpx_function_call_restores_dotted_client_namespace() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_nested_mcpx_read",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_nested_mcpx_read",
+                "type":"function",
+                "function":{"name":"mcp__mcpx__workspace__read","arguments":"{\"path\":\"README.md\"}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","parameters":{"type":"object"}}
+            ]}
+        ]}]}),
+    )
+    .expect("nested provider tool name must restore the client namespace path");
+
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
+    assert_eq!(response["output"][0]["name"], "read");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"path\":\"README.md\"}"
+    );
+    assert_eq!(response["output"][0]["call_id"], "call_nested_mcpx_read");
+}
+
+#[test]
+fn openai_chat_namespace_with_provider_delimiter_restores_declared_identity() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id":"chatcmpl_underscored_namespace",
+            "choices":[{"message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_underscored_namespace",
+                "type":"function",
+                "function":{"name":"mcp__mcpx__workspace__read","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"}]
+        }),
+        &json!({"tools":[{"type":"namespace","name":"mcp__mcpx__workspace","tools":[
+            {"type":"function","name":"read","parameters":{"type":"object"}}
+        ]}]}),
+    )
+    .expect("provider dispatch name must reverse through its request declaration");
+
+    assert_eq!(response["output"][0]["namespace"], "mcp__mcpx__workspace");
+    assert_eq!(response["output"][0]["name"], "read");
+    assert_eq!(response["output"][0]["call_id"], "call_underscored_namespace");
 }
 
 #[test]

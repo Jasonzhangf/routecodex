@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::V3AnthropicCodecError;
 
@@ -7,6 +7,7 @@ use super::V3AnthropicCodecError;
 pub struct V3AnthropicResponsesProjectionContext {
     metadata: Option<Value>,
     custom_tool_names: BTreeMap<String, String>,
+    mcp_tool_identities: HashMap<String, (String, String)>,
     reasoning_summary_policy: Option<String>,
 }
 
@@ -25,15 +26,33 @@ impl V3AnthropicResponsesProjectionContext {
             .map(valid_responses_reasoning_summary_policy)
             .transpose()?
             .map(str::to_string);
+        let mut mcp_tool_identities = super::super::request_outbound_mcp_names::
+            responses_mcp_dispatch_identities(request)
+            .map_err(|_| V3AnthropicCodecError::MalformedField { field: "tools" })?;
+        let (anthropic_client_names, _) = super::namespace_tool_names::
+            anthropic_declared_tool_names(request);
+        for (client_path, provider_name) in anthropic_client_names {
+            if let Some((namespace, name)) = client_path.rsplit_once('.') {
+                mcp_tool_identities.insert(
+                    provider_name,
+                    (namespace.to_string(), name.to_string()),
+                );
+            }
+        }
         Ok(Self {
             metadata,
             custom_tool_names: governed_custom_tool_names(request)?,
+            mcp_tool_identities,
             reasoning_summary_policy,
         })
     }
 
     pub(crate) fn governed_custom_tool_client_name(&self, name: &str) -> Option<&str> {
         self.custom_tool_names.get(name).map(String::as_str)
+    }
+
+    pub(crate) fn mcp_tool_identities(&self) -> &HashMap<String, (String, String)> {
+        &self.mcp_tool_identities
     }
 
     pub(super) fn metadata(&self) -> Option<&Value> {

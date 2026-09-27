@@ -79,6 +79,8 @@ Forbidden owners: server handler, SSE transport, provider transport, continuatio
 
 ### Responses -> OpenAI Chat request
 
+When both surfaces declare the same fully-qualified client tool path and tool kind, the later `additional_tools` declaration refreshes that one dispatch entry at the provider boundary. Distinct client paths or function/custom kinds that collapse to one provider name remain incompatible and fail before send.
+
 | Responses field | OpenAI Chat provider wire | Required test |
 | --- | --- | --- |
 | `model` | preserved until Provider08/12 overwrites to selected wire model | request matrix |

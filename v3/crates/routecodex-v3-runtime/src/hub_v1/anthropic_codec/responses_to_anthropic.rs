@@ -842,8 +842,8 @@ pub(super) fn responses_tools_for_anthropic_wire(
     object: &Map<String, Value>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
     let mut output = Vec::new();
-    let mut seen_names = HashSet::new();
-    append_responses_tools_for_anthropic_wire(object.get("tools"), &mut output, &mut seen_names)?;
+    let mut tool_indexes = HashMap::new();
+    append_responses_tools_for_anthropic_wire(object.get("tools"), &mut output, &mut tool_indexes)?;
     for item in object
         .get("input")
         .and_then(Value::as_array)
@@ -854,7 +854,7 @@ pub(super) fn responses_tools_for_anthropic_wire(
             append_responses_tools_for_anthropic_wire(
                 item.get("tools"),
                 &mut output,
-                &mut seen_names,
+                &mut tool_indexes,
             )?;
         }
     }
@@ -864,7 +864,7 @@ pub(super) fn responses_tools_for_anthropic_wire(
 pub(super) fn append_responses_tools_for_anthropic_wire(
     tools: Option<&Value>,
     output: &mut Vec<Value>,
-    seen_names: &mut HashSet<String>,
+    tool_indexes: &mut HashMap<String, usize>,
 ) -> Result<(), V3AnthropicCodecError> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         let tool_object = tool
@@ -905,7 +905,7 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
                 append_responses_tools_for_anthropic_wire(
                     Some(&Value::Array(vec![child])),
                     output,
-                    seen_names,
+                    tool_indexes,
                 )?;
             }
             continue;
@@ -918,7 +918,10 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
                 field: "tools[].name",
             })?
             .to_string();
-        if seen_names.insert(name) {
+        if let Some(index) = tool_indexes.get(&name).copied() {
+            output[index] = anthropic_tool;
+        } else {
+            tool_indexes.insert(name, output.len());
             output.push(anthropic_tool);
         }
     }

@@ -253,6 +253,61 @@ pub(super) fn rewrite_openai_chat_declared_namespace_history(
     Ok(())
 }
 
+pub(super) fn responses_mcp_dispatch_identities(
+    request: &Value,
+) -> Result<HashMap<String, (String, String)>, String> {
+    let mut identities = HashMap::new();
+    collect_responses_mcp_dispatch_identities(request.get("tools"), &mut identities)?;
+    for item in request
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            collect_responses_mcp_dispatch_identities(item.get("tools"), &mut identities)?;
+        }
+    }
+    Ok(identities)
+}
+
+fn collect_responses_mcp_dispatch_identities(
+    tools: Option<&Value>,
+    identities: &mut HashMap<String, (String, String)>,
+) -> Result<(), String> {
+    for tool in tools.and_then(Value::as_array).into_iter().flatten() {
+        if let Some(namespace_names) = namespace_tool_name_map(tool)? {
+            for (client_path, provider_name) in namespace_names {
+                let Some((namespace, name)) = client_path.rsplit_once('.') else {
+                    continue;
+                };
+                identities.insert(
+                    provider_name,
+                    (namespace.to_string(), name.to_string()),
+                );
+            }
+            continue;
+        }
+        if tool.get("type").and_then(Value::as_str) != Some("function") {
+            continue;
+        }
+        let Some(name) = provider_function_tool_name(tool) else {
+            continue;
+        };
+        let provider_name = provider_function_name(name);
+        let client_name = provider_compat_core::namespace_tools::
+            normalize_client_tool_dispatch_name(name);
+        let Some((namespace, name)) = client_name.rsplit_once('.') else {
+            continue;
+        };
+        identities.insert(
+            provider_name,
+            (namespace.to_string(), name.to_string()),
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn normalize_openai_chat_namespace_history_names(
     payload: &mut Value,
 ) -> Result<(), String> {
@@ -299,36 +354,44 @@ fn mcp_tool_leaf_name(name: &str) -> Option<&str> {
     (!tool.is_empty()).then_some(tool)
 }
 
-pub(super) fn restore_responses_mcp_namespace(object: &mut Map<String, Value>) -> bool {
+pub(super) fn restore_responses_mcp_namespace(
+    object: &mut Map<String, Value>,
+    declared_identities: &HashMap<String, (String, String)>,
+) -> bool {
     if object.get("namespace").is_some() {
         return false;
     }
     let Some(name) = object
         .get("name")
         .and_then(Value::as_str)
-        .map(str::to_owned)
     else {
         return false;
     };
-    let Some(rest) = name.strip_prefix("mcp__") else {
+    let Some((namespace, tool)) = declared_identities.get(name) else {
         return false;
     };
-    // Provider wire flattens a client namespace path into
-    // `mcp__<server>[__<nested>...]__<tool>`: the tool is the last segment and
-    // every earlier segment is namespace path. Using the last separator keeps
-    // nested declarations (mcp__mcpx__workspace__read) reversible to
-    // namespace `mcp__mcpx__workspace` + name `read` instead of gluing the
-    // remaining path onto the tool name.
-    let Some((namespace, tool)) = rest.rsplit_once("__") else {
-        return false;
-    };
-    if namespace.is_empty() || tool.is_empty() {
-        return false;
-    }
     object.insert(
         "namespace".to_owned(),
-        Value::String(format!("mcp__{namespace}")),
+        Value::String(namespace.clone()),
     );
-    object.insert("name".to_owned(), Value::String(tool.to_owned()));
+    object.insert("name".to_owned(), Value::String(tool.clone()));
     true
+}
+
+pub(super) fn restore_responses_mcp_tool_identities(
+    response: &mut Value,
+    declared_identities: &HashMap<String, (String, String)>,
+) {
+    let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        if item.get("type").and_then(Value::as_str) != Some("function_call") {
+            continue;
+        }
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        restore_responses_mcp_namespace(object, declared_identities);
+    }
 }

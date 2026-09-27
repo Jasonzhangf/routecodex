@@ -2395,6 +2395,7 @@ features:
   - 'Source status is not runtime closeout: install, aggregate restart, and exact positive/reverse live replay remain required before delivery.'
 - feature_id: v3.protocol_conversion_field_parity
   owner_crates:
+  - provider-compat-core
   - routecodex-v3-runtime
   owner_scope: All inbound protocols decode into Chat canonical plus registered payload extensions; all Relay outbound protocols project only from governed Chat semantics.
     Request reasoning effort, numeric budget, summary, context, mode, include-thoughts,
@@ -2442,6 +2443,7 @@ features:
     required_tests:
     - resp03_restores_registered_codex_integer_argument_values
   owner_files:
+  - v3/crates/provider-compat-core/src/namespace_tools.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs

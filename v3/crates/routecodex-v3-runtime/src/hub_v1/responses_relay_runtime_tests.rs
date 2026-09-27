@@ -23,7 +23,7 @@ fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostic
     );
 }
 
-fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
+pub(super) fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3

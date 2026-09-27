@@ -11,6 +11,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) provider_id: Option<&'a str>,
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
+    pub(crate) projection_context: &'a V3AnthropicResponsesProjectionContext,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
     pub(crate) web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
@@ -26,7 +27,7 @@ pub(crate) fn run_json_response_hooks(
     input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
 ) -> Result<(Value, Option<V3WebSearchCenterState>), V3ResponsesRelayRuntimeError> {
-    let normalized_provider_value = match input.provider_protocol {
+    let mut normalized_provider_value = match input.provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             normalize_v3_responses_json_document(input.provider_value, "Responses")?
         }
@@ -35,6 +36,12 @@ pub(crate) fn run_json_response_hooks(
         }
         _ => input.provider_value.clone(),
     };
+    if input.provider_protocol == V3HubProviderWireProtocol::Responses {
+        super::super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
+            &mut normalized_provider_value,
+            input.projection_context.mcp_tool_identities(),
+        );
+    }
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         normalized_provider_value,
         V3ProviderRespInbound01RawContext::new(

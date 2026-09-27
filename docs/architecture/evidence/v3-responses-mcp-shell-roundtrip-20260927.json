@@ -1,0 +1,195 @@
+{
+  "evidence_id": "v3-responses-mcp-shell-roundtrip-20260927",
+  "issue_id": "59ffb0d",
+  "feature_id": "v3.protocol_conversion_field_parity",
+  "captured_at": "2026-09-27T20:28:00Z",
+  "source": {
+    "base_commit": "05cbf862202e6e9b965eab986e07b17aff81bb6f",
+    "validated_worktree_diff_sha256_excluding_this_receipt": "3f2dc1141e5d02b94951abcc5e6f21172cbc60f986f7e8589a2dac5cf5dee7dd"
+  },
+  "development_tests": [
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime mcp_ --lib",
+      "result": "pass",
+      "tests": "20 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime openai_chat_ --lib",
+      "result": "pass",
+      "tests": "154 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime anthropic_ --lib",
+      "result": "pass",
+      "tests": "89 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p provider-compat-core namespace_tools::tests --lib",
+      "result": "pass",
+      "tests": "20 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p provider-compat-core dispatch_names_reject_flattened_collision_with_underscored_tool_leaf --lib -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed; preserves dotted namespace plus underscored leaf and rejects flattened identity collision"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime additional_tools --lib",
+      "result": "pass",
+      "tests": "5 passed; 0 failed"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime responses_provider_sse_restores_declared_mcp_identity_for_tool_followup --lib -- --nocapture",
+      "result": "pass",
+      "tests": "1 passed; 0 failed; namespace, call_id, arguments and follow-up tool result round-trip verified"
+    },
+    {
+      "command": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime responses_relay_runtime --lib",
+      "result": "pass",
+      "tests": "146 passed; 0 failed"
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime additional_tools -- --nocapture",
+      "result": "pass",
+      "tests": "5 passed; 0 failed"
+    },
+    {
+      "command": "npm run verify:v3-protocol-conversion-field-parity-ci",
+      "result": "pass",
+      "tests": "parity verifier; 124 forbidden-mutation fixtures; mapped protocol parity integration tests; Responses continuation namespace contract tests all passed"
+    },
+    {
+      "command": "npm run compile:v3-build-admission",
+      "result": "pass",
+      "tests": "lockstep 488 files; generated admission inputs matched"
+    },
+    {
+      "command": "npm run verify:v3-architecture-ci",
+      "result": "pass",
+      "tests": "39/39 sub-gates green"
+    }
+  ],
+  "artifact": {
+    "command": "npm run install:v3",
+    "result": "pass",
+    "binary": "/Users/fanzhang/.local/bin/rccv3",
+    "version": "rccv3 0.90.4819 (crate 0.1.0)",
+    "sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc"
+  },
+  "restart": {
+    "command": "rccv3 restart -c /Volumes/extension/.rcc/config.toml",
+    "result": "pass",
+    "instance_id": "v3-8d7d60058ba4158f0ab0",
+    "state": "running",
+    "loaded_binary_sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc",
+    "restart_receipt": "managed restart completed running at 2026-09-27T20:24:00Z; installed binary SHA256 matches artifact; listeners 4444 and 7777 healthy on 0.90.4819",
+    "status_detail": "RCC instance running; both listener health endpoints returned HTTP 200; hooks sidecar unavailable/crashed"
+  },
+  "health": [
+    {
+      "port": 4444,
+      "http_status": 200,
+      "build_version": "0.90.4819"
+    },
+    {
+      "port": 7777,
+      "http_status": 200,
+      "build_version": "0.90.4819"
+    }
+  ],
+  "same_entry_tool_roundtrip": {
+    "entry": "Codex exec --profile gcm -> RCC 4444 /v1/responses",
+    "client_thread": "01a0e421-93c3-7411-abbd-1cf67f8b0f84",
+    "provider_id": "xmcc2",
+    "requests": [
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T113009682-512557-9856",
+        "route": "tools",
+        "provider_model": "xmcc2/deepseek-v4.1-flash",
+        "response_status": "requires_action",
+        "finish_reason": "tool_calls",
+        "provider_status": 200,
+        "client_tool_receipts": [
+          "Codex item_4 command_execution: /bin/zsh -c 'git rev-parse --show-toplevel'; exit_code=0; stdout=/Users/fanzhang/Documents/github/routecodex/playground/namespace-duplicate-tools-20260927"
+        ]
+      },
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T113017440-512559-9858",
+        "route": "search",
+        "provider_model": "xmcc2/kimi-k3",
+        "response_status": "completed",
+        "finish_reason": "stop",
+        "provider_status": 200,
+        "client_followup": "Codex consumed the tool stdout and returned the exact repository root"
+      }
+    ],
+    "sample_capture": "raw_artifact_ref was null; CLI command_execution event and request records preserved, provider payload snapshot unavailable",
+    "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
+  },
+  "same_entry_json_tool_roundtrip": {
+    "entry": "HTTP JSON client -> RCC 4444 /v1/responses",
+    "provider_id": "xmcc2",
+    "tool_declaration": "mcp__mcpx.workspace.read",
+    "requests": [
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T121325135-512862-10161",
+        "route": "longcontext",
+        "provider_model": "xmcc2/deepseek-v4.1-flash",
+        "http_status": 200,
+        "response_status": "requires_action",
+        "provider_status": 200,
+        "tool_call": {
+          "namespace": "mcp__mcpx.workspace",
+          "name": "read",
+          "call_id": "call_cdba0a8e1a574e5fa78fd3cd",
+          "arguments": "{\"path\": \"README.md\"}"
+        },
+        "client_tool_receipt": "Read README.md and returned its contents with the same call_id"
+      },
+      {
+        "request_id": "openai-responses-router-gpt-5.5-20260927T121439207-512874-10173",
+        "route": "longcontext",
+        "provider_model": "xmcc2/deepseek-v4.1-flash",
+        "http_status": 200,
+        "response_status": "completed",
+        "client_followup": "function_call_output used call_cdba0a8e1a574e5fa78fd3cd; provider returned repository workspace path v3/"
+      }
+    ],
+    "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
+  },
+  "same_entry_json_underscored_leaf_roundtrip_after_restart": {
+    "entry": "HTTP JSON client -> RCC 4444 /v1/responses",
+    "candidate_diff_sha256_excluding_this_receipt": "3f2dc1141e5d02b94951abcc5e6f21172cbc60f986f7e8589a2dac5cf5dee7dd",
+    "loaded_binary_sha256": "a1bb2ef92aa030f1c79505293933cd1b76c067d6dd6d966534c3524d4511f3cc",
+    "tool_declaration": "namespace=mcp__mcpx; name=foo__bar",
+    "tool_call_request": {
+      "request_id": "openai-responses-router-gpt-5.5-20260927T132516626-513507-10806",
+      "route": "thinking",
+      "provider_model": "xmcc2/deepseek-v4.1-flash",
+      "http_status": 200,
+      "response_status": "requires_action",
+      "provider_status": 200,
+      "call_id": "call_39c09dfa05c747d8b803130c",
+      "namespace": "mcp__mcpx",
+      "name": "foo__bar",
+      "arguments": "{\"value\": \"roundtrip-ok\"}"
+    },
+    "client_execution": {
+      "command": "printf '%s' 'roundtrip-ok'",
+      "stdout": "roundtrip-ok",
+      "exit_status": 0
+    },
+    "followup_request": {
+      "request_id": "openai-responses-router-gpt-5.5-20260927T132738709-513523-10822",
+      "submitted_call_id": "call_39c09dfa05c747d8b803130c",
+      "submitted_output": "roundtrip-ok",
+      "route": "thinking",
+      "provider_model": "xmcc2/kimi-k3",
+      "http_status": 200,
+      "response_status": "completed",
+      "provider_status": 200,
+      "client_text": "roundtrip-ok"
+    },
+    "request_records": "/Users/fanzhang/.rcc/logs/server-v3-4444.request-records.jsonl"
+  }
+}

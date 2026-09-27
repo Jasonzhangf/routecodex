@@ -865,7 +865,7 @@ resources:
     identity: [requestId, entryProtocol]
     payload_contract: typed_request_fields_explicitly_registered_for_same_request_response_projection
     allowed_writers: [V3AnthropicResponsesProjectionContext::from_chat_canonical_request]
-    allowed_readers: [project_v3_anthropic_message_as_responses_response_with_context]
+    allowed_readers: [project_v3_anthropic_message_as_responses_response_with_context, run_json_response_hooks, build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-debug, MetadataCenter, V3HubRespOutbound05ClientSemantic, V3ServerRespOutbound06ClientFrame]
     may_enter_provider_body: false
     may_enter_client_body: false

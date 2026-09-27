@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub fn normalize_provider_function_name(name: &str) -> String {
     let name = name
@@ -14,6 +14,32 @@ pub fn normalize_provider_function_name(name: &str) -> String {
     } else {
         name
     }
+}
+
+/// Canonical client dispatch identity used to compare Responses declarations
+/// that encode the same MCP tool with a namespace object or a flattened alias.
+pub fn normalize_client_tool_dispatch_name(name: &str) -> String {
+    let client_name = name
+        .strip_prefix("functions.mcp__")
+        .map(|rest| format!("mcp__{rest}"))
+        .unwrap_or_else(|| name.to_owned());
+    if client_name
+        .strip_prefix("mcp__")
+        .is_some_and(|rest| rest.contains('.'))
+    {
+        return client_name;
+    }
+    let normalized = normalize_provider_function_name(&client_name);
+    let Some(rest) = normalized.strip_prefix("mcp__") else {
+        return normalized;
+    };
+    let Some((namespace, tool)) = rest.rsplit_once("__") else {
+        return normalized;
+    };
+    if namespace.is_empty() || tool.is_empty() {
+        return normalized;
+    }
+    format!("mcp__{}", rest.replace("__", "."))
 }
 
 pub fn provider_function_tool_name(tool: &Value) -> Option<&str> {
@@ -45,6 +71,25 @@ pub fn push_unique_provider_function_tool(
     tool_indexes.insert(name.to_string(), tools.len());
     tools.push(tool);
     Ok(())
+}
+
+/// Replaces a prior provider declaration for a request-validated tool identity.
+/// The caller must first validate that the provider name maps to one client path and tool kind.
+pub fn replace_provider_function_tool(
+    tools: &mut Vec<Value>,
+    tool_indexes: &mut HashMap<String, usize>,
+    tool: Value,
+) {
+    let Some(name) = provider_function_tool_name(&tool) else {
+        tools.push(tool);
+        return;
+    };
+    if let Some(existing_index) = tool_indexes.get(name).copied() {
+        tools[existing_index] = tool;
+    } else {
+        tool_indexes.insert(name.to_string(), tools.len());
+        tools.push(tool);
+    }
 }
 
 /// Returns the reversible client namespace path -> provider function name map
@@ -84,28 +129,148 @@ fn namespace_tool_dispatch_map(
     Ok(Some(map))
 }
 
+/// Remove declarations superseded by a later Responses `additional_tools`
+/// declaration while the original source precedence is still available.
+pub fn remove_refreshed_provider_tools(
+    tools: &mut Vec<Value>,
+    refreshed_provider_tool_names: &BTreeSet<String>,
+) {
+    tools.retain_mut(|tool| {
+        if tool.get("type").and_then(Value::as_str) == Some("namespace") {
+            retain_unshadowed_namespace_children(tool, refreshed_provider_tool_names);
+            tool.get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|children| !children.is_empty())
+        } else {
+            !provider_function_tool_name(tool).is_some_and(|name| {
+                refreshed_provider_tool_names.contains(&normalize_provider_function_name(name))
+            })
+        }
+    });
+}
+
+pub fn resolve_responses_tool_declarations(request: &Value) -> Result<Vec<Value>, String> {
+    let mut tools = request
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(request)?;
+    remove_refreshed_provider_tools(&mut tools, &refreshed_provider_tool_names);
+    Ok(tools)
+}
+
+fn retain_unshadowed_namespace_children(
+    namespace: &mut Value,
+    refreshed_provider_tool_names: &BTreeSet<String>,
+) {
+    let Some(object) = namespace.as_object_mut() else {
+        return;
+    };
+    let Some(namespace_name) = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let Some(children) = object.get_mut("tools").and_then(Value::as_array_mut) else {
+        return;
+    };
+    retain_unshadowed_namespace_tool_list(&namespace_name, children, refreshed_provider_tool_names);
+}
+
+fn retain_unshadowed_namespace_tool_list(
+    namespace_name: &str,
+    children: &mut Vec<Value>,
+    refreshed_provider_tool_names: &BTreeSet<String>,
+) {
+    children.retain_mut(|child| {
+        let Some(child_object) = child.as_object() else {
+            return true;
+        };
+        match child_object.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                let nested_namespace = child_object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| format!("{namespace_name}__{name}"));
+                let Some(nested_namespace) = nested_namespace else {
+                    return true;
+                };
+                let Some(nested_tools) = child.get_mut("tools").and_then(Value::as_array_mut)
+                else {
+                    return true;
+                };
+                retain_unshadowed_namespace_tool_list(
+                    &nested_namespace,
+                    nested_tools,
+                    refreshed_provider_tool_names,
+                );
+                !nested_tools.is_empty()
+            }
+            Some("function" | "custom") => {
+                let child_name = child_object
+                    .get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|function| function.get("name"))
+                    .or_else(|| child_object.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty());
+                let Some(child_name) = child_name else {
+                    return true;
+                };
+                let provider_name = if child_name == namespace_name
+                    || child_name.starts_with(&format!("{namespace_name}__"))
+                {
+                    child_name.to_string()
+                } else {
+                    format!("{namespace_name}__{child_name}")
+                };
+                !refreshed_provider_tool_names.contains(&provider_name)
+            }
+            _ => true,
+        }
+    });
+}
+
 /// A provider name must identify exactly one client declaration before tool
 /// declarations are flattened or deduplicated on the provider wire.
-pub fn validate_namespace_tool_dispatch_names(request: &Value) -> Result<(), String> {
-    let mut identities = BTreeMap::<String, (String, Value)>::new();
-    let tool_lists = request.get("tools").into_iter().chain(
-        request
-            .get("input")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
-            .filter_map(|item| item.get("tools")),
-    );
-    for tools in tool_lists {
+pub fn validate_namespace_tool_dispatch_names(request: &Value) -> Result<BTreeSet<String>, String> {
+    let mut identities = BTreeMap::<String, (String, String, Value, bool)>::new();
+    let mut refreshed_names = BTreeSet::new();
+    let mut tool_lists = Vec::new();
+    if let Some(tools) = request.get("tools") {
+        tool_lists.push((tools, false));
+    }
+    for item in request
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+    {
+        if let Some(tools) = item.get("tools") {
+            tool_lists.push((tools, true));
+        }
+    }
+    for (tools, is_additional_tools) in tool_lists {
         for tool in tools.as_array().into_iter().flatten() {
             if let Some(names) = namespace_tool_dispatch_map(tool)? {
                 for (client_name, (provider_name, declaration)) in names {
                     insert_dispatch_identity(
                         &mut identities,
+                        &mut refreshed_names,
                         &provider_name,
                         &client_name,
+                        tool_dispatch_kind(&declaration),
                         &declaration,
+                        is_additional_tools,
                     )?;
                 }
             } else if matches!(
@@ -130,33 +295,71 @@ pub fn validate_namespace_tool_dispatch_names(request: &Value) -> Result<(), Str
                     }
                     insert_dispatch_identity(
                         &mut identities,
+                        &mut refreshed_names,
                         &provider_name,
-                        &provider_name,
+                        &normalize_client_tool_dispatch_name(name),
+                        tool_dispatch_kind(&declaration),
                         &declaration,
+                        is_additional_tools,
                     )?;
                 }
             }
         }
     }
-    Ok(())
+    Ok(refreshed_names)
+}
+
+fn tool_dispatch_kind(declaration: &Value) -> String {
+    declaration
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn insert_dispatch_identity(
-    identities: &mut BTreeMap<String, (String, Value)>,
+    identities: &mut BTreeMap<String, (String, String, Value, bool)>,
+    refreshed_names: &mut BTreeSet<String>,
     provider_name: &str,
     client_name: &str,
+    kind: String,
     declaration: &Value,
+    is_additional_tools: bool,
 ) -> Result<(), String> {
-    if let Some((existing, previous)) = identities.get(provider_name) {
-        if existing != client_name || previous != declaration {
+    if let Some((existing, existing_kind, previous, existing_is_additional_tools)) =
+        identities.get(provider_name)
+    {
+        if existing != client_name || existing_kind != &kind {
             return Err(format!(
                 "ConflictingOutboundFields provider tool name `{provider_name}` has conflicting declarations for client tools `{existing}` and `{client_name}`"
             ));
         }
+        if previous != declaration {
+            if *existing_is_additional_tools || !is_additional_tools {
+                return Err(format!(
+                    "ConflictingOutboundFields provider tool name `{provider_name}` has conflicting schemas within the same declaration source"
+                ));
+            }
+            refreshed_names.insert(provider_name.to_string());
+        }
+        identities.insert(
+            provider_name.to_owned(),
+            (
+                client_name.to_owned(),
+                kind,
+                declaration.clone(),
+                is_additional_tools,
+            ),
+        );
     } else {
         identities.insert(
             provider_name.to_owned(),
-            (client_name.to_owned(), declaration.clone()),
+            (
+                client_name.to_owned(),
+                kind,
+                declaration.clone(),
+                is_additional_tools,
+            ),
         );
     }
     Ok(())
@@ -510,6 +713,49 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn client_dispatch_identity_unifies_flat_mcp_aliases() {
+        assert_eq!(
+            normalize_client_tool_dispatch_name("functions.mcp__mcpx__workspace"),
+            "mcp__mcpx.workspace"
+        );
+        assert_eq!(
+            normalize_client_tool_dispatch_name("mcp__mcpx.workspace"),
+            "mcp__mcpx.workspace"
+        );
+        assert_eq!(
+            normalize_client_tool_dispatch_name("mcp__mcpx__workspace__read"),
+            "mcp__mcpx.workspace.read"
+        );
+        assert_eq!(
+            normalize_client_tool_dispatch_name("mcp__mcpx.foo__bar"),
+            "mcp__mcpx.foo__bar"
+        );
+        assert_eq!(
+            normalize_client_tool_dispatch_name("functions.mcp__mcpx.foo__bar"),
+            "mcp__mcpx.foo__bar"
+        );
+    }
+
+    #[test]
+    fn dispatch_names_reject_flattened_collision_with_underscored_tool_leaf() {
+        let error = validate_namespace_tool_dispatch_names(&json!({
+            "tools":[
+                {"type":"function","name":"mcp__mcpx.foo__bar","parameters":{"type":"object"}},
+                {"type":"namespace","name":"mcp__mcpx","tools":[
+                    {"type":"namespace","name":"foo","tools":[
+                        {"type":"function","name":"bar","parameters":{"type":"object"}}
+                    ]}
+                ]}
+            ]
+        }))
+        .expect_err("one flattened provider name cannot identify two client paths");
+
+        assert!(error.contains("mcp__mcpx__foo__bar"), "{error}");
+        assert!(error.contains("mcp__mcpx.foo__bar"), "{error}");
+        assert!(error.contains("mcp__mcpx.foo.bar"), "{error}");
+    }
+
+    #[test]
     fn flattens_valid_namespace_children_for_openai_chat() {
         let flattened = flatten_namespace_tool_for_provider(
             "openai-chat",
@@ -784,21 +1030,81 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_names_reject_conflicting_same_name_declarations() {
+    fn dispatch_names_allow_updated_declaration_for_same_namespace_tool_identity() {
+        let first = json!({"type":"namespace","name":"mcp__collab","tools":[
+            {"type":"function","name":"collab_context","description":"deferred","parameters":{"type":"object","properties":{"old":{"type":"string"}}}}
+        ]});
+        let current = json!({"type":"namespace","name":"mcp__collab","tools":[
+            {"type":"function","name":"collab_context","description":"loaded","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}
+        ]});
+        let refreshed = validate_namespace_tool_dispatch_names(&json!({
+            "tools":[first],"input":[{"type":"additional_tools","tools":[current]}]
+        }))
+        .expect("a current declaration may refresh the same client tool identity");
+        assert!(refreshed.contains("mcp__collab__collab_context"));
+    }
+
+    #[test]
+    fn dispatch_names_refresh_nested_namespace_from_additional_tools() {
+        let previous = json!({"type":"namespace","name":"mcp__mcpx","tools":[{
+            "type":"namespace","name":"workspace","tools":[
+                {"type":"function","name":"read","description":"old","parameters":{"type":"object"}}
+            ]
+        }]});
+        let current_flat_alias = json!({
+            "type":"function",
+            "name":"mcp__mcpx__workspace__read",
+            "description":"current",
+            "parameters":{"type":"object"}
+        });
+
+        let refreshed = validate_namespace_tool_dispatch_names(&json!({
+            "tools":[previous],
+            "input":[{"type":"additional_tools","tools":[current_flat_alias]}]
+        }))
+        .expect("nested namespace path must retain one dispatch identity");
+
+        assert!(refreshed.contains("mcp__mcpx__workspace__read"));
+    }
+
+    #[test]
+    fn dispatch_names_reject_conflicting_declarations_within_same_source() {
+        let error = validate_namespace_tool_dispatch_names(&json!({
+            "tools":[
+                {"type":"namespace","name":"mcp__collab","tools":[
+                    {"type":"function","name":"collab_context","description":"old","parameters":{"type":"object"}}
+                ]},
+                {"type":"namespace","name":"mcp__collab","tools":[
+                    {"type":"function","name":"collab_context","description":"new","parameters":{"type":"object"}}
+                ]}
+            ]
+        }))
+        .expect_err("same-source schema conflicts must not silently refresh");
+
+        assert!(error.contains("mcp__collab__collab_context"), "{error}");
+    }
+
+    #[test]
+    fn dispatch_names_still_reject_distinct_identities_with_same_provider_name() {
+        let first_namespace = json!({"type":"namespace","name":"mcp__a","tools":[
+            {"type":"function","name":"b__c","parameters":{"type":"object"}}
+        ]});
+        let second_namespace = json!({"type":"namespace","name":"mcp__a__b","tools":[
+            {"type":"function","name":"c","parameters":{"type":"object"}}
+        ]});
+        let error = validate_namespace_tool_dispatch_names(&json!({
+            "tools":[first_namespace, second_namespace]
+        }))
+        .expect_err("different client dispatch identities remain ambiguous");
+        assert!(error.contains("mcp__a__b__c"), "{error}");
+    }
+
+    #[test]
+    fn dispatch_names_still_reject_function_and_custom_kind_collision() {
         let function = json!({"type":"function","name":"exec","parameters":openai_chat_freeform_custom_tool_parameters()});
         let custom = json!({"type":"custom","name":"exec","format":{"type":"text"}});
-        for tools in [
-            vec![function.clone(), custom.clone()],
-            vec![custom.clone(), function.clone()],
-        ] {
-            let error = validate_namespace_tool_dispatch_names(&json!({"tools":tools}))
-                .expect_err("same provider name cannot hide distinct client declarations");
-            assert!(error.contains("exec"), "{error}");
-        }
-        let error = validate_namespace_tool_dispatch_names(&json!({
-            "tools":[function],"input":[{"type":"additional_tools","tools":[custom]}]
-        }))
-        .expect_err("additional tools must not replace a different declaration");
+        let error = validate_namespace_tool_dispatch_names(&json!({"tools":[function,custom]}))
+            .expect_err("different tool kinds cannot share one provider dispatch name");
         assert!(error.contains("exec"), "{error}");
     }
 }

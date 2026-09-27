@@ -125,11 +125,16 @@ pub(super) async fn build_v3_hub_resp_inbound_02_from_provider_stream_events_for
     let replayed = merge_first_chunk_back_into_provider_stream(first_chunk, provider);
     match provider_protocol {
         V3HubProviderWireProtocol::Responses => {
-            build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
+            let mut response = build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
                 replayed,
                 observation,
             )
-            .await
+            .await?;
+            super::super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
+                &mut response,
+                anthropic_context.mcp_tool_identities(),
+            );
+            Ok(response)
         }
         V3HubProviderWireProtocol::OpenAiChat => {
             build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
