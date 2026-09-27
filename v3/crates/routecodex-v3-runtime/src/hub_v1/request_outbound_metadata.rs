@@ -150,7 +150,8 @@ fn reasoning_effort_rank(value: &str) -> Option<u8> {
         "low" => Some(1),
         "medium" => Some(2),
         "high" => Some(3),
-        "xhigh" | "max" => Some(4),
+        "xhigh" => Some(4),
+        "ultra" | "max" => Some(5),
         _ => None,
     }
 }

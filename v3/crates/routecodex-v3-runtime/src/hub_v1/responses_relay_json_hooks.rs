@@ -83,6 +83,11 @@ pub(crate) fn run_json_response_hooks(
     trace.push("V3HubRespChatProcess03Governed");
     let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
         resp03.into_parts();
+    let mut resp03 = resp03;
+    super::resp_chat_process_codex_integer_values::normalize_v3_codex_integer_tool_values_at_resp03(
+        input.provider_semantic_body,
+        std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+    );
     let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
     let mut finalized_payload = resp05.client_payload().clone();
     trace.push("V3HubRespOutbound05ClientSemantic");

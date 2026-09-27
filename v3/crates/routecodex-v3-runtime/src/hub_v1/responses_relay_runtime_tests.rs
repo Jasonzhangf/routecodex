@@ -823,33 +823,16 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
 #[test]
 fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id":"chatcmpl_mcpx_workspace",
-            "choices":[{
-                "message":{
-                    "role":"assistant",
-                    "content":"",
-                    "tool_calls":[{
-                        "id":"call_mcpx_workspace",
-                        "type":"function",
-                        "function":{
-                            "name":"mcp__mcpx__workspace",
-                            "arguments":"{}"
-                        }
-                    }]
-                },
-                "finish_reason":"tool_calls"
-            }]
-        }),
-        &json!({
-            "tools":[{
-                "type":"function",
-                "function":{
-                    "name":"mcp__mcpx__workspace",
-                    "parameters":{"type":"object"}
-                }
-            }]
-        }),
+        &json!({"id":"chatcmpl_mcpx_workspace","choices":[{
+            "message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_mcpx_workspace","type":"function",
+                "function":{"name":"mcp__mcpx__workspace","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"
+        }]}),
+        &json!({"tools":[
+            {"type":"function","function":{"name":"functions.mcp__mcpx__workspace","parameters":{"type":"object"}}},
+            {"type":"function","function":{"name":"mcp__mcpx.workspace","parameters":{"type":"object"}}}
+        ]}),
     )
     .expect("flattened MCP function call must restore namespace for Responses client");
 
@@ -858,6 +841,22 @@ fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
     assert_eq!(response["output"][0]["name"], "workspace");
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_workspace");
+    let followup = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"deepseek-v4.1-flash",
+        "messages":[
+            {"role":"user","content":"list workspaces"},
+            {"role":"assistant","tool_calls":[{"id":"call_mcpx_workspace","type":"function","function":{"name":"mcp__mcpx__workspace","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"call_mcpx_workspace","content":"workspace result"}
+        ],
+        "tools":[{"type":"function","function":{"name":"functions.mcp__mcpx__workspace","parameters":{"type":"object"}}},
+            {"type":"function","function":{"name":"mcp__mcpx.workspace","parameters":{"type":"object"}}}]
+    }))
+    .expect("the canonical MCP alias must accept the client tool result");
+    assert_eq!(followup["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        followup["messages"][1]["tool_calls"][0]["id"],
+        followup["messages"][2]["tool_call_id"]
+    );
 }
 
 #[test]

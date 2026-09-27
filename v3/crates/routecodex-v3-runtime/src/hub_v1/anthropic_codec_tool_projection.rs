@@ -65,7 +65,7 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "tool_use.input",
         })?;
-    if context.is_governed_custom_tool(name) {
+    if let Some(client_name) = context.governed_custom_tool_client_name(name) {
         let wrapper = input
             .as_object()
             .filter(|value| value.contains_key("input"));
@@ -75,7 +75,7 @@ pub(super) fn anthropic_tool_use_as_responses_call(
                 Value::String("custom_tool_call".to_string()),
             ),
             ("call_id".to_string(), Value::String(call_id.to_owned())),
-            ("name".to_string(), Value::String(name.to_owned())),
+            ("name".to_string(), Value::String(client_name.to_owned())),
         ]);
         let raw = if let Some(wrapper) = wrapper {
             if !wrapper.keys().all(|key| {
@@ -152,6 +152,44 @@ mod tests {
         assert_eq!(call["namespace"], "mcp__mcpx");
         assert_eq!(call["name"], "workspace");
         assert_eq!(call["call_id"], "call_mcpx_workspace");
+    }
+
+    #[test]
+    fn namespace_custom_tool_use_restores_declared_client_identity_and_raw_input() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "namespace", "name": "functions", "tools": [
+                {"type": "custom", "name": "exec", "format": {"type": "text"}}
+            ]}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_exec", "name": "functions__exec", "input": {"input": "pwd"}}),
+            &context,
+        )
+        .expect("namespace custom tool_use must restore the client declaration");
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["name"], "functions.exec");
+        assert_eq!(call["input"], "pwd");
+        assert_eq!(call["call_id"], "call_exec");
+    }
+
+    #[test]
+    fn nested_namespace_custom_tool_use_restores_the_declared_client_identity() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type":"namespace","name":"functions","tools":[
+                {"type":"namespace","name":"mcp__mcpx","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}}
+                ]}
+            ]}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type":"tool_use","id":"call_nested","name":"mcp__mcpx__exec","input":{"input":"pwd"}}),
+            &context,
+        ).expect("nested custom tool must restore client name");
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["name"], "functions.mcp__mcpx.exec");
+        assert_eq!(call["input"], "pwd");
     }
 
     #[test]

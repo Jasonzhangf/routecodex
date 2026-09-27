@@ -1,5 +1,6 @@
 use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, push_unique_provider_function_tool,
+    flatten_namespace_tool_for_provider, openai_chat_freeform_custom_tool_parameters,
+    push_unique_provider_function_tool, validate_namespace_tool_dispatch_names,
 };
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -180,6 +181,7 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<(), String> {
+    validate_namespace_tool_dispatch_names(payload)?;
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };
@@ -578,18 +580,4 @@ fn normalize_openai_chat_function_tool(
         ("type".to_string(), Value::String("function".to_string())),
         ("function".to_string(), Value::Object(function)),
     ])))
-}
-
-fn openai_chat_freeform_custom_tool_parameters() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "input": {
-                "type": "string",
-                "description": "Raw free-form tool input."
-            }
-        },
-        "required": ["input"],
-        "additionalProperties": false
-    })
 }

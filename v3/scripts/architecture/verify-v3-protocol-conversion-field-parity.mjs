@@ -547,7 +547,7 @@ for (const testName of [
 for (const phrase of [
   'if object.get("type").and_then(Value::as_str) == Some("custom")',
   '.get("custom")',
-  'custom_tool_names.contains(name)',
+  'custom_tool_names.get(name)',
   '.get("input")',
   '"type":"custom_tool_call"',
 ]) requireText(chatToResponses, `${paths.responsesOpenaiChatConversion}::chat_to_responses_projection`, phrase);
@@ -555,7 +555,7 @@ forbid(text.responsesRuntime, `${paths.responsesRuntime}::no_function_relabel_fo
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'target_protocol_unmapped_field_projects_internal_598_without_switching_provider');
 requireText(text.responsesRuntimeTests, `${paths.responsesRuntimeTests}::target_protocol_unmapped_field_no_switch`, 'a request-shape error must not send or switch provider');
 requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::responses_metadata_projection_context`, 'pub struct V3AnthropicResponsesProjectionContext');
-for (const phrase of ['custom_tool_names: BTreeSet<String>', 'governed_custom_tool_names']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
+for (const phrase of ['custom_tool_names: BTreeMap<String, String>', 'governed_custom_tool_names', 'governed_custom_tool_client_name']) requireText(text.anthropicProjectionContext, `${paths.anthropicProjectionContext}::anthropic_custom_reverse_guard`, phrase);
 requireText(text.anthropicCodecToolProjection, `${paths.anthropicCodecToolProjection}::anthropic_custom_reverse_guard`, 'anthropic_tool_use_as_responses_call');
 requireText(text.responsesAnthropicProviderTests, `${paths.responsesAnthropicProviderTests}::responses_metadata_projection_context`, 'responses_relay_anthropic_provider_restores_response_metadata_without_wire_leak');
 forbid(text.responsesToAnthropicCodec, `${paths.responsesToAnthropicCodec}::malformed_chat_tool_arguments`, [/field: "tool_call[.]arguments"/, /field: "function_call[.]arguments"/]);

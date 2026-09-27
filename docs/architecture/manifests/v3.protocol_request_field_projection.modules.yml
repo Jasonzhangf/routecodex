@@ -95,6 +95,18 @@ modules:
       - parse Anthropic source wire or SSE frames
       - invent provider-specific stop_reason mappings
       - read MetadataCenter or reconstruct response payload from control state
+  - module_id: v3.protocol_codec.codex_integer_response_values
+    owner: routecodex-v3-runtime::hub_v1::resp_chat_process_codex_integer_values
+    owned_paths:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
+    allowed_operations:
+      - restore integral float argument values to JSON integers for exact registered Codex built-in integer tool fields at Relay Resp03
+    forbidden_operations:
+      - change user-defined tool arguments or fractional values
+      - rewrite SSE transport frames or MetadataCenter
   - module_id: v3.protocol_codec.finish_reason_registry
     owner: routecodex-v3-runtime::protocol_tables
     owned_paths:

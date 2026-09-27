@@ -112,6 +112,7 @@ mod resp_inbound_02_normalized;
 pub use resp_inbound_02_normalized::*;
 mod resp_chat_process_03_governed;
 pub use resp_chat_process_03_governed::*;
+mod resp_chat_process_codex_integer_values;
 pub use responses_relay_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state;
 mod resp_outbound_05_client_semantic;
 pub use resp_outbound_05_client_semantic::*;

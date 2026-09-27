@@ -199,6 +199,9 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
 pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
     apply_deepseek_function_call_arguments_compat(payload);
     apply_deepseek_v4_thinking_chat_compat(payload);
+    if deepseek_chat_thinking_mode(payload) {
+        apply_deepseek_v4_tool_choice_compat(payload);
+    }
 }
 
 /// DeepSeek's Chat-compatible gateway requires every function-call argument
@@ -270,12 +273,7 @@ fn wrap_deepseek_malformed_object_arguments(arguments: &mut Value) {
 }
 
 pub fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
-    let thinking = payload
-        .get("reasoning_effort")
-        .and_then(Value::as_str)
-        .or_else(|| payload.pointer("/reasoning/effort").and_then(Value::as_str))
-        .is_some_and(|effort| !effort.trim().is_empty() && effort != "none");
-    if !thinking {
+    if !deepseek_chat_thinking_mode(payload) {
         return;
     }
     if let Some(root) = payload.as_object_mut() {
@@ -295,6 +293,49 @@ pub fn apply_deepseek_v4_thinking_chat_compat(payload: &mut Value) {
             if object.get("content").is_none_or(Value::is_null) {
                 object.insert("content".to_string(), Value::String(String::new()));
             }
+        }
+    }
+}
+
+fn deepseek_chat_thinking_mode(payload: &Value) -> bool {
+    payload
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .or_else(|| payload.pointer("/reasoning/effort").and_then(Value::as_str))
+        .is_some_and(|effort| !effort.trim().is_empty() && effort != "none")
+}
+
+/// DeepSeek's Chat-compatible relay accepts only `none` and `auto` for
+/// `tool_choice`; `required` and named function objects are rejected with a
+/// generic `inference request is invalid` 400.  This provider-boundary compat
+/// maps unsupported forms to the closest supported enum value instead of
+/// letting the request fail upstream. The mapping is a registered
+/// provider-private compatibility exception documented in
+/// `docs/design/v3-protocol-request-field-projection.md`.
+pub fn apply_deepseek_v4_tool_choice_compat(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    let Some(tool_choice) = root.get("tool_choice").cloned() else {
+        return;
+    };
+    match tool_choice {
+        Value::String(value) if value == "none" || value == "auto" => {}
+        Value::String(_) => {
+            root.insert("tool_choice".to_string(), Value::String("auto".to_string()));
+        }
+        Value::Object(map) => {
+            let normalized = match map.get("type").and_then(Value::as_str) {
+                Some("none") => "none",
+                _ => "auto",
+            };
+            root.insert(
+                "tool_choice".to_string(),
+                Value::String(normalized.to_string()),
+            );
+        }
+        _ => {
+            root.insert("tool_choice".to_string(), Value::String("auto".to_string()));
         }
     }
 }
@@ -377,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn non_thinking_chat_keeps_tool_choice() {
+    fn non_thinking_chat_preserves_required_tool_choice() {
         let mut body = json!({
             "model": "deepseek-v4-flash",
             "reasoning_effort": "none",
@@ -389,6 +430,44 @@ mod tests {
 
         assert_eq!(body["tool_choice"], "required");
         assert!(body["messages"][0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn non_thinking_named_function_object_is_preserved() {
+        let mut body = json!({
+            "model": "deepseek-v4.1-flash",
+            "reasoning_effort": "none",
+            "tool_choice": {"type":"function", "function": {"name":"exec_command"}},
+            "messages": [{"role":"user", "content":"run"}]
+        });
+
+        apply_deepseek_v4_request_compat(&mut body);
+
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type":"function", "function": {"name":"exec_command"}})
+        );
+    }
+
+    #[test]
+    fn non_thinking_none_and_auto_tool_choice_are_preserved() {
+        for (input, expected) in [
+            (json!("none"), json!("none")),
+            (json!("auto"), json!("auto")),
+            (json!({"type":"auto"}), json!({"type":"auto"})),
+            (json!({"type":"none"}), json!({"type":"none"})),
+        ] {
+            let mut body = json!({
+                "model": "deepseek-v4.1-flash",
+                "reasoning_effort": "none",
+                "tool_choice": input,
+                "messages": [{"role":"user","content":"hello"}]
+            });
+
+            apply_deepseek_v4_request_compat(&mut body);
+
+            assert_eq!(body["tool_choice"], expected);
+        }
     }
 
     #[test]
