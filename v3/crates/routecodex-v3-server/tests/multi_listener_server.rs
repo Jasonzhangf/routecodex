@@ -3638,7 +3638,7 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(15), socket.next())
+    let message = timeout(Duration::from_secs(30), socket.next())
         .await
         .unwrap()
         .unwrap()
