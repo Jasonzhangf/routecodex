@@ -3,7 +3,9 @@ use crate::adaptive_concurrency::{
     V3AdaptiveConcurrencyProbeResult,
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
-use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
+use crate::shared::{
+    collect_response_headers, content_type, send_http_await, validated_sse_stream,
+};
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
 use crate::transport_admission::{
     provider_admission_error, take_or_acquire_provider_admission, V3PreAcquiredProviderAdmission,
@@ -149,7 +151,7 @@ fn normalize_provider_header_name(name: String) -> String {
 #[derive(Debug)]
 pub struct V3Transport13ResponsesRequest {
     _sealed: (),
-    kind: V3Transport13ResponsesRequestKind,
+    pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
 }
@@ -467,19 +469,18 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 Vec::new(),
                 Some(Duration::from_millis(request_timeout_ms)),
                 concurrency_acquire_timeout_ms,
+                sse_first_frame_timeout_ms,
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
                 concurrency_acquire_timeout_ms: timeout_ms,
                 compatibility_profile: request_compatibility_profile,
-                sse_first_frame_timeout_ms: sse_timeout,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
                 *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
-                *sse_timeout = sse_first_frame_timeout_ms;
             }
             Ok(request)
         }
@@ -637,6 +638,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         provider_headers,
         timeout,
         60_000,
+        None,
     )
 }
 
@@ -780,47 +782,18 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 ..
             } => *concurrency_acquire_timeout_ms,
         };
-        // Queue for this WebSocket session before taking a provider permit. A request that
-        // waits for the shared connection must not consume provider capacity while queued.
-        let websocket_connection = websocket::acquire_connection_slot(
-            &self.websocket_sessions,
-            &mut request,
-            &self.handoff,
-            attempt_key.as_ref(),
-        )
-        .await?;
-        // Release the session lock before provider admission: another request may already own
-        // admission and need this connection. Re-acquire after admission for the actual send.
-        drop(websocket_connection);
-        let admission = take_or_acquire_provider_admission(
-            request.pre_acquired_admission.take(),
-            controller.clone(),
-            provider_key.clone(),
-            current_epoch_ms(),
-            Duration::from_millis(acquire_timeout_ms),
-            cancellation,
-        )
-        .await;
-        if admission.is_err() {
-            if let Some(attempt_key) = &attempt_key {
-                let _ = self
-                    .handoff
-                    .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-            }
-        }
-        let lease = admission.map_err(|error| {
-            provider_admission_error(error, &request_id, &provider_id, acquire_timeout_ms)
-        })?;
-        let was_probe = lease.is_probe();
-        let permit = lease.into_permit();
-        let permit_guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), permit);
-        let websocket_connection = websocket::acquire_connection_slot(
-            &self.websocket_sessions,
-            &mut request,
-            &self.handoff,
-            attempt_key.as_ref(),
-        )
-        .await?;
+        let (permit_guard, was_probe, websocket_connection) =
+            websocket::acquire_admission_and_connection_slot(
+                &self.websocket_sessions,
+                &mut request,
+                &self.handoff,
+                attempt_key.as_ref(),
+                controller.clone(),
+                provider_key.clone(),
+                acquire_timeout_ms,
+                cancellation.clone(),
+            )
+            .await?;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -1089,22 +1062,17 @@ impl ProviderResponsesTransport {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
         }
         let send = request.json(&body).send();
-        let response = match cancellation.clone() {
-            Some(cancellation) => {
-                tokio::select! {
-                    _ = cancellation.cancelled() => {
-                        return Err(V3ProviderError::ClientDisconnect { request_id, provider_id });
-                    }
-                    response = send => response,
-                }
-            }
-            None => send.await,
-        }
-        .map_err(|error| V3ProviderError::Transport {
-            request_id: request_id.clone(),
-            provider_id: provider_id.clone(),
-            reason: error.to_string(),
-        })?;
+        let response = send_http_await(
+            request_id.clone(),
+            provider_id.clone(),
+            send,
+            cancellation.clone(),
+            match stream_intent {
+                V3ResponsesStreamIntent::Sse => sse_first_frame_timeout_ms,
+                V3ResponsesStreamIntent::Json => None,
+            },
+        )
+        .await?;
         let status = response.status().as_u16();
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());

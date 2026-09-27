@@ -52,6 +52,7 @@ const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
 pub enum V3ProviderHealthProbeFailure {
     Provider(String),
     Internal(String),
+    ConcurrencyBusy,
 }
 
 async fn execute_provider_health_probe<F, Fut>(
@@ -583,6 +584,7 @@ impl V3ProviderFailureRuntimeHealth {
                     }
                     probe_errors.push(error);
                 }
+                Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {}
             }
             drop(cancellation);
             while in_flight.len() < V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {

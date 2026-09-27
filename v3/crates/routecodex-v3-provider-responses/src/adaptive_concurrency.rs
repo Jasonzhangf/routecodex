@@ -123,6 +123,7 @@ impl V3AdaptiveConcurrencyPermit {
 #[derive(Debug)]
 struct V3AdaptiveConcurrencyState {
     budget: u32,
+    hard_max_in_flight: u32,
     in_flight: u32,
     saturated: bool,
     probe_in_flight: bool,
@@ -134,6 +135,7 @@ impl Default for V3AdaptiveConcurrencyState {
     fn default() -> Self {
         Self {
             budget: 0,
+            hard_max_in_flight: 0,
             in_flight: 0,
             saturated: false,
             probe_in_flight: false,
@@ -147,6 +149,7 @@ impl Default for V3AdaptiveConcurrencyState {
 struct V3AdaptiveConcurrencyInner {
     states: Mutex<BTreeMap<String, V3AdaptiveConcurrencyState>>,
     initial_budget: u32,
+    hard_max_in_flight: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -171,13 +174,21 @@ impl V3AdaptiveConcurrencyController {
     }
 
     pub fn new(initial_budget: u32) -> Result<Self, String> {
-        if initial_budget == 0 {
-            return Err("adaptive concurrency initial budget must be positive".to_string());
+        Self::new_with_limits(initial_budget, initial_budget)
+    }
+
+    fn new_with_limits(initial_budget: u32, hard_max_in_flight: u32) -> Result<Self, String> {
+        if initial_budget == 0 || hard_max_in_flight < initial_budget {
+            return Err(
+                "adaptive concurrency budget must be positive and not exceed its hard maximum"
+                    .to_string(),
+            );
         }
         Ok(Self {
             inner: Arc::new(V3AdaptiveConcurrencyInner {
                 states: Mutex::new(BTreeMap::new()),
                 initial_budget,
+                hard_max_in_flight,
             }),
         })
     }
@@ -195,12 +206,16 @@ impl V3AdaptiveConcurrencyController {
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        states
-            .entry(provider_key.to_string())
-            .or_insert_with(|| V3AdaptiveConcurrencyState {
-                budget: initial_budget,
-                ..V3AdaptiveConcurrencyState::default()
-            });
+        let state =
+            states
+                .entry(provider_key.to_string())
+                .or_insert_with(|| V3AdaptiveConcurrencyState {
+                    budget: initial_budget,
+                    hard_max_in_flight: initial_budget,
+                    ..V3AdaptiveConcurrencyState::default()
+                });
+        state.hard_max_in_flight = initial_budget;
+        state.budget = state.budget.min(initial_budget);
         Ok(())
     }
 
@@ -242,6 +257,7 @@ impl V3AdaptiveConcurrencyController {
                 let state = states.entry(provider_key.clone()).or_insert_with(|| {
                     V3AdaptiveConcurrencyState {
                         budget: self.inner.initial_budget,
+                        hard_max_in_flight: self.inner.hard_max_in_flight,
                         ..V3AdaptiveConcurrencyState::default()
                     }
                 });
@@ -279,11 +295,13 @@ impl V3AdaptiveConcurrencyController {
                 .entry(provider_key.to_string())
                 .or_insert_with(|| V3AdaptiveConcurrencyState {
                     budget: self.inner.initial_budget,
+                    hard_max_in_flight: self.inner.hard_max_in_flight,
                     ..V3AdaptiveConcurrencyState::default()
                 });
         if state.saturated
             && !state.probe_in_flight
             && state.in_flight >= state.budget
+            && state.in_flight < state.hard_max_in_flight
             && state.next_probe_at_ms.is_some_and(|next| now_ms >= next)
         {
             state.probe_in_flight = true;
@@ -311,9 +329,10 @@ impl V3AdaptiveConcurrencyController {
                 .entry(provider_key.to_string())
                 .or_insert_with(|| V3AdaptiveConcurrencyState {
                     budget: self.inner.initial_budget,
+                    hard_max_in_flight: self.inner.hard_max_in_flight,
                     ..V3AdaptiveConcurrencyState::default()
                 });
-        if state.in_flight < state.budget {
+        if state.in_flight < state.budget && state.in_flight < state.hard_max_in_flight {
             state.in_flight = state.in_flight.saturating_add(1);
             return Some(V3AdaptiveConcurrencyLease {
                 admission: V3AdaptiveConcurrencyAdmission::Lease,
@@ -325,6 +344,31 @@ impl V3AdaptiveConcurrencyController {
             });
         }
         None
+    }
+
+    pub fn try_acquire_business_soft(&self, provider_key: &str) -> V3AdaptiveConcurrencyLease {
+        let mut states = self
+            .inner
+            .states
+            .lock()
+            .expect("adaptive concurrency state lock should not be poisoned");
+        let state =
+            states
+                .entry(provider_key.to_string())
+                .or_insert_with(|| V3AdaptiveConcurrencyState {
+                    budget: self.inner.initial_budget,
+                    hard_max_in_flight: self.inner.hard_max_in_flight,
+                    ..V3AdaptiveConcurrencyState::default()
+                });
+        state.in_flight = state.in_flight.saturating_add(1);
+        V3AdaptiveConcurrencyLease {
+            admission: V3AdaptiveConcurrencyAdmission::Lease,
+            permit: V3AdaptiveConcurrencyPermit {
+                provider_key: provider_key.to_string(),
+                probe: false,
+            },
+            controller: self.clone(),
+        }
     }
 
     pub fn try_acquire_probe(
@@ -342,9 +386,14 @@ impl V3AdaptiveConcurrencyController {
                 .entry(provider_key.to_string())
                 .or_insert_with(|| V3AdaptiveConcurrencyState {
                     budget: self.inner.initial_budget,
+                    hard_max_in_flight: self.inner.hard_max_in_flight,
                     ..V3AdaptiveConcurrencyState::default()
                 });
-        if !state.saturated && !state.probe_in_flight && state.in_flight >= state.budget {
+        if !state.saturated
+            && !state.probe_in_flight
+            && state.in_flight >= state.budget
+            && state.in_flight < state.hard_max_in_flight
+        {
             state.probe_in_flight = true;
             state.in_flight = state.in_flight.saturating_add(1);
             return Some(V3AdaptiveConcurrencyLease {
@@ -359,6 +408,7 @@ impl V3AdaptiveConcurrencyController {
         if state.saturated
             && !state.probe_in_flight
             && state.in_flight >= state.budget
+            && state.in_flight < state.hard_max_in_flight
             && state.next_probe_at_ms.is_some_and(|next| now_ms >= next)
         {
             state.probe_in_flight = true;
@@ -399,7 +449,7 @@ impl V3AdaptiveConcurrencyController {
         state.in_flight -= 1;
         match result {
             V3AdaptiveConcurrencyProbeResult::Accepted => {
-                state.budget = state.budget.saturating_add(1);
+                state.budget = state.budget.saturating_add(1).min(state.hard_max_in_flight);
                 state.saturated = false;
                 state.next_probe_at_ms = None;
             }
@@ -488,7 +538,7 @@ mod tests {
 
     #[test]
     fn explicit_business_path_reports_busy_instead_of_spending_probe() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let first = controller.try_acquire_business("opencode-go:key1").unwrap();
         let second = controller.try_acquire_business("opencode-go:key1").unwrap();
         assert!(!first.is_probe());
@@ -514,8 +564,23 @@ mod tests {
     }
 
     #[test]
+    fn soft_business_leases_exceed_the_adaptive_budget_without_waiting() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 1).unwrap();
+        let first = controller.try_acquire_business_soft("opencode-go:key1");
+        let second = controller.try_acquire_business_soft("opencode-go:key1");
+        assert!(!first.is_probe());
+        assert!(!second.is_probe());
+        assert_eq!(
+            controller.snapshot("opencode-go:key1").unwrap().in_flight,
+            2
+        );
+        controller.release(first.into_permit()).unwrap();
+        controller.release(second.into_permit()).unwrap();
+    }
+
+    #[test]
     fn first_over_budget_request_is_a_probe_until_probe_completes() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
         assert!(!first.is_probe());
@@ -542,7 +607,7 @@ mod tests {
 
     #[test]
     fn production_admission_can_consume_due_saturation_probe() {
-        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
         let held = controller.try_acquire("opencode-go:key1", 0).unwrap();
         controller
             .observe_rate_limit("opencode-go:key1", 100)
@@ -573,7 +638,7 @@ mod tests {
 
     #[test]
     fn upstream_429_confirms_saturation_and_reduces_budget() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
@@ -597,7 +662,7 @@ mod tests {
 
     #[test]
     fn ten_minute_probe_reopens_budget_only_after_success() {
-        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
         let lease = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let probe = controller.try_acquire_probe("opencode-go:key1", 0);
         assert!(probe.as_ref().is_some_and(|lease| lease.is_probe()));
@@ -632,6 +697,45 @@ mod tests {
     }
 
     #[test]
+    fn scheduled_probe_never_exceeds_configured_provider_hard_maximum() {
+        let controller = V3AdaptiveConcurrencyController::new(8).unwrap();
+        let provider_key = "kdns:key1";
+        controller.ensure_initial_budget(provider_key, 5).unwrap();
+        let mut leases = (0..5)
+            .map(|_| controller.try_acquire_business(provider_key).unwrap())
+            .collect::<Vec<_>>();
+
+        controller.observe_rate_limit(provider_key, 100).unwrap();
+        assert!(
+            controller
+                .try_acquire_scheduled_probe(provider_key, 600_100)
+                .is_none(),
+            "a due probe must not send a sixth request while the provider hard limit is full"
+        );
+
+        controller.release(leases.remove(0).into_permit()).unwrap();
+        let probe = controller
+            .try_acquire_scheduled_probe(provider_key, 600_100)
+            .expect("a due probe may use the released slot below the provider hard limit");
+        assert!(probe.is_probe());
+        assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 5);
+        assert!(controller.try_acquire_business(provider_key).is_none());
+
+        controller
+            .complete_probe(
+                probe.into_permit(),
+                V3AdaptiveConcurrencyProbeResult::Accepted,
+                600_100,
+            )
+            .unwrap();
+        assert_eq!(controller.snapshot(provider_key).unwrap().budget, 5);
+        assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 4);
+        for lease in leases {
+            controller.release(lease.into_permit()).unwrap();
+        }
+    }
+
+    #[test]
     fn provider_keys_are_isolated() {
         let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
         let key1 = controller.try_acquire("opencode-go:key1", 0).unwrap();
@@ -652,7 +756,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn saturated_admission_expires_without_leaking_a_lease() {
-        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
         let held = controller.acquire("opencode-go:key1", 0).await;
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
         assert!(probe.is_probe());
@@ -676,7 +780,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn provider_scoped_notify_wakes_only_target_provider() {
-        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
         let held_a = controller.acquire("opencode-go:key-a", 0).await;
         let probe_a = controller
             .try_acquire_probe("opencode-go:key-a", 0)
@@ -735,7 +839,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn same_provider_releases_wake_registered_waiters_after_probe_completion() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let held_first = controller.acquire("opencode-go:key1", 0).await;
         let held_second = controller.acquire("opencode-go:key1", 0).await;
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
@@ -788,7 +892,7 @@ mod tests {
 
     #[test]
     fn non_rate_limited_probe_release_resets_probe_state() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
@@ -810,7 +914,7 @@ mod tests {
 
     #[test]
     fn probe_result_guard_finalizes_when_dropped_not_from_raw_ok() {
-        let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(2, 3).unwrap();
         let first = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let second = controller.try_acquire("opencode-go:key1", 0).unwrap();
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
@@ -835,7 +939,7 @@ mod tests {
 
     #[tokio::test]
     async fn waiter_is_released_without_acquire_timeout() {
-        let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
         let held = controller.acquire("opencode-go:key1", 0).await;
         let probe = controller.try_acquire_probe("opencode-go:key1", 0).unwrap();
         assert!(probe.is_probe());

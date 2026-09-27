@@ -14,9 +14,10 @@ use crate::hub_v1::{
 use crate::nodes::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
-    select_v3_expanded_target_with_admission_rescue, select_v3_target_with_session_then_global,
-    try_admit_v3_selected_target, V3AdmittedTargetSelectionAfterRescue,
-    V3ProviderFailureRuntimeHealth, V3RuntimeProviderAdmission,
+    admit_v3_selected_target_after_recovery, select_v3_expanded_target_with_admission_rescue,
+    select_v3_target_with_session_then_global, try_admit_v3_selected_target, V3AdmitAfterRecovery,
+    V3AdmittedTargetSelectionAfterRescue, V3ProviderFailureRuntimeHealth,
+    V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingState};
 use crate::shared::V3ProviderAttemptBody;
@@ -319,6 +320,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
+    let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
+    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
         let (selected, mut selected_admission): (
@@ -342,7 +345,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     0,
                     allow_exhaustion_rescue_probe,
                     preferred,
-                    pinned.is_none(),
                 ))
                 .await
                 {
@@ -384,19 +386,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 }
             } else if let Some(selected) = preferred {
                 match try_admit_v3_selected_target(&selected) {
-                    Ok(Some(admission)) => (selected, Some(admission)),
-                    Ok(None) => {
-                        return error_output(
-                            build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::TargetPoolExhausted,
-                                "V3Target10ConcreteProviderSelected",
-                                "concurrency_busy",
-                                "selected provider concurrency capacity is busy",
-                            ),
-                            trace,
-                            &hook_registry,
-                        )
-                    }
+                    Ok(admission) => (selected, Some(admission)),
                     Err(reason) => {
                         return error_output(
                             runtime_source("V3Target10ConcreteProviderSelected", reason),
@@ -416,6 +406,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 );
             }
         };
+        if provider_action_permit_target
+            .as_ref()
+            .is_some_and(|target| {
+                target.provider_id != selected.candidate.provider_id
+                    || target.auth_alias != selected.candidate.auth_alias
+                    || target.model_id != selected.candidate.model_id
+            })
+        {
+            drop(provider_action_permit.take());
+            provider_action_permit_target = None;
+        }
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         trace.push("V3Target10ConcreteProviderSelected");
         if let Some(sink) = route_selection_event_sink.as_ref() {
@@ -440,7 +441,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             observability.attempts = Some(total_attempts(&accumulator, send_attempts));
             sink(&observability);
         }
-        let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
@@ -451,6 +451,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             {
                 Ok(V3ProviderActionRecoveryTransition::Admitted(mut admission)) => {
                     provider_action_permit = admission.take_permit();
+                    provider_action_permit_target = Some(selected.candidate.clone());
+                    selected_admission = match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => Some(admission),
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return error_output(
+                                runtime_source("V3Target10ConcreteProviderSelected", reason),
+                                trace,
+                                &hook_registry,
+                            )
+                        }
+                    };
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 Ok(V3ProviderActionRecoveryTransition::Superseded(ticket)) => {
@@ -784,6 +795,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &error,
                     V3ProviderError::Transport { reason, .. }
                         if reason == default_transport::V3_DIRECT_TRANSPORT_HANG_REASON
+                            || routecodex_v3_error::is_v3_provider_response_header_timeout_reason(
+                                reason,
+                            )
                 );
                 let source =
                     build_v3_provider_error_source("V3Transport13ResponsesHttpRequest", error);

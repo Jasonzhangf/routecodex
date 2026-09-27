@@ -2,6 +2,9 @@ use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::web_search_hop::store_v3_responses_relay_web_search_state;
 use super::web_search_sidecar::execute_web_search_through_hooks_sidecar;
 use super::*;
+use crate::provider_failure_runtime_policy::{
+    admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
+};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 
@@ -110,6 +113,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     let mut failed_candidates = initial_request_local_excluded_candidates;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut pending_provider_action_recovery = None;
+    let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
+    let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -187,6 +192,17 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 }
             }
         };
+        if provider_action_permit_target
+            .as_ref()
+            .is_some_and(|target| {
+                target.provider_id != selected.candidate.provider_id
+                    || target.auth_alias != selected.candidate.auth_alias
+                    || target.model_id != selected.candidate.model_id
+            })
+        {
+            drop(_provider_action_permit.take());
+            provider_action_permit_target = None;
+        }
         attempt_budget.set_transport_attempt_limit(selected.candidate_count);
         let protocol_decision =
             handle_error_before_resp03!(
@@ -350,7 +366,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             handle_provider_request_failure!(error);
         }
         trace.push("V3ProviderReqOutbound09TransportRequest");
-        let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
         if pending_provider_action_recovery.is_some() {
             drop(selected_admission.take());
         }
@@ -362,6 +377,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             {
                 V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
                     _provider_action_permit = admission.take_permit();
+                    provider_action_permit_target = Some(selected.candidate.clone());
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3ResponsesRelayRuntimeError::Target(reason))
+                        }
+                    }
                     trace.push("V3ProviderActionGateAdmission");
                 }
                 V3ProviderActionRecoveryTransition::Superseded(ticket) => {

@@ -29,7 +29,7 @@ fn probe_sse_fixture(
     V3ProviderTransportAttemptKey,
 ) {
     let provider_key = "probe-sse-provider:key1";
-    let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
+    let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
     let held = controller.try_acquire(provider_key, 0).unwrap();
     controller.observe_rate_limit(provider_key, 0).unwrap();
     let probe = controller
@@ -118,6 +118,7 @@ fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
             vec![],
             None,
             100,
+            None,
         )
         .unwrap()
         .with_pre_acquired_admission(lease);
@@ -155,6 +156,7 @@ fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
             vec![],
             None,
             100,
+            None,
         )
         .unwrap()
         .with_pre_acquired_admission(lease);
@@ -250,15 +252,16 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
 async fn saturated_provider_admission_returns_typed_transport_failure() {
     let provider_key = "admission-timeout-provider:key1";
     let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 1).unwrap();
-    let held = controller.acquire(provider_key, 0).await;
-    let probe = controller.acquire(provider_key, 0).await;
-    assert!(probe.is_probe());
+    controller.ensure_initial_budget(provider_key, 2).unwrap();
+    let first = controller.acquire(provider_key, 0).await;
+    let second = controller.acquire(provider_key, 0).await;
+    assert!(!first.is_probe());
+    assert!(!second.is_probe());
 
     let mut target = responses_http_target();
     target.provider_id = "admission-timeout-provider".into();
     target.auth.alias = "key1".into();
-    target.initial_concurrency_budget = 1;
+    target.initial_concurrency_budget = 2;
     target.concurrency_acquire_timeout_ms = 20;
     let wire = build_v3_provider_12_responses_wire_payload(
         "req-admission-timeout",
@@ -277,8 +280,8 @@ async fn saturated_provider_admission_returns_typed_transport_failure() {
             if reason == "provider concurrency admission timed out after 20ms"
     ));
 
-    controller.release(held.into_permit()).unwrap();
-    controller.release(probe.into_permit()).unwrap();
+    controller.release(first.into_permit()).unwrap();
+    controller.release(second.into_permit()).unwrap();
 }
 
 #[test]
@@ -296,6 +299,7 @@ fn direct_http_builder_preserves_target_admission_timeout() {
             Vec::new(),
             Some(std::time::Duration::from_secs(5)),
             target.concurrency_acquire_timeout_ms,
+            None,
         )
         .unwrap();
 
@@ -539,6 +543,76 @@ async fn responses_http_transport_times_out_on_stalled_read_instead_of_waiting_f
     assert!(started.elapsed() < Duration::from_secs(2));
     match error {
         V3ProviderError::Transport { .. } => {}
+        other => panic!("expected transport timeout, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn responses_http_transport_uses_sse_first_frame_timeout_for_header_wait() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..n]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let body = "data: {\"type\":\"response.output_text.done\"}\n\n";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let request =
+        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            "req-sse-header-wait",
+            "kdns-test",
+            format!("http://{addr}/v1/chat/completions"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-header-wait".into()),
+            },
+            V3ResponsesStreamIntent::Sse,
+            json!({"model":"deepseek-v4.1-flash","stream":true}),
+            Vec::new(),
+            Some(Duration::from_secs(5)),
+            60_000,
+            Some(50),
+        )
+        .unwrap();
+
+    let started = tokio::time::Instant::now();
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("SSE header wait must honor configured first-frame timeout");
+    server.abort();
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "SSE header wait should fail quickly"
+    );
+    match error {
+        V3ProviderError::Transport { reason, .. } => {
+            assert!(
+                reason.contains("SSE first-frame"),
+                "expected SSE first-frame timeout reason, got {reason}"
+            );
+        }
         other => panic!("expected transport timeout, got {other:?}"),
     }
 }

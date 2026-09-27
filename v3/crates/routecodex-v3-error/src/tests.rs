@@ -81,6 +81,27 @@ fn transient_stage_code_classifier_accepts_stream_and_header_hang_failures() {
 }
 
 #[test]
+fn provider_header_timeout_reason_is_canonical_health_neutral_hang() {
+    let reason = format!(
+        "{} (30000ms)",
+        V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX
+    );
+    assert!(is_v3_provider_response_header_timeout_reason(&reason));
+    assert!(!is_v3_provider_response_header_timeout_reason(
+        "connection reset by peer"
+    ));
+    for stage in [
+        "V3Transport13ResponsesHttpRequest",
+        "V3ProviderReqOutbound09TransportRequest",
+    ] {
+        assert!(is_v3_retryable_transient_stage_code(
+            stage,
+            V3_TRANSIENT_TRANSPORT_HANG_CODE
+        ));
+    }
+}
+
+#[test]
 fn transient_stage_code_classifier_rejects_http_and_non_provider_failures() {
     assert!(!is_v3_retryable_transient_stage_code(
         "V3ProviderRespInbound01Raw",

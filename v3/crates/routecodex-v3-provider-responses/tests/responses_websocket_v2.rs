@@ -194,9 +194,11 @@ async fn start_asxs_shaped_function_call_websocket() -> ControlledWebSocket {
         for event in [
             json!({"type":"response.created","response":{"id":"resp_asxs_1","status":"in_progress","output":[]}}),
             json!({"type":"response.in_progress","response":{"id":"resp_asxs_1","status":"in_progress","output":[]}}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"id":"msg_asxs_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}),
+            json!({"type":"response.output_item.done","output_index":1,"item":{"id":"reasoning_asxs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"brief reasoning"}]}}),
             json!({
                 "type":"response.output_item.added",
-                "output_index":0,
+                "output_index":2,
                 "item":{
                     "id":"fc_asxs_1",
                     "type":"function_call",
@@ -206,12 +208,12 @@ async fn start_asxs_shaped_function_call_websocket() -> ControlledWebSocket {
                     "arguments":""
                 }
             }),
-            json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_asxs_1","delta":"{\"pin\""}),
-            json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_asxs_1","delta":":\"asxs\"}"}),
-            json!({"type":"response.function_call_arguments.done","output_index":0,"item_id":"fc_asxs_1","arguments":"{\"pin\":\"asxs\"}"}),
+            json!({"type":"response.function_call_arguments.delta","output_index":2,"item_id":"fc_asxs_1","delta":"{\"pin\""}),
+            json!({"type":"response.function_call_arguments.delta","output_index":2,"item_id":"fc_asxs_1","delta":":\"asxs\"}"}),
+            json!({"type":"response.function_call_arguments.done","output_index":2,"item_id":"fc_asxs_1","arguments":"{\"pin\":\"asxs\"}"}),
             json!({
                 "type":"response.output_item.done",
-                "output_index":0,
+                "output_index":2,
                 "item":{
                     "id":"fc_asxs_1",
                     "type":"function_call",
@@ -361,7 +363,7 @@ async fn websocket_v2_binary_events_project_as_equivalent_sse_and_errors_never_f
 }
 
 #[tokio::test]
-async fn websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty() {
+async fn websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty() {
     let controlled = start_asxs_shaped_function_call_websocket().await;
     std::env::set_var("V3_WS_KEY_ASXS_SHAPE", "websocket-secret");
     let mut selected = target(&controlled.url);
@@ -388,11 +390,15 @@ async fn websocket_v2_json_aggregates_function_call_item_when_terminal_output_is
     let body: Value = serde_json::from_slice(&raw.into_body_bytes().await.unwrap()).unwrap();
     assert_eq!(body["id"], "resp_asxs_1");
     let output = body["output"].as_array().unwrap();
-    assert_eq!(output.len(), 1);
-    assert_eq!(output[0]["type"], "function_call");
-    assert_eq!(output[0]["call_id"], "call_asxs_1");
-    assert_eq!(output[0]["name"], "lookup_v3_pin");
-    assert_eq!(output[0]["arguments"], "{\"pin\":\"asxs\"}");
+    assert_eq!(output.len(), 3);
+    assert_eq!(output[0]["type"], "message");
+    assert_eq!(output[0]["content"][0]["text"], "answer");
+    assert_eq!(output[1]["type"], "reasoning");
+    assert_eq!(output[1]["summary"][0]["text"], "brief reasoning");
+    assert_eq!(output[2]["type"], "function_call");
+    assert_eq!(output[2]["call_id"], "call_asxs_1");
+    assert_eq!(output[2]["name"], "lookup_v3_pin");
+    assert_eq!(output[2]["arguments"], "{\"pin\":\"asxs\"}");
 
     std::env::remove_var("V3_WS_KEY_ASXS_SHAPE");
     let _ = controlled.shutdown.send(());
@@ -1211,7 +1217,7 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
 }
 
 #[tokio::test]
-async fn websocket_v2_pre_acquired_admission_stays_reserved_while_waiting_for_shared_connection() {
+async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (release_first_tx, mut release_first_rx) = oneshot::channel();
@@ -1313,15 +1319,15 @@ async fn websocket_v2_pre_acquired_admission_stays_reserved_while_waiting_for_sh
             .snapshot(provider_key)
             .unwrap()
             .in_flight,
-        2,
-        "pre-acquired WebSocket admission must stay reserved while waiting for the shared connection"
+        1,
+        "a request queued for the shared WebSocket connection must not hold provider capacity"
     );
-    assert!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .try_acquire_business(provider_key)
-            .is_none(),
-        "reserved pre-acquired admission must prevent over-admission past hard capacity"
-    );
+    let available_capacity = V3AdaptiveConcurrencyController::process_shared()
+        .try_acquire_business(provider_key)
+        .expect("queued WebSocket request must release its provider reservation");
+    V3AdaptiveConcurrencyController::process_shared()
+        .release(available_capacity.into_permit())
+        .unwrap();
     second_cancellation.cancel();
     assert!(matches!(
         second_send.await.unwrap().unwrap_err(),

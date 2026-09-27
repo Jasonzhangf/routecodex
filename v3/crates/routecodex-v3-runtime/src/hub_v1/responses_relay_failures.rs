@@ -120,6 +120,7 @@ pub(crate) fn provider_runtime_failure(
         &error,
         V3ProviderError::Transport { reason, .. }
             if reason == V3_RELAY_TRANSPORT_HANG_REASON
+                || routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason)
     ) {
         V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
     } else {
@@ -650,5 +651,24 @@ mod tests {
         assert_eq!(failure.status, 598);
         assert!(failure.terminal_projection.is_some());
         assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn sse_header_wait_timeout_is_health_neutral_relay_hang() {
+        let error = V3ProviderError::Transport {
+            request_id: "req-sse-header-wait-policy".into(),
+            provider_id: "provider-1".into(),
+            reason: format!(
+                "{} (30000ms)",
+                routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX
+            ),
+        };
+        let failure = provider_runtime_failure(error, "provider-1", None);
+        assert_eq!(
+            failure.policy_error_type,
+            V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string(),
+            "SSE first-frame header wait timeout must project as the health-neutral transient hang"
+        );
+        assert_eq!(failure.status, 502);
     }
 }

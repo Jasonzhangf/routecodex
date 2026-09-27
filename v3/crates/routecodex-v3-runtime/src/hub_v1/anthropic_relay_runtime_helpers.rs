@@ -289,13 +289,21 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
                 error.to_string(),
             )
         });
+    let error_type = match &error {
+        V3ProviderError::Transport { reason, .. }
+            if routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason) =>
+        {
+            routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE
+        }
+        _ => "provider_error",
+    };
     V3RelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
             502
         },
-        client_response: json!({"type":"error","error":{"type":"provider_error","message":error.to_string()}}),
+        client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
         error_type_fn: extract_error_type_style,
@@ -426,6 +434,28 @@ data: {"type":"response.output_text.delta","response_id":"resp_partial","delta":
         assert_ne!(
             responses_message, anthropic_message,
             "provider wire protocol must remain bound through closeout failure replay"
+        );
+    }
+
+    #[test]
+    fn anthropic_header_wait_timeout_keeps_health_neutral_hang_code() {
+        let reason = format!(
+            "{} {}",
+            routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX,
+            "after 120000ms"
+        );
+        let failure = provider_runtime_failure(
+            V3ProviderError::Transport {
+                request_id: "req-header-timeout".to_string(),
+                provider_id: "provider-1".to_string(),
+                reason,
+            },
+            "provider-1",
+        );
+
+        assert_eq!(
+            crate::hub_v1::relay_runtime_shared::failure_error_type(&failure).as_deref(),
+            Some(routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE)
         );
     }
 

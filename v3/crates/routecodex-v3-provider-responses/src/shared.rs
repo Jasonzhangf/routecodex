@@ -4,6 +4,7 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
+use routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX;
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk,
     build_v3_sse_transport_out_04_from_v3_sse_transport_in_03, SseIncrementalDecoder,
@@ -26,6 +27,53 @@ pub(crate) fn content_type(headers: &HeaderMap) -> Option<String> {
     headers
         .get(reqwest::header::CONTENT_TYPE)
         .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+}
+
+pub(crate) async fn send_http_await(
+    request_id: String,
+    provider_id: String,
+    send: impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>> + Send,
+    cancellation: Option<V3ProviderCancellation>,
+    header_timeout_ms: Option<u64>,
+) -> Result<reqwest::Response, V3ProviderError> {
+    match header_timeout_ms {
+        Some(header_timeout_ms) if header_timeout_ms > 0 => tokio::time::timeout(
+            std::time::Duration::from_millis(header_timeout_ms),
+            send_http_await_inner(request_id.clone(), provider_id.clone(), send, cancellation),
+        )
+        .await
+        .map_err(|_| V3ProviderError::Transport {
+            request_id,
+            provider_id,
+            reason: format!(
+                "{V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX} ({header_timeout_ms}ms)"
+            ),
+        })?,
+        _ => send_http_await_inner(request_id, provider_id, send, cancellation).await,
+    }
+}
+
+async fn send_http_await_inner(
+    request_id: String,
+    provider_id: String,
+    send: impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>> + Send,
+    cancellation: Option<V3ProviderCancellation>,
+) -> Result<reqwest::Response, V3ProviderError> {
+    match cancellation {
+        Some(cancellation) => tokio::select! {
+            _ = cancellation.cancelled() => Err(V3ProviderError::ClientDisconnect { request_id, provider_id }),
+            response = send => response.map_err(|error| V3ProviderError::Transport {
+                request_id,
+                provider_id,
+                reason: error.to_string(),
+            }),
+        },
+        None => send.await.map_err(|error| V3ProviderError::Transport {
+            request_id,
+            provider_id,
+            reason: error.to_string(),
+        }),
+    }
 }
 
 struct SseState {

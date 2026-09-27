@@ -214,6 +214,13 @@ fn auth_key_policy_cools_key_across_sessions_without_blocking_sibling_keys() {
         None,
         "the auth-key probe permit must retain the model-less probe identity"
     );
+    assert_eq!(
+        store
+            .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key-a"), Some("gpt-5.5"),)
+            .unwrap(),
+        None,
+        "an in-flight probe must not expose its expired due time as a retry deadline"
+    );
     store
         .complete_provider_cooldown_probe_failure_at_generation(
             permit.provider_id(),
@@ -342,6 +349,42 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
             )
             .available,
         "a different model must not be changed by this recovery"
+    );
+}
+
+#[tokio::test]
+async fn success_in_any_session_publishes_availability_change_for_waiters() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_failure_in_session(
+            &session("session-a"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            100,
+        )
+        .unwrap();
+    let observed_generation = store.availability_generation();
+    store
+        .record_provider_success_in_session(
+            &session("session-b"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            101,
+        )
+        .unwrap();
+    let changed = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        store.wait_for_availability_change(observed_generation),
+    )
+    .await
+    .expect("session success must wake anyone waiting for availability change")
+    .expect("availability watch must remain live");
+    assert_ne!(
+        changed, observed_generation,
+        "success in any session must publish a new availability generation"
     );
 }
 
@@ -480,6 +523,49 @@ fn cancelled_probe_releases_single_flight_for_the_same_generation() {
             .is_some(),
         "cancellation must release the single-flight permit"
     );
+}
+
+#[tokio::test]
+async fn cancelled_probe_wakes_cooldown_exhaustion_waiter() {
+    let store = V3ProviderHealthStore::default();
+    store
+        .record_provider_cooldown_failure(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            "post-commit stream failure",
+            100,
+            900_000,
+        )
+        .unwrap();
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .unwrap()
+        .expect("blocked provider must acquire one probe");
+
+    let observed_generation = store.availability_generation();
+    let wait = store.wait_for_availability_change(observed_generation);
+    tokio::pin!(wait);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut wait)
+            .await
+            .is_err()
+    );
+
+    store
+        .cancel_provider_cooldown_probe_at_generation(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            permit.expected_generation(),
+        )
+        .unwrap();
+
+    let next_generation = tokio::time::timeout(std::time::Duration::from_millis(100), &mut wait)
+        .await
+        .expect("probe cancellation must wake exhaustion rescue so it can reselect")
+        .expect("availability-change notification must remain readable");
+    assert_ne!(next_generation, observed_generation);
 }
 
 #[test]

@@ -173,9 +173,19 @@ requireMatch(
   "Provider Health must expose a session-bound read-only availability reader",
 );
 requireMatch(
+  source.cooldownRescue,
+  /let Some\(permit\) = permit else \{[\s\S]*return Ok\(true\);/u,
+  "in-flight cooldown probes must not block target selection from using a later tier",
+);
+forbidMatch(
+  source.cooldownRescue,
+  /wait_for_provider_cooldown_probe_completion/u,
+  "request selection must not wait for another request's provider cooldown probe",
+);
+forbidMatch(
   source.health,
-  /acquire_provider_cooldown_rescue_probe[\s\S]*wait_for_provider_cooldown_probe_completion/u,
-  "Provider Health must own single-flight cooldown rescue admission and waiting",
+  /wait_for_provider_cooldown_probe_completion/u,
+  "Provider Health must not expose request-blocking cooldown probe waits",
 );
 forbidMatch(
   source.health,
@@ -199,8 +209,13 @@ requireMatch(
 );
 requireMatch(
   source.resourceMap,
-  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*V3ProviderHealthStore::wait_for_provider_cooldown_probe_completion[^\]]*\]/u,
+  /resource_id:\s*v3\.provider\.health_state[\s\S]*allowed_readers:\s*\[[^\]]*V3ProviderHealthStore::availability_for_session[^\]]*V3ProviderSessionAvailabilityReader::availability[^\]]*\]/u,
   "Resource map provider health readers must name the session-bound availability projection owner",
+);
+forbidMatch(
+  source.resourceMap,
+  /wait_for_provider_cooldown_probe_completion/u,
+  "Resource map must not authorize request selection to wait on provider probes",
 );
 const providerHealthStateResource = extractYamlItem(
   source.resourceMap,
