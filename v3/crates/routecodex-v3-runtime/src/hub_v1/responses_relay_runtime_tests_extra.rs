@@ -44,8 +44,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             projection_context: &projection_context,
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
-            web_search_execution_mode:
-                routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
             web_search_center_state: None,
             retain_response_cipher: false,
             tool_thinking_enabled: false,
@@ -58,7 +57,10 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_json_read");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"path\":\"README.md\"}"
+    );
 
     let followup = json!({
         "tools": request["tools"],
@@ -84,10 +86,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
         chat["messages"][0]["tool_calls"][0]["function"]["name"],
         "mcp__mcpx__workspace__read"
     );
-    assert_eq!(
-        chat["messages"][1]["tool_call_id"],
-        "call_mcpx_json_read"
-    );
+    assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_json_read");
     assert_eq!(chat["messages"][1]["content"], "README contents");
 }
 
@@ -121,7 +120,10 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_read");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"path\":\"README.md\"}"
+    );
 
     let followup = json!({
         "tools": request["tools"],
@@ -271,7 +273,10 @@ fn openai_chat_namespace_with_provider_delimiter_restores_declared_identity() {
 
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx__workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["call_id"], "call_underscored_namespace");
+    assert_eq!(
+        response["output"][0]["call_id"],
+        "call_underscored_namespace"
+    );
 }
 
 #[test]
