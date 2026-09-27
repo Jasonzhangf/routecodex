@@ -810,8 +810,7 @@ mod tests {
             V3HubProviderWireProtocol::OpenAiChat,
         );
         req07.previous.selected_target.provider_type = "openai_chat".to_string();
-        req07.previous.selected_target.compatibility_profile =
-            Some("chat:openai".to_string());
+        req07.previous.selected_target.compatibility_profile = Some("chat:openai".to_string());
         req07.previous.selected_target.model_id = "deepseek-v4.1-flash".to_string();
         req07.previous.selected_target.wire_model = "DeepSeek-V4.1-Flash".to_string();
 
@@ -821,9 +820,10 @@ mod tests {
             req_compat.provider_semantic_payload()["tool_choice"],
             "auto"
         );
-        assert!(
-            req_compat.provider_semantic_payload().get("reasoning_effort").is_none()
-        );
+        assert!(req_compat
+            .provider_semantic_payload()
+            .get("reasoning_effort")
+            .is_none());
     }
 
     #[test]

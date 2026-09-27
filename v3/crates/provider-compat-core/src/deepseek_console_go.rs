@@ -439,10 +439,7 @@ mod tests {
 
         apply_deepseek_v4_request_compat(&mut body);
 
-        assert_eq!(
-            body["tool_choice"],
-            "auto"
-        );
+        assert_eq!(body["tool_choice"], "auto");
     }
 
     #[test]
