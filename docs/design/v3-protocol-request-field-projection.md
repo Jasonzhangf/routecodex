@@ -219,7 +219,7 @@ does not authorize reuse of the source object or of another target's mapping.
 | `user` | upstream user identifier payload | preserve separately from `client_metadata.user_id` and `safety_identifier` | exact | exact `user` | unmapped; never relabel as metadata user_id |
 
 DeepSeek Chat-compatible providers accept only `none` and `auto` for
-`tool_choice` in thinking mode; `required`, named function, and custom object
+`tool_choice` across all modes; `required`, named function, and custom object
 forms are rejected with a generic upstream 400. This is a registered
 provider-private compatibility exception: provider-compat normalizes those
 unsupported forms to `auto` before the provider wire and documents the
