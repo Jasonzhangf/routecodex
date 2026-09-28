@@ -1731,6 +1731,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
@@ -1805,8 +1806,7 @@ features:
   - Valid Responses function-call argument JSON remains unchanged on OpenAI Chat wire.
   - The registered Codex black-box compatibility exception rewrites only the five exact built-in shell-tool schema fields from direct `number` to `integer` at Responses inbound; user tools, unrelated numeric fields, non-direct schemas, and outbound paths remain unchanged.
   - OpenAI Chat same-protocol Relay preserves request and response field families without cross-protocol repair.
-  - OpenAI Chat outbound maps exact client_metadata.user_id to public metadata.user_id, consumes registered Codex client-local keys before provider send, and rejects unknown client_metadata keys plus reasoning-summary
-    policy before provider send.
+  - Legacy OpenAI Chat outbound currently maps exact client_metadata.user_id to public metadata.user_id and consumes registered Codex client-local keys before provider send; unknown client_metadata and reasoning-summary rejection are known transparency defects, not acceptance requirements. Their owner cutover must prove opaque preservation, provider attempt forwarding, and paired client inverse projection.
   - Responses Direct kernel preserves same-protocol Responses input/include/tool history through production Direct provider wire while applying selected provider model binding and never synthesizing Chat
     messages.
   - Responses function-call history with an MCP namespace projects to the qualified provider tool name, while namespace-less Responses-origin history is qualified only when the provider tool set
@@ -3577,3 +3577,105 @@ features:
     global_install_restart: supervisor_owned
     agy_review: supervisor_owned
     merge: supervisor_owned
+
+- feature_id: v3.unified_operation_runner_design
+  status: node01_capture_runtime_candidate_full_runner_pending
+  change_risk: high
+  owner_kind: design_architecture
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and first runtime slice. This candidate delivers only Node 01 capture_client_json; later operation nodes remain pending.
+  owner_modules:
+  - routecodex-v3-runtime
+  - routecodex-v3-config
+  design:
+  - docs/design/v3-unified-operation-runner-design.md
+  contract:
+  - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
+  - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
+  - docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  - docs/architecture/dagpipe/v3.operation_runner.response.graph.json
+  - docs/architecture/dagpipe/v3.operation_runner.error.graph.json
+  - docs/architecture/manifests/error.mainline.yml
+  required_contract:
+  - request and response and error graphs are separate SESE DAGpipe graphs
+  - every graph node binds exact operator@operator_version
+  - the response provenance edge is RespInbound02 -> Resp03 -> RespOutbound05; RespInbound02 produces v3.operation_runner.response_provenance, Resp03 consumes it and produces response_tool_binding/execution_disposition, and RespOutbound05 consumes response_tool_binding/execution_disposition only for the successful attempt
+  - RespInbound02 is the unique producer of v3.operation_runner.response_provenance; Resp03 and RespOutbound05 are its only readers
+  - ReqOutbound07 is the unique producer of v3.operation_runner.attempt_declaration_map and records only tools actually emitted for this successful attempt
+  - explicit_history_pairing is a registered typed resource written by ReqInbound02 and read by Req04, ReqOutbound07, and Resp03 for validation/pass-through only
+  - request_origin_kind is an immutable invocation-scoped typed control resource keyed by [requestId, invocationId, originKind]; RuntimeRequestGraphEntry is the sole producer before every request graph invocation, normalize_request_losslessly is its only graph reader, storage is none, scope ends when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it
+  - request_inverse_context and explicit_history_pairing are request-scoped; they initialize only for client_entry, are preserved on retry/internal_followup, and release only at RuntimeRequestFinalizer
+  - response_tool_binding is written by Resp03 for the new provider call returned in this successful attempt and read only by RespOutbound05
+  - the response graph sink is v3.operation_runner.client_frame_candidate; the candidate is staged and never enters a client body directly
+  - the error graph sink is v3.error.client_projection_candidate; Error06 always runs and emits an empty candidate for retry, while terminal_client_error is submitted only through Server/SSE
+  - retry belongs to Error05 typed error execution decision, not to the response graph; cancel/disconnect belong to Runtime ownership and the unified finalizer
+  - no protocol-configurable optional flow or second runner bypasses the fixed request/response/error graphs
+  - Config publishes declarations only and references the field/operator profile manifest; legacy conversion tables are migration baselines and cannot remain a competing field-mapping owner after cutover
+  - one exhaustive field walker assigns each semantic matrix path one consumer per direction
+  - every ARC has a registered schema_ref; only raw source-request and client-json may use SDK Any so invalid but syntactically valid JSON reaches the existing protocol shape owner unchanged; all semantic ARCs have concrete non-Any schemas
+  - operator admission is exact operator@operator_version and project compile() is authoritative
+  - fold operations declare input paths, registered operator@version, typed params, and one finalize operator/position
+  - tool arguments/input are opaque complete values and are not reparsed as JSON mapping text
+  - RespInbound02/Resp03/RespOutbound05 use only the successful attempt map and current response binding
+  - remote continuation is projection-only; no local continuation is introduced
+  - semantic matrix partial/declared statuses are preserved, not relabeled as covered
+  - ErrorErr02HostCaptured is mandatory between ErrorErr01 and ErrorErr03
+  - Direct/Relay, ToolThinking, inverse context, attempt projection, and response binding have one writer and declared readers
+  - servertool hop re-enters the same runner before client commit
+  - servertool_sidecar_plan is produced only by Resp03 when execution_disposition=servertool_followup, read only by RuntimeInternalFollowup, and released after sidecar execution before request re-entry
+  - SSE is the only client projection/communication exit
+  - the first node has two real Server callers: the four-protocol HTTP dispatcher and the Responses WebSocket message handler; both call the same Runtime capture operation before their mode dispatch
+  - capture_client_json output is the same serde_json::Value and is adapted without payload changes into current Direct and protocol-specific Relay owners
+  - the first node is compiled and run by pipeline_runtime from the deterministic SESE slice derived from the canonical request graph; the selected node keeps its canonical operator/version/schema/effects, and the slice exits at client-json
+  - RuntimeRequestGraphEntry owns slice derivation, pipeline_runtime::compile, and Runtime::run; there is no direct Operator call path
+  - Direct-to-Relay handoff reuses the in-flight captured value and existing request_execution_control; it does not re-enter Server ingress or recapture
+  - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
+  - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
+  negative_assertions:
+  - no graph node or staged candidate resource is defined as writing directly to a client body
+  - no response graph node may write v3.response.client_payload or a Server/SSE frame as its own output
+  - no Server/SSE frame node appears in allowed_readers of v3.operation_runner.client_frame_candidate or v3.error.client_projection_candidate
+  - no retry disposition is produced by Resp03; execution_disposition legal_values are exactly client_commit and servertool_followup
+  - no old current_attempt_declaration_map or request_history_pairing identifiers appear in the operation-runner design/map/lifecycle references owned by this feature
+  - no cross-graph backedge or second runner re-enters an earlier graph before the current graph returns to its single sink
+  - retry and servertool intermediate outcomes go through the typed Error05/RuntimeInternalFollowup disposition and the single graph sink; no graph node or Server/SSE frame commits before the graph returns and RuntimeClientCommit consumes the staged candidate
+  - no graph node writes v3.operation_runner.request_origin_kind; no payload-carried origin marker or fallback shortcut replaces the typed invocation origin
+  - capture_client_json reads or writes neither v3.operation_runner.metadata_center_control nor v3.operation_runner.request_origin_kind
+  - missing capture_client_json@1 registration is rejected by DAGpipe compile and enters the typed ErrorErr01 path
+  - RuntimeRequestFinalizer consumes/releases no request_origin_kind storage; request_origin_kind has no MetadataCenter slot and no cross-invocation storage to clean
+  evidence_sources:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_inbound_02_normalized.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/dagpipe/v3.operation_runner.response.graph.json
+  - docs/architecture/dagpipe/v3.operation_runner.error.graph.json
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
+  - docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  required_gates:
+  - npm run verify:v3-operation-runner-dagpipe
+  - npm run test:v3-operation-runner-red-fixtures
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
+  completion_boundary:
+    source_controlled: required
+    mapped_gates: required
+    runtime: required_for_node01_capture_client_json_slice
+    remaining_operation_nodes: pending

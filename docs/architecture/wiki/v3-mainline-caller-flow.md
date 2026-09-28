@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 75 functional paths, 446 caller edges.
+Generated view: 78 functional paths, 464 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -35,7 +35,7 @@ flowchart TD
   module_v3_target["v3-target"]
   module_v3_virtual_router["v3-virtual-router"]
   module_v3_scripts["v3/scripts"]
-  module_pending -->|1 edges / 1 paths| module_pending
+  module_pending -->|19 edges / 4 paths| module_pending
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
   module_routecodex_v3_hooks -->|6 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
@@ -83,7 +83,7 @@ flowchart TD
 
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
-| pending | pending | 1 | `v3.responses_chat_sse_typed_tree` |
+| pending | pending | 19 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
 | routecodex-v3-hooks | routecodex-v3-hooks | 6 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
@@ -146,6 +146,24 @@ flowchart TD
 | v3.responses_chat_sse_typed_tree | v3-responses-sse-tree-03 | HubRespChatProcess03Governed | V3HubRespOutbound05ClientSemantic |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-01 | V3Front01StableRequestOwner | V3Front02RequestLeaseBound |
 | v3.runtime_restart_handoff_skeleton | v3-runtime-restart-handoff-02 | V3Front02RequestLeaseBound | V3Front08ClientTerminalOrError |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-01 | V3OperationRunnerCaptureClientJson | V3OperationRunnerNormalizeRequest |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-02 | V3OperationRunnerNormalizeRequest | V3OperationRunnerResolveTarget |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-02b | V3OperationRunnerNormalizeRequest | V3OperationRunnerPlanExecution |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-03 | V3OperationRunnerResolveTarget | V3OperationRunnerPlanExecution |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-04 | V3OperationRunnerPlanExecution | V3OperationRunnerGovernChatRequest |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-05 | V3OperationRunnerGovernChatRequest | V3OperationRunnerProjectProviderSemantic |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-06 | V3OperationRunnerProjectProviderSemantic | V3OperationRunnerCompatRequest |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-07 | V3OperationRunnerCompatRequest | V3OperationRunnerEncodeWire |
+| v3.operation_runner.dagpipe.request | v3-op-runner-req-08 | V3OperationRunnerEncodeWire | V3OperationRunnerConstructTransport |
+| v3.operation_runner.dagpipe.response | v3-op-runner-resp-01 | V3OperationRunnerCompatResponse | V3OperationRunnerNormalizeResponse |
+| v3.operation_runner.dagpipe.response | v3-op-runner-resp-02 | V3OperationRunnerNormalizeResponse | V3OperationRunnerGovernResponse |
+| v3.operation_runner.dagpipe.response | v3-op-runner-resp-03 | V3OperationRunnerGovernResponse | V3OperationRunnerInverseProjectClient |
+| v3.operation_runner.dagpipe.response | v3-op-runner-resp-04 | V3OperationRunnerInverseProjectClient | V3OperationRunnerFrameClient |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-01 | ErrorErr01SourceRaised | ErrorErr02HostCaptured |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-02 | ErrorErr02HostCaptured | ErrorErr03RuntimeClassified |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-03 | ErrorErr03RuntimeClassified | ErrorErr04RouterPolicyApplied |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-04 | ErrorErr04RouterPolicyApplied | ErrorErr05ExecutionDecision |
+| v3.operation_runner.dagpipe.error | v3-op-runner-err-05 | ErrorErr05ExecutionDecision | ErrorErr06ClientProjected |
 
 ### Missing caller/callee fields
 
@@ -3038,3 +3056,90 @@ flowchart TD
 | `v3-memory-raw-capture-direct-resp03` | `V3ProviderResp14Raw` → `V3DirectResp14ProviderProjectionPrepared` | anchored | apply_v3_direct_response_projection_hooks<br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
 | `v3-memory-raw-capture-relay-resp03` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | capture_responses_json<br/><small>routecodex-v3-agent-memory/src/lib.rs</small> | `v3.memory_raw_capture` |
 | `v3-direct-sse-full-attempt-terminal-commit` | `V3DirectResp14ProviderProjectionPrepared` → `V3DirectSseAccept03ProjectedClientFrame` | anchored | execute_v3_direct_runtime_kernel_core_resident<br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small> | collect_direct_sse_attempt_after_terminal<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small> | `v3.responses_direct_full_attempt_commit` |
+
+## v3.operation_runner.dagpipe.request
+
+Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+
+Owner feature: `v3.unified_operation_runner_design`
+Manifest: `docs/architecture/dagpipe/v3.operation_runner.request.graph.json`
+
+```mermaid
+flowchart TD
+  subgraph c_75_v3_operation_runner_dagpipe_request_m_pending["pending"]
+    c_75_v3_operation_runner_dagpipe_request_0["pending<br/>pending<br/><small>pending</small>"]
+  end
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-01<br/>V3OperationRunnerCaptureClientJson → V3OperationRunnerNormalizeRequest| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-02<br/>V3OperationRunnerNormalizeRequest → V3OperationRunnerResolveTarget| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-02b<br/>V3OperationRunnerNormalizeRequest → V3OperationRunnerPlanExecution| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-03<br/>V3OperationRunnerResolveTarget → V3OperationRunnerPlanExecution| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-04<br/>V3OperationRunnerPlanExecution → V3OperationRunnerGovernChatRequest| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-05<br/>V3OperationRunnerGovernChatRequest → V3OperationRunnerProjectProviderSemantic| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-06<br/>V3OperationRunnerProjectProviderSemantic → V3OperationRunnerCompatRequest| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-07<br/>V3OperationRunnerCompatRequest → V3OperationRunnerEncodeWire| c_75_v3_operation_runner_dagpipe_request_0
+  c_75_v3_operation_runner_dagpipe_request_0 -->|v3-op-runner-req-08<br/>V3OperationRunnerEncodeWire → V3OperationRunnerConstructTransport| c_75_v3_operation_runner_dagpipe_request_0
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-op-runner-req-01` | `V3OperationRunnerCaptureClientJson` → `V3OperationRunnerNormalizeRequest` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-02` | `V3OperationRunnerNormalizeRequest` → `V3OperationRunnerResolveTarget` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-02b` | `V3OperationRunnerNormalizeRequest` → `V3OperationRunnerPlanExecution` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-03` | `V3OperationRunnerResolveTarget` → `V3OperationRunnerPlanExecution` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-04` | `V3OperationRunnerPlanExecution` → `V3OperationRunnerGovernChatRequest` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-05` | `V3OperationRunnerGovernChatRequest` → `V3OperationRunnerProjectProviderSemantic` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-06` | `V3OperationRunnerProjectProviderSemantic` → `V3OperationRunnerCompatRequest` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-07` | `V3OperationRunnerCompatRequest` → `V3OperationRunnerEncodeWire` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-req-08` | `V3OperationRunnerEncodeWire` → `V3OperationRunnerConstructTransport` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+
+## v3.operation_runner.dagpipe.response
+
+Design-only DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Every node runs in fixed order; Runtime consumes Resp03 disposition after the graph and alone decides commit versus servertool follow-up. Client_commit reaches RuntimeClientCommit and RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization. Retry is Error05-owned; cancellation is Runtime-owned.
+
+Owner feature: `v3.unified_operation_runner_design`
+Manifest: `docs/architecture/dagpipe/v3.operation_runner.response.graph.json`
+
+```mermaid
+flowchart TD
+  subgraph c_76_v3_operation_runner_dagpipe_response_m_pending["pending"]
+    c_76_v3_operation_runner_dagpipe_response_0["pending<br/>pending<br/><small>pending</small>"]
+  end
+  c_76_v3_operation_runner_dagpipe_response_0 -->|v3-op-runner-resp-01<br/>V3OperationRunnerCompatResponse → V3OperationRunnerNormalizeResponse| c_76_v3_operation_runner_dagpipe_response_0
+  c_76_v3_operation_runner_dagpipe_response_0 -->|v3-op-runner-resp-02<br/>V3OperationRunnerNormalizeResponse → V3OperationRunnerGovernResponse| c_76_v3_operation_runner_dagpipe_response_0
+  c_76_v3_operation_runner_dagpipe_response_0 -->|v3-op-runner-resp-03<br/>V3OperationRunnerGovernResponse → V3OperationRunnerInverseProjectClient| c_76_v3_operation_runner_dagpipe_response_0
+  c_76_v3_operation_runner_dagpipe_response_0 -->|v3-op-runner-resp-04<br/>V3OperationRunnerInverseProjectClient → V3OperationRunnerFrameClient| c_76_v3_operation_runner_dagpipe_response_0
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-op-runner-resp-01` | `V3OperationRunnerCompatResponse` → `V3OperationRunnerNormalizeResponse` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-resp-02` | `V3OperationRunnerNormalizeResponse` → `V3OperationRunnerGovernResponse` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-resp-03` | `V3OperationRunnerGovernResponse` → `V3OperationRunnerInverseProjectClient` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-resp-04` | `V3OperationRunnerInverseProjectClient` → `V3OperationRunnerFrameClient` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+
+## v3.operation_runner.dagpipe.error
+
+Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+
+Owner feature: `v3.unified_operation_runner_design`
+Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`
+
+```mermaid
+flowchart TD
+  subgraph c_77_v3_operation_runner_dagpipe_error_m_pending["pending"]
+    c_77_v3_operation_runner_dagpipe_error_0["pending<br/>pending<br/><small>pending</small>"]
+  end
+  c_77_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-01<br/>ErrorErr01SourceRaised → ErrorErr02HostCaptured| c_77_v3_operation_runner_dagpipe_error_0
+  c_77_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-02<br/>ErrorErr02HostCaptured → ErrorErr03RuntimeClassified| c_77_v3_operation_runner_dagpipe_error_0
+  c_77_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-03<br/>ErrorErr03RuntimeClassified → ErrorErr04RouterPolicyApplied| c_77_v3_operation_runner_dagpipe_error_0
+  c_77_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-04<br/>ErrorErr04RouterPolicyApplied → ErrorErr05ExecutionDecision| c_77_v3_operation_runner_dagpipe_error_0
+  c_77_v3_operation_runner_dagpipe_error_0 -->|v3-op-runner-err-05<br/>ErrorErr05ExecutionDecision → ErrorErr06ClientProjected| c_77_v3_operation_runner_dagpipe_error_0
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-op-runner-err-01` | `ErrorErr01SourceRaised` → `ErrorErr02HostCaptured` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-02` | `ErrorErr02HostCaptured` → `ErrorErr03RuntimeClassified` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-03` | `ErrorErr03RuntimeClassified` → `ErrorErr04RouterPolicyApplied` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-04` | `ErrorErr04RouterPolicyApplied` → `ErrorErr05ExecutionDecision` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+| `v3-op-runner-err-05` | `ErrorErr05ExecutionDecision` → `ErrorErr06ClientProjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |

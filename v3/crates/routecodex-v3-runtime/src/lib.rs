@@ -7,6 +7,7 @@ pub mod hub_v1;
 mod internal;
 pub mod kernel;
 pub mod nodes;
+pub mod operation_runner;
 pub mod protocol_tables;
 mod provider_action_gate;
 mod provider_error_policy_matching;

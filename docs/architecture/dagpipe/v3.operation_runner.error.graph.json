@@ -1,0 +1,101 @@
+{
+  "id": "v3.operation_runner.error",
+  "version": "1",
+  "inputs": [
+    { "id": "source-failure", "schema": "Object", "schema_ref": "v3.operation_runner.arc.source_failure" }
+  ],
+  "nodes": [
+    {
+      "id": "error_err01_source_raised",
+      "operator": "routecodex.v3.error.err01_source_raised",
+      "operator_version": "1",
+      "inputs": ["source-failure"],
+      "output": { "id": "error-source", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_source" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.error.chain"]
+      }
+    },
+    {
+      "id": "error_err02_host_captured",
+      "operator": "routecodex.v3.error.err02_host_captured",
+      "operator_version": "1",
+      "inputs": ["error-source"],
+      "output": { "id": "error-host-captured", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_host_captured" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain"],
+        "writes": ["v3.error.chain"]
+      }
+    },
+    {
+      "id": "error_err03_runtime_classified",
+      "operator": "routecodex.v3.error.err03_runtime_classified",
+      "operator_version": "1",
+      "inputs": ["error-host-captured"],
+      "output": { "id": "error-classified", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_classified" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "provider_runtime.observation"],
+        "writes": ["v3.error.chain", "provider_runtime.observation"]
+      }
+    },
+    {
+      "id": "error_err04_router_policy_applied",
+      "operator": "routecodex.v3.error.err04_router_policy_applied",
+      "operator_version": "1",
+      "inputs": ["error-classified"],
+      "output": { "id": "error-policy-applied", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_policy_applied" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "route.retry_exclusion_set"],
+        "writes": ["v3.error.chain", "route.retry_exclusion_set"]
+      }
+    },
+    {
+      "id": "error_err05_execution_decision",
+      "operator": "routecodex.v3.error.err05_execution_decision",
+      "operator_version": "1",
+      "inputs": ["error-policy-applied"],
+      "output": { "id": "error-for-projection", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_projection_input" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.execution_decision"],
+        "writes": ["v3.error.chain", "v3.error.execution_decision"]
+      }
+    },
+    {
+      "id": "error_err06_client_projected",
+      "operator": "routecodex.v3.error.err06_client_projected",
+      "operator_version": "1",
+      "inputs": ["error-for-projection"],
+      "output": { "id": "error-client-projected-candidate", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_client_projected" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.execution_decision"],
+        "writes": ["v3.error.client_projection_candidate"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "error_err01_source_raised", "to": "error_err02_host_captured", "arc_id": "error-source" },
+    { "from": "error_err02_host_captured", "to": "error_err03_runtime_classified", "arc_id": "error-host-captured" },
+    { "from": "error_err03_runtime_classified", "to": "error_err04_router_policy_applied", "arc_id": "error-classified" },
+    { "from": "error_err04_router_policy_applied", "to": "error_err05_execution_decision", "arc_id": "error-policy-applied" },
+    { "from": "error_err05_execution_decision", "to": "error_err06_client_projected", "arc_id": "error-for-projection" }
+  ],
+  "outputs": ["error-client-projected-candidate"]
+}

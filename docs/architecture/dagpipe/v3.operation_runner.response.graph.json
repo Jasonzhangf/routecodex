@@ -1,0 +1,86 @@
+{
+  "id": "v3.operation_runner.response",
+  "version": "1",
+  "inputs": [
+    { "id": "provider-raw", "schema": "Object", "schema_ref": "v3.operation_runner.arc.provider_raw" }
+  ],
+  "nodes": [
+    {
+      "id": "adjust_provider_private_response",
+      "operator": "routecodex.v3.operation.adjust_provider_private_response",
+      "operator_version": "1",
+      "inputs": ["provider-raw"],
+      "output": { "id": "compatible-provider-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.compatible_provider_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.attempt_projection_context"],
+        "writes": []
+      }
+    },
+    {
+      "id": "normalize_provider_response",
+      "operator": "routecodex.v3.operation.normalize_provider_response",
+      "operator_version": "1",
+      "inputs": ["compatible-provider-response"],
+      "output": { "id": "canonical-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.canonical_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map"],
+        "writes": ["v3.operation_runner.response_provenance"]
+      }
+    },
+    {
+      "id": "govern_chat_response",
+      "operator": "routecodex.v3.operation.govern_chat_response",
+      "operator_version": "1",
+      "inputs": ["canonical-response"],
+      "output": { "id": "governed-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.governed_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.attempt_declaration_map", "v3.operation_runner.explicit_history_pairing", "v3.operation_runner.response_provenance", "v3.operation_runner.tool_thinking_turn_context"],
+        "writes": ["v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition", "v3.operation_runner.servertool_sidecar_plan"]
+      }
+    },
+    {
+      "id": "inverse_project_client_response",
+      "operator": "routecodex.v3.operation.inverse_project_client_response",
+      "operator_version": "1",
+      "inputs": ["governed-response"],
+      "output": { "id": "client-semantic-response", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_semantic_response" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.request_inverse_context", "v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map", "v3.operation_runner.response_provenance", "v3.operation_runner.response_tool_binding", "v3.operation_runner.execution_disposition"],
+        "writes": []
+      }
+    },
+    {
+      "id": "frame_committed_client_response",
+      "operator": "routecodex.v3.operation.frame_committed_client_response",
+      "operator_version": "1",
+      "inputs": ["client-semantic-response"],
+      "output": { "id": "client-frame-candidate", "schema": "Object", "schema_ref": "v3.operation_runner.arc.client_frame" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.execution_disposition"],
+        "writes": ["v3.operation_runner.client_frame_candidate"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "adjust_provider_private_response", "to": "normalize_provider_response", "arc_id": "compatible-provider-response" },
+    { "from": "normalize_provider_response", "to": "govern_chat_response", "arc_id": "canonical-response" },
+    { "from": "govern_chat_response", "to": "inverse_project_client_response", "arc_id": "governed-response" },
+    { "from": "inverse_project_client_response", "to": "frame_committed_client_response", "arc_id": "client-semantic-response" }
+  ],
+  "outputs": ["client-frame-candidate"]
+}
