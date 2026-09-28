@@ -131,6 +131,9 @@ jobs:
       - name: V3 canonical verification stack
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: npm --prefix v3 run verify:ci
+      - name: V3 DAGPipe graph governance
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: npm run verify:v3-dagpipe-governance
       - name: V3 route-classifier semantic gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}
         run: npm run test:route-classifier-semantics

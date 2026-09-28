@@ -211,9 +211,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User));
     let Some(segment) = responses_active_segment(entries, latest_user_index, latest_role) else {
         let current_turn_start = latest_user_index
-            .map(|index| {
-                responses_current_user_run_start(entries, index)
-            })
+            .map(|index| responses_current_user_run_start(entries, index))
             .unwrap_or(0);
         return V3CurrentTurnSignals {
             latest_message_from_user: matches!(latest_role, Some(ResponsesTurnRole::User)),
@@ -367,9 +365,7 @@ fn responses_current_user_run_start(
     let mut start = latest_user_index;
     while start > 0 {
         let previous = &entries[start - 1];
-        if previous.role != ResponsesTurnRole::User
-            || previous.kind == ResponsesTurnKind::Other
-        {
+        if previous.role != ResponsesTurnRole::User || previous.kind == ResponsesTurnKind::Other {
             break;
         }
         start -= 1;

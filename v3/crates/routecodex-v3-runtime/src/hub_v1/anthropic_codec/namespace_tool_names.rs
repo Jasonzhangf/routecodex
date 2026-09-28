@@ -97,15 +97,13 @@ fn collect_namespace_dispatch_identities(
         };
         let client_name = format!("{client_namespace}.{name}");
         match child.get("type").and_then(Value::as_str) {
-            Some("namespace") => {
-                collect_namespace_dispatch_identities(
-                    child,
-                    &client_name,
-                    name,
-                    identities,
-                    is_additional_tools,
-                )?
-            }
+            Some("namespace") => collect_namespace_dispatch_identities(
+                child,
+                &client_name,
+                name,
+                identities,
+                is_additional_tools,
+            )?,
             Some(kind @ ("function" | "custom")) => insert_dispatch_identity(
                 identities,
                 &anthropic_namespace_wire_name(wire_namespace, name),
