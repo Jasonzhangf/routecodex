@@ -80,14 +80,78 @@ Report source, test, build, install, restart, health, same-entry replay, review,
 
 ## Standard Defect Delivery Flow
 
-Every RouteCodex development or bug-fix task follows this order:
+`rcc-dev-skills` owns the V3 defect procedure; see
+`.agents/skills/rcc-dev-skills/references/60-defect-lifecycle.md` for its
+issue, sample-audit, and resource-close DAGs. AppSDK's project-governance Skill
+owns bug intake and solution-record commands. This section fixes the project
+contract and terminal conditions; it does not define a second command flow.
 
-1. Register or reopen the bug in the project bug tracker after checking for duplicates; preserve the exact reproduction evidence, owner, scope, and priority.
-2. Create an independent clean worktree from the latest integration base. Reproduce the bug there and make the smallest owner-scoped fix with a regression test.
-3. Run the mapped focused tests and required gates, then perform the required independent review on the validated candidate.
-4. Commit the reviewed candidate and merge it into `main`; verify the resulting main tree and commit receipt.
-5. Rebuild from the merged `main`, install through the declared release path when applicable, and restart the managed server using the official lifecycle command.
-6. Verify listener health and replay the original request through the real entrypoint. Report source, tests, build, install, restart, health, replay, review, merge, and remote evidence separately.
-7. Only after the merged runtime is validated, clean up the completed worktree and close the bug with the solution and verification receipt. Never delete an active or blocked worktree to make a task appear complete.
+Every execution-bound local defect, including one found in post-restart Codex
+samples, must be deduplicated or recorded in the project bug tracker and carry
+its authoritative issue ID to a solution receipt. Every repeated regression
+requires a regression test in the mapped required gate. Each issue gets its own
+clean worktree under `playground/<issue-id>` from the latest `origin/main`; do
+not reproduce or fix separate issues in one shared worktree. Classify provider
+sample errors using the typed probe bound to the same provider, auth-key
+identity, and model: probe success with payload failure is a local request
+problem; a sample-bound probe failure may be excluded as upstream; an unbound
+probe is unresolved and cannot pass the sample gate.
 
-No step may be skipped or inferred from another step. A candidate commit, review result, build artifact, or restart alone does not prove merged, running, or fixed behavior.
+Do not start issue work until canonical AppSDK intake/dedup returns the bug ID.
+If intake is unavailable, report the blocker and recovery condition before
+creating a worktree; never substitute a local tracker or fabricated ID. The
+issue owner carries the issue through its gates and cleanup, independent
+reviewers own their review verdicts, the authorized delivery owner handles
+merge/push, and the master owns the separate residual-resource inventory.
+
+Each issue run has one entry and one disposition exit:
+
+```text
+bug intake/dedup -> issue-owned clean worktree at latest origin/main
+-> reproduce + bind feature DAG/maps, first divergence, unique owner, and regression evidence
+-> minimal owner-scoped fix -> fetch/combine latest origin/main -> candidate commit + exact SHA
+-> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
+-> when runtime-impacting: install/restart candidate, check health/replay, audit Codex samples
+-> independent Codex and AGY architecture reviews on that exact validated candidate
+-> recheck origin/main -> merge reviewed candidate into clean main -> push
+-> candidate/main equivalence + remote receipt
+-> rebuild merged main and install/restart when runtime-impacting
+-> merged-main real-entry replay or scoped consumer verification
+-> after every managed restart: health + Codex sample audit
+-> issue-owner cleanup of its worktree/playground and temporary resources
+-> one bug disposition receipt: solved or open
+```
+
+Before merge, a newer `origin/main` or any candidate change invalidates the
+bound validation/review evidence. Record that attempt as `open`; continue from a
+new candidate attempt for the same bug ID and rerun affected gates, E2E, and
+reviews. Do not create a cross-attempt back-edge or reuse stale evidence.
+
+`solved` requires every applicable test/build/E2E and runtime gate, both
+required architecture reviews, merge and remote receipts, candidate/main
+equivalence, post-merge replay and sample audit after any managed restart, and
+verified removal of the issue owner's resources. Post-merge verification uses
+the real entrypoint for runtime changes and the scoped consumer for non-runtime
+changes; sample audit covers every managed restart in the issue run. Any failed
+or unavailable gate,
+review finding, unresolved/local regression sample, merge/push failure, or
+cancellation reaches the same `open` disposition with cause, owner, recovery
+condition, and retained-resource state. Keep an active or blocked worktree; do
+not clean resources still needed for recovery. A candidate commit, review,
+artifact, restart, or health result alone never proves the bug solved.
+
+The master has a separate residual-resource DAG at scheduling close:
+
+```text
+inventory remaining worktrees/playgrounds/tmp/logs/forwards/processes
+-> bind each to owner, active/stale status, and evidence
+-> coordinate the owner's authorized terminal disposition
+-> remove only resources proven stale and authorized for cleanup
+-> verify absence; retain unknown/active resources as open items
+-> one residual-resource inventory receipt
+```
+
+The master owns the inventory and its receipt; resource owners perform cleanup
+within their ownership. Never delete an unknown, active, shared, or other-owner
+resource by assumption. No applicable node may be skipped or inferred from an
+earlier node.
