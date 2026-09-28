@@ -44,21 +44,20 @@ rccv3 --version
 rccv3 restart -c <active-config>
 ```
 
-5. `restart` is NOT guaranteed to leave a running server. It controls an existing
-   managed instance and exits non-zero with `NotRunning: managed instance is not
-   running` when no live instance owns the listeners. Always confirm a real
-   running instance and, if absent, start it:
+5. `restart` controls an existing managed instance and exits non-zero with
+   `NotRunning: managed instance is not running` when no live instance owns the
+   listeners. Confirm status; if it is not `running`, stop and report this
+   lifecycle step as incomplete. Do not substitute `start` or another lifecycle
+   action unless the user explicitly authorizes it:
 
 ```bash
 rccv3 status -c <active-config>          # state must be "running"
-rccv3 start  -c <active-config>          # only when status is stopped/failed
 ```
 
    `restart` on a stopped instance, or `restart` whose control exchange fails,
    leaves the service down and the whole runtime unavailable. Treat a non-zero
-   `restart` exit or a non-`running` status as an incomplete step, run
-   `rccv3 start`, and re-check status before continuing. Never report lifecycle
-   done from the `restart` exit code alone.
+   `restart` exit or a non-`running` status as an incomplete step. Never report
+   lifecycle done from the `restart` exit code alone.
 6. Check every listener for expected version, identity, and readiness.
 7. Replay target entry; bind request id to provider-bound request, raw response/error, and client response.
 

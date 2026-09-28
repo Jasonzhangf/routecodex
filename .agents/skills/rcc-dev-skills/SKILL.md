@@ -32,15 +32,24 @@ rg -n "feature_id: ${rcc_task_feature}" \
 npm run verify:v3-architecture-ci
 ```
 
-9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero `restart` exit or a status that is not `running` is an incomplete step. Run `rccv3 start -c <active-config>`, then re-check `rccv3 status` and listener health before claiming any lifecycle evidence.
+9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
 10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
+
+## Defect Lifecycle
+
+Every execution-bound defect uses the canonical issue intake and close contract
+in `.appsdk/skills/appsdk-project-governance/SKILL.md`. For the issue DAG,
+per-restart Codex sample audit, and master residual-resource closeout, read
+[`references/60-defect-lifecycle.md`](references/60-defect-lifecycle.md).
+Repeated regressions require a regression test in the mapped required gate.
 
 ## Review Gate
 
-After verification and before commit/merge, use the reviewer selected by global
-AGENTS.md and its shared review standards. Apply the project Semantic Invariants
-and mapped owner/edge/gate bindings. Do not duplicate the global checklist or
-historical-finding policy here.
+After author verification and before commit/merge, run the ordinary reviewers
+required by global `AGENTS.md` L3: Codex Review and AGY Review. Bind both to the
+same validated candidate SHA and apply their shared review standards, project
+Semantic Invariants, and mapped owner/edge/gate bindings. Do not duplicate the
+shared checklist or historical-finding policy here.
 
 ## Routes
 
@@ -55,6 +64,7 @@ historical-finding policy here.
 | selected provider model | `references/96-v3-selected-provider-model-binding-sop.md` |
 | continuation cache | `references/97-continuation-cache-compliance.md` |
 | provider request/error | `references/98-provider-request-dryrun-and-request-error-debug.md` |
+| defect issue/sample/resource lifecycle | `references/60-defect-lifecycle.md` |
 
 For an explicit provider/model pin, set the client request `model` to
 `<provider_id>.<model_id>` (for example `kdns.deepseek-v4.1-flash`); this is
@@ -62,4 +72,4 @@ For an explicit provider/model pin, set the client request `model` to
 
 ## Report
 
-Report goal, owner, first divergence, changed paths, red/green evidence, mapped gates, installed runtime evidence, review result, remaining gap, and next transition. State why edited owner is unique and which adjacent layers were ruled out.
+Report goal, owner, first divergence, changed paths, red/green evidence, mapped gates, installed runtime evidence, review result, remaining gap, and next transition. For defects, include issue ID/state, merge receipt, post-restart sample classifications, and resource-cleanup evidence. State why edited owner is unique and which adjacent layers were ruled out.
