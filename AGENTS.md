@@ -115,9 +115,7 @@ bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> independent Codex and AGY architecture reviews on that exact validated candidate
 -> recheck origin/main -> merge reviewed candidate into clean main -> push
 -> candidate/main equivalence + remote receipt
--> rebuild merged main and install/restart when runtime-impacting
--> merged-main real-entry replay or scoped consumer verification
--> after every managed restart: health + Codex sample audit
+-> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
 -> issue-owner cleanup of its worktree/playground and temporary resources
 -> one bug disposition receipt: solved or open
 ```
@@ -133,8 +131,8 @@ equivalence, post-merge replay and sample audit after any managed restart, and
 verified removal of the issue owner's resources. Post-merge verification uses
 the real entrypoint for runtime changes and the scoped consumer for non-runtime
 changes; sample audit covers every managed restart in the issue run. Any failed
-or unavailable gate,
-review finding, unresolved/local regression sample, merge/push failure, or
+or unavailable gate, resource-cleanup failure, review finding,
+unresolved/local regression sample, merge/push failure, or
 cancellation reaches the same `open` disposition with cause, owner, recovery
 condition, and retained-resource state. Keep an active or blocked worktree; do
 not clean resources still needed for recovery. A candidate commit, review,

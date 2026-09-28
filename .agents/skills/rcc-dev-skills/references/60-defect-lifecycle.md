@@ -36,8 +36,7 @@ bug intake / dedup
 -> health + real-entry replay + post-restart sample audit
 -> independent Codex review and independent AGY review on that exact validated candidate SHA
 -> recheck origin/main -> merge reviewed candidate to clean main -> push + candidate/main equivalence + remote receipt
--> rebuild merged main + install applicable artifact
--> when runtime-impacting: managed restart + health + real-entry replay + post-restart sample audit
+-> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
 -> issue-owned resource cleanup + absence checks
 -> one issue disposition receipt
 ```
