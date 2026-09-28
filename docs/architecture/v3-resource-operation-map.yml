@@ -1090,8 +1090,14 @@ resources:
     owner_crate: routecodex-v3-error
     owner_node: V3Error05ExecutionDecision
     identity: [decision, targetExhausted]
+    semantic_contract:
+      owner: ErrorErr05ExecutionDecision
+      legal_values: [retry, terminal_client_error]
+      retry_rule: retry remains a typed control decision; the fixed Error graph still reaches Error06, which emits no error projection, RuntimeRetryLaunch consumes the decision and runs typed attempt_cleanup, then re-enters the request graph without client SSE commit and without RuntimeRequestFinalizer
+      terminal_rule: Error06 emits a projected candidate only for terminal_client_error; Runtime alone submits that candidate through Server/SSE; RuntimeAttemptCleanup releases attempt scope after submission before RuntimeRequestFinalizer releases request scope
+      payload_rule: this decision is typed control resource; it is never reconstructed from response payload or debug state
     allowed_writers: [build_v3_error_05_execution_decision_from_v3_error_04]
-    allowed_readers: [V3Error06ClientProjected]
+    allowed_readers: [V3Error06ClientProjected, RuntimeClientCommit, RuntimeRetryLaunch, RuntimeAttemptCleanup, RuntimeRequestFinalizer]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1434,7 +1440,7 @@ resources:
     owner_node: V3ProtocolConversionFieldParityContract
     identity: [entryProtocol, providerProtocol, clientProjectionProtocol, fieldFamily]
     allowed_writers: [docs/design/v3-protocol-request-field-projection.md, docs/goals/v3-protocol-conversion-field-parity-test-design.md, docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md, docs/architecture/manifests/v3.protocol_request_field_projection.yml, docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml, docs/architecture/reviews/v3-protocol-semantic-matrix-review.md, docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml, v3/scripts/architecture/verify-v3-protocol-conversion-field-parity.mjs]
-    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, v3/scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
+    allowed_readers: [v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_tool_id.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/projection_context.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs, v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs, docs/architecture/v3-function-map.yml, docs/architecture/v3-mainline-call-map.yml, docs/architecture/v3-verification-map.yml, docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html, v3/scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-virtual-router, routecodex-v3-target, MetadataCenter, SSE transport, provider transport, src, sharedmodule]
     data_plane_fields: [client_metadata, metadata, reasoning_effort, reasoning_budget_tokens, reasoning_summary_policy, reasoning_context_policy, reasoning_mode, reasoning_include_thoughts, reasoning_display_policy, stop, thinking, tool_choice, usage, model, created, response_format]
     control_plane_fields: [metadata_center, routeHint, requestCapabilities]
@@ -2839,3 +2845,350 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: anchored
+
+  - resource_id: v3.operation_runner.dagpipe_manifest
+    resource_kind: config_contract
+    lifecycle: v3.config.compile
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config04ResourceRegistryBuilt
+    identity: [configVersion, graphIds, graphVersions, operatorBindings]
+    allowed_writers: [compile_hub_v1, compile_v3_hub_v1_static_registry_from_config]
+    allowed_readers: [V3Config05ManifestPublished, V3HubRuntimeKernel, compile_v3_operation_runner_graph]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, dynamic_loader]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.operator_registry
+    resource_kind: control
+    lifecycle: v3.operation_runner.compile
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerOperatorRegistry
+    identity: [operator, version]
+    semantic_contract:
+      admission: each DAGpipe node must resolve exact operator@version through compile(), not a non-empty descriptor
+      compile_gate: parse graph JSON, register operators, allow only declared effects, reject dead nodes and unknown bindings
+    allowed_writers: [register_v3_operation_runner_operator]
+    allowed_readers: [compile_v3_operation_runner_graph, pipeline_runtime::compile]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, dynamic_loader]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.execution_mode
+    resource_kind: side_channel
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerExecutionPlan
+    identity: [requestId, attemptId, selectedTargetIdentity]
+    allowed_writers: [plan_v3_operation_runner_execution]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_provider_semantic, govern_v3_operation_runner_chat_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.request_origin_kind
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: RuntimeRequestGraphEntry
+    identity: [requestId, invocationId, originKind]
+    legal_values: [client_entry, retry, internal_followup]
+    semantic_contract:
+      producer: RuntimeRequestGraphEntry
+      lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client_entry, retry, or internal_followup before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
+      client_entry_rule: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; normalize_v3_operation_runner_request_losslessly initializes request_inverse_context and explicit_history_pairing from the original client entry payload
+      retry_internal_followup_rule: RuntimeRetryLaunch/RuntimeInternalFollowup route re-entry through RuntimeRequestGraphEntry, which creates originKind=retry or internal_followup before the next graph invocation; normalize_v3_operation_runner_request_losslessly reads the existing request_inverse_context and never rebuilds or overwrites it from an internal follow-up payload
+      payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
+    allowed_writers: [RuntimeRequestGraphEntry]
+    allowed_readers:
+    - normalize_v3_operation_runner_request_losslessly
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: graph_invocation_return; no MetadataCenter slot and no cross-invocation storage to clean
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.request_inverse_context
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerInboundInverse
+    identity: [requestId, entryProtocol]
+    semantic_contract:
+      storage: metadata_center.inbound_inverse_context
+      content: immutable original client entry-protocol field provenance and current request tool identity, namespace, kind, name, and source path/encoding references; remains valid across retry and internal servertool follow-up
+      internal_origin_rule: never rebuilt from an internal follow-up payload; request graph re-entry reads the preserved slot and does not replace it
+      client_entry_rule: initialized only when request_origin_kind=client_entry
+      retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
+      payload_rule: arguments and tool business values remain in canonical payload; only identity, paths, and encoding are stored here
+    allowed_writers: [normalize_v3_operation_runner_request_losslessly]
+    allowed_readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.attempt_projection_context
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerAttemptProjection
+    identity: [requestId, attemptId, selectedProviderProtocol, modelCapabilityRevision]
+    allowed_writers: [project_v3_operation_runner_standard_provider_request]
+    allowed_readers: [normalize_v3_operation_runner_provider_response, inverse_project_v3_operation_runner_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.attempt_declaration_map
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerAttemptDeclaration
+    identity: [requestId, attemptId, providerProtocol, providerModel]
+    semantic_contract:
+      writer: project_v3_operation_runner_standard_provider_request
+      content: collision_safe_bijection_for_tools_actually_emitted_for_this_attempt
+      new_call_rule: Chat Process Resp03 may authorize a new provider call only from this successful attempt's map
+      inverse_rule: RespOutbound restores original client identity from this map only for the successful attempt
+      payload_rule: tool arguments and inputs remain opaque business payload; the map stores identity, namespace, kind, encoding, and call/output references only
+    allowed_writers: [project_v3_operation_runner_standard_provider_request]
+    allowed_readers: [normalize_v3_operation_runner_provider_response, govern_v3_operation_runner_chat_response, inverse_project_v3_operation_runner_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, govern_v3_operation_runner_chat_response]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup; terminal_client_error_cancel_or_disconnect_attempt_cleanup_before_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.explicit_history_pairing
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerRequestHistoryPairing
+    identity: [requestId, entryProtocol, callId, outputId]
+    semantic_contract:
+      writer: normalize_v3_operation_runner_request_losslessly
+      client_entry_rule: initialized only when request_origin_kind=client_entry
+      retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
+      content: explicit_current_request_history_call_and_output_identity_pairs_with_original_kind_namespace_name_argument_paths_encoding
+      authority: history validates and passes through prior calls; it never authorizes a new provider call
+      resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
+      payload_rule: argument and output values remain in canonical payload; only identity and pairing references are control state
+    allowed_writers: [normalize_v3_operation_runner_request_losslessly]
+    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.response_provenance
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerResponseProvenance
+    identity: [requestId, successfulAttemptId, providerProtocol, providerModel]
+    semantic_contract:
+      writer: normalize_v3_operation_runner_provider_response
+      content: successful_attempt_source_and_provider_response_field_origin
+      consumer_rule: Chat Process Resp03 and inverse projection may consume provenance only for the successful attempt
+      payload_rule: provenance is typed control metadata; it is not reconstructed from response payload fields
+    allowed_writers: [normalize_v3_operation_runner_provider_response]
+    allowed_readers: [govern_v3_operation_runner_chat_response, inverse_project_v3_operation_runner_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, govern_v3_operation_runner_chat_response]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.tool_thinking_turn_context
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.current_turn
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerToolThinkingTurn
+    identity: [requestId, pipelineId]
+    allowed_writers: [compile_v3_operation_runner_tool_thinking_context]
+    allowed_readers: [govern_v3_operation_runner_chat_response, finalize_v3_operation_runner_tool_thinking_turn]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: V3HubRespChatProcess03Governed or request finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.response_tool_binding
+    resource_kind: projection_resource
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerResponseToolBinding
+    identity: [requestId, successfulAttemptId, providerCallId]
+    allowed_writers: [govern_v3_operation_runner_chat_response]
+    allowed_readers: [inverse_project_v3_operation_runner_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: true
+    release_point: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_before_terminal_client_error_cancel_disconnect_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.execution_disposition
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerExecutionDisposition
+    identity: [requestId, successfulAttemptId, outcome]
+    semantic_contract:
+      producer: govern_v3_operation_runner_chat_response
+      legal_values: [client_commit, servertool_followup]
+      graph_rule: every response node runs once in fixed order; the disposition never changes graph topology or skips a node
+      client_commit_effect: RuntimeClientCommit may submit the staged client-frame-candidate only after the graph returns and this typed value is client_commit
+      servertool_effect: inverse and frame staging produce an empty candidate for servertool_followup; Runtime discards it, executes the declared sidecar, and re-enters the request graph
+      retry_rule: retry is owned by ErrorErr05ExecutionDecision through v3.error.execution_decision, not by Resp03
+      cancel_rule: cancellation is owned by RuntimeCancellation, not produced by Resp03
+      finalization: client_commit reaches RuntimeClientCommit and then RuntimeRequestFinalizer; terminal_client_error_cancel_and_disconnect run typed attempt_cleanup before RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization
+    allowed_writers: [govern_v3_operation_runner_chat_response]
+    allowed_readers: [inverse_project_v3_operation_runner_client_response, frame_v3_operation_runner_committed_client_response, runtime_client_commit, RuntimeInternalFollowup, RuntimeRequestFinalizer]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, protocol_adapter, payload_writer]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_request_finalizer_after_attempt_cleanup_for_terminal_outcomes; servertool_followup_disposition_released_by_attempt_cleanup_before_request_reentry
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.client_semantic_response
+    resource_kind: normal_payload
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerInverseProjectClient
+    identity: [requestId, successfulAttemptId, entryProtocol]
+    allowed_writers: [inverse_project_v3_operation_runner_client_response]
+    allowed_readers: [frame_v3_operation_runner_committed_client_response]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, govern_v3_operation_runner_chat_response]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: V3OperationRunnerFrameClient
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.client_frame_candidate
+    resource_kind: client_frame_staging
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerFrameClient
+    identity: [requestId, successfulAttemptId, entryProtocol, frameSequence]
+    semantic_contract:
+      staging_only: this resource is a staged candidate produced by the fixed response graph; it is never written directly to a client body
+      committer: RuntimeClientCommit alone submits the staged candidate to Server/SSE after the graph returns and execution_disposition=client_commit
+      servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it and re-enters the request graph
+      terminal_rule: terminal error candidates follow the same staged-candidate boundary and are submitted only through Server/SSE
+      client_communication_owner: Server/SSE owns actual HTTP/WebSocket/SSE framing and final delivery; graph nodes do not communicate with the client
+    allowed_writers: [frame_v3_operation_runner_committed_client_response]
+    allowed_readers: [runtime_client_commit]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, servertool_hook, payload_writer, V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_client_commit; terminal_client_error_candidate_released_by_attempt_cleanup_before_request_finalizer; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.servertool_sidecar_plan
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.response
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerExecutionDisposition
+    identity: [requestId, successfulAttemptId, servertoolHookId, sidecarPlan]
+    semantic_contract:
+      producer: govern_v3_operation_runner_chat_response
+      only_emitted_for: execution_disposition=servertool_followup
+      consumer_rule: RuntimeInternalFollowup alone executes the declared sidecar and releases the plan before re-entering the request graph
+      payload_rule: the sidecar plan is typed control state and is never serialized into client or provider body
+    allowed_writers: [govern_v3_operation_runner_chat_response]
+    allowed_readers: [RuntimeInternalFollowup]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, servertool_hook, payload_writer, protocol_adapter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: after_sidecar_execution_before_request_reentry
+    binding_status: design_pending
+
+  - resource_id: v3.error.client_projection_candidate
+    resource_kind: error_projection_staging
+    lifecycle: v3.operation_runner.error
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error06ClientProjected
+    identity: [requestId, decision, status, code, errorNode]
+    semantic_contract:
+      staging_only: this resource is the staged terminal error candidate produced by the fixed error graph; it is never written directly to a client body
+      retry_rule: Error06 always runs but returns an empty candidate for retry; Runtime discards it and re-enters the request graph
+      terminal_rule: for terminal_client_error, RuntimeClientCommit alone submits this staged candidate through Server/SSE, then RuntimeAttemptCleanup releases attempt scope before RuntimeRequestFinalizer releases request scope
+      committer: RuntimeClientCommit consumes the candidate; Server/SSE owns actual client framing and delivery
+    allowed_writers: [ErrorErr06ClientProjected, build_v3_error_06_client_projected_from_v3_error_05]
+    allowed_readers: [runtime_client_commit]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, V3Server16HttpFrame, V3ServerRespOutbound06ClientFrame]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_client_commit_for_terminal_projection; attempt_cleanup_for_terminal_projection_before_request_finalizer; empty_retry_candidate_released_by_attempt_cleanup_before_request_reentry
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.metadata_center_control
+    resource_kind: typed_control_resource_registry
+    lifecycle: v3.operation_runner.request
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: V3OperationRunnerMetadataCenter
+    identity: [requestId, slotFamily, slotId]
+    allowed_writers: [runtime_operation_runner_control_owner]
+    allowed_readers: [runtime_operation_runner_control_reader]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: runtime_request_finalizer
+    binding_status: design_pending
+
+  - resource_id: v3.operation_runner.field_profile_manifest
+    resource_kind: config_contract
+    lifecycle: v3.operation_runner.compile
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-config
+    owner_node: V3Config05ManifestPublished
+    identity: [contractId, schemaVersion, fieldSets, operatorRegistry]
+    allowed_writers: [publish_v3_operation_runner_field_profile]
+    allowed_readers: [compile_v3_operation_runner_graph, pipeline_runtime::compile, verifyV3OperationRunnerDagpipe]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, dynamic_loader]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design_pending

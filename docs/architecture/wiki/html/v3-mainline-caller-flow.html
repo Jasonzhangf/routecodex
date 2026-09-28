@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>75 functional paths</span>
-        <span>446 caller edges</span>
+        <span>78 functional paths</span>
+        <span>464 caller edges</span>
       </div>
     </header>
 
@@ -470,7 +470,7 @@ flowchart TD
 <tr><td>Forbidden source registered direct response edges</td><td><strong>none</strong></td></tr>
 <tr><td>Invalid aggregate wrapper edges</td><td><strong>none</strong></td></tr>
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
-<tr><td>Binding-pending edges</td><td><strong>4</strong></td></tr>
+<tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
 <tr><td>live-bound source edges</td><td><strong>353</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
@@ -496,6 +496,24 @@ flowchart TD
 <tr><td><code>v3.responses_chat_sse_typed_tree</code></td><td><code>v3-responses-sse-tree-03</code></td><td><code>HubRespChatProcess03Governed</code></td><td><code>V3HubRespOutbound05ClientSemantic</code></td></tr>
 <tr><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>v3-runtime-restart-handoff-01</code></td><td><code>V3Front01StableRequestOwner</code></td><td><code>V3Front02RequestLeaseBound</code></td></tr>
 <tr><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>v3-runtime-restart-handoff-02</code></td><td><code>V3Front02RequestLeaseBound</code></td><td><code>V3Front08ClientTerminalOrError</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-01</code></td><td><code>V3OperationRunnerCaptureClientJson</code></td><td><code>V3OperationRunnerNormalizeRequest</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-02</code></td><td><code>V3OperationRunnerNormalizeRequest</code></td><td><code>V3OperationRunnerResolveTarget</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-02b</code></td><td><code>V3OperationRunnerNormalizeRequest</code></td><td><code>V3OperationRunnerPlanExecution</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-03</code></td><td><code>V3OperationRunnerResolveTarget</code></td><td><code>V3OperationRunnerPlanExecution</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-04</code></td><td><code>V3OperationRunnerPlanExecution</code></td><td><code>V3OperationRunnerGovernChatRequest</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-05</code></td><td><code>V3OperationRunnerGovernChatRequest</code></td><td><code>V3OperationRunnerProjectProviderSemantic</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-06</code></td><td><code>V3OperationRunnerProjectProviderSemantic</code></td><td><code>V3OperationRunnerCompatRequest</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-07</code></td><td><code>V3OperationRunnerCompatRequest</code></td><td><code>V3OperationRunnerEncodeWire</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-08</code></td><td><code>V3OperationRunnerEncodeWire</code></td><td><code>V3OperationRunnerConstructTransport</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-01</code></td><td><code>V3OperationRunnerCompatResponse</code></td><td><code>V3OperationRunnerNormalizeResponse</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-02</code></td><td><code>V3OperationRunnerNormalizeResponse</code></td><td><code>V3OperationRunnerGovernResponse</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-03</code></td><td><code>V3OperationRunnerGovernResponse</code></td><td><code>V3OperationRunnerInverseProjectClient</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-04</code></td><td><code>V3OperationRunnerInverseProjectClient</code></td><td><code>V3OperationRunnerFrameClient</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-01</code></td><td><code>ErrorErr01SourceRaised</code></td><td><code>ErrorErr02HostCaptured</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-02</code></td><td><code>ErrorErr02HostCaptured</code></td><td><code>ErrorErr03RuntimeClassified</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-03</code></td><td><code>ErrorErr03RuntimeClassified</code></td><td><code>ErrorErr04RouterPolicyApplied</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-04</code></td><td><code>ErrorErr04RouterPolicyApplied</code></td><td><code>ErrorErr05ExecutionDecision</code></td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-05</code></td><td><code>ErrorErr05ExecutionDecision</code></td><td><code>ErrorErr06ClientProjected</code></td></tr>
 </tbody>
 </table>
 
@@ -542,6 +560,24 @@ flowchart TD
 <tr><td><code>v3.responses_chat_sse_typed_tree</code></td><td><code>v3-responses-sse-tree-03</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>v3-runtime-restart-handoff-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 <tr><td><code>v3.runtime_restart_handoff_skeleton</code></td><td><code>v3-runtime-restart-handoff-02</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-02</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-02b</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-03</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-04</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-05</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-06</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-07</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.request</code></td><td><code>v3-op-runner-req-08</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-02</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-03</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.response</code></td><td><code>v3-op-runner-resp-04</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-01</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-02</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-03</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-04</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
+<tr><td><code>v3.operation_runner.dagpipe.error</code></td><td><code>v3-op-runner-err-05</code></td><td><span class="status binding_pending">binding_pending</span></td><td>map owner exists but runtime/source binding is not proven</td></tr>
 </tbody>
 </table>
     </section>
@@ -629,6 +665,9 @@ flowchart TD
 <tr><td><a href="#chain-v3_responses_direct_full_attempt_commit"><code>v3.responses_direct_full_attempt_commit</code></a><br/>v 3.responses_direct_full_attempt_commit</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.responses_direct_full_attempt_commit</code></td><td><code>sha256:982bdfb9e55a…</code></td></tr>
 <tr><td><a href="#chain-v3_execution_control_payload_architecture"><code>v3.execution_control_payload_architecture</code></a><br/>v 3.execution_control_payload_architecture</td><td><span class="status pending_review">pending review</span></td><td>7</td><td>11</td><td><code>v3.execution_request_lifecycle</code></td><td><code>sha256:7e759b7774f6…</code></td></tr>
 <tr><td><a href="#chain-v3_memory_raw_capture"><code>v3.memory_raw_capture</code></a><br/>v 3.memory_raw_capture</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>9</td><td><code>v3.memory_raw_capture</code></td><td><code>sha256:9c828cc2b1e5…</code></td></tr>
+<tr><td><a href="#chain-v3_operation_runner_dagpipe_request"><code>v3.operation_runner.dagpipe.request</code></a><br/>v 3.operation_runner.dagpipe.request</td><td><span class="status pending_review">pending review</span></td><td>9</td><td>17</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:b7f431db088b…</code></td></tr>
+<tr><td><a href="#chain-v3_operation_runner_dagpipe_response"><code>v3.operation_runner.dagpipe.response</code></a><br/>v 3.operation_runner.dagpipe.response</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>13</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:35766f4e2942…</code></td></tr>
+<tr><td><a href="#chain-v3_operation_runner_dagpipe_error"><code>v3.operation_runner.dagpipe.error</code></a><br/>v 3.operation_runner.dagpipe.error</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>4</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:42fff5fcd38c…</code></td></tr>
 </tbody>
 </table>
     </section>
@@ -883,6 +922,20 @@ flowchart TD
             <span>5 edges · 9 resources · routecodex-v3-agent-memory, v3-runtime, v3-runtime::hub_v1</span>
             <span class="status pending_review">pending review</span>
           </a>
+<a class="branch-card" href="#chain-v3_operation_runner_dagpipe_request">
+            <span class="chain-id">v 3.operation_runner.dagpipe.request</span>
+            <span>V3OperationRunnerCaptureClientJson → V3OperationRunnerConstructTransport</span>
+            <span><code>v3.operation_runner.dagpipe.request</code></span>
+            <span>9 edges · 17 resources · pending</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_operation_runner_dagpipe_response">
+            <span class="chain-id">v 3.operation_runner.dagpipe.response</span>
+            <span>V3OperationRunnerCompatResponse → V3OperationRunnerFrameClient</span>
+            <span><code>v3.operation_runner.dagpipe.response</code></span>
+            <span>4 edges · 13 resources · pending</span>
+            <span class="status pending_review">pending review</span>
+          </a>
       </div>
     </section>
 
@@ -923,6 +976,13 @@ flowchart TD
             <span>V3ProviderResp14Raw → V3DirectResp14ProviderProjectionPrepared</span>
             <span><code>v3.sse_error_and_direct_consumer_pre_wiring</code></span>
             <span>6 edges · 11 resources · routecodex-v3-sse, v3-runtime</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_operation_runner_dagpipe_error">
+            <span class="chain-id">v 3.operation_runner.dagpipe.error</span>
+            <span>ErrorErr01SourceRaised → ErrorErr06ClientProjected</span>
+            <span><code>v3.operation_runner.dagpipe.error</code></span>
+            <span>5 edges · 4 resources · pending</span>
             <span class="status pending_review">pending review</span>
           </a>
       </div>
@@ -4969,6 +5029,161 @@ flowchart TD
 <tr><td><code>v3-memory-raw-capture-direct-resp03</code></td><td><code>V3ProviderResp14Raw</code><br/>→ <code>V3DirectResp14ProviderProjectionPrepared</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.memory.raw_capture_config</code> <code>v3.response.provider_raw</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.memory.response_capture</code> <code>v3.memory.l3_publication</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.memory.raw_capture_config</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.memory.l3_publication</code></div></td><td><code>apply_v3_direct_response_projection_hooks</code><br/><small>routecodex-v3-runtime/src/direct_response_hooks.rs</small></td><td><code>capture_responses_json</code><br/><small>routecodex-v3-agent-memory/src/lib.rs</small></td></tr>
 <tr><td><code>v3-memory-raw-capture-relay-resp03</code></td><td><code>V3HubRespInbound02Normalized</code><br/>→ <code>V3HubRespChatProcess03Governed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.memory.raw_capture_config</code> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.memory.response_capture</code> <code>v3.memory.l3_publication</code> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.memory.raw_capture_config</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.memory.l3_publication</code></div></td><td><code>govern_v3_hub_relay_response</code><br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small></td><td><code>capture_responses_json</code><br/><small>routecodex-v3-agent-memory/src/lib.rs</small></td></tr>
 <tr><td><code>v3-direct-sse-full-attempt-terminal-commit</code></td><td><code>V3DirectResp14ProviderProjectionPrepared</code><br/>→ <code>V3DirectSseAccept03ProjectedClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.full_attempt_buffer</code> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.response.client_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div></td><td><code>execute_v3_direct_runtime_kernel_core_resident</code><br/><small>routecodex-v3-runtime/src/kernel/v3_direct_core.rs</small></td><td><code>collect_direct_sse_attempt_after_terminal</code><br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_operation_runner_dagpipe_request" >
+      <summary>
+        <span class="summary-main">v 3.operation_runner.dagpipe.request</span>
+        <span class="summary-sub">V3OperationRunnerCaptureClientJson → V3OperationRunnerConstructTransport</span>
+        <span class="summary-sub">9 edges · <code>v3.operation_runner.dagpipe.request</code> · V3OperationRunnerCaptureClientJson → V3OperationRunnerConstructTransport</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.unified_operation_runner_design</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>pending</code></span>
+          <span>resources: <code>17</code></span>
+          <span>manifest: <code>docs/architecture/dagpipe/v3.operation_runner.request.graph.json</code></span>
+          <span class="pending-pill">9 binding pending</span>
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_operation_runner_dagpipe_request_0[&quot;&lt;b&gt;Operation Runner Capture Client Json&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerCaptureClientJson&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_1[&quot;&lt;b&gt;Operation Runner Normalize Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerNormalizeRequest&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_2[&quot;&lt;b&gt;Operation Runner Resolve Target&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerResolveTarget&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_3[&quot;&lt;b&gt;Operation Runner Plan Execution&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerPlanExecution&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_4[&quot;&lt;b&gt;Operation Runner Govern Chat Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerGovernChatRequest&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_5[&quot;&lt;b&gt;Operation Runner Project Provider Semantic&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerProjectProviderSemantic&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_6[&quot;&lt;b&gt;Operation Runner Compat Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerCompatRequest&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_7[&quot;&lt;b&gt;Operation Runner Encode Wire&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerEncodeWire&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_8[&quot;&lt;b&gt;Operation Runner Construct Transport&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerConstructTransport&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_request_0 --&gt;|v3-op-runner-req-01&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_1
+  n_v3_operation_runner_dagpipe_request_1 --&gt;|v3-op-runner-req-02&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_2
+  n_v3_operation_runner_dagpipe_request_1 --&gt;|v3-op-runner-req-02b&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_3
+  n_v3_operation_runner_dagpipe_request_2 --&gt;|v3-op-runner-req-03&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_3
+  n_v3_operation_runner_dagpipe_request_3 --&gt;|v3-op-runner-req-04&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_4
+  n_v3_operation_runner_dagpipe_request_4 --&gt;|v3-op-runner-req-05&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_5
+  n_v3_operation_runner_dagpipe_request_5 --&gt;|v3-op-runner-req-06&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_6
+  n_v3_operation_runner_dagpipe_request_6 --&gt;|v3-op-runner-req-07&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_7
+  n_v3_operation_runner_dagpipe_request_7 --&gt;|v3-op-runner-req-08&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_request_8
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_operation_runner_dagpipe_request_0,n_v3_operation_runner_dagpipe_request_1,n_v3_operation_runner_dagpipe_request_2,n_v3_operation_runner_dagpipe_request_3,n_v3_operation_runner_dagpipe_request_4,n_v3_operation_runner_dagpipe_request_5,n_v3_operation_runner_dagpipe_request_6,n_v3_operation_runner_dagpipe_request_7,n_v3_operation_runner_dagpipe_request_8 node;
+  class n_v3_operation_runner_dagpipe_request_0,n_v3_operation_runner_dagpipe_request_1,n_v3_operation_runner_dagpipe_request_2,n_v3_operation_runner_dagpipe_request_3,n_v3_operation_runner_dagpipe_request_4,n_v3_operation_runner_dagpipe_request_5,n_v3_operation_runner_dagpipe_request_6,n_v3_operation_runner_dagpipe_request_7,n_v3_operation_runner_dagpipe_request_8 pending;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-op-runner-req-01</code></td><td><code>V3OperationRunnerCaptureClientJson</code><br/>→ <code>V3OperationRunnerNormalizeRequest</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.dagpipe_manifest</code> <code>v3.operation_runner.field_profile_manifest</code> <code>v3.operation_runner.operator_registry</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-02</code></td><td><code>V3OperationRunnerNormalizeRequest</code><br/>→ <code>V3OperationRunnerResolveTarget</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.request_origin_kind</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.metadata_center_control</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-02b</code></td><td><code>V3OperationRunnerNormalizeRequest</code><br/>→ <code>V3OperationRunnerPlanExecution</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.config.published_manifest</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.normal_payload</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.request_origin_kind</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.metadata_center_control</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-03</code></td><td><code>V3OperationRunnerResolveTarget</code><br/>→ <code>V3OperationRunnerPlanExecution</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.resolved_target</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.operation_runner.execution_mode</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.hub.resolved_target</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.execution_mode</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-04</code></td><td><code>V3OperationRunnerPlanExecution</code><br/>→ <code>V3OperationRunnerGovernChatRequest</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.operation_runner.execution_mode</code> <code>v3.operation_runner.tool_thinking_turn_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.operation_runner.tool_thinking_turn_context</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.execution_mode</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.tool_thinking_turn_context</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-05</code></td><td><code>V3OperationRunnerGovernChatRequest</code><br/>→ <code>V3OperationRunnerProjectProviderSemantic</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.normal_payload</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.request.provider_semantic</code> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.execution_mode</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.explicit_history_pairing</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-06</code></td><td><code>V3OperationRunnerProjectProviderSemantic</code><br/>→ <code>V3OperationRunnerCompatRequest</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.request.provider_semantic</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-07</code></td><td><code>V3OperationRunnerCompatRequest</code><br/>→ <code>V3OperationRunnerEncodeWire</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.provider_wire_payload</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-req-08</code></td><td><code>V3OperationRunnerEncodeWire</code><br/>→ <code>V3OperationRunnerConstructTransport</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.provider_wire_payload</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.transport_request</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_operation_runner_dagpipe_response" >
+      <summary>
+        <span class="summary-main">v 3.operation_runner.dagpipe.response</span>
+        <span class="summary-sub">V3OperationRunnerCompatResponse → V3OperationRunnerFrameClient</span>
+        <span class="summary-sub">4 edges · <code>v3.operation_runner.dagpipe.response</code> · V3OperationRunnerCompatResponse → V3OperationRunnerFrameClient</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Design-only DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Every node runs in fixed order; Runtime consumes Resp03 disposition after the graph and alone decides commit versus servertool follow-up. Client_commit reaches RuntimeClientCommit and RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization. Retry is Error05-owned; cancellation is Runtime-owned.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.unified_operation_runner_design</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>pending</code></span>
+          <span>resources: <code>13</code></span>
+          <span>manifest: <code>docs/architecture/dagpipe/v3.operation_runner.response.graph.json</code></span>
+          <span class="pending-pill">4 binding pending</span>
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_operation_runner_dagpipe_response_0[&quot;&lt;b&gt;Operation Runner Compat Response&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerCompatResponse&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_response_1[&quot;&lt;b&gt;Operation Runner Normalize Response&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerNormalizeResponse&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_response_2[&quot;&lt;b&gt;Operation Runner Govern Response&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerGovernResponse&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_response_3[&quot;&lt;b&gt;Operation Runner Inverse Project Client&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerInverseProjectClient&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_response_4[&quot;&lt;b&gt;Operation Runner Frame Client&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3OperationRunnerFrameClient&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_response_0 --&gt;|v3-op-runner-resp-01&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_response_1
+  n_v3_operation_runner_dagpipe_response_1 --&gt;|v3-op-runner-resp-02&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_response_2
+  n_v3_operation_runner_dagpipe_response_2 --&gt;|v3-op-runner-resp-03&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_response_3
+  n_v3_operation_runner_dagpipe_response_3 --&gt;|v3-op-runner-resp-04&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_response_4
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_operation_runner_dagpipe_response_0,n_v3_operation_runner_dagpipe_response_1,n_v3_operation_runner_dagpipe_response_2,n_v3_operation_runner_dagpipe_response_3,n_v3_operation_runner_dagpipe_response_4 node;
+  class n_v3_operation_runner_dagpipe_response_0,n_v3_operation_runner_dagpipe_response_1,n_v3_operation_runner_dagpipe_response_2,n_v3_operation_runner_dagpipe_response_3,n_v3_operation_runner_dagpipe_response_4 pending;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-op-runner-resp-01</code></td><td><code>V3OperationRunnerCompatResponse</code><br/>→ <code>V3OperationRunnerNormalizeResponse</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.response.provider_raw</code> <code>v3.operation_runner.attempt_projection_context</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.attempt_projection_context</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-resp-02</code></td><td><code>V3OperationRunnerNormalizeResponse</code><br/>→ <code>V3OperationRunnerGovernResponse</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code> <code>v3.operation_runner.response_provenance</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code> <code>v3.operation_runner.response_provenance</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.response_provenance</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-resp-03</code></td><td><code>V3OperationRunnerGovernResponse</code><br/>→ <code>V3OperationRunnerInverseProjectClient</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.hub.response_semantic</code> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code> <code>v3.operation_runner.explicit_history_pairing</code> <code>v3.operation_runner.response_provenance</code> <code>v3.operation_runner.tool_thinking_turn_context</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.hub.response_semantic</code> <code>v3.operation_runner.response_tool_binding</code> <code>v3.operation_runner.execution_disposition</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.request_inverse_context</code> <code>v3.operation_runner.attempt_projection_context</code> <code>v3.operation_runner.attempt_declaration_map</code> <code>v3.operation_runner.explicit_history_pairing</code> <code>v3.operation_runner.response_provenance</code> <code>v3.operation_runner.tool_thinking_turn_context</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.response_tool_binding</code> <code>v3.operation_runner.execution_disposition</code> <code>v3.operation_runner.servertool_sidecar_plan</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-resp-04</code></td><td><code>V3OperationRunnerInverseProjectClient</code><br/>→ <code>V3OperationRunnerFrameClient</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.operation_runner.client_semantic_response</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.operation_runner.client_frame_candidate</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.execution_disposition</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.operation_runner.client_frame_candidate</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_operation_runner_dagpipe_error" >
+      <summary>
+        <span class="summary-main">v 3.operation_runner.dagpipe.error</span>
+        <span class="summary-sub">ErrorErr01SourceRaised → ErrorErr06ClientProjected</span>
+        <span class="summary-sub">5 edges · <code>v3.operation_runner.dagpipe.error</code> · ErrorErr01SourceRaised → ErrorErr06ClientProjected</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.unified_operation_runner_design</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>pending</code></span>
+          <span>resources: <code>4</code></span>
+          <span>manifest: <code>docs/architecture/dagpipe/v3.operation_runner.error.graph.json</code></span>
+          <span class="pending-pill">5 binding pending</span>
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_operation_runner_dagpipe_error_0[&quot;&lt;b&gt;Error Err 01 Source Raised&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr01SourceRaised&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_1[&quot;&lt;b&gt;Error Err 02 Host Captured&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr02HostCaptured&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_2[&quot;&lt;b&gt;Error Err 03 Runtime Classified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr03RuntimeClassified&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_3[&quot;&lt;b&gt;Error Err 04 Router Policy Applied&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr04RouterPolicyApplied&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_4[&quot;&lt;b&gt;Error Err 05 Execution Decision&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr05ExecutionDecision&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_5[&quot;&lt;b&gt;Error Err 06 Client Projected&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;ErrorErr06ClientProjected&lt;/small&gt;&quot;]
+  n_v3_operation_runner_dagpipe_error_0 --&gt;|v3-op-runner-err-01&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_error_1
+  n_v3_operation_runner_dagpipe_error_1 --&gt;|v3-op-runner-err-02&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_error_2
+  n_v3_operation_runner_dagpipe_error_2 --&gt;|v3-op-runner-err-03&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_error_3
+  n_v3_operation_runner_dagpipe_error_3 --&gt;|v3-op-runner-err-04&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_error_4
+  n_v3_operation_runner_dagpipe_error_4 --&gt;|v3-op-runner-err-05&lt;br/&gt;pending → pending| n_v3_operation_runner_dagpipe_error_5
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_operation_runner_dagpipe_error_0,n_v3_operation_runner_dagpipe_error_1,n_v3_operation_runner_dagpipe_error_2,n_v3_operation_runner_dagpipe_error_3,n_v3_operation_runner_dagpipe_error_4,n_v3_operation_runner_dagpipe_error_5 node;
+  class n_v3_operation_runner_dagpipe_error_0,n_v3_operation_runner_dagpipe_error_1,n_v3_operation_runner_dagpipe_error_2,n_v3_operation_runner_dagpipe_error_3,n_v3_operation_runner_dagpipe_error_4,n_v3_operation_runner_dagpipe_error_5 pending;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-op-runner-err-01</code></td><td><code>ErrorErr01SourceRaised</code><br/>→ <code>ErrorErr02HostCaptured</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.operation_runner.metadata_center_control</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-err-02</code></td><td><code>ErrorErr02HostCaptured</code><br/>→ <code>ErrorErr03RuntimeClassified</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-err-03</code></td><td><code>ErrorErr03RuntimeClassified</code><br/>→ <code>ErrorErr04RouterPolicyApplied</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-err-04</code></td><td><code>ErrorErr04RouterPolicyApplied</code><br/>→ <code>ErrorErr05ExecutionDecision</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+<tr><td><code>v3-op-runner-err-05</code></td><td><code>ErrorErr05ExecutionDecision</code><br/>→ <code>ErrorErr06ClientProjected</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code> <code>v3.error.execution_decision</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.client_projection_candidate</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code> <code>v3.error.execution_decision</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.client_projection_candidate</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
 </tbody>
 </table>
       </div>

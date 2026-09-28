@@ -953,6 +953,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pipeline_runtime"
+version = "0.1.0"
+source = "git+https://github.com/Jasonzhangf/DAGpipe.git?tag=v0.1.0#8cb59fb5262b5e1e440638faf3b04e06a2762cfb"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1374,6 +1383,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
+ "pipeline_runtime",
  "provider-compat-core",
  "reqwest",
  "routecodex-v3-agent-memory",
@@ -1388,6 +1398,7 @@ dependencies = [
  "routecodex-v3-virtual-router",
  "serde",
  "serde_json",
+ "serde_yaml",
  "servertool-core",
  "thiserror 1.0.69",
  "tiktoken-rs",
@@ -1589,6 +1600,19 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -2024,6 +2048,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
