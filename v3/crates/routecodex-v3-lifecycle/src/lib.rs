@@ -1105,6 +1105,9 @@ async fn wait_for_stopping_instance(
         if status.state != V3ManagedRunState::Stopping {
             return Ok(());
         }
+        if owned_unreachable_runtime_state_is_reapable(instance_dir, declaration)? {
+            return Ok(());
+        }
         if tokio::time::Instant::now() >= deadline {
             return Err(V3LifecycleError::Timeout(format!(
                 "stop {} did not reach a terminal state before start",
