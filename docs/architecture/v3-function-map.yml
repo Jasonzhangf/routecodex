@@ -1284,6 +1284,9 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
     owner_boundary: Responses item and content projection helpers owned by provider-standard
       request formatting; no lifecycle/node transition owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
+    owner_boundary: OpenAI Chat content-part normalization helper included by request_outbound_format.rs;
+      no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
     owner_boundary: Gemini provider-standard request projection helpers included by
       request_outbound_format.rs; no lifecycle/node transition owner
@@ -1353,6 +1356,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
@@ -2456,6 +2460,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
@@ -2561,6 +2566,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs

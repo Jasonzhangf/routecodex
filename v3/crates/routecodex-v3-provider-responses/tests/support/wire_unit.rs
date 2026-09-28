@@ -214,30 +214,36 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_invalid_input_tool_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_responses_tool_name_and_matching_result() {
         let body = json!({
             "model": "upstream-model",
-            "input": [{"type": "function_call", "name": "servertool.exec!"}]
+            "input": [
+                {"type": "function_call", "call_id": "call_bad", "name": "read 1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_bad", "output": "unsupported call: read 1"}
+            ]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
-            .expect_err("invalid tool name must be rejected locally");
-        assert!(error.to_string().contains("input[0].name"));
+        let expected = body.clone();
+        let wire = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
+            .expect("historical call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
     }
 
     #[test]
-    fn wire_rejects_invalid_nested_tool_use_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_anthropic_tool_use_and_result() {
         let body = json!({
-            "model": "upstream-model",
-            "messages": [{"role": "assistant", "content": [
-                {"type": "tool_use", "name": "invalid.tool!", "input": {}}
-            ]}]
+            "model": "upstream-model", "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_bad", "name": "read 1", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_bad", "content": "unsupported call: read 1"}
+                ]}
+            ]
         });
-        let error =
-            build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
-                .expect_err("invalid nested tool name must be rejected locally");
-        assert!(error
-            .to_string()
-            .contains("body.messages[0].content[0].name"));
+        let expected = body.clone();
+        let wire = build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
+            .expect("historical Anthropic call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
     }
 
     #[test]
@@ -290,22 +296,41 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_openai_chat_tool_call_and_result() {
         let body = json!({
             "model": "upstream-model",
-            "messages": [{"role": "assistant", "content": "", "tool_calls": [
-                {"id": "call-review", "type": "function", "function": {
-                    "name": "invalid.tool!",
-                    "arguments": "{}"
-                }}
-            ]}]
+            "messages": [
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "call_bad", "type": "function", "function": {
+                        "name": "read 1", "arguments": "{}"
+                    }}
+                ]},
+                {"role": "tool", "tool_call_id": "call_bad", "content": "unsupported call: read 1"}
+            ]
         });
-        let error =
-            build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
-                .expect_err("invalid openai_chat tool call name must be rejected locally");
-        assert!(error
-            .to_string()
-            .contains("body.messages[0].tool_calls[0].function.name"));
+        let expected = body.clone();
+        let wire = build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
+            .expect("historical Chat call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
+    }
+
+    #[test]
+    fn wire_preserves_current_tool_declaration_name_for_provider_decision() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [{"type": "function", "name": "read 1", "function": {
+                "name": "read 1", "parameters": {"type": "object"}
+            }}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-invalid-declaration",
+            target(),
+            body,
+        )
+        .expect("provider decides whether its tool declaration name is acceptable");
+        assert_eq!(wire.body()["tools"][0]["name"], "read 1");
+        assert_eq!(wire.body()["tools"][0]["function"]["name"], "read 1");
     }
 
     #[test]
@@ -630,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
+    fn wire_keeps_openai_chat_tool_declaration_name_without_guessing_namespace_alias() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -647,16 +672,13 @@ mod tests {
                 }}
             ]
         });
-        let error =
+        let wire =
             build_v3_provider_12_responses_wire_payload("req-declaration-name", chat_target, body)
-                .expect_err("ordinary tool declaration must not be rewritten before validation");
-        assert!(
-            error.to_string().contains("body.tools[1].function.name"),
-            "declaration path must be rejected without mapping: {error}"
-        );
-        assert!(
-            !error.to_string().contains("mcp__node_repl__js"),
-            "declaration names must not be rewritten from call-history aliases: {error}"
+                .expect("ordinary declaration name must reach the provider unchanged");
+        assert_eq!(wire.body()["tools"][1]["name"], "mcp__node_repl.js");
+        assert_eq!(
+            wire.body()["tools"][1]["function"]["name"],
+            "mcp__node_repl.js"
         );
     }
 
@@ -776,44 +798,40 @@ mod tests {
     }
 
     #[test]
-    fn wire_does_not_guess_unrelated_dotted_history_from_colliding_flat_tool() {
+    fn wire_preserves_unrelated_dotted_history_without_adopting_flat_tool_identity() {
         let body = json!({
             "model": "upstream-model",
             "tools": [{"type": "function", "name": "billing__charge", "parameters": {"type": "object"}}],
             "input": [{"type": "function_call", "call_id": "call_old", "name": "billing.charge", "arguments": "{}"}]
         });
-        let error = build_v3_provider_12_responses_wire_payload(
+        let wire = build_v3_provider_12_responses_wire_payload(
             "req-unrelated-dotted-history",
             target(),
             body,
         )
-        .expect_err("unrelated historical name must not adopt a flat tool identity");
-        assert!(
-            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
-            "{error:?}"
-        );
+        .expect("unknown historical call may be paired with a failed result later");
+        assert_eq!(wire.body()["input"][0]["name"], "billing.charge");
     }
 
     #[test]
-    fn wire_fails_closed_on_declared_flat_dotted_tool_call_name() {
+    fn wire_preserves_declared_flat_dotted_tool_call_name() {
         let body = json!({
             "model": "upstream-model",
             "tools": [{"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}],
             "input": [{"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}]
         });
-        let error =
-            build_v3_provider_12_responses_wire_payload("req-flat-dotted-tool", target(), body)
-                .expect_err(
-                "flat dotted tool call must fail closed instead of diverging from its declaration",
-            );
-        assert!(
-            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
-            "{error:?}"
-        );
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-flat-dotted-tool",
+            target(),
+            body,
+        )
+        .expect("flat declaration and call retain their exact matching name");
+        assert_eq!(wire.body()["tools"][0]["name"], "functions.exec_command");
+        assert_eq!(wire.body()["input"][0]["name"], "functions.exec_command");
     }
 
     #[test]
-    fn wire_fails_closed_on_additional_tools_flat_dotted_tool_call_name() {
+    fn wire_preserves_additional_tools_flat_dotted_tool_call_name() {
         let body = json!({
             "model": "upstream-model",
             "input": [
@@ -823,16 +841,17 @@ mod tests {
                 {"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload(
+        let wire = build_v3_provider_12_responses_wire_payload(
             "req-flat-dotted-additional-tool",
             target(),
             body,
         )
-        .expect_err("flat dotted additional tool call must fail closed");
-        assert!(
-            matches!(error, V3ProviderError::FunctionToolShapeFailed { .. }),
-            "{error:?}"
+        .expect("additional declaration and call retain their exact matching name");
+        assert_eq!(
+            wire.body()["input"][0]["tools"][0]["name"],
+            "functions.exec_command"
         );
+        assert_eq!(wire.body()["input"][1]["name"], "functions.exec_command");
     }
 
     #[test]

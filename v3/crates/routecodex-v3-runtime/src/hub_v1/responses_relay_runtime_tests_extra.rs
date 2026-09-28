@@ -149,6 +149,47 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
 }
 
 #[test]
+fn unsupported_provider_tool_call_keeps_identity_through_client_error_and_next_turn() {
+    let request = json!({"tools":[{"type":"function","name":"exec_command",
+        "parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}]});
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"id":"chatcmpl_unknown_call","choices":[{
+            "message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_read1","type":"function",
+                "function":{"name":"read 1","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"
+        }]}),
+        &request,
+    )
+    .expect("provider call must reach the client with its original identity");
+    assert_eq!(response["output"][0]["name"], "read 1");
+    assert_eq!(response["output"][0]["call_id"], "call_read1");
+
+    let followup = json!({
+        "tools": request["tools"],
+        "input": [
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_read1",
+                "output":"unsupported call: read 1"}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client error must canonicalize with the failed call");
+    let chat = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("failed call and result must project into the next provider request");
+    assert_eq!(chat["messages"][0]["tool_calls"][0]["id"], "call_read1");
+    assert_eq!(
+        chat["messages"][0]["tool_calls"][0]["function"]["name"],
+        "read 1"
+    );
+    assert_eq!(chat["messages"][1]["tool_call_id"], "call_read1");
+    assert_eq!(chat["messages"][1]["content"], "unsupported call: read 1");
+}
+
+#[test]
 fn openai_chat_functions_exec_call_restores_shell_namespace_for_responses_client() {
     let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({"id":"chatcmpl_functions_exec","choices":[{
