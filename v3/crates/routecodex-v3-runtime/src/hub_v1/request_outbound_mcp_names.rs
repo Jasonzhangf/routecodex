@@ -281,10 +281,7 @@ fn collect_responses_mcp_dispatch_identities(
                 let Some((namespace, name)) = client_path.rsplit_once('.') else {
                     continue;
                 };
-                identities.insert(
-                    provider_name,
-                    (namespace.to_string(), name.to_string()),
-                );
+                identities.insert(provider_name, (namespace.to_string(), name.to_string()));
             }
             continue;
         }
@@ -295,15 +292,12 @@ fn collect_responses_mcp_dispatch_identities(
             continue;
         };
         let provider_name = provider_function_name(name);
-        let client_name = provider_compat_core::namespace_tools::
-            normalize_client_tool_dispatch_name(name);
+        let client_name =
+            provider_compat_core::namespace_tools::normalize_client_tool_dispatch_name(name);
         let Some((namespace, name)) = client_name.rsplit_once('.') else {
             continue;
         };
-        identities.insert(
-            provider_name,
-            (namespace.to_string(), name.to_string()),
-        );
+        identities.insert(provider_name, (namespace.to_string(), name.to_string()));
     }
     Ok(())
 }
@@ -361,19 +355,13 @@ pub(super) fn restore_responses_mcp_namespace(
     if object.get("namespace").is_some() {
         return false;
     }
-    let Some(name) = object
-        .get("name")
-        .and_then(Value::as_str)
-    else {
+    let Some(name) = object.get("name").and_then(Value::as_str) else {
         return false;
     };
     let Some((namespace, tool)) = declared_identities.get(name) else {
         return false;
     };
-    object.insert(
-        "namespace".to_owned(),
-        Value::String(namespace.clone()),
-    );
+    object.insert("namespace".to_owned(), Value::String(namespace.clone()));
     object.insert("name".to_owned(), Value::String(tool.clone()));
     true
 }

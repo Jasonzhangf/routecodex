@@ -76,9 +76,10 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     let mut output_text_parts = Vec::new();
     let mut finish_reason = None;
     let custom_tool_names = collect_v3_responses_custom_tool_names(provider_semantic_body);
-    let mcp_tool_identities = super::request_outbound_mcp_names::
-        responses_mcp_dispatch_identities(provider_semantic_body)
-        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let mcp_tool_identities = super::request_outbound_mcp_names::responses_mcp_dispatch_identities(
+        provider_semantic_body,
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     for choice in choices {
         if finish_reason.is_none() {
             finish_reason = choice
