@@ -1248,11 +1248,12 @@ chat_semantic_translation_groups:
       gemini:
         request_fields: []
         response_fields: []
-        transform: Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean;
-          keep it out of outbound parallelism unless a separate compatible target contract is approved.
+        transform: Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean.
+          Gemini outbound may consume parallel_tool_calls=true as the permissive/default no-op only; false remains unmapped
+          because it constrains provider behavior without an exact Gemini equivalent.
     chat_extension_fields: []
     current_impl: partial
-    gap: Gemini parallelism exact value mapping requires runtime contract
+    gap: Gemini parallelism exact non-default value mapping requires runtime contract
   - group_id: tool.call.id
     standard_chat_field: request.messages[].tool_calls[].id
     chat_fields:
@@ -1645,7 +1646,8 @@ chat_semantic_translation_groups:
       - request.reasoning_summary_policy
     direction: request
     standard_semantic_meaning: Request policy asking a compatible target to produce reasoning summaries; not the summary
-      text itself and not reasoning effort.
+      text itself and not reasoning effort. The default auto value is a no-extra-constraint policy only for targets whose
+      outbound row explicitly declares default-safe no-op consumption; non-auto values remain an explicit summary request.
     chat_shape_rule: Responses reasoning.summary is a request option. It must not be collapsed into response reasoning
       content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings
       require a registered target-local request policy consumer.
@@ -1670,12 +1672,14 @@ chat_semantic_translation_groups:
       gemini:
         request_fields: []
         response_fields: []
-        transform: No direct equivalent in the audited Gemini request inventory.
+        transform: No direct equivalent in the audited Gemini request inventory. Gemini outbound may consume
+          reasoning_summary_policy=auto only as the default/no-extra-constraint, no-explicit-summary no-op; non-auto
+          values remain unmapped.
     chat_extension_fields:
       - request.reasoning_summary_policy
     current_impl: partial
     gap: Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection;
-      Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no
+      Gemini has no equivalent request policy beyond default-safe auto no-op consumption. Anthropic consumes valid values through the registered static compatibility projection with no
       provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response
       reasoning field does not authorize reconstructing the source request policy.
   - group_id: reasoning.request_context_policy

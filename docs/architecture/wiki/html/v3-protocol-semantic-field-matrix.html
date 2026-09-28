@@ -1082,7 +1082,7 @@
       <details><summary>Chat shape / value rule</summary><div>Chat top-level boolean; not equivalent to a specific tool_choice target.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini parallelism exact value mapping requires runtime contract</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Gemini parallelism exact non-default value mapping requires runtime contract</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.parallel_tool_calls</code></li></ul>
@@ -1105,7 +1105,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean; keep it out of outbound parallelism unless a separate compatible target contract is approved.</div>
+    <div>Gemini functionCallingConfig.mode is a tool-choice policy, not an exact Chat parallel_tool_calls boolean. Gemini outbound may consume parallel_tool_calls=true as the permissive/default no-op only; false remains unmapped because it constrains provider behavior without an exact Gemini equivalent.</div>
 
   </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
@@ -1571,11 +1571,11 @@
     </td>
     <td class="standard-cell">
       <strong>Standard Chat semantic meaning</strong>
-      <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort.</div>
+      <div>Request policy asking a compatible target to produce reasoning summaries; not the summary text itself and not reasoning effort. The default auto value is a no-extra-constraint policy only for targets whose outbound row explicitly declares default-safe no-op consumption; non-auto values remain an explicit summary request.</div>
       <details><summary>Chat shape / value rule</summary><div>Responses reasoning.summary is a request option. It must not be collapsed into response reasoning content. OpenAI Chat uses the registered static effort compatibility mapping; other compatible outbound mappings require a registered target-local request policy consumer.</div></details>
 
     </td>
-    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection; Gemini has no equivalent request policy and must reject. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
+    <td><span class="badge request">request</span><br><span class="badge partial">partial</span><br><span class="muted">Responses round-trips the policy. OpenAI Chat uses the registered static effort compatibility projection; Gemini has no equivalent request policy beyond default-safe auto no-op consumption. Anthropic consumes valid values through the registered static compatibility projection with no provider-wire field; complete native thinking is projected as Responses reasoning.summary. A target response reasoning field does not authorize reconstructing the source request policy.</span></td>
     <td><div class="equiv-cell">
     <h4>request fields</h4>
     <ul class="field-list"><li><code>request.reasoning.summary</code></li><li><code>request.reasoning.generate_summary</code></li></ul>
@@ -1598,7 +1598,7 @@
     <h4>response fields</h4>
     <span class="muted">— no response field</span>
     <h4>transform</h4>
-    <div>No direct equivalent in the audited Gemini request inventory.</div>
+    <div>No direct equivalent in the audited Gemini request inventory. Gemini outbound may consume reasoning_summary_policy=auto only as the default/no-extra-constraint, no-explicit-summary no-op; non-auto values remain unmapped.</div>
 
   </div></td><td><span class="muted">— missing DeepSeek provider compatibility semantic group</span></td>
   </tr>
