@@ -183,6 +183,15 @@ fn global_pool_alive_manifest_with_rescue_timeout(
     scope: &str,
     residence_timeout_ms: Option<u64>,
 ) -> V3Config05ManifestPublished {
+    global_pool_alive_manifest_with_provider_names(scope, residence_timeout_ms, "first", "second")
+}
+
+fn global_pool_alive_manifest_with_provider_names(
+    scope: &str,
+    residence_timeout_ms: Option<u64>,
+    first_provider: &str,
+    second_provider: &str,
+) -> V3Config05ManifestPublished {
     let execution = match residence_timeout_ms {
         Some(residence_timeout_ms) => format!(
             r#"
@@ -204,38 +213,40 @@ port = 5555
 routing_group = "__SCOPE__"
 endpoints = ["responses"]
 __EXECUTION__
-[providers.first]
+[providers.__FIRST_PROVIDER__]
 type = "responses"
 base_url = "http://first.invalid/v1"
 default_model = "gpt-test"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
-[providers.first.models.gpt-test]
+[providers.__FIRST_PROVIDER__.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools", "reasoning"]
-[providers.second]
+[providers.__SECOND_PROVIDER__]
 type = "responses"
 base_url = "http://second.invalid/v1"
 default_model = "gpt-test"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "SECOND_KEY" }] }
-[providers.second.models.gpt-test]
+[providers.__SECOND_PROVIDER__.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools", "reasoning"]
 [route_groups.__SCOPE__.pools.client_responses]
 selection = { strategy = "priority" }
 match = { precedence = 10, entry_protocol = "responses", models = ["client-responses"] }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "__FIRST_PROVIDER__", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "__SECOND_PROVIDER__", model = "gpt-test", key = "key1", priority = 2 }
 ]
 [route_groups.__SCOPE__.pools.default]
 selection = { strategy = "priority" }
 targets = [
-  { kind = "provider_model", provider = "first", model = "gpt-test", key = "key1", priority = 1 },
-  { kind = "provider_model", provider = "second", model = "gpt-test", key = "key1", priority = 2 }
+  { kind = "provider_model", provider = "__FIRST_PROVIDER__", model = "gpt-test", key = "key1", priority = 1 },
+  { kind = "provider_model", provider = "__SECOND_PROVIDER__", model = "gpt-test", key = "key1", priority = 2 }
 ]
 "#
     .replace("__EXECUTION__", &execution)
-    .replace("__SCOPE__", scope);
+    .replace("__SCOPE__", scope)
+    .replace("__FIRST_PROVIDER__", first_provider)
+    .replace("__SECOND_PROVIDER__", second_provider);
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(&source).expect("global-pool-alive authoring"),
     )
