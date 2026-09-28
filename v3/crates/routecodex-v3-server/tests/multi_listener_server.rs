@@ -2958,7 +2958,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     shutdown.send(()).unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
@@ -3043,7 +3043,7 @@ async fn responses_direct_previous_response_id_is_rejected_after_continuation_re
     let _ = shutdown.send(());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_sse_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =

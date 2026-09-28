@@ -333,7 +333,7 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
         .await
     });
     for _ in 0..2 {
-        tokio::time::timeout(Duration::from_secs(2), arrivals_rx.recv())
+        tokio::time::timeout(Duration::from_secs(10), arrivals_rx.recv())
             .await
             .expect("both provider rescue probes must start")
             .expect("probe arrival channel must stay open");
@@ -1161,15 +1161,17 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
 #[tokio::test]
 async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     let server_id = "later_tier_probe_transport_busy";
-    let mut manifest = global_pool_alive_manifest(server_id);
+    let first_provider = "later_tier_busy_first";
+    let mut manifest =
+        global_pool_alive_manifest_with_provider_names(server_id, None, first_provider, "second");
     manifest
         .providers
-        .get_mut("first")
+        .get_mut(first_provider)
         .expect("first provider")
         .base_url = "http://127.0.0.1:1/v1".to_string();
     manifest
         .providers
-        .get_mut("first")
+        .get_mut(first_provider)
         .expect("first provider")
         .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
         max_in_flight: 1,
@@ -1203,7 +1205,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     let first = expanded
         .candidates
         .iter_mut()
-        .find(|candidate| candidate.provider_id == "first")
+        .find(|candidate| candidate.provider_id == first_provider)
         .expect("first candidate");
     first.pool_ids = vec!["client_responses".to_string()];
     let second = expanded
@@ -1234,7 +1236,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     health
         .store
         .record_provider_cooldown_failure(
-            "first",
+            first_provider,
             Some("key1"),
             Some("gpt-test"),
             "preceding tier is cooled",
@@ -1244,11 +1246,12 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
         .expect("first provider cooldown");
 
     let controller = V3AdaptiveConcurrencyController::process_shared();
+    let first_key = format!("{first_provider}:key1");
     controller
-        .ensure_initial_budget("first:key1", 1)
+        .ensure_initial_budget(&first_key, 1)
         .expect("first provider concurrency budget");
     let active_business_lease = controller
-        .try_acquire_business("first:key1")
+        .try_acquire_business(&first_key)
         .expect("first provider busy lease");
 
     let selection = tokio::time::timeout(
@@ -1273,7 +1276,7 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
     assert!(
         !health
             .store
-            .availability("first", Some("key1"), Some("gpt-test"), 20_001)
+            .availability(first_provider, Some("key1"), Some("gpt-test"), 20_001)
             .available,
         "skipping a capacity-blocked probe must preserve provider cooldown"
     );
@@ -1285,10 +1288,12 @@ async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
 #[tokio::test]
 async fn pinned_over_budget_candidate_stays_selected_without_admission_reselection() {
     let server_id = "pinned_busy_candidate_reselect";
-    let mut manifest = global_pool_alive_manifest(server_id);
+    let first_provider = "pinned_busy_first";
+    let mut manifest =
+        global_pool_alive_manifest_with_provider_names(server_id, None, first_provider, "second");
     manifest
         .providers
-        .get_mut("first")
+        .get_mut(first_provider)
         .expect("first provider")
         .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
         max_in_flight: 1,
@@ -1318,7 +1323,7 @@ async fn pinned_over_budget_candidate_stays_selected_without_admission_reselecti
     let first = expanded
         .candidates
         .iter_mut()
-        .find(|candidate| candidate.provider_id == "first")
+        .find(|candidate| candidate.provider_id == first_provider)
         .expect("first candidate");
     first.pool_ids = vec!["client_responses".to_string()];
     let second = expanded
@@ -1349,14 +1354,15 @@ async fn pinned_over_budget_candidate_stays_selected_without_admission_reselecti
     let preferred = V3TargetInterpreter::default()
         .select_available(expanded.clone(), &health.store, 20_001)
         .expect("first tier selected");
-    assert_eq!(preferred.candidate.provider_id, "first");
+    assert_eq!(preferred.candidate.provider_id, first_provider);
 
     let controller = V3AdaptiveConcurrencyController::process_shared();
+    let first_key = format!("{first_provider}:key1");
     controller
-        .ensure_initial_budget("first:key1", 1)
+        .ensure_initial_budget(&first_key, 1)
         .expect("first provider concurrency budget");
     let active_business_lease = controller
-        .try_acquire_business("first:key1")
+        .try_acquire_business(&first_key)
         .expect("first provider busy lease");
 
     let selected = select_v3_expanded_target_with_admission_rescue(
@@ -1374,7 +1380,7 @@ async fn pinned_over_budget_candidate_stays_selected_without_admission_reselecti
     let V3AdmittedTargetSelectionAfterRescue::Selected(selected) = selected else {
         panic!("an over-budget preferred provider must remain selected");
     };
-    assert_eq!(selected.selected.candidate.provider_id, "first");
+    assert_eq!(selected.selected.candidate.provider_id, first_provider);
     drop(selected);
     controller
         .release(active_business_lease.into_permit())

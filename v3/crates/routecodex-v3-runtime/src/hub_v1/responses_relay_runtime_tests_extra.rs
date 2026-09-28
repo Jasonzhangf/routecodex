@@ -44,8 +44,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             projection_context: &projection_context,
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
-            web_search_execution_mode:
-                routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
             web_search_center_state: None,
             retain_response_cipher: false,
             tool_thinking_enabled: false,
@@ -58,7 +57,10 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_json_read");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"path\":\"README.md\"}"
+    );
 
     let followup = json!({
         "tools": request["tools"],
@@ -84,10 +86,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
         chat["messages"][0]["tool_calls"][0]["function"]["name"],
         "mcp__mcpx__workspace__read"
     );
-    assert_eq!(
-        chat["messages"][1]["tool_call_id"],
-        "call_mcpx_json_read"
-    );
+    assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_json_read");
     assert_eq!(chat["messages"][1]["content"], "README contents");
 }
 
@@ -121,7 +120,10 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_read");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx.workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["arguments"], "{\"path\":\"README.md\"}");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"path\":\"README.md\"}"
+    );
 
     let followup = json!({
         "tools": request["tools"],
@@ -146,6 +148,47 @@ async fn responses_provider_sse_restores_declared_mcp_identity_for_tool_followup
     );
     assert_eq!(chat["messages"][1]["tool_call_id"], "call_mcpx_read");
     assert_eq!(chat["messages"][1]["content"], "README contents");
+}
+
+#[test]
+fn unsupported_provider_tool_call_keeps_identity_through_client_error_and_next_turn() {
+    let request = json!({"tools":[{"type":"function","name":"exec_command",
+        "parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}]});
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"id":"chatcmpl_unknown_call","choices":[{
+            "message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_read1","type":"function",
+                "function":{"name":"read 1","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"
+        }]}),
+        &request,
+    )
+    .expect("provider call must reach the client with its original identity");
+    assert_eq!(response["output"][0]["name"], "read 1");
+    assert_eq!(response["output"][0]["call_id"], "call_read1");
+
+    let followup = json!({
+        "tools": request["tools"],
+        "input": [
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_read1",
+                "output":"unsupported call: read 1"}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client error must canonicalize with the failed call");
+    let chat = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("failed call and result must project into the next provider request");
+    assert_eq!(chat["messages"][0]["tool_calls"][0]["id"], "call_read1");
+    assert_eq!(
+        chat["messages"][0]["tool_calls"][0]["function"]["name"],
+        "read 1"
+    );
+    assert_eq!(chat["messages"][1]["tool_call_id"], "call_read1");
+    assert_eq!(chat["messages"][1]["content"], "unsupported call: read 1");
 }
 
 #[test]
@@ -271,7 +314,10 @@ fn openai_chat_namespace_with_provider_delimiter_restores_declared_identity() {
 
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx__workspace");
     assert_eq!(response["output"][0]["name"], "read");
-    assert_eq!(response["output"][0]["call_id"], "call_underscored_namespace");
+    assert_eq!(
+        response["output"][0]["call_id"],
+        "call_underscored_namespace"
+    );
 }
 
 #[test]

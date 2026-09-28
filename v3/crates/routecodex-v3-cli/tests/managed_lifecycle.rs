@@ -42,7 +42,7 @@ fn wait_for_hooksd_marker(instance_dir: &Path, marker: &Path, label: &str) {
     }
 }
 
-fn managed_test_command(binary: &str) -> Command {
+fn managed_test_command(binary: &str, state_root: &Path) -> Command {
     let mut command = Command::new(binary);
     let temp_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../build-control/temp");
     fs::create_dir_all(&temp_dir).unwrap();
@@ -50,7 +50,11 @@ fn managed_test_command(binary: &str) -> Command {
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("TMPDIR", "build-control/temp")
         .env("TMP", "build-control/temp")
-        .env("TEMP", "build-control/temp");
+        .env("TEMP", "build-control/temp")
+        .env(
+            "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+            state_root.join("provider-cooldowns.json"),
+        );
     command
 }
 
@@ -284,7 +288,7 @@ fn run(binary: &str, state_root: &Path, config: &Path, command: &str) -> Output 
 }
 
 fn run_with_pid(binary: &str, state_root: &Path, config: &Path, command: &str) -> (u32, Output) {
-    let child = managed_test_command(binary)
+    let child = managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -309,7 +313,7 @@ fn run_with_hooks_record(
     command: &str,
     hooks_record: &Path,
 ) -> Output {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -331,7 +335,7 @@ fn run_with_hooks_record_tmpdir(
     hooks_record: &Path,
     tmp_dir: &Path,
 ) -> Output {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -355,7 +359,7 @@ fn run_with_timeout(
     command: &str,
     timeout_ms: u64,
 ) -> Output {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .args(["server", command, "--config"])
         .arg(config)
         .arg("--timeout-ms")
@@ -371,7 +375,7 @@ fn run_with_timeout(
 }
 
 fn run_top_level(binary: &str, state_root: &Path, config: &Path, command: &str) -> Output {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .args([command, "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -446,7 +450,7 @@ fn top_level_status_json(binary: &str, state_root: &Path, config: &Path) -> Valu
 }
 
 fn spawn_top_level_start(binary: &str, state_root: &Path, config: &Path) -> Child {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .args(["start", "--config"])
         .arg(config)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -469,7 +473,7 @@ fn spawn_top_level_start_with_args_and_home(
     extra_args: &[&str],
     home: &Path,
 ) -> Child {
-    let mut command = managed_test_command(binary);
+    let mut command = managed_test_command(binary, state_root);
     command.args(["start", "--config"]).arg(config);
     command.args(extra_args);
     command
@@ -496,7 +500,7 @@ fn run_top_level_without_config(
     home: &Path,
     command: &str,
 ) -> Output {
-    managed_test_command(binary)
+    managed_test_command(binary, state_root)
         .arg(command)
         .env("HOME", home)
         .env("ROUTECODEX_V3_STATE_DIR", state_root)
@@ -1747,7 +1751,7 @@ fn top_level_restart_snap_forces_debug_snapshots() {
     assert_eq!(before["debug"]["snapshots_enabled"], false);
     assert_eq!(before["debug"]["codex_samples_enabled"], false);
 
-    let restart = managed_test_command(binary)
+    let restart = managed_test_command(binary, &state_root)
         .args(["restart", "--config"])
         .arg(&config)
         .arg("--snap")
@@ -2171,7 +2175,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let mut occupied = spawn_sigterm_resistant_multi_listener(ports);
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
-    let mut start = managed_test_command(binary)
+    let mut start = managed_test_command(binary, &state_root)
         .args(["start", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -2237,7 +2241,7 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
     let admin_bind = format!("127.0.0.1:{admin_port}");
-    let mut start = managed_test_command(binary)
+    let mut start = managed_test_command(binary, &state_root)
         .args(["start", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -2288,7 +2292,7 @@ fn start_force_releases_occupied_admin_webui_port_before_server_bind() {
         sleep(Duration::from_millis(50));
     }
 
-    let stop = managed_test_command(binary)
+    let stop = managed_test_command(binary, &state_root)
         .args(["stop", "--config"])
         .arg(&config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
@@ -2323,7 +2327,7 @@ fn stop_force_kills_explicit_listener_pid_after_graceful_timeout() {
     let config = write_config(&root, ports);
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let stop = managed_test_command(binary)
+    let stop = managed_test_command(binary, &state_root)
         .args(["server", "stop", "--config"])
         .arg(&config)
         .arg("--timeout-ms")
@@ -2509,7 +2513,7 @@ fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
     );
     let binary = env!("CARGO_BIN_EXE_rccv3");
 
-    let start = managed_test_command(binary)
+    let start = managed_test_command(binary, &state_root)
         .args(["server", "start", "--config"])
         .arg(&single_port_config)
         .env("ROUTECODEX_V3_STATE_DIR", &state_root)
