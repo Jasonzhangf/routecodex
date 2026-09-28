@@ -139,8 +139,23 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /persist_v3_error_evidence_payload[\s\S]*?state\.codex_sample_store\.persist\([\s\S]*?payload,[\s\S]*?true,/,
-  "Error evidence must force-write samples even when sampling is disabled",
+  /persist_v3_error_evidence_payload[\s\S]*?state\s*\.codex_sample_store\s*\.enqueue_persist\([\s\S]*?V3CodexSamplePersistJob[\s\S]*?force:\s*true,/,
+  "Error evidence must enqueue force-write samples even when sampling is disabled",
+);
+requireMatch(
+  sampleStore,
+  /async fn run_v3_codex_sample_persist_worker[\s\S]*persist_v3_codex_sample_persist_job[\s\S]*V3CodexSamplePersistQueueMessage::Barrier/,
+  "The single Debug worker must drain queued sample writes and provide a completion barrier",
+);
+requireMatch(
+  sampleStore,
+  /fn record_v3_codex_sample_persist_failure[\s\S]*codex sample persist failed[\s\S]*failures\.push/,
+  "Asynchronous sample write failures must be logged immediately and retained for explicit reporting",
+);
+forbidMatch(
+  sampleStore,
+  /persist_failures\.lock\(\)\.ok\(\)/,
+  "Sample persistence failures must never be dropped when the failure ledger lock is poisoned",
 );
 requireMatch(
   serverLiveSnapshot,

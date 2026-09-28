@@ -10,6 +10,8 @@
   - `--snapall`: Debug snapshots plus Direct and Relay sample persistence enabled.
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
 - Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
+- Authorized sample payloads are enqueued to one Debug-owned worker; a completion barrier waits for all previously accepted writes.
+- Enqueue acceptance is not filesystem success: worker write failures are logged immediately and retained as request/file-qualified errors for the barrier.
 - Provider request/response snapshots pass through Debug redaction and payload budgets before filesystem IO.
 - Debug checks the final serialized artifact against a hard 64 KiB limit; recursive estimates alone are not sufficient.
 - Relay and Direct SSE samples retain only a Debug-owned bounded prefix, append an explicit truncation marker, and write only at initial capture plus terminal EOF/error.

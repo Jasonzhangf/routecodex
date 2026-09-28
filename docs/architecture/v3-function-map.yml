@@ -4188,9 +4188,16 @@ features:
   resource_bindings:
   - v3.debug.codex_sample_authorization
   - v3.debug.payload_budget
+  - v3.debug.codex_sample_persist_queue
+  - v3.debug.codex_sample_persist_failure
   - v3.debug.codex_sample_filesystem
   entry_symbols:
   - V3CodexSampleStore
+  - V3CodexSampleStore::enqueue_persist
+  - V3CodexSampleStore::start_persist_worker
+  - run_v3_codex_sample_persist_worker
+  - persist_v3_codex_sample_persist_job
+  - record_v3_codex_sample_persist_failure
   - V3_CODEX_SAMPLE_REQUEST_RETENTION
   - persist_v3_codex_sample_payload
   - persist_v3_error_evidence_payload
@@ -4207,7 +4214,9 @@ features:
   - v3/crates/routecodex-v3-lifecycle
   - v3/crates/routecodex-v3-debug
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/tests
+  - v3/Cargo.lock
   - docs/goals/v3-codex-sample-retention-snap-scope-test-design.md
   - docs/architecture
   forbidden_paths:
@@ -4222,17 +4231,25 @@ features:
   mainline_bindings:
   - v3-codex-sample-01
   - v3-codex-sample-02
+  - v3-codex-sample-03
+  - v3-codex-sample-04
+  - v3-codex-sample-05
+  - v3-codex-sample-06
 - feature_id: v3.error.raw_wire_evidence
   owner_crate: routecodex-v3-server
   owner_file: v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.error.raw_wire_evidence
+  - v3.debug.codex_sample_persist_queue
+  - v3.debug.codex_sample_persist_failure
   entry_symbols:
   - persist_v3_error_evidence_payload
   - capture_v3_responses_relay_provider_snapshots
   - finalize_v3_responses_relay_server_output
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-debug/src/sample_store.rs
   - v3/crates/routecodex-v3-server/tests
   - docs/architecture
   forbidden_paths:
@@ -4246,6 +4263,8 @@ features:
   - npm run verify:v3-resource-map
   mainline_bindings:
   - v3-responses-relay-error-evidence-01
+  - v3-responses-relay-error-evidence-02
+  - v3-responses-relay-error-evidence-03
 - feature_id: v3.build_test_artifact_budget
   status: active
   owner_module: v3-build-test-artifact-budget

@@ -2784,7 +2784,7 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_bounded_debug_artifact_lifecycle
-  owner_scope: V3CodexSampleStore is the unique persistence owner; dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories; neither samples nor control
+  owner_scope: V3CodexSampleStore is the unique persistence owner; accepted sample jobs run through one serialized worker, barriers confirm completion and return request/file-qualified failures, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories; neither samples nor control
     state may enter MetadataCenter or normal provider/client payload.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -2798,11 +2798,13 @@ features:
   - Direct runtime typed provider request/response carriers persist canonical artifacts without rebuilding provider payloads at the server boundary.
   - Error evidence force-writes request/error samples even when sampling is disabled.
   - Dev builds sample by default; release builds require explicit opt-in.
-  - Each port retains at most 200 request directories.
+  - Each port retains at most 100 request directories.
+  - The worker completes accepted writes before a queue barrier and reports filesystem failures immediately to logs and through the barrier result.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
   - Missing Direct typed carriers do not cause the server to fabricate provider artifacts.
   - No truncation or placeholder machinery may exist anywhere in the sample path.
+  - Enqueue acceptance alone is never treated as successful filesystem persistence; worker failures cannot be discarded.
   required_gates:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures
@@ -2822,7 +2824,8 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
-  - Terminal Relay failure persists verbatim request and Error chain evidence through the declared side-channel edge.
+  - Terminal Relay failure enqueues verbatim request and Error chain evidence through the declared side-channel edge, and the shared sample worker persists it.
+  - Worker filesystem failures for error evidence are logged immediately and retained as request/file-qualified barrier errors.
   required_negative:
   - Success responses do not force failure evidence persistence.
   - Failure evidence never enters MetadataCenter, provider payload, or client payload.

@@ -2316,6 +2316,10 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
     assert!(body.contains("event: response.completed"));
     assert!(body.contains("relay sse reasoning summary"));
     let _capture = captures.recv().await.unwrap();
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted Relay samples must finish before the E2E inspects disk");
 
     let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let sample = read_single_responses_sample_response(&samples_root);
@@ -4410,6 +4414,10 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert_eq!(sse_response.status(), 200);
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.contains("response.completed"), "{sse_body}");
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted Direct samples must finish before the E2E inspects disk");
 
     let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let json_sample = read_responses_sample_response_by_request_marker(
@@ -4434,6 +4442,52 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
         .contains("secret-key"));
     assert!(captures.recv().await.is_some());
     assert!(captures.recv().await.is_some());
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succeeds() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-sample-persist-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block sample directory creation").unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct sample persistence failure stays visible",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("response.completed"), "{body}");
+    assert!(captures.recv().await.is_some());
+
+    let persist_result = handle.wait_for_codex_sample_persistence().await;
+    assert!(
+        persist_result.is_err(),
+        "filesystem failure must be observable"
+    );
+    assert!(
+        persist_result.unwrap_err().contains("request.json"),
+        "the failure must identify the lost artifact"
+    );
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

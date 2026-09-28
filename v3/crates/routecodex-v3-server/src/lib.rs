@@ -247,6 +247,7 @@ pub struct V3ServerAggregateHandle {
     front_transport_broker: V3FrontTransportBroker,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     observability_writers: Vec<V3WebuiObservability>,
+    codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -268,8 +269,20 @@ impl V3ServerAggregateHandle {
         &self.front_transport_broker
     }
 
+    #[doc(hidden)]
+    pub async fn wait_for_codex_sample_persistence(&self) -> Result<(), String> {
+        self.codex_sample_persist_worker
+            .as_ref()
+            .ok_or_else(|| "codex sample persist worker is not running".to_string())?
+            .wait_until_idle()
+            .await
+    }
+
     pub async fn shutdown(mut self) {
         self.flush_runtime_persistence();
+        if let Some(mut worker) = self.codex_sample_persist_worker.take() {
+            worker.shutdown().await;
+        }
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -292,6 +305,9 @@ impl V3ServerAggregateHandle {
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
         self.flush_runtime_persistence();
+        if let Some(mut worker) = self.codex_sample_persist_worker.take() {
+            worker.shutdown().await;
+        }
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -411,6 +427,9 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.full_codex_sampling
             && !manifest.debug.codex_samples,
     ));
+    let codex_sample_persist_worker = codex_sample_store
+        .start_persist_worker()
+        .map_err(std::io::Error::other)?;
     for server in &preflight.listeners {
         codex_sample_store
             .enforce_listener_retention(server.port)
@@ -635,6 +654,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         front_transport_broker,
         provider_health,
         observability_writers,
+        codex_sample_persist_worker: Some(codex_sample_persist_worker),
     })
 }
 
