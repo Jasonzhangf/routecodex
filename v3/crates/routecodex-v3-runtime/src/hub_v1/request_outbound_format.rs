@@ -1419,6 +1419,18 @@ fn normalize_openai_chat_messages_payload(
             message_row,
         );
         consume_routecodex_chat_extension_for_openai_chat_provider(message_row);
+        // Map `developer` role to `system` for OpenAI Chat provider wire
+        // compatibility. Many third-party Chat Completions providers (e.g.
+        // xmcc2) reject `developer` role with HTTP 400, accepting only
+        // `system`. The `developer` role is an OpenAI extension; standard
+        // Chat Completions providers expect `system` for instruction messages.
+        if message_row
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| role.eq_ignore_ascii_case("developer"))
+        {
+            message_row.insert("role".to_string(), Value::String("system".to_string()));
+        }
         let Some(content) = message_row.get_mut("content") else {
             continue;
         };

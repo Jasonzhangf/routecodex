@@ -1076,3 +1076,19 @@ fn chat_mode_b_without_selected_search_capability_drops_local_search() {
     assert_eq!(wire["tools"][0]["function"]["name"], "read_file");
     assert!(wire.get("tool_choice").is_none());
 }
+
+#[test]
+fn openai_chat_outbound_maps_developer_role_to_system() {
+    let canonical = json!({
+        "model": "gpt-5.5",
+        "messages": [
+            {"role": "developer", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "hello"},
+        ],
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("developer role must project to chat wire");
+    assert_eq!(request["messages"][0]["role"], "system");
+    assert_eq!(request["messages"][0]["content"], "You are a helpful assistant.");
+    assert_eq!(request["messages"][1]["role"], "user");
+}
