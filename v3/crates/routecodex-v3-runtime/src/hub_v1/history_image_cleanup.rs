@@ -18,7 +18,8 @@ use serde_json::Value;
 /// 统一占位符文本（chat wire 与 responses wire 共用同一字符串，保证确定性）。
 pub(crate) const V3_HISTORY_IMAGE_PLACEHOLDER: &str = "[Image]";
 
-/// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id 键的 part）。
+/// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id /
+/// file_url 键的 part）。
 pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
     fn count_in_parts(parts: &[Value]) -> usize {
         parts
@@ -27,6 +28,7 @@ pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
                 part.get("image_url").is_some()
                     || part.get("data").is_some()
                     || part.get("file_id").is_some()
+                    || part.get("file_url").is_some()
             })
             .count()
     }
@@ -76,7 +78,7 @@ pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
 /// - messages[]：content 数组的 image_url/data/file_id part + tool 消息字符串
 ///   content（JSON 数组字符串——解析后清洗）；
 /// - input[]：item content 的 input_image/image_url part + function_call_output
-///   output 数组（含无 type 字段的 image_url/data/file_id part）+ 顶层
+///   output 数组（含无 type 字段的 image_url/data/file_id/file_url part）+ 顶层
 ///   input_image/output_image item；
 /// - contents[]（gemini）：parts 的 inline_data/file_data/image。
 ///
@@ -179,14 +181,15 @@ fn is_responses_user_carrier(item: &Value) -> bool {
 }
 
 fn is_top_level_input_image(item: &Value) -> bool {
-    // input_image/output_image 的 image_url / data / file_id 形态都必须清洗，
+    // input_image/output_image 的 image_url / data / file_id / file_url 形态都必须清洗，
     // 否则历史图片以 base64 进 wire，导致 provider 侧 context 膨胀。
     matches!(
         item.get("type").and_then(Value::as_str),
         Some("input_image" | "output_image")
     ) && (item.get("image_url").is_some()
         || item.get("data").is_some()
-        || item.get("file_id").is_some())
+        || item.get("file_id").is_some()
+        || item.get("file_url").is_some())
 }
 
 fn normalize_chat_content_parts(message: &mut Value) {
@@ -198,11 +201,16 @@ fn normalize_chat_content_parts(message: &mut Value) {
             let Some(row) = part.as_object_mut() else {
                 continue;
             };
-            // 与 responses output[] 判定一致：有 image_url / data / file_id 即视为图片
+            // 与 responses output[] 判定一致：有 image_url / data / file_id / file_url
+            // 即视为图片（Codex 的图片 part 有时不带 type 字段，只靠字段名）。
             // （Codex 的图片 part 有时不带 type 字段，只靠 type==image_url 会漏）。
             let is_image = row.contains_key("image_url")
                 || row.contains_key("data")
-                || row.contains_key("file_id");
+                || row.contains_key("file_id")
+                || row
+                    .get("file_url")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value.trim().starts_with("data:image/"));
             if is_image {
                 *part = serde_json::json!({"type":"text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             }
@@ -234,7 +242,7 @@ fn normalize_chat_content_parts(message: &mut Value) {
 }
 
 /// 递归清洗任意 JSON 值中内嵌的图片字节：对象/数组任意深度的字符串值若包含
-/// `data:image` 或 `image_url`/`data`/`file_id` 图片载体，替换为历史图片占位符。
+/// `data:image` 或 `image_url`/`data`/`file_id`/`file_url` 图片载体，替换为历史图片占位符。
 /// 覆盖工具输出字符串形态（`{"image":"data:image/..."}` 对象、part 数组、裸字符串）。
 fn strip_v3_embedded_image_bytes(value: &mut Value, changed: &mut bool) {
     match value {
@@ -288,6 +296,11 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
             .as_str()
             .is_some_and(|value| !value.trim().is_empty());
     }
+    if let Some(file_url) = map.get("file_url") {
+        return file_url.as_str().is_some_and(|value| {
+            value.trim().to_ascii_lowercase().starts_with("data:image/")
+        });
+    }
     false
 }
 
@@ -304,11 +317,15 @@ fn normalize_responses_image_part_array(parts: &mut [Value]) -> bool {
         let Some(row) = part.as_object_mut() else {
             continue;
         };
-        // 有 image_url / data / file_id 即视为图片（Codex 的 fco.output 图片 part
+        // 有 image_url / data / file_id / file_url 即视为图片（Codex 的 fco.output 图片 part
         // 有时不带 type 字段——只靠 type 匹配会漏，历史 base64 原样进 wire → context 400）。
         let is_image = row.contains_key("image_url")
             || row.contains_key("data")
-            || row.contains_key("file_id");
+            || row.contains_key("file_id")
+            || row
+                .get("file_url")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.trim().starts_with("data:image/"));
         if is_image {
             *part = serde_json::json!({"type":"input_text","text":V3_HISTORY_IMAGE_PLACEHOLDER});
             changed = true;
@@ -802,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_compat_cleans_all_images_for_non_vision_target() {
+    fn continuation_save_cleans_all_images_any_turn() {
         // continuation save 专用：全量清理（不分当前轮/历史轮）——保存的上下文
         // 只允许存图片占位符，图片 base64 绝不进入 continuation（下一轮 restore
         // 会把它重新注入 wire → context 400）。
@@ -826,7 +843,7 @@ mod tests {
             for part in content {
                 assert!(
                     part.get("image_url").is_none() && part.get("data").is_none(),
-                    "provider compat must not keep any image part: {part}"
+                    "continuation save must not keep any image part: {part}"
                 );
                 assert_eq!(
                     part.get("text").and_then(Value::as_str),

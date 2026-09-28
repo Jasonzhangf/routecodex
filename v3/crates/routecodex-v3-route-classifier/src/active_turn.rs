@@ -169,11 +169,14 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
             if part.has_web_search {
                 has_current_turn_web_search = true;
             }
-            if entry.role == ChatTurnRole::Tool {
-                has_current_turn_tool_output = true;
-                if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
-                    has_current_turn_tool_execution_error = true;
+            match entry.role {
+                ChatTurnRole::Tool => {
+                    has_current_turn_tool_output = true;
+                    if part.kind == TurnPartKind::ToolOutput && part.text == "error" {
+                        has_current_turn_tool_execution_error = true;
+                    }
                 }
+                _ => {}
             }
         }
         if matches!(entry.role, ChatTurnRole::Assistant) {
@@ -209,11 +212,7 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
     let Some(segment) = responses_active_segment(entries, latest_user_index, latest_role) else {
         let current_turn_start = latest_user_index
             .map(|index| {
-                entries[..index]
-                    .iter()
-                    .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User))
-                    .map(|previous| previous + 1)
-                    .unwrap_or(0)
+                responses_current_user_run_start(entries, index)
             })
             .unwrap_or(0);
         return V3CurrentTurnSignals {
@@ -230,9 +229,16 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
                     .any(|entry| entry.has_web_search)
             }),
             has_current_turn_image: latest_user_index.is_some_and(|index| {
-                entries[current_turn_start..=index]
-                    .iter()
-                    .any(|entry| entry.has_image)
+                if entries[index].kind == ResponsesTurnKind::Other {
+                    // An explicit user message owns its nested content. Tool
+                    // output images before it belong to the preceding turn,
+                    // even when the request has no other carrier boundary.
+                    entries[index].has_image
+                } else {
+                    entries[current_turn_start..=index]
+                        .iter()
+                        .any(|entry| entry.has_image)
+                }
             }),
             ..Default::default()
         };
@@ -317,11 +323,11 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     }
 }
 
-fn chat_active_segment(
-    entries: &[ChatTurnEntry],
+fn chat_active_segment<'a>(
+    entries: &'a [ChatTurnEntry],
     latest_user_index: Option<usize>,
     latest_role: Option<ChatTurnRole>,
-) -> Option<&[ChatTurnEntry]> {
+) -> Option<&'a [ChatTurnEntry]> {
     if matches!(latest_role, Some(ChatTurnRole::User)) {
         return None;
     }
@@ -329,16 +335,46 @@ fn chat_active_segment(
     Some(&entries[start..])
 }
 
-fn responses_active_segment(
-    entries: &[ResponsesTurnEntry],
+fn responses_active_segment<'a>(
+    entries: &'a [ResponsesTurnEntry],
     latest_user_index: Option<usize>,
     latest_role: Option<ResponsesTurnRole>,
-) -> Option<&[ResponsesTurnEntry]> {
+) -> Option<&'a [ResponsesTurnEntry]> {
     if matches!(latest_role, Some(ResponsesTurnRole::User)) {
         return None;
     }
     let start = latest_user_index.map(|index| index + 1).unwrap_or(0);
     Some(&entries[start..])
+}
+
+fn responses_current_user_run_start(
+    entries: &[ResponsesTurnEntry],
+    latest_user_index: usize,
+) -> usize {
+    // An explicit message is the current-turn boundary when an earlier user
+    // carrier exists. Its nested content is already represented by the message
+    // entry; never inherit image facts from preceding history/tool output.
+    if entries[latest_user_index].kind == ResponsesTurnKind::Other {
+        return if entries[..latest_user_index]
+            .iter()
+            .any(|entry| entry.role == ResponsesTurnRole::User)
+        {
+            latest_user_index
+        } else {
+            0
+        };
+    }
+    let mut start = latest_user_index;
+    while start > 0 {
+        let previous = &entries[start - 1];
+        if previous.role != ResponsesTurnRole::User
+            || previous.kind == ResponsesTurnKind::Other
+        {
+            break;
+        }
+        start -= 1;
+    }
+    start
 }
 
 fn extract_chat_user_text(entry: &ChatTurnEntry) -> String {
