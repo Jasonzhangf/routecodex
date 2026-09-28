@@ -1,5 +1,11 @@
 # RouteCodex V3 Contract
 
+## Highest Priority: Transparent Proxy
+
+- RouteCodex is a transparent proxy. Its primary product goal is to increase the success rate of forwarding real client requests and returning real provider responses. For any parseable request or response, local validation must not impose narrower rules than the actual target protocol and reject traffic that the provider or client can handle.
+- Preserve request, response, tool name, arguments, call ID, history, and matched tool result across the complete round trip. An invalid tool call returned by a model and the client's corresponding error result remain paired and are forwarded into the next turn so the model can correct itself; they are not grounds for a proxy-generated 502.
+- Validation may diagnose and classify, but it must not become an extra admission boundary for otherwise forwardable business payload. Unrepresentable protocol data and genuine transport failures follow their declared protocol/error paths with truthful status and evidence; no invented rejection, silent truncation, or success-wrapped error is permitted.
+
 ## Project Truth
 
 - RouteCodex V3 is the only active production implementation.
