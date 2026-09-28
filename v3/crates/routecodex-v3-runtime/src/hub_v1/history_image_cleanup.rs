@@ -297,9 +297,9 @@ fn is_v3_embedded_image_carrier(map: &serde_json::Map<String, Value>) -> bool {
             .is_some_and(|value| !value.trim().is_empty());
     }
     if let Some(file_url) = map.get("file_url") {
-        return file_url.as_str().is_some_and(|value| {
-            value.trim().to_ascii_lowercase().starts_with("data:image/")
-        });
+        return file_url
+            .as_str()
+            .is_some_and(|value| value.trim().to_ascii_lowercase().starts_with("data:image/"));
     }
     false
 }

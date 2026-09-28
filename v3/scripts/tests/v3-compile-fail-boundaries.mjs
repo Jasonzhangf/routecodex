@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,12 @@ const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const compileFailTarget = resolve(v3Root, 'build-control', 'compile-fail-target');
 
 mkdirSync(compileFailTarget, { recursive: true });
+
+function fixtureRoot(prefix) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  copyFileSync(resolve(v3Root, 'Cargo.lock'), join(root, 'Cargo.lock'));
+  return root;
+}
 
 function files(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -56,7 +62,7 @@ for (const fixture of [
   ['cli', 'routecodex-v3-cli', resolve(v3Root, 'crates/routecodex-v3-cli')],
 ]) {
   const [name, dependencyName, dependencyPath] = fixture;
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -88,7 +94,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-health-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-health-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -120,7 +126,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-availability-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-availability-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -144,7 +150,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-one-shot-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-one-shot-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -168,7 +174,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-private-plan-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-private-plan-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -205,7 +211,7 @@ for (const fixture of [
     code: 'use routecodex_v3_provider_responses::V3ProviderResp14Raw;\nfn main() { let _ = V3ProviderResp14Raw { request_id: String::new(), provider_id: String::new(), status: 200, headers: Vec::new(), body: todo!() }; }\n',
   },
 ]) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-provider-node-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-provider-node-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -257,7 +263,7 @@ for (const fixture of [
     diagnostic: /returns a value referencing data owned by the current function|E0515/,
   },
 ]) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-node-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-hub-node-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
