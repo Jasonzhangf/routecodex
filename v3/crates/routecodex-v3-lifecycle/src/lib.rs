@@ -412,6 +412,7 @@ impl V3ManagedLifecycle {
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "start")?;
         release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
+        wait_for_stopping_instance(&instance_dir, &declaration, timeout).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
         write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
         write_status(
@@ -527,6 +528,8 @@ impl V3ManagedLifecycle {
                 Err(error) => return Err(error),
             };
             release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
+            wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_secs(15))
+                .await?;
             reap_inactive_runtime_files(&instance_dir, &declaration)?;
             write_json_atomic(&instance_dir.join("instance.json"), &declaration)?;
             write_status(
@@ -1080,6 +1083,36 @@ fn control_release_ports(
         ));
     }
     Ok(Some(release_ports))
+}
+
+async fn wait_for_stopping_instance(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+    timeout: Duration,
+) -> Result<(), V3LifecycleError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let status_path = instance_dir.join("status.json");
+        if !status_path.exists() {
+            return Ok(());
+        }
+        let status: V3ManagedStatusRecord = read_json(&status_path)?;
+        if status.instance_id != declaration.instance_id {
+            return Err(V3LifecycleError::IdentityMismatch(
+                "managed status differs from start declaration".to_string(),
+            ));
+        }
+        if status.state != V3ManagedRunState::Stopping {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(V3LifecycleError::Timeout(format!(
+                "stop {} did not reach a terminal state before start",
+                declaration.instance_id
+            )));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 async fn release_listener_set_for_start(
