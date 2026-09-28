@@ -1362,6 +1362,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.lifecycle.status_record
+    resource_kind: runtime_control_status
+    lifecycle: v3.server.managed_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3Lifecycle07GracefullyStopped
+    identity: [instanceId, state, updatedAtEpochMs, detail]
+    allowed_writers: [write_status]
+    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live]
+    forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.lifecycle.operation_lock
     resource_kind: runtime_control_lock
     lifecycle: v3.server.managed_lifecycle
@@ -1916,7 +1928,7 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: record_v3_codex_sample_persist_failure
     identity: [requestId, artifactName, reason]
-    allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_until_idle, developer_logs]
+    allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_until_idle, V3CodexSamplePersistHandle::shutdown, V3ServerAggregateHandle::shutdown, V3ServerAggregateHandle::prepare_for_exec, shutdown_managed_runtime, restart_managed_runtime_in_place, developer_logs]
     allowed_writers: [record_v3_codex_sample_persist_failure]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false

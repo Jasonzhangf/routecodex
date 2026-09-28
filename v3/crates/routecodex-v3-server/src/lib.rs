@@ -250,6 +250,12 @@ pub struct V3ServerAggregateHandle {
     codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
 }
 
+#[derive(Debug)]
+pub struct V3ServerExecPreparation {
+    pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
+    pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+}
+
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
     manifest: &V3Config05ManifestPublished,
 ) -> V3ServerStartup01ListenerSetPreflight {
@@ -278,11 +284,12 @@ impl V3ServerAggregateHandle {
             .await
     }
 
-    pub async fn shutdown(mut self) {
+    pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
         self.flush_runtime_persistence();
-        if let Some(mut worker) = self.codex_sample_persist_worker.take() {
-            worker.shutdown().await;
-        }
+        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+            Some(mut worker) => worker.shutdown().await,
+            None => Vec::new(),
+        };
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -291,13 +298,14 @@ impl V3ServerAggregateHandle {
                 let _ = shutdown.send(());
             }
         }
+        codex_sample_persist_failures
     }
 
     /// Stop accepting new listener work without waiting for active client
     /// bodies. Active bodies belong to Front/Transport handoff and must be
     /// checkpointed/reattached by the lifecycle owner; waiting here would
     /// deadlock restart on a provider stream that is already being replaced.
-    pub async fn prepare_for_exec(mut self) -> Vec<V3RuntimeHandoffCheckpoint> {
+    pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -305,9 +313,10 @@ impl V3ServerAggregateHandle {
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
         self.flush_runtime_persistence();
-        if let Some(mut worker) = self.codex_sample_persist_worker.take() {
-            worker.shutdown().await;
-        }
+        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+            Some(mut worker) => worker.shutdown().await,
+            None => Vec::new(),
+        };
         if let Some(shutdown) = self.probe_shutdown.take() {
             let _ = shutdown.send(());
         }
@@ -317,7 +326,10 @@ impl V3ServerAggregateHandle {
             }
         }
         let _ = &self.request_activity_gate;
-        checkpoints
+        V3ServerExecPreparation {
+            front_checkpoints: checkpoints,
+            codex_sample_persist_failures,
+        }
     }
 
     fn flush_runtime_persistence(&self) {
@@ -663,8 +675,19 @@ pub async fn serve_v3_server_aggregate_until_shutdown(
 ) -> Result<(), std::io::Error> {
     let handle = spawn_v3_server_aggregate(manifest).await?;
     tokio::signal::ctrl_c().await?;
-    handle.shutdown().await;
-    Ok(())
+    let failures = handle.shutdown().await;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "codex sample persistence failed during server shutdown: {}",
+            failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )))
+    }
 }
 
 fn v3_sse_dump_env_flag() -> bool {

@@ -130,16 +130,16 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:8fb87ce102045d85c1f1ed86c47cad00946577944ddacada928b0a124bc445a7
-    last_manual_authorization_id: auth-20260928-e12092b-codex-sample-lock
+    fingerprint: sha256:73893d0d80825b4aee3039ca548ef751f5dfe896ace1218e39f3039b96060860
+    last_manual_authorization_id: auth-20260928-f305a16-sample-shutdown-report
   - item_id: chain:v3.server.managed_lifecycle
     chain_id: v3.server.managed_lifecycle
     status: audited_locked
     reviewed_by: Jason
     locked_at: '2026-08-12T20:30:00+08:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
-    last_manual_authorization_id: auth-20260911-v3-hooks-sidecar-lifecycle
+    fingerprint: sha256:263429b7022d5741d42c1d776360bda477a5d8e06481726f7bcbab02b9b053a6
+    last_manual_authorization_id: auth-20260928-f305a16-lifecycle-status-report
   - item_id: chain:v3.models.capability_catalog
     chain_id: v3.models.capability_catalog
     status: audited_locked
@@ -1208,3 +1208,17 @@ manual_authorizations:
     reason: "Jason instructed continuation through verification failures for issue e12092b. Terminal Relay error evidence now enters the shared Debug persistence queue and the failure edge reports unsuccessful filesystem writes; this authorization refreshes the audited fingerprint to match that scoped change."
     fingerprint_before: sha256:b82df6355f3804b38d1cd062d21aae7b8c9125b126f278d0a89fd485208b17b1
     fingerprint_after: sha256:383b2116a35b192951d60f8c5df63cdd759e4fce448702d7389b8e8a9bb4b612
+  - authorization_id: auth-20260928-f305a16-sample-shutdown-report
+    item_id: chain:v3.codex_sample_retention_snap_scope
+    approved_by: Jason
+    approved_at: '2026-09-28T09:29:57-07:00'
+    reason: "Jason instructed continuation after the review finding for issue f305a16. The reviewed caller flow now binds residual failure-ledger draining to aggregate shutdown and exec preparation return paths; this refresh records that scoped terminal-reporting change."
+    fingerprint_before: sha256:8fb87ce102045d85c1f1ed86c47cad00946577944ddacada928b0a124bc445a7
+    fingerprint_after: sha256:73893d0d80825b4aee3039ca548ef751f5dfe896ace1218e39f3039b96060860
+  - authorization_id: auth-20260928-f305a16-lifecycle-status-report
+    item_id: chain:v3.server.managed_lifecycle
+    approved_by: Jason
+    approved_at: '2026-09-28T09:29:57-07:00'
+    reason: "Jason instructed continuation after the review finding for issue f305a16. Managed shutdown now records sample persistence failures in terminal status detail, with the failure resource bound to the lifecycle edge; this refresh records that scoped report path."
+    fingerprint_before: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
+    fingerprint_after: sha256:263429b7022d5741d42c1d776360bda477a5d8e06481726f7bcbab02b9b053a6

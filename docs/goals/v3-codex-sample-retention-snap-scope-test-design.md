@@ -11,7 +11,8 @@
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
 - Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
 - Authorized sample payloads are enqueued to one Debug-owned worker; a completion barrier waits for all previously accepted writes.
-- Enqueue acceptance is not filesystem success: worker write failures are logged immediately and retained as request/file-qualified errors for the barrier.
+- Enqueue acceptance is not filesystem success: worker write failures are logged immediately and retained as request/file-qualified errors for a barrier or worker shutdown to return.
+- Aggregate shutdown and exec preparation return residual persistence failures; managed stop records them in terminal status and exec restart reports them while preserving handoff checkpoints.
 - Provider request/response snapshots pass through Debug redaction and payload budgets before filesystem IO.
 - Debug checks the final serialized artifact against a hard 64 KiB limit; recursive estimates alone are not sufficient.
 - Relay and Direct SSE samples retain only a Debug-owned bounded prefix, append an explicit truncation marker, and write only at initial capture plus terminal EOF/error.
@@ -55,11 +56,12 @@
 
 1. Focused red tests.
 2. Focused Config/Debug/Server/CLI green tests.
-3. `npm run verify:v3-debug-payload-budget` plus its red fixtures.
-4. V3 architecture and format gates.
-5. V3 build.
-6. Global `npm run install:v3`.
-7. Aggregate restart and all member `/health`.
-8. Live Relay/Direct replay for `--snap`; controlled `--snapall` replay.
-9. Codex review only after installed live evidence.
+3. Real HTTP/SSE success with a forced sample-store filesystem failure; assert the subsequent aggregate shutdown or exec-preparation result retains request ID, artifact name, and reason.
+4. `npm run verify:v3-debug-payload-budget` plus its red fixtures.
+5. V3 architecture and format gates.
+6. V3 build.
+7. Global `npm run install:v3`.
+8. Aggregate restart and all member `/health`.
+9. Live Relay/Direct replay for `--snap`; controlled `--snapall` replay.
+10. Codex review only after installed live evidence.
    - no flag reports Codex-sample persistence disabled even when config authoring enables Debug snapshots;

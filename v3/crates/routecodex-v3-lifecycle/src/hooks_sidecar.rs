@@ -233,23 +233,33 @@ impl V3HooksSidecarSupervisor {
         instance_dir: PathBuf,
         instance_id: String,
         start_nonce: String,
+        startup_detail: Option<String>,
     ) {
         let Some(mut readiness_rx) = self.readiness_rx.take() else {
             return;
         };
         tokio::spawn(async move {
-            let detail = match readiness_rx.as_mut().await {
+            let pending = "hooks sidecar readiness pending".to_string();
+            let expected_detail = append_status_detail(startup_detail.as_deref(), pending);
+            let readiness_detail = match readiness_rx.as_mut().await {
                 Ok(detail) => detail,
                 Err(_) => Some(format!(
                     "hooks sidecar unavailable: {}: hooks sidecar supervisor exited before publishing readiness",
                     hooks_unavailable(HooksUnavailableReason::Crashed)
                 )),
             };
+            let detail = match readiness_detail {
+                Some(readiness_detail) => Some(append_status_detail(
+                    startup_detail.as_deref(),
+                    readiness_detail,
+                )),
+                None => startup_detail,
+            };
             if let Err(error) = write_running_status_if_current_detail_for_generation(
                 &instance_dir,
                 &instance_id,
                 Some(&start_nonce),
-                Some("hooks sidecar readiness pending"),
+                Some(&expected_detail),
                 detail,
             ) {
                 eprintln!("hooks sidecar readiness status write failed: {error}");

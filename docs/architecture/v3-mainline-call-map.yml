@@ -465,7 +465,7 @@ chains:
       side_channel_writes: [v3.target.concrete_provider]
 - chain_id: v3.codex_sample_retention_snap_scope
   owner_feature_id: v3.codex_sample_retention_snap_scope
-  summary: Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned persistence queue and worker to the filesystem without entering MetadataCenter or normal payload truth; accepted writes complete behind barriers, write failures are logged and retained for explicit reporting, diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
+  summary: Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned persistence queue and worker to the filesystem without entering MetadataCenter or normal payload truth; accepted writes complete behind barriers, write failures remain request/file-qualified in the failure ledger until a barrier or worker shutdown returns them, aggregate shutdown and exec preparation preserve residual failures for lifecycle reporting, diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
   edges:
   - step_id: v3-codex-sample-01
     from_node: V3CodexSample02ManifestAuthorizationPublished
@@ -552,9 +552,52 @@ chains:
       produces: [v3.debug.codex_sample_persist_failure]
       side_channel_reads: [v3.debug.codex_sample_persist_queue]
       side_channel_writes: [v3.debug.codex_sample_persist_failure]
+  - step_id: v3-codex-sample-07
+    from_node: V3CodexSamplePersistFailureReported
+    to_node: V3CodexSamplePersistFailureDrained
+    caller_symbol: V3CodexSamplePersistHandle::shutdown
+    caller_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    callee_symbol: V3CodexSampleStore::persist_failures
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    edge_kind: shutdown_failure_drain_edge
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.codex_sample_persist_failure]
+      produces: [v3.debug.codex_sample_persist_failure]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: [v3.debug.codex_sample_persist_failure]
+  - step_id: v3-codex-sample-08
+    from_node: V3CodexSamplePersistFailureDrained
+    to_node: V3CodexSamplePersistFailureReturned
+    caller_symbol: V3ServerAggregateHandle::shutdown
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3CodexSamplePersistHandle::shutdown
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.codex_sample_persist_failure]
+      produces: [v3.debug.codex_sample_persist_failure]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: [v3.debug.codex_sample_persist_failure]
+  - step_id: v3-codex-sample-09
+    from_node: V3CodexSamplePersistFailureDrained
+    to_node: V3CodexSamplePersistFailureReturned
+    caller_symbol: V3ServerAggregateHandle::prepare_for_exec
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3CodexSamplePersistHandle::shutdown
+    callee_file: v3/crates/routecodex-v3-debug/src/sample_store.rs
+    status: anchored
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    resource_flow:
+      consumes: [v3.debug.codex_sample_persist_failure]
+      produces: [v3.debug.codex_sample_persist_failure]
+      side_channel_reads: [v3.debug.codex_sample_persist_failure]
+      side_channel_writes: [v3.debug.codex_sample_persist_failure]
 - chain_id: v3.server.managed_lifecycle
   owner_feature_id: v3.managed_server_lifecycle
-  summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.
+  summary: One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill while preserving terminal Codex sample persistence failures in managed status.
   manifest: docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml
   edges:
   - step_id: v3-life-01
@@ -706,7 +749,9 @@ chains:
       side_channel_reads:
       - v3.lifecycle.control_channel
       - v3.lifecycle.hooks_sidecar_process
-      side_channel_writes: []
+      - v3.debug.codex_sample_persist_failure
+      side_channel_writes:
+      - v3.lifecycle.status_record
 - chain_id: v3.user_config.compile
   owner_feature_id: v3.simplified_user_config
   summary: Parallel minimal config.toml parsing and deterministic projection into the existing V3Config02 authoring node; exact filename selection remains Config-owned, reuses the unique Config03-05 compiler, and hands the published Manifest plus source identity to lifecycle without parser retry or runtime-side authoring reads.

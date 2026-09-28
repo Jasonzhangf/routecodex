@@ -155,10 +155,12 @@ features:
   - v3.lifecycle.instance_declaration
   - v3.lifecycle.pid_cache
   - v3.lifecycle.control_channel
+  - v3.lifecycle.status_record
   - v3.lifecycle.operation_lock
   - v3.lifecycle.restart_plan
   - v3.lifecycle.hooks_sidecar_declaration
   - v3.lifecycle.hooks_sidecar_process
+  - v3.debug.codex_sample_persist_failure
   entry_symbols:
   - V3ManagedLifecycle::declaration
   - V3ManagedLifecycle::start
@@ -4198,6 +4200,11 @@ features:
   - run_v3_codex_sample_persist_worker
   - persist_v3_codex_sample_persist_job
   - record_v3_codex_sample_persist_failure
+  - V3CodexSampleStore::persist_failures
+  - V3CodexSamplePersistHandle::wait_until_idle
+  - V3CodexSamplePersistHandle::shutdown
+  - V3ServerAggregateHandle::shutdown
+  - V3ServerAggregateHandle::prepare_for_exec
   - V3_CODEX_SAMPLE_REQUEST_RETENTION
   - persist_v3_codex_sample_payload
   - persist_v3_error_evidence_payload
@@ -4228,6 +4235,8 @@ features:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
+  - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
+  - cargo test -p routecodex-v3-server --test multi_listener_server responses_direct_sample_persist_failure_is_reported -- --nocapture
   mainline_bindings:
   - v3-codex-sample-01
   - v3-codex-sample-02
@@ -4235,6 +4244,9 @@ features:
   - v3-codex-sample-04
   - v3-codex-sample-05
   - v3-codex-sample-06
+  - v3-codex-sample-07
+  - v3-codex-sample-08
+  - v3-codex-sample-09
 - feature_id: v3.error.raw_wire_evidence
   owner_crate: routecodex-v3-server
   owner_file: v3/crates/routecodex-v3-server/src/lib.rs

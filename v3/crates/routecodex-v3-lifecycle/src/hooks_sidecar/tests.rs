@@ -347,6 +347,7 @@ async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
         instance_dir.clone(),
         instance_id.to_string(),
         start_nonce.to_string(),
+        None,
     );
     readiness_tx
         .send(Some(
@@ -384,6 +385,64 @@ async fn readiness_admission_is_bounded_and_deferred_detail_is_published() {
 
 #[tokio::test]
 #[cfg(unix)]
+async fn deferred_readiness_preserves_exec_restart_sample_persistence_failure() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "hooks-readiness-sample-persist-instance";
+    let start_nonce = "generation-sample-persist";
+    let sample_failure =
+        "codex sample persistence shutdown failed during exec restart: request=req-7 file=request.json reason=permission denied";
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: instance_id.to_string(),
+            socket_path: "hooks-sidecar.sock".to_string(),
+            start_nonce: start_nonce.to_string(),
+        },
+    )
+    .unwrap();
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some(append_status_detail(
+            Some(sample_failure),
+            "hooks sidecar readiness pending".to_string(),
+        )),
+    )
+    .unwrap();
+
+    let (readiness_tx, readiness_rx) = tokio::sync::oneshot::channel();
+    let mut supervisor =
+        V3HooksSidecarSupervisor::from_readiness_for_test(instance_dir.clone(), readiness_rx);
+    supervisor.spawn_readiness_detail_publisher(
+        instance_dir.clone(),
+        instance_id.to_string(),
+        start_nonce.to_string(),
+        Some(sample_failure.to_string()),
+    );
+    readiness_tx
+        .send(Some("hooks sidecar ready".to_string()))
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let detail = read_live_status_detail(&instance_dir, instance_id).unwrap();
+        if detail.as_deref() == Some("codex sample persistence shutdown failed during exec restart: request=req-7 file=request.json reason=permission denied; hooks sidecar ready") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "deferred readiness overwrote the sample persistence failure: {detail:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
@@ -417,6 +476,7 @@ async fn deferred_readiness_does_not_overwrite_an_earlier_crash_detail() {
         instance_dir.clone(),
         instance_id.to_string(),
         start_nonce.to_string(),
+        None,
     );
     readiness_tx
         .send(Some(
@@ -463,6 +523,7 @@ async fn stale_generation_readiness_does_not_overwrite_new_generation_detail() {
         instance_dir.clone(),
         instance_id.to_string(),
         "generation-1".to_string(),
+        None,
     );
 
     write_json_atomic(

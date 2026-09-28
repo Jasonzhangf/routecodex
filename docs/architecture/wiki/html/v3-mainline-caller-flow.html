@@ -283,7 +283,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>75 functional paths</span>
-        <span>451 caller edges</span>
+        <span>454 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>4</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>358</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>361</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -563,8 +563,8 @@ flowchart TD
 <tr><td><a href="#chain-v3_provider_compat_request_invalid_error_source"><code>v3.provider_compat.request_invalid_error_source</code></a><br/>v 3.provider_compat.request_invalid_error_source</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:8e5435ba6720…</code></td></tr>
 <tr><td><a href="#chain-v3_provider_compat_profile_response"><code>v3.provider_compat_profile.response</code></a><br/>v 3.provider_compat_profile.response</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>4</td><td><code>v3.provider_compat_profile_loading</code></td><td><code>sha256:cb52e8e22579…</code></td></tr>
 <tr><td><a href="#chain-v3_target_session_global_selection"><code>v3.target.session_global_selection</code></a><br/>v 3.target.session_global_selection</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>4</td><td><code>v3.virtual_router_target_interpreter</code></td><td><code>sha256:ff56cb023f01…</code></td></tr>
-<tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>6</td><td>5</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:8fb87ce10204…</code></td></tr>
-<tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>11</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:a47745d25074…</code></td></tr>
+<tr><td><a href="#chain-v3_codex_sample_retention_snap_scope"><code>v3.codex_sample_retention_snap_scope</code></a><br/>v 3.codex_sample_retention_snap_scope</td><td><span class="status audited_locked">locked by Jason</span></td><td>9</td><td>5</td><td><code>v3.codex_sample_retention_snap_scope</code></td><td><code>sha256:73893d0d8082…</code></td></tr>
+<tr><td><a href="#chain-v3_server_managed_lifecycle"><code>v3.server.managed_lifecycle</code></a><br/>v 3.server.managed_lifecycle</td><td><span class="status audited_locked">locked by Jason</span></td><td>8</td><td>13</td><td><code>v3.managed_server_lifecycle</code></td><td><code>sha256:263429b7022d…</code></td></tr>
 <tr><td><a href="#chain-v3_user_config_compile"><code>v3.user_config.compile</code></a><br/>v 3.user_config.compile</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>5</td><td><code>v3.simplified_user_config</code></td><td><code>sha256:5dbe426ca1f6…</code></td></tr>
 <tr><td><a href="#chain-v3_config_compile"><code>v3.config.compile</code></a><br/>01 配置编译</td><td><span class="status audited_locked">locked by Jason</span></td><td>4</td><td>11</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:59948789e48f…</code></td></tr>
 <tr><td><a href="#chain-v3_config_server_manifest_compile_mainline"><code>v3.config.server_manifest_compile.mainline</code></a><br/>v 3.config.server_manifest_compile.mainline</td><td><span class="status pending_review">pending review</span></td><td>1</td><td>2</td><td><code>v3.config_interpreter_contract</code></td><td><code>sha256:5690f3b72dc0…</code></td></tr>
@@ -696,9 +696,9 @@ flowchart TD
           </a>
 <a class="branch-card" href="#chain-v3_codex_sample_retention_snap_scope">
             <span class="chain-id">v 3.codex_sample_retention_snap_scope</span>
-            <span>V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReported</span>
+            <span>V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReturned</span>
             <span><code>v3.codex_sample_retention_snap_scope</code></span>
-            <span>6 edges · 5 resources · v3-debug, v3-server</span>
+            <span>9 edges · 5 resources · v3-debug, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_responses_provider_event_terminal_merge">
@@ -936,7 +936,7 @@ flowchart TD
             <span class="chain-id">v 3.server.managed_lifecycle</span>
             <span>V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
             <span><code>v3.server.managed_lifecycle</code></span>
-            <span>8 edges · 11 resources · v3-cli, v3-lifecycle, v3-server</span>
+            <span>8 edges · 13 resources · v3-cli, v3-lifecycle, v3-server</span>
             <span class="status audited_locked">locked by Jason</span>
           </a>
 <a class="branch-card" href="#chain-v3_user_config_compile">
@@ -1585,11 +1585,11 @@ flowchart TD
     <details class="branch-detail" id="chain-v3_codex_sample_retention_snap_scope" >
       <summary>
         <span class="summary-main">v 3.codex_sample_retention_snap_scope</span>
-        <span class="summary-sub">V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReported</span>
-        <span class="summary-sub">6 edges · <code>v3.codex_sample_retention_snap_scope</code> · V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReported</span>
+        <span class="summary-sub">V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReturned</span>
+        <span class="summary-sub">9 edges · <code>v3.codex_sample_retention_snap_scope</code> · V3CodexSample02ManifestAuthorizationPublished → V3CodexSamplePersistFailureReturned</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned persistence queue and worker to the filesystem without entering MetadataCenter or normal payload truth; accepted writes complete behind barriers, write failures are logged and retained for explicit reporting, diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.</p>
+        <p class="chain-summary">Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned persistence queue and worker to the filesystem without entering MetadataCenter or normal payload truth; accepted writes complete behind barriers, write failures remain request/file-qualified in the failure ledger until a barrier or worker shutdown returns them, aggregate shutdown and exec preparation preserve residual failures for lifecycle reporting, diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.codex_sample_retention_snap_scope</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>
@@ -1609,15 +1609,20 @@ flowchart TD
   n_v3_codex_sample_retention_snap_scope_5[&quot;&lt;b&gt;Codex Sample 06 Retention Enforced&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3CodexSample06RetentionEnforced&lt;/small&gt;&quot;]
   n_v3_codex_sample_retention_snap_scope_6[&quot;&lt;b&gt;Codex Sample Persist Job Failed&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3CodexSamplePersistJobFailed&lt;/small&gt;&quot;]
   n_v3_codex_sample_retention_snap_scope_7[&quot;&lt;b&gt;Codex Sample Persist Failure Reported&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3CodexSamplePersistFailureReported&lt;/small&gt;&quot;]
+  n_v3_codex_sample_retention_snap_scope_8[&quot;&lt;b&gt;Codex Sample Persist Failure Drained&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3CodexSamplePersistFailureDrained&lt;/small&gt;&quot;]
+  n_v3_codex_sample_retention_snap_scope_9[&quot;&lt;b&gt;Codex Sample Persist Failure Returned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3CodexSamplePersistFailureReturned&lt;/small&gt;&quot;]
   n_v3_codex_sample_retention_snap_scope_0 --&gt;|v3-codex-sample-01&lt;br/&gt;v3-server → v3-debug| n_v3_codex_sample_retention_snap_scope_1
   n_v3_codex_sample_retention_snap_scope_1 --&gt;|v3-codex-sample-02&lt;br/&gt;v3-server → v3-debug| n_v3_codex_sample_retention_snap_scope_2
   n_v3_codex_sample_retention_snap_scope_3 --&gt;|v3-codex-sample-03&lt;br/&gt;v3-server → v3-debug| n_v3_codex_sample_retention_snap_scope_2
   n_v3_codex_sample_retention_snap_scope_2 --&gt;|v3-codex-sample-04&lt;br/&gt;v3-debug → v3-debug| n_v3_codex_sample_retention_snap_scope_4
   n_v3_codex_sample_retention_snap_scope_4 --&gt;|v3-codex-sample-05&lt;br/&gt;v3-debug → v3-debug| n_v3_codex_sample_retention_snap_scope_5
   n_v3_codex_sample_retention_snap_scope_6 --&gt;|v3-codex-sample-06&lt;br/&gt;v3-debug → v3-debug| n_v3_codex_sample_retention_snap_scope_7
+  n_v3_codex_sample_retention_snap_scope_7 --&gt;|v3-codex-sample-07&lt;br/&gt;v3-debug → v3-debug| n_v3_codex_sample_retention_snap_scope_8
+  n_v3_codex_sample_retention_snap_scope_8 --&gt;|v3-codex-sample-08&lt;br/&gt;v3-server → v3-debug| n_v3_codex_sample_retention_snap_scope_9
+  n_v3_codex_sample_retention_snap_scope_8 --&gt;|v3-codex-sample-09&lt;br/&gt;v3-server → v3-debug| n_v3_codex_sample_retention_snap_scope_9
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_codex_sample_retention_snap_scope_0,n_v3_codex_sample_retention_snap_scope_1,n_v3_codex_sample_retention_snap_scope_2,n_v3_codex_sample_retention_snap_scope_3,n_v3_codex_sample_retention_snap_scope_4,n_v3_codex_sample_retention_snap_scope_5,n_v3_codex_sample_retention_snap_scope_6,n_v3_codex_sample_retention_snap_scope_7 node;</pre>
+  class n_v3_codex_sample_retention_snap_scope_0,n_v3_codex_sample_retention_snap_scope_1,n_v3_codex_sample_retention_snap_scope_2,n_v3_codex_sample_retention_snap_scope_3,n_v3_codex_sample_retention_snap_scope_4,n_v3_codex_sample_retention_snap_scope_5,n_v3_codex_sample_retention_snap_scope_6,n_v3_codex_sample_retention_snap_scope_7,n_v3_codex_sample_retention_snap_scope_8,n_v3_codex_sample_retention_snap_scope_9 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
@@ -1628,6 +1633,9 @@ flowchart TD
 <tr><td><code>v3-codex-sample-04</code></td><td><code>V3CodexSamplePersistJobQueued</code><br/>→ <code>V3CodexSamplePersistJobDispatched</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_queue</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_queue</code></div></td><td><code>run_v3_codex_sample_persist_worker</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td><td><code>persist_v3_codex_sample_persist_job</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
 <tr><td><code>v3-codex-sample-05</code></td><td><code>V3CodexSamplePersistJobDispatched</code><br/>→ <code>V3CodexSample06RetentionEnforced</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_filesystem</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_filesystem</code></div></td><td><code>persist_v3_codex_sample_persist_job</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td><td><code>V3CodexSampleStore::persist</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
 <tr><td><code>v3-codex-sample-06</code></td><td><code>V3CodexSamplePersistJobFailed</code><br/>→ <code>V3CodexSamplePersistFailureReported</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_queue</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_queue</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>persist_v3_codex_sample_persist_job</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td><td><code>record_v3_codex_sample_persist_failure</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
+<tr><td><code>v3-codex-sample-07</code></td><td><code>V3CodexSamplePersistFailureReported</code><br/>→ <code>V3CodexSamplePersistFailureDrained</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td><td><code>V3CodexSampleStore::persist_failures</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
+<tr><td><code>v3-codex-sample-08</code></td><td><code>V3CodexSamplePersistFailureDrained</code><br/>→ <code>V3CodexSamplePersistFailureReturned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3ServerAggregateHandle::shutdown</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
+<tr><td><code>v3-codex-sample-09</code></td><td><code>V3CodexSamplePersistFailureDrained</code><br/>→ <code>V3CodexSamplePersistFailureReturned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.debug.codex_sample_persist_failure</code></div></td><td><code>V3ServerAggregateHandle::prepare_for_exec</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3CodexSamplePersistHandle::shutdown</code><br/><small>routecodex-v3-debug/src/sample_store.rs</small></td></tr>
 </tbody>
 </table>
       </div>
@@ -1641,12 +1649,12 @@ flowchart TD
         <span class="summary-sub">8 edges · <code>v3.server.managed_lifecycle</code> · V3Lifecycle01ValidatedConfig → V3Lifecycle07GracefullyStopped</span>
       </summary>
       <div class="branch-body">
-        <p class="chain-summary">One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.</p>
+        <p class="chain-summary">One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill while preserving terminal Codex sample persistence failures in managed status.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.managed_server_lifecycle</code></span>
           <span>audit: <span class="status audited_locked">locked by Jason</span></span>
           <span>modules: <code>v3-cli · v3-lifecycle · v3-server</code></span>
-          <span>resources: <code>11</code></span>
+          <span>resources: <code>13</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml</code></span>
 
         </div>
@@ -1683,7 +1691,7 @@ flowchart TD
 <tr><td><code>v3-life-05</code></td><td><code>V3Lifecycle05IdentityPublished</code><br/>→ <code>V3Lifecycle06LiveControlled</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div></td><td><code>V3ManagedLifecycle::status</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>send_control</code><br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small></td></tr>
 <tr><td><code>v3-life-05r</code></td><td><code>V3Lifecycle06LiveControlled</code><br/>→ <code>V3Lifecycle05IdentityPublished</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.lifecycle.restart_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.pid_cache</code> <code>v3.lifecycle.control_channel</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.lifecycle.restart_plan</code></div></td><td><code>V3ManagedLifecycle::restart</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>send_restart_control</code><br/><small>routecodex-v3-lifecycle/src/control_plane.rs</small></td></tr>
 <tr><td><code>v3-life-cli-debug-01</code></td><td><code>V3Cli01ResolvedDebugIntent</code><br/>→ <code>V3Lifecycle06LiveControlled</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.config.published_manifest</code></div></td><td><code>run_cli</code><br/><small>routecodex-v3-cli/src/main.rs</small></td><td><code>V3ManagedLifecycle::with_console_enabled</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td></tr>
-<tr><td><code>v3-life-06</code></td><td><code>V3Lifecycle06LiveControlled</code><br/>→ <code>V3Lifecycle07GracefullyStopped</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.control_channel</code> <code>v3.server.listener_set</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.control_channel</code> <code>v3.lifecycle.hooks_sidecar_process</code></div></td><td><code>V3ManagedLifecycle::stop</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>V3ServerAggregateHandle::shutdown</code><br/><small>routecodex-v3-server/src/lib.rs</small></td></tr>
+<tr><td><code>v3-life-06</code></td><td><code>V3Lifecycle06LiveControlled</code><br/>→ <code>V3Lifecycle07GracefullyStopped</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.lifecycle.instance_declaration</code> <code>v3.lifecycle.control_channel</code> <code>v3.server.listener_set</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.lifecycle.control_channel</code> <code>v3.lifecycle.hooks_sidecar_process</code> <code>v3.debug.codex_sample_persist_failure</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.lifecycle.status_record</code></div></td><td><code>V3ManagedLifecycle::stop</code><br/><small>routecodex-v3-lifecycle/src/lib.rs</small></td><td><code>V3ServerAggregateHandle::shutdown</code><br/><small>routecodex-v3-server/src/lib.rs</small></td></tr>
 </tbody>
 </table>
       </div>

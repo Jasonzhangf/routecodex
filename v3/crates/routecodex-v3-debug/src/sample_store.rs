@@ -76,6 +76,16 @@ pub struct V3CodexSamplePersistFailure {
     pub reason: String,
 }
 
+impl std::fmt::Display for V3CodexSamplePersistFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "request={} file={} reason={}",
+            self.request_id, self.file_name, self.reason
+        )
+    }
+}
+
 impl V3CodexSamplePersistHandle {
     /// Wait until every accepted persistence job ahead of this barrier finishes.
     pub async fn wait_until_idle(&self) -> Result<(), String> {
@@ -96,8 +106,8 @@ impl V3CodexSamplePersistHandle {
             .map_err(|error| format!("codex sample persist barrier failed: {error}"))?
     }
 
-    /// Await worker termination before listener shutdown.
-    pub async fn shutdown(&mut self) {
+    /// Await worker termination and return failures not already reported by a barrier.
+    pub async fn shutdown(&mut self) -> Vec<V3CodexSamplePersistFailure> {
         self.store
             .enqueue
             .write()
@@ -125,6 +135,7 @@ impl V3CodexSamplePersistHandle {
                 eprintln!("codex sample persist worker task failed: {error}");
             }
         }
+        self.store.persist_failures()
     }
 
     pub fn persist_failures(&self) -> Vec<V3CodexSamplePersistFailure> {
@@ -1009,8 +1020,7 @@ mod tests {
                         status: None,
                     })
                     .expect("queued sample should be accepted");
-                handle.shutdown().await;
-                let failures = handle.persist_failures();
+                let failures = handle.shutdown().await;
                 assert_eq!(
                     failures.len(),
                     1,
@@ -1024,6 +1034,10 @@ mod tests {
                 assert!(
                     failure_reason.contains("create")
                         || failure_reason.contains("permission denied")
+                );
+                assert!(
+                    handle.persist_failures().is_empty(),
+                    "shutdown must take ownership of the residual failure ledger"
                 );
                 let _ = fs::set_permissions(sample_dir(&home_base), Permissions::from_mode(0o755));
             })
