@@ -13,6 +13,55 @@ flowchart LR
   F --> G[V3Lifecycle07GracefullyStopped]
 ```
 
+## Hooks sidecar DAG (single source, single sink)
+
+The V3 managed lifecycle and the optional hooks sidecar share one entry and one exit
+inside the managed runtime process tree. The lifecycle is the only owner of the sidecar
+process group, its control socket, and its stop/cleanup. `legacy_supervisor` is an explicit
+install-record declaration and is not selected by default; an enabled record without
+`hooks_runtime` or with `hooks_runtime: internal_hooksd` starts the installed
+`rccv3-hooksd` binary with an instance-owned `hooks-sidecar.sock` and
+`hooks-sidecar-state.json`. It never shares the legacy `127.0.0.1:8787` daemon or
+`~/.codex/routecodex-hooks/codexapp.sock` unless the install record explicitly names the
+legacy supervisor.
+
+```mermaid
+flowchart TB
+  A[V3Lifecycle04ChildSpawned] --> B[Read hooks install record]
+  B -- malformed or unreadable --> I[Publish managed Running with hooks_unavailable:reason]
+  B --> C{supervisor_enabled true}
+  C -- no --> N[Publish managed Running without sidecar]
+  C -- yes --> D{valid hooks_runtime}
+  D -- invalid --> I
+  D -- internal_hooksd or unset --> E[Resolve installed rccv3-hooksd]
+  D -- legacy_supervisor --> E2[Resolve declared legacy supervisor]
+  E -- missing or invalid --> I
+  E --> F[Start lifecycle-owned process group]
+  E2 -- missing or invalid --> I
+  E2 --> F
+  F -- spawn failure --> I
+  F --> G[Check selected sidecar readiness; internal uses rcc-hooks-sidecar/v1]
+  G -- ready --> H[Publish managed Running with sidecar healthy]
+  G -- missing/crash/timeout --> I[Publish managed Running with hooks_unavailable:reason]
+  H --> J[Managed status/control; sidecar events only when available]
+  I --> J
+  N --> J
+  J --> K[Lifecycle stop / sidecar process-group stop]
+  K --> L[Remove hooks-sidecar.pid, socket, state when owned]
+  L --> Z[Managed lifecycle exit]
+```
+
+### Current-state notes
+
+- The active install record now selects `internal_hooksd`. The lifecycle therefore owns a
+  sidecar process group independent of the external hooks supervisor daemon and its fixed
+  `8787` endpoint.
+- The previous `legacy_supervisor` path could collide with an already-running external
+  supervisor or try to bind `codexapp.sock` owned by another process. Internal mode does
+  not use the legacy supervisor wrapper, daemon config, or `codexapp.sock` path.
+- A broken install record and a missing `rccv3-hooksd` fail closed with
+  `hooks_unavailable:<reason>`; the managed server remains `running`.
+
 ## Truth and cache
 
 - `instance.json` is the authoritative declaration: deterministic config identity, executable, and
