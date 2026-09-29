@@ -531,10 +531,16 @@ fn hooks_runtime_mode(
     record: &Value,
     record_path: &Path,
 ) -> Result<HooksRuntimeMode, V3LifecycleError> {
-    let mode = record
-        .get("hooks_runtime")
-        .and_then(Value::as_str)
-        .unwrap_or("internal_hooksd");
+    let mode = match record.get("hooks_runtime") {
+        None => "internal_hooksd",
+        Some(Value::String(mode)) => mode.as_str(),
+        Some(other) => {
+            return Err(V3LifecycleError::Validation(format!(
+                "hooks install record {} declares non-string hooks_runtime {other}",
+                record_path.display()
+            )));
+        }
+    };
     match mode {
         "internal_hooksd" => Ok(HooksRuntimeMode::InternalHooksd),
         // The legacy external supervisor is reachable only through an explicit

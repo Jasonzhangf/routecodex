@@ -998,6 +998,92 @@ fn default_install_record_uses_internal_hooksd_from_cli_lifecycle() {
 }
 
 #[test]
+fn invalid_hooks_runtime_type_keeps_managed_cli_running_without_sidecar() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+    let hooks_root = root.path().join("hooks");
+    let bin_directory = hooks_root.join("bin");
+    let record_path = hooks_root.join("install.json");
+    let hooksd_started = hooks_root.join("hooksd-started");
+    let legacy_started = hooks_root.join("legacy-started");
+    fs::create_dir_all(&bin_directory).unwrap();
+    let hooksd = bin_directory.join("rccv3-hooksd");
+    fs::write(
+        &hooksd,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\n",
+            hooksd_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&hooksd, fs::Permissions::from_mode(0o755)).unwrap();
+    let legacy_wrapper = hooks_root.join("supervisor-wrapper");
+    fs::write(
+        &legacy_wrapper,
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\n",
+            legacy_started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&legacy_wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "hooks_runtime": 42,
+            "supervisor_wrapper": legacy_wrapper,
+            "bin_directory": bin_directory,
+            "install_root": hooks_root,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let start = run_with_hooks_record(binary, &state_root, &config, "start", &record_path);
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    for port in ports {
+        wait_port(port, true);
+        assert_eq!(http_get_json(port, "/health")["status"], "ok");
+    }
+    let status = run_with_hooks_record(binary, &state_root, &config, "status", &record_path);
+    assert!(status.status.success());
+    let status_json = last_json(&status);
+    assert_eq!(status_json["state"], "running");
+    assert!(status_json["detail"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("hooks_unavailable:"));
+    assert!(
+        !hooksd_started.exists(),
+        "invalid mode must not launch internal hooksd"
+    );
+    assert!(
+        !legacy_started.exists(),
+        "invalid mode must not launch legacy supervisor"
+    );
+
+    let stop = run_with_hooks_record(binary, &state_root, &config, "stop", &record_path);
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_eq!(last_json(&stop)["state"], "stopped");
+    for port in ports {
+        wait_port(port, false);
+    }
+}
+
+#[test]
 fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
     let _guard = lifecycle_test_guard();
     let root = TempDir::new().unwrap();
