@@ -1348,6 +1348,69 @@ if (!requestNormalizePlanMapEdge) {
   }
 }
 
+const node02DesignBinding = requestChain?.entry_contract?.second_delivery_design_binding;
+const requiredNode02Consumers = [
+  'direct',
+  'relay',
+  'responses_relay',
+  'anthropic_relay',
+  'public_relay_hook',
+  'responses_relay_websocket',
+  'openai_chat_direct_to_relay',
+  'responses_direct_to_relay',
+];
+if (!node02DesignBinding) {
+  failures.push('v3-mainline-call-map.yml: request chain missing second_delivery_design_binding');
+} else {
+  const node02Entry = node02DesignBinding.node02_slice_entry ?? {};
+  if (node02Entry.output_arc !== 'canonical-request') {
+    failures.push('v3-mainline-call-map.yml: Node02 slice entry output_arc must be canonical-request');
+  }
+  if (node02Entry.caller_file !== 'v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs') {
+    failures.push('v3-mainline-call-map.yml: Node02 slice entry caller_file must be v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs');
+  }
+
+  const node02Consumers = node02DesignBinding.node02_slice_consumers;
+  if (!Array.isArray(node02Consumers)) {
+    failures.push('v3-mainline-call-map.yml: Node02 slice consumers must be an array');
+  } else {
+    const consumerModes = new Set(node02Consumers.map((consumer) => consumer?.mode));
+    for (const mode of requiredNode02Consumers) {
+      if (!consumerModes.has(mode)) failures.push(`v3-mainline-call-map.yml: Node02 slice consumers missing ${mode}`);
+    }
+    for (const consumer of node02Consumers) {
+      if (!requiredNode02Consumers.includes(consumer?.mode)) continue;
+      if (consumer?.handoff !== 'canonical-request') {
+        failures.push(`v3-mainline-call-map.yml: Node02 slice consumer ${consumer?.mode} handoff must be canonical-request`);
+      }
+    }
+  }
+
+  const futureNodeSymbols = new Set([
+    'V3OperationRunnerResolveTarget',
+    'V3OperationRunnerPlanExecution',
+  ]);
+  for (const consumer of node02Consumers ?? []) {
+    if (futureNodeSymbols.has(consumer?.consumer_symbol)) {
+      failures.push(`v3-mainline-call-map.yml: Node02 consumer ${consumer?.mode} cannot bind future node ${consumer.consumer_symbol}`);
+    }
+  }
+
+  const futureFullGraphEdges = node02DesignBinding.future_full_graph_edges;
+  if (!Array.isArray(futureFullGraphEdges)) {
+    failures.push('v3-mainline-call-map.yml: Node02 binding missing future_full_graph_edges');
+  } else {
+    for (const expectedStepId of ['v3-op-runner-req-02', 'v3-op-runner-req-02b']) {
+      const edge = futureFullGraphEdges.find((item) => item?.step_id === expectedStepId);
+      if (!edge) {
+        failures.push(`v3-mainline-call-map.yml: Node02 future full graph edge ${expectedStepId} missing`);
+      } else if (edge.status !== 'binding_pending') {
+        failures.push(`v3-mainline-call-map.yml: Node02 future full graph edge ${expectedStepId} must remain binding_pending`);
+      }
+    }
+  }
+}
+
 const errorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
 // Error graph resource checks are deferred design targets: validate only
 // when the graph is present, never block Node 01.

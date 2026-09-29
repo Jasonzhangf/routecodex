@@ -1,0 +1,25 @@
+{
+  "id": "v3.operation_runner.request.normalize_request_losslessly",
+  "version": "1",
+  "inputs": [
+    { "id": "client-json", "schema": "Any", "schema_ref": "v3.operation_runner.arc.client_json" }
+  ],
+  "nodes": [
+    {
+      "id": "normalize_request_losslessly",
+      "operator": "routecodex.v3.operation.normalize_request_losslessly",
+      "operator_version": "1",
+      "inputs": ["client-json"],
+      "output": { "id": "canonical-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.canonical_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.operation_runner.request_origin_kind", "v3.operation_runner.request_inverse_context"],
+        "writes": ["v3.request.normal_payload", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"]
+      }
+    }
+  ],
+  "edges": [],
+  "outputs": ["canonical-request"]
+}

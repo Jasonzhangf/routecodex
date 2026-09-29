@@ -664,6 +664,34 @@ const mutations = [
     expect: /missing normalize_request_losslessly -> plan_execution caller edge/u,
   },
   {
+    name: 'node02-current-consumer-binds-future-resolve-target',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      if (!chain) throw new Error('missing v3.operation_runner.dagpipe.request chain');
+      const consumer = chain.entry_contract.second_delivery_design_binding.node02_slice_consumers[0];
+      consumer.consumer_symbol = 'V3OperationRunnerResolveTarget';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 consumer direct cannot bind future node V3OperationRunnerResolveTarget/u,
+  },
+  {
+    name: 'node02-future-edge-claims-runtime-bound',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      if (!chain) throw new Error('missing v3.operation_runner.dagpipe.request chain');
+      const edge = chain.entry_contract.second_delivery_design_binding.future_full_graph_edges[0];
+      edge.status = 'runtime_bound';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 future full graph edge v3-op-runner-req-02 must remain binding_pending/u,
+  },
+  {
     name: 'missing-transform-id',
     mutate(tmp) {
       const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
