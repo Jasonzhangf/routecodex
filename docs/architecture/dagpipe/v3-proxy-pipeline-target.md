@@ -87,7 +87,7 @@ flowchart LR
 flowchart LR
   A[收到类型化来源失败] --> B[分类来源阶段和真实外部状态]
   B --> C{是否为已绑定身份的 provider 失败}
-  C -->|是| D[冷却对应 provider 身份]
+  C -->|是| D[按类型化失败策略管理 provider 身份或仅排除本次候选]
   D --> E[判断目标内候选及错误动作]
   C -->|否| F[按来源阶段生成终端错误]
   E -->|可重选| G[产出新尝试请求事件]
@@ -97,7 +97,7 @@ flowchart LR
   H --> I
 ```
 
-入口 ARC 是类型化来源失败；provider/模型/鉴权身份仅在来源确属该 provider 尝试时存在。唯一出口 ARC 是类型化错误决策。`新尝试请求事件` 由生命周期 owner 消费并创建新的尝试 ID，不是指向请求图内部节点的回边。只有当前错误策略确实允许重选才发起新尝试；Server、请求阶段、响应阶段等非 provider 失败按来源终结，保留真实外部状态及项目规定的 598/599/502 投影。调试日志、snapshot 和样本只旁路记录证据，不承载决策真相。
+入口 ARC 是类型化来源失败；provider/模型/鉴权身份仅在来源确属该 provider 尝试时存在。唯一出口 ARC 是类型化错误决策。`新尝试请求事件` 由生命周期 owner 消费并创建新的尝试 ID，不是指向请求图内部节点的回边。只有当前错误策略确实允许重选才发起新尝试。Provider 的真实外部状态只供错误分类和管理，不能作为客户端状态或错误体投影；请求局部兼容失败只排除本次候选，不冷却 provider。Server、请求阶段、响应阶段等非 provider 失败按来源终结，并使用项目规定的 598/599/502 投影。调试日志、snapshot 和样本只旁路记录证据，不承载决策真相。
 
 ## 请求生命周期状态
 
@@ -145,7 +145,7 @@ stateDiagram-v2
 | G2 | 节点绑定为可执行 Operator | `operation_runner` 已从请求图派生并编译 `capture_client_json` Node01 切片，HTTP 与 Responses WebSocket 入口使用同一编译结果；其余节点尚未运行。 | 沿唯一 owner 逐一落实余下节点的 Operator 名称/版本、ARC schema、作用权限和 SDK compile；每步核对真实入口。 |
 | G3 | 请求入口到模式分支 | `v3/crates/routecodex-v3-server/src/lib.rs` 声明 HTTP 入口；`endpoint_handlers.rs`、`executors.rs` 接到 Runtime；`v3-mainline-call-map.yml` 有 `v3.responses_direct.required_mainline`。 | 用真实请求 ID 核对 Direct/Relay 决策和候选引用；不能把 map 的 `anchored` 或测试锚点当成所有协议的运行证明。 |
 | G4 | Relay 与 Direct 的响应分支 | `v3.hub_pipeline.v1.request/response` 与 `v3.hub_relay.*` map 分别列静态骨架及 Relay source slice；`hub_v1.rs` 导出相邻 builder 与 Direct/Relay 路径。 | 各选一个真实成功样本，对比 provider raw、Chat/Direct 作用点、continuation、客户端 JSON/SSE；再决定 Operator 边界。 |
-| G5 | 错误、重选与终端 | `v3.debug_error_foundation.mainline` map 列 Error01–06；`v3.hub_relay.response_failure_entry` 声明响应治理失败接 Error01；Runtime `kernel.rs` 持有尝试计数和传输尝试。 | 分别用 Server/请求、provider、响应阶段失败样本核对状态；仅对已绑定 provider 身份的类型化失败更新健康，验证目标内重选、598/599/502/外部状态和最终响应。为新尝试 ID、响应失败接线及释放终点补类型化证据。 |
+| G5 | 错误、重选与终端 | `v3.debug_error_foundation.mainline` map 列 Error01–06；`v3.hub_relay.response_failure_entry` 声明响应治理失败接 Error01；Runtime `kernel.rs` 持有尝试计数和传输尝试。 | 分别用 Server/请求、provider、响应阶段失败样本核对状态；仅对已绑定 provider 身份且策略要求冷却的类型化失败更新健康，验证请求局部排除、目标内重选、598/599/502 及客户端与 provider 状态隔离。为新尝试 ID、响应失败接线及释放终点补类型化证据。 |
 | G6 | 取消、提交后流中断与资源释放 | 当前 map 主要记录请求/响应/错误调用边，也有提交后 SSE 观测与 EOF/error/drop 的局部合同；本轮未绑定 DAGPipe 状态机与每终点资源收据。 | 明确连接断开、上游尝试取消、SSE 关闭的 owner、事件与验收；核对提交前完整缓冲与现有提交后观测的关系，补同入口取消/流中断回放。 |
 
 **审计结论：三张静态图已登记，Node01 切片已接入；整条请求、响应、错误图仍未运行。** 后续沿 G2–G6 逐节点核对图、Operator、调用边和真实入口证据，不以静态校验或 Node01 证据推断全图完成。修改项目锁定骨架节点、边、owner 或资源流之前，先遵守 `docs/architecture/wiki/v3-mainline-skeleton-sop.md` 的授权边界。
