@@ -4200,6 +4200,8 @@ features:
   - V3CodexSampleStore
   - V3CodexSampleStore::enqueue_persist
   - V3CodexSampleStore::start_persist_worker
+  - V3CodexSamplePersistFailureLedger
+  - serialized_v3_codex_sample_payload_size
   - run_v3_codex_sample_persist_worker
   - persist_v3_codex_sample_persist_job
   - record_v3_codex_sample_persist_failure

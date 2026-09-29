@@ -10,8 +10,10 @@
   - `--snapall`: Debug snapshots plus Direct and Relay sample persistence enabled.
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
 - Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
-- Authorized sample payloads are enqueued to one Debug-owned worker; a completion barrier waits for all previously accepted writes.
-- Enqueue acceptance is not filesystem success: worker write failures are logged immediately and retained as request/file-qualified errors for a barrier or worker shutdown to return.
+- Authorized sample payloads are enqueued to one Debug-owned worker behind a 64-job and 64-MiB serialized-payload budget; a completion barrier waits for all previously accepted writes.
+- Queue overload and oversized payloads are logged and retained as request/file-qualified failures without rejecting a passable business request.
+- A completion barrier reports a snapshot without draining the failure ledger; worker shutdown drains the bounded ledger and returns an omitted-count summary when needed.
+- Server startup starts the persistence worker only after fallible listener preparation and before listener tasks begin accepting requests.
 - Aggregate shutdown and exec preparation return residual persistence failures; managed stop records them in terminal status and exec restart reports them while preserving handoff checkpoints.
 - Provider request/response snapshots pass through Debug redaction and payload budgets before filesystem IO.
 - Debug checks the final serialized artifact against a hard 64 KiB limit; recursive estimates alone are not sufficient.
@@ -50,7 +52,8 @@
 
 - Positive: Relay diagnostics remain available; `--snapall` preserves explicit full capture.
 - Negative: no snapshot flag cannot write any new sample; default `--snap` cannot write Direct; restart cannot leave more than 100 pre-existing request directories; provider media/auth cannot reach disk unredacted.
-- Failure: filesystem and redaction/persistence failures remain explicit debug errors; no silent success or payload fallback.
+- Failure: filesystem, queue-budget, and redaction/persistence failures remain explicit debug errors; queue pressure cannot become a client error or payload fallback.
+- Boundaries: tests saturate the queue, drop a barrier reply, and exceed the failure-ledger cap to prove each resource and failure report stays bounded.
 
 ## Verification Order
 

@@ -149,8 +149,43 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /fn record_v3_codex_sample_persist_failure[\s\S]*codex sample persist failed[\s\S]*failures\.push/,
-  "Asynchronous sample write failures must be logged immediately and retained for explicit reporting",
+  /fn record_v3_codex_sample_persist_failure[\s\S]*failures\.record[\s\S]*codex sample persist failed/,
+  "Asynchronous sample write failures must be retained in a bounded ledger and logged",
+);
+requireMatch(
+  sampleStore,
+  /mpsc::channel\(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY\)[\s\S]*try_send[\s\S]*TrySendError::Full/,
+  "Sample persistence must use a bounded queue and report overload without awaiting capacity",
+);
+requireMatch(
+  sampleStore,
+  /queued_payload_bytes:[\s\S]*Semaphore[\s\S]*serialized_v3_codex_sample_payload_size[\s\S]*try_acquire_many_owned/,
+  "Queued and in-flight sample payload bytes must stay within the declared byte budget",
+);
+requireMatch(
+  sampleStore,
+  /fn persist_failure_snapshot[\s\S]*\.snapshot\(\)/,
+  "A barrier must observe failures without clearing the shutdown failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub async fn shutdown[\s\S]*self\.store\.persist_failures\(\)/,
+  "Worker shutdown must report the residual failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub fn persist_failures[\s\S]*ledger\.take\(\)/,
+  "Terminal failure reporting must drain the ledger only at shutdown",
+);
+requireMatch(
+  sampleStore,
+  /V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT[\s\S]*additional_failures[\s\S]*additional codex sample persistence failures omitted/,
+  "Failure ledger overflow must remain bounded and report its omitted count",
+);
+forbidMatch(
+  sampleStore,
+  /UnboundedSender|UnboundedReceiver|unbounded_channel/,
+  "Sample persistence must not retain an unbounded payload queue",
 );
 forbidMatch(
   sampleStore,

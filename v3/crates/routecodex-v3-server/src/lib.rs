@@ -439,9 +439,6 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.full_codex_sampling
             && !manifest.debug.codex_samples,
     ));
-    let codex_sample_persist_worker = codex_sample_store
-        .start_persist_worker()
-        .map_err(std::io::Error::other)?;
     for server in &preflight.listeners {
         codex_sample_store
             .enforce_listener_retention(server.port)
@@ -495,6 +492,7 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     });
     let mut listeners = Vec::with_capacity(bound.len());
     let mut observability_writers = Vec::with_capacity(bound.len());
+    let mut pending_listener_tasks = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -542,6 +540,33 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
         let app_for_serve = app.clone();
+        pending_listener_tasks.push((listener, app_for_serve, shutdown_rx, connection_broker));
+        listeners.push(V3ListenerHandle {
+            server_id,
+            addr,
+            shutdown: Some(shutdown_tx),
+        });
+    }
+    for listener in &listeners {
+        let scope = debug
+            .start_trace(&listener.server_id, "startup", "listener")
+            .map_err(std::io::Error::other)?;
+        debug
+            .record_node_event(
+                &scope,
+                "V3ServerStartup01ListenerSetPreflight",
+                "listening",
+                Some(json!({
+                    "server_id": listener.server_id,
+                    "address": listener.addr.to_string()
+                })),
+            )
+            .map_err(std::io::Error::other)?;
+    }
+    let codex_sample_persist_worker = codex_sample_store
+        .start_persist_worker()
+        .map_err(std::io::Error::other)?;
+    for (listener, app_for_serve, shutdown_rx, connection_broker) in pending_listener_tasks {
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
             loop {
@@ -567,30 +592,9 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 }
             }
         });
-        listeners.push(V3ListenerHandle {
-            server_id,
-            addr,
-            shutdown: Some(shutdown_tx),
-        });
     }
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
-    }
-    for listener in &listeners {
-        let scope = debug
-            .start_trace(&listener.server_id, "startup", "listener")
-            .map_err(std::io::Error::other)?;
-        debug
-            .record_node_event(
-                &scope,
-                "V3ServerStartup01ListenerSetPreflight",
-                "listening",
-                Some(json!({
-                    "server_id": listener.server_id,
-                    "address": listener.addr.to_string()
-                })),
-            )
-            .map_err(std::io::Error::other)?;
     }
     let (probe_shutdown, mut probe_shutdown_rx) = oneshot::channel();
     let probe_manifest = Arc::clone(&manifest);

@@ -119,10 +119,13 @@ async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::Sock
     let mut response_body = Vec::new();
     if let Some(content_length) = content_length {
         response_body.resize(content_length, 0);
-        tokio::time::timeout(Duration::from_secs(5), response.read_exact(&mut response_body))
-            .await
-            .unwrap()
-            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            response.read_exact(&mut response_body),
+        )
+        .await
+        .unwrap()
+        .unwrap();
     } else if chunked {
         loop {
             let mut size_line = String::new();
@@ -192,7 +195,10 @@ async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_
         spawn_sample_persistence_failure_server(root.path(), &home, port).await;
     let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
     assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
-    assert!(response.contains("\r\n\r\n"), "incomplete HTTP response: {response}");
+    assert!(
+        response.contains("\r\n\r\n"),
+        "incomplete HTTP response: {response}"
+    );
     assert!(
         !response.contains("codex sample persistence shutdown failed"),
         "persistence diagnostics must not replace the client error response: {response}"
@@ -236,11 +242,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     if child_root.is_none() {
         let root = TempDir::new().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                FAILED_EXEC_RESTART_TEST_FILTER,
-                "--nocapture",
-            ])
+            .args(["--exact", FAILED_EXEC_RESTART_TEST_FILTER, "--nocapture"])
             .env(FAILED_EXEC_RESTART_CHILD_ENV, root.path())
             .output()
             .unwrap();
@@ -274,7 +276,10 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         spawn_sample_persistence_failure_server(&root, &home, port).await;
     let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
     assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
-    assert!(response.contains("\r\n\r\n"), "incomplete HTTP response: {response}");
+    assert!(
+        response.contains("\r\n\r\n"),
+        "incomplete HTTP response: {response}"
+    );
     assert!(
         !response.contains("codex sample persistence shutdown failed"),
         "persistence diagnostics must not replace the client error response: {response}"

@@ -1918,6 +1918,7 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: run_v3_codex_sample_persist_worker
     identity: [requestId, artifactName]
+    semantic_contract: Bounded to 64 queued jobs and 64 MiB of serialized payload across queued and in-flight writes. Capacity or byte-budget exhaustion is logged and recorded as a persistence failure without rejecting the business request.
     allowed_readers: [run_v3_codex_sample_persist_worker]
     allowed_writers: [V3CodexSampleStore::enqueue_persist]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
@@ -1934,6 +1935,7 @@ resources:
     owner_crate: routecodex-v3-debug
     owner_node: record_v3_codex_sample_persist_failure
     identity: [requestId, artifactName, reason]
+    semantic_contract: Retains at most 256 request-qualified failures plus one omitted-count summary. Barriers report a snapshot without draining it; worker shutdown drains the ledger for lifecycle reporting.
     allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_until_idle, V3CodexSamplePersistHandle::shutdown, V3ServerAggregateHandle::shutdown, V3ServerAggregateHandle::prepare_for_exec, shutdown_managed_runtime, restart_managed_runtime_in_place, developer_logs]
     allowed_writers: [record_v3_codex_sample_persist_failure]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]

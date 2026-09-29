@@ -2784,7 +2784,7 @@ features:
   status: source_active_live_verification_required
   change_risk: medium
   owner_kind: rust_v3_bounded_debug_artifact_lifecycle
-  owner_scope: V3CodexSampleStore is the unique persistence owner; accepted sample jobs run through one serialized worker, barriers and worker shutdown return request/file-qualified failures, aggregate shutdown and exec preparation preserve residual failures for lifecycle reporting, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories; neither samples nor control
+  owner_scope: V3CodexSampleStore is the unique persistence owner; accepted sample jobs run through one serialized worker behind a 64-job and 64-MiB serialized-payload budget, overload is recorded without rejecting business requests, barriers snapshot failures without draining the ledger, and worker shutdown drains the bounded request/file-qualified failure ledger for aggregate shutdown and exec-preparation reporting. The server starts this worker after fallible listener startup checks and before listener tasks begin accepting requests. Dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories; neither samples nor control
     state may enter MetadataCenter or normal provider/client payload.
   owner_modules:
   - v3/crates/routecodex-v3-debug
@@ -2800,17 +2800,24 @@ features:
   - Dev builds sample by default; release builds require explicit opt-in.
   - Each port retains at most 100 request directories.
   - The worker completes accepted writes before a queue barrier and reports filesystem failures immediately to logs and through the barrier result.
-  - Worker shutdown drains and returns failures not already consumed by a barrier; aggregate shutdown and exec preparation return that terminal report.
+  - Queue overload and payloads above the byte budget are explicitly reported without rejecting a passable business request.
+  - A barrier reports a failure snapshot without draining it; a cancelled barrier reply cannot erase failures needed by shutdown.
+  - Worker shutdown drains and returns the bounded failure ledger, including an omitted-count summary; aggregate shutdown and exec preparation return that terminal report.
+  - The persistence worker starts only after fallible startup preparation and before listener tasks begin accepting requests.
   required_negative:
   - Debug payload copies never enter MetadataCenter, provider payload, client payload, or routing truth.
   - Missing Direct typed carriers do not cause the server to fabricate provider artifacts.
   - No truncation or placeholder machinery may exist anywhere in the sample path.
   - Enqueue acceptance alone is never treated as successful filesystem persistence; worker failures cannot be discarded.
+  - Queue or failure-ledger growth cannot retain an unbounded number or total byte size of JSON payloads.
   required_gates:
   - npm run verify:v3-debug-payload-budget
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - cargo test -p routecodex-v3-debug persist_async_worker_records_explicit_failure_terminal
+  - cargo test -p routecodex-v3-debug persist_async_worker_bounds_queue_and_reports_overload
+  - cargo test -p routecodex-v3-debug persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped
+  - cargo test -p routecodex-v3-debug persist_failure_ledger_bounds_records_and_summarizes_overflow
   - cargo test -p routecodex-v3-server --test multi_listener_server responses_direct_sample_persist_failure_is_reported -- --nocapture
   completion_rule:
     source: Debug budget, red fixtures, resource map, and build gate pass.
