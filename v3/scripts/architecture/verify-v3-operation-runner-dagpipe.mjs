@@ -359,6 +359,25 @@ for (const row of fieldProfiles?.extension_path_consumers ?? []) {
   }
 }
 
+const inverseOperator = fieldProfiles?.request_inverse_contract?.inverse_operator;
+if (fieldProfiles?.request_inverse_contract?.inverse_method !== 'inverse_to_entry'
+  || !inverseOperator || !fieldOperatorLibrary.has(inverseOperator)) {
+  failures.push(`${fieldProfilesRel}: request inverse_to_entry operator must be registered`);
+}
+const forwardRequestOperators = new Set();
+for (const row of [
+  ...(fieldProfiles?.path_consumers ?? []),
+  ...(fieldProfiles?.extension_path_consumers ?? []),
+]) {
+  const operator = row?.consumers?.client_request_to_chat ?? row?.scalar_consumer?.client_request_to_chat;
+  if (operator) forwardRequestOperators.add(operator);
+}
+for (const operator of forwardRequestOperators) {
+  if (fieldOperatorLibrary.get(operator)?.inverse_to_entry !== inverseOperator) {
+    failures.push(`${fieldProfilesRel}: configured forward request operator ${operator} must declare registered inverse_to_entry ${inverseOperator}`);
+  }
+}
+
 const normalizedProtocol = (protocol) => protocol === 'openai_chat_extension' ? 'openai_chat' : protocol;
 const standardBindingKeys = new Set();
 for (const row of fieldProfiles?.path_consumers ?? []) {
@@ -1195,6 +1214,28 @@ if (lifecycleManifest.field_profiles !== fieldProfilesRel) {
   failures.push(`v3.operation_runner.lifecycle.manifest.yml: field_profiles must be ${fieldProfilesRel}`);
 }
 if (!lifecycleManifest.field_walker_contract) failures.push('v3.operation_runner.lifecycle.manifest.yml: missing field_walker_contract');
+const node02SliceRel = 'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json';
+const node02ErrorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+const node02Failure = lifecycleManifest.node02_failure_handoff;
+const node02Slice = JSON.parse(fs.readFileSync(path.join(root, node02SliceRel), 'utf8'));
+const node02ErrorGraph = fs.existsSync(path.join(root, node02ErrorGraphRel))
+  ? JSON.parse(fs.readFileSync(path.join(root, node02ErrorGraphRel), 'utf8'))
+  : null;
+if (node02ErrorGraph && (node02Failure?.source_graph !== node02SliceRel
+  || node02Failure?.source_node !== 'normalize_request_losslessly'
+  || node02Failure?.runtime_result !== 'typed_source_failure'
+  || node02Failure?.error_input_arc !== 'source-failure'
+  || node02Failure?.error_graph !== node02ErrorGraphRel
+  || node02Failure?.error_entry_node !== 'error_err01_source_raised'
+  || node02Failure?.owner !== 'RuntimeRequestGraphEntry'
+  || node02Slice.outputs?.length !== 1
+  || node02Slice.outputs[0] !== 'canonical-request'
+  || !node02Slice.nodes?.some((node) => node.id === node02Failure?.source_node)
+  || !node02ErrorGraph.inputs?.some((input) => input.id === node02Failure?.error_input_arc)
+  || !node02ErrorGraph.nodes?.some((node) => node.id === node02Failure?.error_entry_node
+    && node.inputs?.includes(node02Failure?.error_input_arc)))) {
+  failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01');
+}
 
 const resourceIds = new Set((resourceMap.resources ?? []).map((r) => r.resource_id));
 for (const id of [

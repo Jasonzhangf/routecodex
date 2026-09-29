@@ -10,6 +10,8 @@ const rel = {
   verification: 'docs/architecture/v3-verification-map.yml',
   http: 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
   websocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+  chatDirectOutcome: 'v3/crates/routecodex-v3-server/src/executors.rs',
+  responsesDirectOutcome: 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
   directCore: 'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs',
   directCodec: 'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs',
   relayCore: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs',
@@ -138,6 +140,12 @@ const websocketRelay = functionBody(rel.websocket, 'fn execute_responses_relay_w
 assertNot(websocketRelay, /payload:\s*payload(\.clone\(\))?/, 'Responses WebSocket still sends raw payload to Relay', rel.websocket);
 assertNot(websocketRelay, /handoff\.request_payload\.clone\(\)/, 'Responses WebSocket still passes handoff raw request_payload to Direct', rel.websocket);
 
+const chatDirectOutcome = functionBody(rel.chatDirectOutcome, 'fn execute_v3_openai_chat_direct_server_outcome(', 'OpenAI Chat Direct-to-Relay handoff');
+assertNot(chatDirectOutcome, /V3OpenAiChatRelayRuntimeInput\s*\{[^}]*\bpayload\s*,/, 'OpenAI Chat Direct-to-Relay still passes raw payload', rel.chatDirectOutcome);
+const responsesDirectOutcome = functionBody(rel.responsesDirectOutcome, 'fn execute_responses_direct_server_outcome(', 'Responses Direct-to-Relay handoff');
+assertNot(responsesDirectOutcome, /V3ResponsesRelayRuntimeInput\s*\{[^}]*\bpayload:\s*payload\.clone\(\)/, 'Responses Direct-to-Relay still passes raw payload', rel.responsesDirectOutcome);
+assertNot(responsesDirectOutcome, /next_handoff\.request_payload\.clone\(\)/, 'Responses nested handoff still passes raw request_payload', rel.responsesDirectOutcome);
+
 for (const target of [rel.operatorEntry, rel.operators]) {
   if (!exists(target)) continue;
   if (/routecodex\.v3\.operation\.(resolve_target|plan_execution)\b/.test(readFile(target))) fail('Node03/04 runtime registration found', target);
@@ -157,4 +165,5 @@ console.log('[verify:v3-operation-runner-node02-cutover] ok');
 console.log('- Node02 HTTP/WebSocket canonical entry before dispatch: verified');
 console.log('- Direct/Relay/Anthropic/public relay old raw normalization callers removed: verified');
 console.log('- Responses WebSocket raw Relay and handoff bypasses removed: verified');
+console.log('- OpenAI Chat and Responses Direct-to-Relay raw handoffs removed: verified');
 console.log('- Node03/04 runtime registration absent: verified');

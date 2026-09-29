@@ -701,8 +701,13 @@ This is the current blocker for claiming Node 02 runtime cutover: the static
 design and DAGPipe slice can be reviewed, but encoding must not proceed until
 the listed current callers/consumers are replaced in one cutover.
 
-The Node 02 failure exit is a typed source failure into ErrorErr01. The Server
-does not project it directly. If a configured field operator cannot express a
+The Node 02 request slice has one success sink, `canonical-request`. On an
+operator failure, `RuntimeRequestGraphEntry` returns a typed source failure as
+its error result and supplies that result to the separate Error graph's
+`source-failure` input at `error_err01_source_raised`; no second request-graph
+sink or Server error projection is created. The handoff is declared in
+`v3.operation_runner.lifecycle.manifest.yml` and checked against both graphs.
+If a configured field operator cannot express a
 client field losslessly, Node 02 must preserve it as an extension when the
 protocol permits; an actual conversion failure is reported through Error and
 never wrapped as success. No provider attempt or client response is committed

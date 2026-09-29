@@ -11,6 +11,7 @@ const verifyRel = 'v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mj
 const verifyScript = path.join(repo, verifyRel);
 const files = [
   'docs/architecture/dagpipe/v3.operation_runner.request.graph.json',
+  'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.response.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
   'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
@@ -1427,6 +1428,27 @@ const mutations = [
       fs.writeFileSync(file, YAML.stringify(doc));
     },
     expect: /content union parent.*shape_children references unknown source inventory path|shape_children.*forged_shadow_field|must be source-backed and consumer-bound/u,
+  },
+  {
+    name: 'node02-forward-operator-missing-inverse',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const operator = doc.operator_registry.field_operators.find((entry) => entry.operator === 'routecodex.v3.field.lossless_preserve');
+      delete operator.inverse_to_entry;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /configured forward request operator routecodex\.v3\.field\.lossless_preserve@1 must declare registered inverse_to_entry/u,
+  },
+  {
+    name: 'node02-failure-handoff-missing-error-entry',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.node02_failure_handoff.error_entry_node = 'missing_error_entry';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01/u,
   },
 ];
 
