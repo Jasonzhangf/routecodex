@@ -282,9 +282,14 @@ async fn anthropic_sse_namespaced_custom_call_keeps_identity_and_result_pairing(
     let tools = json!([{"type":"namespace","name":"functions","tools":[
         {"type":"custom","name":"exec","format":{"type":"text"}}
     ]}]);
-    let context =
-        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({"tools":tools}))
-            .expect("projection context");
+    let inbound = json!({"model":"kimi-k3","input":[
+        {"type":"additional_tools","role":"developer","tools":tools.clone()},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Run pwd"}]}
+    ]});
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&inbound)
+        .expect("additional_tools must enter the canonical request");
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&canonical)
+        .expect("projection context");
     let event = |kind: &str, body: serde_json::Value| {
         Ok(format!("event: {kind}\ndata: {body}\n\n").into_bytes())
     };
