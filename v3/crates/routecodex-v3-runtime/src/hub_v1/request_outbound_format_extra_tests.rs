@@ -33,16 +33,7 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 
 #[test]
 fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "patch"}],
-        "tools": [{
-            "type": "custom",
-            "name": "apply_patch",
-            "description": "Apply a patch",
-            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire must wrap custom apply_patch as a function schema");
@@ -50,29 +41,14 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
     assert_eq!(tool["type"], "function");
     assert_eq!(tool["function"]["name"], "apply_patch");
     assert_eq!(tool["function"]["parameters"]["required"], json!(["input"]));
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("reason")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("goal_alignment_confidence")
-        .is_none());
-    assert!(tool["function"]["parameters"]["properties"]
-        .get("model_id")
-        .is_none());
+    assert!(tool["function"]["parameters"]["properties"].get("reason").is_none());
+    assert!(tool["function"]["parameters"]["properties"].get("goal_alignment_confidence").is_none());
+    assert!(tool["function"]["parameters"]["properties"].get("model_id").is_none());
 }
 
 #[test]
 fn responses_wire_normalizes_system_text_parts_to_input_text() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{
-            "role": "system",
-            "content": [{"type": "text", "text": "system guidance"}]
-        }, {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "assistant output"}]
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "system", "content": [{"type": "text", "text": "system guidance"}]}, {"role": "assistant", "content": [{"type": "text", "text": "assistant output"}]}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire must normalize system content parts");
@@ -85,14 +61,7 @@ fn responses_openai_chat_field_parity_responses_wire_generates_collision_resista
     let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
     let payload = json!({
         "model": "gpt-test",
-        "messages": [{
-            "role": "assistant",
-            "content": null,
-            "tool_calls": [
-                {"id": format!("{repeated_prefix}_left"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
-                {"id": format!("{repeated_prefix}_right"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
-            ]
-        }]
+        "messages": [{"role": "assistant", "content": null, "tool_calls": [{"id": format!("{repeated_prefix}_left"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}, {"id": format!("{repeated_prefix}_right"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}]}]
     });
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire projection must succeed");
@@ -615,16 +584,7 @@ fn openai_chat_wire_rejects_unknown_web_search_content_type() {
 
 #[test]
 fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "patch"}],
-        "tools": [{
-            "type": "custom",
-            "name": "apply_patch",
-            "description": "Apply a patch",
-            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
         .expect("custom grammar must flatten to the legal OpenAI Chat function tool shape");
