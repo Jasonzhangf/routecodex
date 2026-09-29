@@ -1124,6 +1124,7 @@ fn normalize_openai_chat_messages_payload(
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
 }
+
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
     message_row: &mut Map<String, Value>,
 ) {

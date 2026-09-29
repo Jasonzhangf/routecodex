@@ -223,7 +223,15 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "chat-wire-model");
-    assert_eq!(captured["messages"], payload["messages"]);
+    let expected_messages = payload["messages"]
+        .as_array()
+        .expect("payload messages")
+        .clone();
+    assert_eq!(
+        captured["messages"],
+        Value::Array(expected_messages),
+        "openai_chat provider wire preserves the client history verbatim"
+    );
     assert_eq!(
         captured["tools"],
         json!([{
