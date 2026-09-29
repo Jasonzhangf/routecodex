@@ -77,6 +77,10 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             ("call_id".to_string(), Value::String(call_id.to_owned())),
             ("name".to_string(), Value::String(client_name.to_owned())),
         ]);
+        if let Some((namespace, tool_name)) = context.namespaced_custom_tool_identity(name) {
+            output.insert("namespace".to_string(), Value::String(namespace.to_owned()));
+            output.insert("name".to_string(), Value::String(tool_name.to_owned()));
+        }
         let raw = if let Some(wrapper) = wrapper {
             if !wrapper.keys().all(|key| {
                 matches!(
@@ -171,7 +175,8 @@ mod tests {
         )
         .expect("namespace custom tool_use must restore the client declaration");
         assert_eq!(call["type"], "custom_tool_call");
-        assert_eq!(call["name"], "functions.exec");
+        assert_eq!(call["namespace"], "functions");
+        assert_eq!(call["name"], "exec");
         assert_eq!(call["input"], "pwd");
         assert_eq!(call["call_id"], "call_exec");
     }
@@ -191,7 +196,25 @@ mod tests {
             &context,
         ).expect("nested custom tool must restore client name");
         assert_eq!(call["type"], "custom_tool_call");
-        assert_eq!(call["name"], "functions.mcp__mcpx.exec");
+        assert_eq!(call["namespace"], "functions.mcp__mcpx");
+        assert_eq!(call["name"], "exec");
+        assert_eq!(call["input"], "pwd");
+    }
+
+    #[test]
+    fn top_level_custom_tool_with_dotted_name_stays_top_level() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "custom", "name": "functions.exec"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_dotted", "name": "functions.exec", "input": {"input": "pwd"}}),
+            &context,
+        )
+        .expect("top-level custom tool name must be preserved");
+        assert_eq!(call["name"], "functions.exec");
+        assert!(call.get("namespace").is_none());
+        assert_eq!(call["call_id"], "call_dotted");
         assert_eq!(call["input"], "pwd");
     }
 

@@ -1,3 +1,4 @@
+use super::namespace_tool_names::anthropic_tool_call_wire_name;
 use super::*;
 
 pub(super) fn responses_system_as_anthropic_system(value: &Value) -> Option<String> {
@@ -143,11 +144,15 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         Some(value) => value.to_owned(),
         None => json!({}),
     };
+    let is_custom = value
+        .pointer("/routecodex_chat_extension/responses_tool_call_type")
+        .and_then(Value::as_str)
+        == Some("custom_tool_call");
     let name = function
         .and_then(|function| function.get("name"))
         .or_else(|| object.get("name"))
         .and_then(Value::as_str)
-        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(|name| anthropic_tool_call_wire_name(name, is_custom))
         .map(Value::String)
         .unwrap_or(Value::Null);
     Ok(json!({
@@ -398,7 +403,12 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
     let name = object
         .get("name")
         .and_then(Value::as_str)
-        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(|name| {
+            anthropic_tool_call_wire_name(
+                name,
+                object.get("type").and_then(Value::as_str) == Some("custom_tool_call"),
+            )
+        })
         .map(Value::String)
         .unwrap_or(Value::Null);
     Ok(json!({

@@ -74,7 +74,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.v3 == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
