@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative as relativePath, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
@@ -22,7 +22,10 @@ const fixtures = [
                                 V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, `"request.messages[].content[].image.source.data",
                                 V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType,`, /image\.source\.data.*must map near ChatInlineMediaData|image\.source\.data.*must not collapse near ChatMediaMimeType/],
   ['shape branch required test removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'anthropic_image_source_url_maps_only_to_chat_image_url_url', 'anthropic_image_source_url_removed', /missing anthropic_image_source_url_maps_only_to_chat_image_url_url/],
-  ['npm script points to missing file', 'package.json', 'node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', 'node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', /test:v3-anthropic-codec-characterization references missing script scripts\/run-v3-cargo-test\.mjs/],
+  ['npm script points to missing file', 'package.json', [
+    'node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization',
+    'node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_anthropic_codec_characterization',
+  ], 'node missing/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', /test:v3-anthropic-codec-characterization references missing script missing\/run-v3-cargo-test\.mjs/],
 ];
 
 const failures = [];
@@ -30,15 +33,17 @@ for (const [name, relative, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-codec-red-'));
   try {
     for (const relative of ['v3', 'docs', 'package.json']) {
-      cpSync(resolve(repoRoot, relative), join(root, relative), {
+      const sourceRoot = resolve(repoRoot, relative);
+      cpSync(sourceRoot, join(root, relative), {
         recursive: true,
-        filter: (source) => !source.includes('/target/') && !source.includes('/build-control/'),
+        filter: (source) => !relativePath(sourceRoot, source).split(sep).some((part) => part === 'target' || part === 'build-control'),
       });
     }
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');
-    if (!source.includes(from)) throw new Error(name + ': fixture source missing');
-    writeFileSync(target, source.split(from).join(to));
+    const fixtureSource = (Array.isArray(from) ? from : [from]).find((candidate) => source.includes(candidate));
+    if (!fixtureSource) throw new Error(name + ': fixture source missing');
+    writeFileSync(target, source.split(fixtureSource).join(to));
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = (result.stdout ?? '') + '\n' + (result.stderr ?? '');
     if (result.status === 0) failures.push(name + ': gate unexpectedly passed');
