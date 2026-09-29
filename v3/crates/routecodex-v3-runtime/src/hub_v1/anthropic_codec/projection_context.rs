@@ -7,6 +7,7 @@ use super::V3AnthropicCodecError;
 pub struct V3AnthropicResponsesProjectionContext {
     metadata: Option<Value>,
     custom_tool_names: BTreeMap<String, String>,
+    namespaced_custom_tool_identities: BTreeMap<String, (String, String)>,
     mcp_tool_identities: HashMap<String, (String, String)>,
     reasoning_summary_policy: Option<String>,
 }
@@ -37,9 +38,25 @@ impl V3AnthropicResponsesProjectionContext {
                     .insert(provider_name, (namespace.to_string(), name.to_string()));
             }
         }
+        let custom_tool_names = governed_custom_tool_names(request)?;
+        let namespaced_custom_tool_identities =
+            super::namespace_tool_names::anthropic_declared_tool_names(request)
+                .0
+                .into_iter()
+                .filter_map(|(client_path, provider_name)| {
+                    (custom_tool_names.get(&provider_name) == Some(&client_path))
+                        .then(|| {
+                            client_path.rsplit_once('.').map(|(namespace, name)| {
+                                (provider_name, (namespace.to_string(), name.to_string()))
+                            })
+                        })
+                        .flatten()
+                })
+                .collect();
         Ok(Self {
             metadata,
-            custom_tool_names: governed_custom_tool_names(request)?,
+            custom_tool_names,
+            namespaced_custom_tool_identities,
             mcp_tool_identities,
             reasoning_summary_policy,
         })
@@ -47,6 +64,12 @@ impl V3AnthropicResponsesProjectionContext {
 
     pub(crate) fn governed_custom_tool_client_name(&self, name: &str) -> Option<&str> {
         self.custom_tool_names.get(name).map(String::as_str)
+    }
+
+    pub(crate) fn namespaced_custom_tool_identity(&self, name: &str) -> Option<(&str, &str)> {
+        self.namespaced_custom_tool_identities
+            .get(name)
+            .map(|(namespace, tool_name)| (namespace.as_str(), tool_name.as_str()))
     }
 
     pub(crate) fn mcp_tool_identities(&self) -> &HashMap<String, (String, String)> {

@@ -275,3 +275,73 @@ fn relay_runtime_failure_propagates_supplied_observability() {
         "no observability input must keep output.observability None to preserve previous behavior"
     );
 }
+
+#[tokio::test]
+async fn anthropic_sse_namespaced_custom_call_keeps_identity_and_result_pairing() {
+    let observation = V3RuntimeStreamObservation::default();
+    let tools = json!([{"type":"namespace","name":"functions","tools":[
+        {"type":"custom","name":"exec","format":{"type":"text"}}
+    ]}]);
+    let context =
+        V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({"tools":tools}))
+            .expect("projection context");
+    let event = |kind: &str, body: serde_json::Value| {
+        Ok(format!("event: {kind}\ndata: {body}\n\n").into_bytes())
+    };
+    let input = "const r=await tools.exec_command({cmd:\"pwd\"}); text(r.output);";
+    let provider = Box::pin(stream::iter(vec![
+        event(
+            "message_start",
+            json!({"type":"message_start","message":{"id":"msg_exec","type":"message","role":"assistant","model":"kimi-k3","content":[],"usage":{"input_tokens":10}}}),
+        ),
+        event(
+            "content_block_start",
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_a721e55043a14035a8611be4","name":"functions__exec"}}),
+        ),
+        event(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":json!({"input":input}).to_string()}}),
+        ),
+        event(
+            "content_block_stop",
+            json!({"type":"content_block_stop","index":0}),
+        ),
+        event(
+            "message_delta",
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":2}}),
+        ),
+        event("message_stop", json!({"type":"message_stop"})),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+            &context,
+        )
+        .await
+        .expect("tool use must reach Responses");
+    let call = &response["output"][0];
+    assert_eq!(call["type"], "custom_tool_call");
+    assert_eq!(call["namespace"], "functions");
+    assert_eq!(call["name"], "exec");
+    assert_eq!(call["call_id"], "call_a721e55043a14035a8611be4");
+    assert_eq!(call["input"], input);
+    let followup = json!({"model":"kimi-k3","tools":tools,"input":[
+        call.clone(),
+        {"type":"custom_tool_call_output","call_id":call["call_id"],"output":"/tmp"}
+    ]});
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&followup)
+        .expect("client tool result must enter the next turn");
+    let next_request =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
+            .expect("call and result must project together to Anthropic");
+    assert_eq!(
+        next_request["messages"][0]["content"][1]["name"],
+        "functions__exec"
+    );
+    assert_eq!(
+        next_request["messages"][1]["content"][0]["tool_use_id"],
+        call["call_id"]
+    );
+}
