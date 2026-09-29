@@ -3602,6 +3602,7 @@ features:
   - routecodex-v3-config
   design:
   - docs/design/v3-unified-operation-runner-design.md
+  - docs/design/v3-node02-typed-resource-injection.md
   contract:
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
@@ -3648,6 +3649,8 @@ features:
   - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
   - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
   node02_required_positive:
+  - Before Node02 product implementation, a minimal real pinned-DAGpipe consumer proves invocation-specific Operator constructor injection, Runtime-adapter grant enforcement, one request-scoped MetadataCenter, concurrent-request slot isolation, AlreadyCanonical cross-attempt reuse without overwrite, and finalizer release on success/failure/cancel/disconnect; the SDK itself does not execute graph resources declarations.
+  - The selected HTTP or WebSocket endpoint supplies entry protocol and RawEntry/AlreadyCanonical as typed ingress facts independently of JSON/model shape; valid object requests with unmatched fields remain passable.
   - Compile the client-json -> normalize_request_losslessly -> canonical-request derived slice from docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json; every configured raw path and union discriminator has exactly one registered forward consumer and an inverse_to_entry operator with typed provenance.
   - At the public Runtime consumer, compare canonical output plus typed inverse references against the original OpenAI Chat, Responses, Anthropic, and Gemini request JSON, including unknown, null, and unmatched shapes; tool declarations and complete arguments/input remain opaque and unchanged.
   - Design gate: Node 02 runtime cutover is SESE. The same delivery compiles and runs client-json -> RuntimeRequestGraphEntry(normalize_request_losslessly) -> canonical-request, connects HTTP and Responses WebSocket client entries to that canonical ARC before mode dispatch, removes Direct raw normalization from build_v3_req_04_standardized_responses_from_v3_server_03 and build_v3_chat_req_04_standardized_from_v3_server_03, removes all four Relay Req02 mappings, and replaces every raw Direct-to-Relay handoff with the same canonical ARC and request scope.

@@ -5813,6 +5813,7 @@ features:
   - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
   - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
   - docs/design/v3-unified-operation-runner-design.md
+  - docs/design/v3-node02-typed-resource-injection.md
   - docs/goals/v3-unified-operation-runner-astra-r1-plan.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml

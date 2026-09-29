@@ -2941,6 +2941,29 @@ resources:
     release_point: runtime_request_finalizer
     binding_status: design_pending
 
+  - resource_id: v3.operation_runner.ingress_contract
+    resource_kind: typed_control_resource
+    lifecycle: v3.operation_runner.invocation
+    owner_feature_id: v3.unified_operation_runner_design
+    owner_crate: routecodex-v3-runtime
+    owner_node: RuntimeRequestGraphEntry
+    identity: [requestId, invocationId, entryProtocol, inputKind]
+    legal_values: [RawEntry, AlreadyCanonical]
+    semantic_contract:
+      producer: RuntimeRequestGraphEntry
+      protocol_source: already selected HTTP route or WebSocket endpoint; never inferred from JSON keys, model name, or a payload extension
+      input_kind: RawEntry for the original client entry; AlreadyCanonical for a retry or internal follow-up that re-enters the graph
+      lifetime: immutable invocation descriptor; not stored in MetadataCenter and released when the graph invocation returns
+      grant_owner: RouteCodex Runtime adapter checks graph resource declarations against this map and injects restricted handles into an invocation-specific Operator; the pinned DAGpipe SDK checks effect names but does not natively execute resources declarations
+    allowed_writers: [RuntimeRequestGraphEntry]
+    allowed_readers: [normalize_v3_operation_runner_request_losslessly]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug, payload_writer, protocol_adapter]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    release_point: graph_invocation_return
+    binding_status: design_pending
+
   - resource_id: v3.operation_runner.request_origin_kind
     resource_kind: typed_control_resource
     lifecycle: v3.operation_runner.request
@@ -2979,7 +3002,7 @@ resources:
       client_entry_rule: initialized only when request_origin_kind=client_entry
       retry_internal_followup_rule: read and preserved when request_origin_kind=retry or internal_followup; never overwritten from follow-up payload
       payload_rule: arguments and tool business values remain in canonical payload; only identity, paths, and encoding are stored here
-      node02_lease_rule: one Runtime-owned V3NormalizedRequestLease spans the in-flight client request and is the implementation container for the request-scoped slots; RuntimeRequestFinalizer is the only release owner, and a new remote-continuation client request creates a new lease
+      node02_lease_rule: one Runtime-owned V3NormalizedRequestLease spans the in-flight client request and owns the single request-scoped MetadataCenter instance without mirroring slot values; RuntimeRequestFinalizer is the only release owner, and a new remote-continuation client request creates a new lease
     allowed_writers: [normalize_v3_operation_runner_request_losslessly]
     allowed_readers: [normalize_v3_operation_runner_request_losslessly, project_v3_operation_runner_standard_provider_request, inverse_project_v3_operation_runner_client_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
@@ -3042,9 +3065,9 @@ resources:
       authority: history validates and passes through prior calls; it never authorizes a new provider call
       resp03_reader: Chat Process Resp03 reads explicit history pairing for validation and pass-through only
       payload_rule: argument and output values remain in canonical payload; only identity and pairing references are control state
-      node02_lease_rule: paired with request_inverse_context in the same Runtime-owned V3NormalizedRequestLease; RuntimeRequestFinalizer is the only release owner
+      node02_lease_rule: paired with request_inverse_context in the same MetadataCenter instance owned by Runtime V3NormalizedRequestLease, which mirrors no slot values; RuntimeRequestFinalizer is the only release owner
     allowed_writers: [normalize_v3_operation_runner_request_losslessly]
-    allowed_readers: [govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
+    allowed_readers: [normalize_v3_operation_runner_request_losslessly, govern_v3_operation_runner_chat_request, project_v3_operation_runner_standard_provider_request, govern_v3_operation_runner_chat_response]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, routecodex-v3-debug]
     may_enter_provider_body: false
     may_enter_client_body: false
