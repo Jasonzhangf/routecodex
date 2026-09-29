@@ -3593,10 +3593,10 @@ features:
     merge: supervisor_owned
 
 - feature_id: v3.unified_operation_runner_design
-  status: node01_capture_runtime_candidate_full_runner_pending
+  status: node01_merged_node02_design_pending_review
   change_risk: high
   owner_kind: design_architecture
-  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and first runtime slice. This candidate delivers only Node 01 capture_client_json; later operation nodes remain pending.
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, and per-node runtime slices. Node 01 capture_client_json is merged; Node 02 normalize_request_losslessly is the next independent delivery.
   owner_modules:
   - routecodex-v3-runtime
   - routecodex-v3-config
@@ -3644,6 +3644,27 @@ features:
   - Direct-to-Relay handoff reuses the in-flight captured value and existing request_execution_control; it does not re-enter Server ingress or recapture
   - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
   - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
+  node02_required_positive:
+  - Compile the client-json -> normalize_request_losslessly -> canonical-request slice from the canonical request graph; every configured raw path and union discriminator has exactly one registered forward consumer and an inverse_to_entry operator with typed provenance.
+  - At the public Runtime consumer, compare canonical plus same-operator inverse against the original OpenAI Chat, Responses, Anthropic, and Gemini request JSON, including unknown, null, and unmatched shapes; tool declarations and complete arguments/input remain opaque and unchanged.
+  - HTTP entry for all four protocols and Responses WebSocket consume Node 02 before mode dispatch; supported Direct and Relay modes use its output, and all four Relay Req02 mappings are removed rather than run beside it.
+  - Direct mode selection consumes the mode-neutral view derived from canonical and the same inverse operators; changing the original raw request after Node 02 cannot change that view or the selected consumer input.
+  - Candidate retry and Direct-to-Relay handoff retain one canonical value and one request-scoped lease; a new external request creates a new lease; success, terminal error, cancellation, and disconnect each release its request resources.
+  - Actual response inverse consumer reads original client tool identity and field provenance from that same lease; real tool execution, output, and follow-up preserve call identity and client entry shape.
+  node02_required_negative:
+  - Registry compile rejects duplicate path ownership, an unregistered field operator, or a configured operator without inverse_to_entry; a Node 02 execution failure enters ErrorErr01 before provider attempt or client commit.
+  - No shadow normalization, original-raw consumer bypass, recursive tool-argument mapping, model-name-based inverse choice, payload-carried control state, or local continuation qualifies as cutover.
+  node02_evidence_entry:
+  - Before and after black-box requests use the same real HTTP and Responses WebSocket entry, supported mode, and client tool declarations for OpenAI Chat, Responses, Anthropic, and Gemini.
+  - Compare request-scoped client JSON, canonical and inverse view, provider-bound request, raw provider result, client response, tool execution receipt/output, and follow-up where applicable; record lease identity and terminal release for retry, handoff, error, cancel, and disconnect.
+  node02_completion_boundary:
+    source_controlled: required
+    mapped_tests_and_real_entry_e2e: required
+    independent_design_review_before_product_edit: required
+    independent_architecture_review_after_e2e: required
+    installed_runtime_same_entry_replay: required
+    merge_push_and_resource_cleanup: required
+    later_operation_nodes: pending
   negative_assertions:
   - no graph node or staged candidate resource is defined as writing directly to a client body
   - no response graph node may write v3.response.client_payload or a Server/SSE frame as its own output
