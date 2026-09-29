@@ -885,6 +885,7 @@ impl V3ManagedLifecycle {
             }
             verify_published_declaration(&instance_dir, &declaration)?;
         }
+        let startup_detail = read_pending_startup_detail(&instance_dir, &declaration.instance_id)?;
         let start_nonce = new_start_nonce(&declaration.instance_id);
         let socket_path = managed_control_socket_path(&declaration.instance_id);
         remove_restart_plan_for_previous_control_identity(&instance_dir, &start_nonce)?;
@@ -997,11 +998,18 @@ impl V3ManagedLifecycle {
                 .await;
             }
         };
+        let running_detail = hooks_sidecar_detail
+            .map(|detail| append_status_detail(startup_detail.as_deref(), detail));
+        let running_detail = if running_detail.is_some() {
+            running_detail
+        } else {
+            startup_detail.clone()
+        };
         if let Err(error) = write_status(
             &instance_dir,
             &declaration.instance_id,
             V3ManagedRunState::Running,
-            hooks_sidecar_detail,
+            running_detail,
         ) {
             return control_plane::fail_managed_runtime_with_hooks_cleanup(
                 &instance_dir,
@@ -1016,6 +1024,7 @@ impl V3ManagedLifecycle {
             instance_dir.clone(),
             declaration.instance_id.clone(),
             start_nonce.clone(),
+            startup_detail,
         );
         return control_plane::run_managed_control_loop(
             &instance_dir,

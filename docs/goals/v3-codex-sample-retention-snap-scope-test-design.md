@@ -10,6 +10,11 @@
   - `--snapall`: Debug snapshots plus Direct and Relay sample persistence enabled.
 - No-flag startup does not disable unrelated Debug runtime features such as provider-request dry-run.
 - Server is the only filesystem owner for `~/.rcc/codex-samples/<endpoint>/ports/<port>/<requestId>/`.
+- Authorized sample payloads are enqueued to one Debug-owned worker behind a 64-job and 64-MiB serialized-payload budget; a completion barrier waits for all previously accepted writes.
+- Queue overload and oversized payloads are logged and retained as request/file-qualified failures without rejecting a passable business request.
+- A completion barrier reports a snapshot without draining the failure ledger; worker shutdown drains the bounded ledger and returns an omitted-count summary when needed.
+- Server startup starts the persistence worker only after fallible listener preparation and before listener tasks begin accepting requests.
+- Aggregate shutdown and exec preparation return residual persistence failures; managed stop records them in terminal status and exec restart reports them while preserving handoff checkpoints.
 - Provider request/response snapshots pass through Debug redaction and payload budgets before filesystem IO.
 - Debug checks the final serialized artifact against a hard 64 KiB limit; recursive estimates alone are not sufficient.
 - Relay and Direct SSE samples retain only a Debug-owned bounded prefix, append an explicit truncation marker, and write only at initial capture plus terminal EOF/error.
@@ -47,17 +52,19 @@
 
 - Positive: Relay diagnostics remain available; `--snapall` preserves explicit full capture.
 - Negative: no snapshot flag cannot write any new sample; default `--snap` cannot write Direct; restart cannot leave more than 100 pre-existing request directories; provider media/auth cannot reach disk unredacted.
-- Failure: filesystem and redaction/persistence failures remain explicit debug errors; no silent success or payload fallback.
+- Failure: filesystem, queue-budget, and redaction/persistence failures remain explicit debug errors; queue pressure cannot become a client error or payload fallback.
+- Boundaries: tests saturate the queue, drop a barrier reply, and exceed the failure-ledger cap to prove each resource and failure report stays bounded.
 
 ## Verification Order
 
 1. Focused red tests.
 2. Focused Config/Debug/Server/CLI green tests.
-3. `npm run verify:v3-debug-payload-budget` plus its red fixtures.
-4. V3 architecture and format gates.
-5. V3 build.
-6. Global `npm run install:v3`.
-7. Aggregate restart and all member `/health`.
-8. Live Relay/Direct replay for `--snap`; controlled `--snapall` replay.
-9. Codex review only after installed live evidence.
+3. Real HTTP/SSE success with a forced sample-store filesystem failure; assert the subsequent aggregate shutdown or exec-preparation result retains request ID, artifact name, and reason.
+4. `npm run verify:v3-debug-payload-budget` plus its red fixtures.
+5. V3 architecture and format gates.
+6. V3 build.
+7. Global `npm run install:v3`.
+8. Aggregate restart and all member `/health`.
+9. Live Relay/Direct replay for `--snap`; controlled `--snapall` replay.
+10. Codex review only after installed live evidence.
    - no flag reports Codex-sample persistence disabled even when config authoring enables Debug snapshots;
