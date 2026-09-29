@@ -4,9 +4,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
+#[cfg(unix)]
+#[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
+
 pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
+#[cfg(unix)]
+mod codex_sample_persistence;
 mod hooks_lifecycle;
 
 #[test]
@@ -381,6 +387,53 @@ fn unavailable_hook_detail_survives_a_running_status_update() {
     assert_eq!(
         append_status_detail(None, "released listener ports 45499".to_string()),
         "released listener ports 45499"
+    );
+}
+
+#[test]
+fn pending_exec_restart_diagnostic_survives_starting_status_read() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "v3-pending-restart-diagnostic";
+    let detail = "codex sample persistence shutdown failed during exec restart: request=req-7 file=request.json reason=permission denied";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Starting,
+        Some(format!("exec restart accepted; {detail}")),
+    )
+    .unwrap();
+
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        Some(detail.to_string())
+    );
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Starting,
+        Some("exec restart accepted".to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        None,
+        "the generic legacy restart marker must not become a persistent running detail"
+    );
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some(detail.to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        None,
+        "the next normal child start must not replay a consumed startup diagnostic"
     );
 }
 
