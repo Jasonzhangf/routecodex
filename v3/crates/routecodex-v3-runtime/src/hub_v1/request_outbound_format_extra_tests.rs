@@ -1573,6 +1573,42 @@ fn continuation_history_prefix_renders_byte_identical_across_requests() {
 }
 
 #[test]
+fn openai_chat_wire_continues_assistant_tool_call_history_after_tool_outputs() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "do it"},
+            {"role": "assistant", "content": null, "reasoning_content": "plan", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "tool result"}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat wire build");
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages[1]["reasoning_content"], "plan");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call_1");
+    assert_eq!(messages[3]["role"], "user");
+    assert_eq!(messages[3]["content"], "continue");
+}
+
+#[test]
+fn openai_chat_wire_leaves_normal_history_without_synthetic_followup() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat wire build");
+    assert_eq!(request["messages"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
     let reasoning =
         "1. The user asks to reply with exactly CONTINUE_B. No other content is needed.";

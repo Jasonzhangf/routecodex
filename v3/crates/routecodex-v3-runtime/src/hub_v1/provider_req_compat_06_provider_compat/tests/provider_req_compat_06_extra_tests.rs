@@ -7,6 +7,7 @@ fn openai_chat_deepseek_v41_consumes_responses_transport_options_before_provider
         json!({
             "model": "client-route-alias",
             "input": "hello",
+            "parallel_tool_calls": true,
             "store": false,
             "stream_options": {"include_usage": true}
         }),
@@ -21,4 +22,5 @@ fn openai_chat_deepseek_v41_consumes_responses_transport_options_before_provider
     let payload = req_compat.provider_semantic_payload();
     assert!(payload.get("store").is_none(), "{payload}");
     assert!(payload.get("stream_options").is_none(), "{payload}");
+    assert!(payload.get("parallel_tool_calls").is_none(), "{payload}");
 }

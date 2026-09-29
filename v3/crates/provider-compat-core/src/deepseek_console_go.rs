@@ -213,6 +213,7 @@ pub fn apply_deepseek_chat_transport_options_compat(payload: &mut Value) {
     };
     root.remove("store");
     root.remove("stream_options");
+    root.remove("parallel_tool_calls");
 }
 
 /// DeepSeek's Chat-compatible gateway requires every function-call argument
