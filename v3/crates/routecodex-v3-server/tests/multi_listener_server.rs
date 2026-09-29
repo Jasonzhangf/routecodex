@@ -5219,11 +5219,12 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
 #[tokio::test]
 async fn anthropic_provider_request_keeps_custom_web_search_without_a_search_route() {
     let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_anthropic_wire_upstream().await;
     std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-key");
     let handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
         free_port(),
         free_port(),
-        "http://127.0.0.1:9",
+        &provider_base_url,
     ))
     .await
     .unwrap();
@@ -5257,6 +5258,7 @@ async fn anthropic_provider_request_keeps_custom_web_search_without_a_search_rou
     let builtin_status = builtin_response.status();
     let builtin_body: Value = builtin_response.json().await.unwrap();
     handle.shutdown().await;
+    shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     assert_eq!(status, 200, "{body}");
     assert!(

@@ -3885,6 +3885,7 @@ features:
   - v3-web-search-sm-07
   - v3-web-search-sm-08
   - v3-hooks-sidecar-web-search-01
+  - v3-web-search-route-exposure-00
   - v3-web-search-route-exposure-01
   - v3-web-search-route-exposure-02
   - v3-web-search-route-exposure-03

@@ -78,6 +78,10 @@ capabilities = ["text", "tools", "web_search"]
 model = "MiniMax-M3"
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", priority = 1 }]
+[route_groups.chatwire.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 [route_groups.chatwire.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
@@ -117,6 +121,10 @@ capabilities = ["text", "tools", "web_search"]
 model = "MiniMax-M3"
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3", priority = 1 }]
+[route_groups.chatwire.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
 [route_groups.chatwire.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
