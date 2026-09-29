@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-anthropic-codec-characterization.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs');
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['Gemini branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'V3HubEntryProtocol::Anthropic', 'V3HubEntryProtocol::Gemini', /missing V3HubEntryProtocol::Anthropic|forbidden.*Gemini/],
@@ -22,16 +22,17 @@ const fixtures = [
                                 V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, `"request.messages[].content[].image.source.data",
                                 V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType,`, /image\.source\.data.*must map near ChatInlineMediaData|image\.source\.data.*must not collapse near ChatMediaMimeType/],
   ['shape branch required test removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'anthropic_image_source_url_maps_only_to_chat_image_url_url', 'anthropic_image_source_url_removed', /missing anthropic_image_source_url_maps_only_to_chat_image_url_url/],
+  ['npm script points to missing file', 'package.json', 'node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', 'node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', /test:v3-anthropic-codec-characterization references missing script scripts\/run-v3-cargo-test\.mjs/],
 ];
 
 const failures = [];
 for (const [name, relative, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-codec-red-'));
   try {
-    for (const relative of ['v3', 'docs', 'scripts', 'package.json']) {
+    for (const relative of ['v3', 'docs', 'package.json']) {
       cpSync(resolve(repoRoot, relative), join(root, relative), {
         recursive: true,
-        filter: (source) => !source.includes('/target/'),
+        filter: (source) => !source.includes('/target/') && !source.includes('/build-control/'),
       });
     }
     const target = join(root, relative);

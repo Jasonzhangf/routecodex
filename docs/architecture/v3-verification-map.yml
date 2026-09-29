@@ -778,8 +778,8 @@ features:
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
-  - scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
-  - scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
+  - v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
+  - v3/scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
   mainline_bindings:
   - v3-protocol-anthropic-01
   - v3-protocol-anthropic-shape-branch-01
