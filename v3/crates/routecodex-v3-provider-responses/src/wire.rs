@@ -649,14 +649,14 @@ fn expand_namespace_tools_in_responses_wire_body(
     mut body: Value,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
+        rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
         return Ok(body);
     };
     let has_namespace = tools
         .iter()
         .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
     if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
+        rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
     }
     let protocol = match provider_type {
         "openai_chat" => "openai-chat",
@@ -707,7 +707,7 @@ fn expand_namespace_tools_in_responses_wire_body(
     // tool declaration is incomplete or omitted its child. Apply the same
     // validated convention mapping as the no-tools path so strict providers
     // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(&mut body);
+    rewrite_namespace_qualified_call_names_from_convention(&mut body, provider_type);
     Ok(body)
 }
 
@@ -755,8 +755,8 @@ fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<Stri
     }
 }
 
-fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
-    let declared_flat_dotted_names = collect_declared_flat_dotted_tool_names(body);
+fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value, provider_type: &str) {
+    let declared_flat_dotted_names = collect_declared_flat_dotted_tool_names(body, provider_type);
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
             let kind = item.get("type").and_then(Value::as_str);
@@ -808,9 +808,9 @@ fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
     }
 }
 
-fn collect_declared_flat_dotted_tool_names(body: &Value) -> HashSet<String> {
+fn collect_declared_flat_dotted_tool_names(body: &Value, provider_type: &str) -> HashSet<String> {
     let mut names = HashSet::new();
-    collect_flat_dotted_tool_names(body.get("tools"), &mut names);
+    collect_flat_dotted_tool_names(body.get("tools"), provider_type, &mut names);
     for item in body
         .get("input")
         .and_then(Value::as_array)
@@ -818,18 +818,29 @@ fn collect_declared_flat_dotted_tool_names(body: &Value) -> HashSet<String> {
         .flatten()
     {
         if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            collect_flat_dotted_tool_names(item.get("tools"), &mut names);
+            collect_flat_dotted_tool_names(item.get("tools"), provider_type, &mut names);
         }
     }
     names
 }
 
-fn collect_flat_dotted_tool_names(tools: Option<&Value>, names: &mut HashSet<String>) {
+fn collect_flat_dotted_tool_names(
+    tools: Option<&Value>,
+    provider_type: &str,
+    names: &mut HashSet<String>,
+) {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         let Some(object) = tool.as_object() else {
             continue;
         };
-        if object.get("type").and_then(Value::as_str) != Some("function") {
+        let is_function = object.get("type").and_then(Value::as_str) == Some("function");
+        let is_anthropic_custom = provider_type == "anthropic"
+            && object.get("type").is_none()
+            && object
+                .get("input_schema")
+                .and_then(Value::as_object)
+                .is_some();
+        if !is_function && !is_anthropic_custom {
             continue;
         }
         let name = object.get("name").and_then(Value::as_str).or_else(|| {

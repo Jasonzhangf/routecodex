@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn anthropic_tool_call_wire_name(name: &str, is_custom: bool) -> String {
+    if is_custom {
+        name.to_owned()
+    } else {
+        super::super::request_outbound_mcp_names::provider_function_name(name)
+    }
+}
+
 pub(super) fn anthropic_namespace_wire_name(namespace: &str, name: &str) -> String {
     format!(
         "{namespace}__{}",

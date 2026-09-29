@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs';
 const source = [
   readFileSync(resolve(root, sourcePath), 'utf8'),
-  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec'),
+  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec').map((path) => readFileSync(path, 'utf8')),
 ].join('\n');
 const tests = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs'), 'utf8');
 const failures = [];
@@ -121,7 +121,10 @@ requireAll(readFileSync(resolve(root, 'docs/architecture/v3-resource-operation-m
 
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 for (const script of ['test:v3-anthropic-codec-characterization', 'verify:v3-anthropic-codec-characterization', 'test:v3-anthropic-codec-characterization-red-fixtures']) {
-  if (!packageJson.scripts?.[script]) fail('package.json: missing script ' + script);
+  const command = packageJson.scripts?.[script];
+  if (!command) { fail('package.json: missing script ' + script); continue; }
+  const scriptPath = command.match(/\bnode\s+(\S+\.mjs)\b/)?.[1];
+  if (!scriptPath || !existsSync(resolve(root, scriptPath))) fail('package.json: ' + script + ' references missing script ' + (scriptPath ?? '(none)'));
 }
 if (failures.length) {
   console.error('[verify:v3-anthropic-codec-characterization] failed');
