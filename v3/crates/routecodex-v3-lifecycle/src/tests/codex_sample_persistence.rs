@@ -1,5 +1,7 @@
 use super::*;
 
+const FAILED_EXEC_RESTART_CHILD_ENV: &str = "ROUTECODEX_TEST_FAILED_EXEC_RESTART_CHILD";
+
 struct SamplePersistenceTestEnvironment {
     previous_home: Option<std::ffi::OsString>,
     previous_key: Option<std::ffi::OsString>,
@@ -35,7 +37,7 @@ impl Drop for SamplePersistenceTestEnvironment {
 }
 
 async fn spawn_sample_persistence_failure_server(
-    root: &TempDir,
+    root: &std::path::Path,
     home: &std::path::Path,
     port: u16,
 ) -> (
@@ -66,31 +68,112 @@ async fn spawn_sample_persistence_failure_server(
 }
 
 async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::SocketAddr) -> String {
-    tokio::task::spawn_blocking(move || {
-        use std::io::{BufRead, BufReader, Write};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
-        let body = serde_json::json!({
-            "model": "test",
-            "input": "managed sample persistence failure",
-        })
-        .to_string();
-        let header = format!(
-            "POST /v1/responses HTTP/1.1\r\nHost: {listener_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let mut stream = std::net::TcpStream::connect(listener_addr).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-        stream.write_all(header.as_bytes()).unwrap();
-        stream.write_all(body.as_bytes()).unwrap();
-        let mut response = BufReader::new(stream);
-        let mut status_line = String::new();
-        response.read_line(&mut status_line).unwrap();
-        status_line
+    let body = serde_json::json!({
+        "model": "test",
+        "input": "managed sample persistence failure",
     })
-    .await
-    .unwrap()
+    .to_string();
+    let header = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: {listener_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let mut stream = tokio::net::TcpStream::connect(listener_addr).await.unwrap();
+    stream.write_all(header.as_bytes()).await.unwrap();
+    stream.write_all(body.as_bytes()).await.unwrap();
+    let mut response = tokio::io::BufReader::new(stream);
+    let mut status_line = String::new();
+    tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut status_line))
+        .await
+        .unwrap()
+        .unwrap();
+    let mut response_headers = String::new();
+    let mut content_length = None;
+    let mut chunked = false;
+    loop {
+        let mut header = String::new();
+        tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut header))
+            .await
+            .unwrap()
+            .unwrap();
+        if header == "\r\n" {
+            break;
+        }
+        if header.is_empty() {
+            panic!("response closed before the header terminator: {status_line}{response_headers}");
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = Some(value.trim().parse::<usize>().unwrap());
+            }
+            if name.eq_ignore_ascii_case("transfer-encoding") {
+                chunked = value
+                    .split(',')
+                    .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
+            }
+        }
+        response_headers.push_str(&header);
+    }
+    let mut response_body = Vec::new();
+    if let Some(content_length) = content_length {
+        response_body.resize(content_length, 0);
+        tokio::time::timeout(Duration::from_secs(5), response.read_exact(&mut response_body))
+            .await
+            .unwrap()
+            .unwrap();
+    } else if chunked {
+        loop {
+            let mut size_line = String::new();
+            tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut size_line))
+                .await
+                .unwrap()
+                .unwrap();
+            let size = usize::from_str_radix(
+                size_line
+                    .trim_end_matches(['\r', '\n'])
+                    .split(';')
+                    .next()
+                    .unwrap(),
+                16,
+            )
+            .unwrap();
+            if size == 0 {
+                loop {
+                    let mut trailer = String::new();
+                    tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut trailer))
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    if trailer == "\r\n" || trailer.is_empty() {
+                        break;
+                    }
+                }
+                break;
+            }
+            let body_start = response_body.len();
+            response_body.resize(body_start + size, 0);
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                response.read_exact(&mut response_body[body_start..]),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let mut chunk_end = [0; 2];
+            tokio::time::timeout(Duration::from_secs(5), response.read_exact(&mut chunk_end))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&chunk_end, b"\r\n");
+        }
+    } else {
+        panic!("unsupported response framing: {status_line}{response_headers}");
+    }
+    format!(
+        "{status_line}{response_headers}\r\n{}",
+        String::from_utf8(response_body).unwrap()
+    )
 }
 
 #[tokio::test]
@@ -105,9 +188,14 @@ async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_
         .unwrap()
         .port();
     let (declaration, instance_dir, handle) =
-        spawn_sample_persistence_failure_server(&root, &home, port).await;
+        spawn_sample_persistence_failure_server(root.path(), &home, port).await;
     let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
     assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
+    assert!(response.contains("\r\n\r\n"), "incomplete HTTP response: {response}");
+    assert!(
+        !response.contains("codex sample persistence shutdown failed"),
+        "persistence diagnostics must not replace the client error response: {response}"
+    );
 
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");
@@ -143,9 +231,30 @@ async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_
 
 #[tokio::test]
 async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files() {
+    let child_root = std::env::var_os(FAILED_EXEC_RESTART_CHILD_ENV);
+    if child_root.is_none() {
+        let root = TempDir::new().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::codex_sample_persistence::failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files",
+                "--nocapture",
+            ])
+            .env(FAILED_EXEC_RESTART_CHILD_ENV, root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated failed exec-restart process failed: status={} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let _guard = TEST_ENV_LOCK.lock().unwrap();
-    let root = TempDir::new().unwrap();
-    let home = root.path().join("home");
+    let root = PathBuf::from(child_root.unwrap());
+    let home = root.join("home");
     let _environment = SamplePersistenceTestEnvironment::new(&home);
     let port = std::net::TcpListener::bind(("127.0.0.1", 0))
         .unwrap()
@@ -156,6 +265,11 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         spawn_sample_persistence_failure_server(&root, &home, port).await;
     let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
     assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
+    assert!(response.contains("\r\n\r\n"), "incomplete HTTP response: {response}");
+    assert!(
+        !response.contains("codex sample persistence shutdown failed"),
+        "persistence diagnostics must not replace the client error response: {response}"
+    );
 
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");
@@ -175,7 +289,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
         declaration: declaration.clone(),
-        executable_path: root.path().join("missing-replacement"),
+        executable_path: root.join("missing-replacement"),
         snapshots: true,
         snapshot_direct: true,
         snapshot_stages: None,
@@ -195,6 +309,10 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     )
     .await
     .unwrap_err();
+    assert!(
+        wait_for_listener_set_available(&declaration.listeners, Duration::from_secs(3)).await,
+        "failed exec restart must release listener ports before the test runtime exits"
+    );
     assert!(
         matches!(error, V3LifecycleError::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
         "restart should report the missing replacement executable: {error}"
@@ -221,10 +339,10 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
     assert!(!restart_plan_path.exists());
 }
 
-fn managed_fixture_with_port(root: &TempDir, port: u16) -> (PathBuf, PathBuf, PathBuf) {
-    let config = root.path().join("managed-config.v3.toml");
+fn managed_fixture_with_port(root: &std::path::Path, port: u16) -> (PathBuf, PathBuf, PathBuf) {
+    let config = root.join("managed-config.v3.toml");
     let executable = std::env::current_exe().unwrap();
-    let state = root.path().join("managed-state");
+    let state = root.join("managed-state");
     let hub_v1_declaration = super::hub_v1_fixture::hub_v1_test_declaration();
     let server_execution = super::hub_v1_fixture::hub_v1_server_execution("test");
     fs::write(
