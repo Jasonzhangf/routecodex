@@ -5,6 +5,25 @@ use routecodex_v3_provider_responses::build_v3_transport_13_responses_http_reque
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostics_lock() {
+    let observation = V3RuntimeStreamObservation::default();
+    observation
+        .record_provider_event_json(&json!({
+            "type": "response.completed",
+            "response": {"status": "completed"}
+        }))
+        .expect("record terminal before diagnostic failure");
+    observation.poison_diagnostics_for_test();
+
+    assert_eq!(
+        observation
+            .semantic_terminal()
+            .expect("terminal control must not depend on diagnostic lock"),
+        Some(V3RuntimeSemanticTerminal::Success)
+    );
+}
+
 struct AnthropicToolSearchJsonTransport;
 
 #[async_trait::async_trait]
@@ -145,6 +164,7 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
         None,
     )

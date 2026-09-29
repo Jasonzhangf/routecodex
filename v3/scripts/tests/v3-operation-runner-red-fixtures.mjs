@@ -32,7 +32,9 @@ const mutations = [
     mutate(tmp) {
       const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
       const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, source.replace('execute_v3_operation_runner_request_capture_client_json(payload)', 'missing_capture_client_json(payload)'));
+      const symbol = 'execute_v3_operation_runner_request_capture_client_json(payload, ingress)';
+      if (!source.includes(symbol)) throw new Error('HTTP typed capture call missing from fixture source');
+      fs.writeFileSync(file, source.replace(symbol, 'missing_capture_client_json(payload, ingress)'));
     },
     expect: /capture_client_json must be called exactly once before Direct\/Relay dispatch/u,
   },
@@ -41,9 +43,44 @@ const mutations = [
     mutate(tmp) {
       const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/websocket.rs');
       const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, source.replace('execute_v3_operation_runner_request_capture_client_json(payload)', 'missing_capture_client_json(payload)'));
+      const symbol = 'execute_v3_operation_runner_request_capture_client_json(';
+      if (!source.includes(symbol)) throw new Error('WebSocket typed capture call missing from fixture source');
+      fs.writeFileSync(file, source.replace(symbol, 'missing_capture_client_json('));
     },
     expect: /capture_client_json must be called exactly once before Direct\/Relay dispatch/u,
+  },
+  {
+    name: 'runtime-bound-capture-http-ingress-from-body',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = /(RuntimeIngressDescriptor::http\(\s*)entry_protocol\.clone\(\),/u;
+      if (!selected.test(source)) throw new Error('selected HTTP protocol missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, '$1payload["protocol"].as_str().unwrap_or_default().to_string(),'));
+    },
+    expect: /capture_client_json must receive the selected typed ingress/u,
+  },
+  {
+    name: 'runtime-bound-capture-websocket-wrong-ingress',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/websocket.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = 'RuntimeIngressDescriptor::responses_websocket()';
+      if (!source.includes(selected)) throw new Error('selected WebSocket protocol missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, 'RuntimeIngressDescriptor::http("responses")'));
+    },
+    expect: /capture_client_json must receive the selected typed ingress/u,
+  },
+  {
+    name: 'runtime-bound-capture-http-lease-dropped',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = 'hold_response_body_request_lease(response, request_lease)';
+      if (!source.includes(selected)) throw new Error('HTTP response lease hold missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, 'response'));
+    },
+    expect: /HTTP response Body must retain the Runtime request lease/u,
   },
   {
     name: 'unmatched-business-value-loses-opaque-inverse',

@@ -1,4 +1,5 @@
 use super::*;
+use routecodex_v3_runtime::kernel::V3ProviderCancellation;
 
 pub(super) enum V3ResponsesDirectServerOutcome {
     DirectFrame(V3Server16HttpFrame),
@@ -20,6 +21,43 @@ pub(super) async fn execute_responses_direct_server_outcome(
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     request_purpose: V3RequestPurpose,
+) -> V3ResponsesDirectServerOutcome {
+    execute_responses_direct_server_outcome_with_cancellation(
+        state,
+        request_headers,
+        method,
+        path,
+        request_id,
+        pipeline_id,
+        execution_id,
+        payload,
+        responses_protocol_plan,
+        observability_accumulator,
+        request_execution_control,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        request_purpose,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn execute_responses_direct_server_outcome_with_cancellation(
+    state: &V3ListenerState,
+    request_headers: &HeaderMap,
+    method: String,
+    path: String,
+    request_id: String,
+    pipeline_id: Option<String>,
+    execution_id: String,
+    payload: serde_json::Value,
+    responses_protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
+    observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    request_execution_control: Option<V3RequestExecutionControl>,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    request_purpose: V3RequestPurpose,
+    provider_cancellation: Option<V3ProviderCancellation>,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_request_wants_sse(request_headers, &payload);
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -153,7 +191,8 @@ pub(super) async fn execute_responses_direct_server_outcome(
                     route_selection_event_sink
                         .as_ref()
                         .map(std::sync::Arc::clone),
-                ),
+                )
+                .with_provider_cancellation(provider_cancellation.clone()),
                 &state.manifest,
                 raw,
                 server_tool_scope,
@@ -181,7 +220,8 @@ pub(super) async fn execute_responses_direct_server_outcome(
                     route_selection_event_sink
                         .as_ref()
                         .map(std::sync::Arc::clone),
-                ),
+                )
+                .with_provider_cancellation(provider_cancellation.clone()),
                 &state.manifest,
                 raw,
                 server_tool_scope,
@@ -231,7 +271,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
             .debug
             .should_capture_snapshot_stage("provider-response");
         let relay_result = if capture_provider_request || capture_provider_response {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
@@ -252,10 +292,11 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
+                provider_cancellation.clone(),
             )
             .await
         } else {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
                 &state.manifest,
                 runtime_input,
                 &state.provider_health,
@@ -273,6 +314,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 handoff.request_local_excluded_candidates,
                 Some(handoff.observability_accumulator),
                 Some(handoff.request_execution_control),
+                provider_cancellation.clone(),
             )
             .await
         };
@@ -300,23 +342,25 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 .unwrap_or_default();
             relay_events.extend(next_handoff.provider_failure_events);
             let request_execution_control = next_handoff.request_execution_control;
-            let nested_outcome = Box::pin(execute_responses_direct_server_outcome(
-                state,
-                request_headers,
-                method,
-                path,
-                request_id,
-                Some(pipeline_id.clone()),
-                execution_id,
-                next_handoff.request_payload.clone(),
-                Some(&next_handoff.plan),
-                Some(next_handoff.observability_accumulator),
-                Some(request_execution_control),
-                provider_failure_event_sink,
-                route_selection_event_sink,
-                request_purpose,
-            ))
-            .await;
+            let nested_outcome =
+                Box::pin(execute_responses_direct_server_outcome_with_cancellation(
+                    state,
+                    request_headers,
+                    method,
+                    path,
+                    request_id,
+                    Some(pipeline_id.clone()),
+                    execution_id,
+                    next_handoff.request_payload.clone(),
+                    Some(&next_handoff.plan),
+                    Some(next_handoff.observability_accumulator),
+                    Some(request_execution_control),
+                    provider_failure_event_sink,
+                    route_selection_event_sink,
+                    request_purpose,
+                    provider_cancellation,
+                ))
+                .await;
             return match nested_outcome {
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                     prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &relay_trace);

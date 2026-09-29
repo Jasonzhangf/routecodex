@@ -23,6 +23,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
     initial_request_local_excluded_candidates: BTreeSet<String>,
     initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    provider_cancellation: Option<V3ProviderCancellation>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let observability_accumulator =
         initial_observability_accumulator.unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
@@ -422,6 +423,10 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
             Some(admission) => {
                 transport_request.with_pre_acquired_admission(admission.into_lease())
             }
+            None => transport_request,
+        };
+        let transport_request = match provider_cancellation.as_ref() {
+            Some(cancellation) => transport_request.with_cancellation(cancellation.clone()),
             None => transport_request,
         };
         let transport_result = match tokio::time::timeout(

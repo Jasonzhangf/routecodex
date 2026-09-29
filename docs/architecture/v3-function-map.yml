@@ -3215,8 +3215,10 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-server/Cargo.toml
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
   - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-server/tests/node02_websocket_ingress.rs
   - docs/goals/v3-responses-inbound-websocket-proxy-plan.md
   - docs/architecture/manifests/v3.responses_inbound_websocket_proxy.mainline.yml
   - docs/architecture/wiki/v3-responses-inbound-websocket-proxy.md
@@ -5450,8 +5452,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   resource_bindings:
   - v3.execution.request_lifecycle_control
   - v3.execution.target_plan
@@ -5468,9 +5474,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/tests
   - docs/architecture
   - docs/goals/v3-execution-control-payload-architecture-audit-*.md

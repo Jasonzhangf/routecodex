@@ -2700,8 +2700,12 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     let client = reqwest::Client::new();
     let valid =
         json!({"model":"client-test","input":"hello","metadata":{"client_field":"preserve"}});
-    let captured_valid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(valid.clone())
-        .expect("capture valid request");
+    let captured_valid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(
+        valid.clone(),
+        routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::http("openai-responses"),
+    )
+    .expect("capture valid request")
+    .payload;
     assert_eq!(captured_valid, valid);
     let original = client.post(&endpoint).json(&valid).send().await.unwrap();
     let projected = client
@@ -2720,8 +2724,12 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     );
 
     let invalid = json!([]);
-    let captured_invalid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(invalid.clone())
-        .expect("capture preserves invalid protocol shape");
+    let captured_invalid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(
+        invalid.clone(),
+        routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::http("openai-responses"),
+    )
+    .expect("capture preserves invalid protocol shape")
+    .payload;
     assert_eq!(captured_invalid, invalid);
     let original = client.post(&endpoint).json(&invalid).send().await.unwrap();
     let projected = client
@@ -3313,8 +3321,12 @@ async fn capture_node_preconnection_matches_responses_websocket_projection() {
         "type":"response.create", "model":"test", "input":"use tool",
         "tools":[{"type":"function","name":"lookup"}]
     });
-    let captured = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(original.clone())
-        .expect("capture WebSocket JSON frame");
+    let captured = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(
+        original.clone(),
+        routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::responses_websocket(),
+    )
+    .expect("capture WebSocket JSON frame")
+    .payload;
     assert_eq!(captured, original);
     let mut request = endpoint.as_str().into_client_request().unwrap();
     request.headers_mut().insert(

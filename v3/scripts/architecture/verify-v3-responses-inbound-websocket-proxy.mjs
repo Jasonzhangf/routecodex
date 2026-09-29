@@ -8,6 +8,7 @@ const files = {
   websocket: 'v3/crates/routecodex-v3-server/src/websocket.rs',
   directOutcome: 'v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs',
   tests: 'v3/crates/routecodex-v3-server/tests/multi_listener_server.rs',
+  node02Tests: 'v3/crates/routecodex-v3-server/tests/node02_websocket_ingress.rs',
   serverCargo: 'v3/crates/routecodex-v3-server/Cargo.toml',
   providerTransport: 'v3/crates/routecodex-v3-provider-responses/src/transport.rs',
   runtime: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
@@ -60,6 +61,9 @@ const failures = [];
 function requireText(owner, body, phrase) {
   if (!body.includes(phrase)) failures.push(owner + ': missing ' + phrase);
 }
+function requirePattern(owner, body, pattern) {
+  if (!pattern.test(body)) failures.push(owner + ': missing ' + pattern);
+}
 function forbid(owner, body, patterns) {
   for (const pattern of patterns) {
     if (pattern.test(body)) failures.push(owner + ': forbidden pattern ' + pattern);
@@ -78,11 +82,11 @@ for (const phrase of [
   'unsupported client WebSocket event type',
   'expected response.create',
   'response.create must be a flat event; nested response payload is unsupported',
-  'execute_responses_direct_server_outcome(',
+  'execute_responses_direct_server_outcome_with_cancellation(',
   'async fn execute_responses_relay_websocket_output(',
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(',
   'send_responses_websocket_committed_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -93,6 +97,45 @@ for (const phrase of [
   'runtime SSE stream did not terminate cleanly',
   'invalid_client_event',
 ]) requireText(files.websocket, text.websocket, phrase);
+
+const handlerStart = text.websocket.indexOf('pub(crate) async fn handle_responses_websocket_message_with_mode(');
+const relayStart = text.websocket.indexOf('pub(crate) async fn execute_responses_relay_websocket_output(');
+if (handlerStart < 0 || relayStart <= handlerStart) {
+  failures.push(files.websocket + ': missing typed WebSocket request handler boundary');
+} else {
+  const handler = text.websocket.slice(handlerStart, relayStart);
+  for (const phrase of [
+    'let provider_cancellation = V3ProviderCancellation::new();',
+    'execute_responses_direct_server_outcome_with_cancellation(',
+    'execute_responses_relay_websocket_output(',
+    'pending_message = Some(message);',
+    'client_message = socket.next(), if pending_message.is_none() =>',
+    'let _ = operation.await;',
+  ]) requireText(files.websocket + ': request handler', handler, phrase);
+  const directBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::Direct => Some(');
+  const relayBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::Relay => Some(');
+  const pendingBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::PendingNotImplemented => None');
+  if (directBranchStart < 0 || relayBranchStart <= directBranchStart || pendingBranchStart <= relayBranchStart) {
+    failures.push(files.websocket + ': missing ordered Direct/Relay/Pending dispatch branches');
+  } else {
+    const directBranch = handler.slice(directBranchStart, relayBranchStart);
+    const relayBranch = handler.slice(relayBranchStart, pendingBranchStart);
+    requirePattern(files.websocket + ': Direct dispatch', directBranch,
+      /execute_responses_direct_server_outcome_with_cancellation\([\s\S]*?Some\(provider_cancellation\.clone\(\)\),/);
+    requirePattern(files.websocket + ': Relay dispatch', relayBranch,
+      /execute_responses_relay_websocket_output\([\s\S]*?provider_cancellation\.clone\(\),/);
+  }
+  requirePattern(files.websocket + ': Close cancellation', handler,
+    /Some\(Ok\(Message::Close\(_\)\)\) \| None \| Some\(Err\(_\)\) => \{\s*provider_cancellation\.cancel\(\);\s*break \(true, None\);/);
+  requirePattern(files.websocket + ': cancellation drain', handler,
+    /if client_disconnected \{\s*let _ = operation\.await;\s*return Err\(\(\)\);/);
+}
+for (const phrase of [
+  'responses_websocket_real_endpoint_captures_body_without_protocol_discriminator',
+  'responses_websocket_client_disconnect_during_provider_operation',
+  'responses_websocket_queues_next_create_without_reordering',
+  'provider must observe cancellation before it sends a response',
+]) requireText(files.node02Tests, text.node02Tests, phrase);
 
 for (const phrase of [
   'responses_inbound_websocket_requires_beta_upgrade_and_handles_ping',
@@ -207,10 +250,22 @@ const directRuntimeCalls = text.directOutcome.match(/execute_v3_responses_direct
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
-const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state\(/g) ?? [];
+const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation\(/g) ?? [];
 if (relayRuntimeCalls.length !== 2) {
-  failures.push(files.server + ': expected planned and unplanned WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
+  failures.push(files.websocket + ': expected planned and unplanned typed-cancellation Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }
+const directCancellationMounts = text.directOutcome.match(/\.with_provider_cancellation\(provider_cancellation\.clone\(\)\)/g) ?? [];
+if (directCancellationMounts.length !== 2) {
+  failures.push(files.directOutcome + ': expected Direct planned and default Runtime states to carry the same cancellation token, got ' + directCancellationMounts.length);
+}
+const directRelayCancellationCalls = text.directOutcome.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation\(/g) ?? [];
+if (directRelayCancellationCalls.length !== 2) {
+  failures.push(files.directOutcome + ': expected both Direct-to-Relay handoff branches to carry typed cancellation, got ' + directRelayCancellationCalls.length);
+}
+requirePattern(files.directOutcome + ': Relay-to-Direct handoff', text.directOutcome,
+  /execute_responses_direct_server_outcome_with_cancellation\([\s\S]*?provider_cancellation,\s*\)\)/);
+requirePattern(files.websocket + ': Relay-to-Direct handoff', text.websocket,
+  /if let Some\(handoff\) = relay_output\.protocol_direct_handoff\.take\(\) \{[\s\S]*?execute_responses_direct_server_outcome_with_cancellation\([\s\S]*?Some\(provider_cancellation\),/);
 
 forbid(files.server, text.server + text.websocket, [
   /routecodex_v3_provider_responses/,

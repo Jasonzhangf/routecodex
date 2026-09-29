@@ -1322,13 +1322,19 @@ if (!['design_review_pending', 'runtime_bound'].includes(captureEntry?.status)) 
 }
 if (captureEntry?.status === 'runtime_bound') {
   const symbol = 'execute_v3_operation_runner_request_capture_client_json';
-  for (const [rel, start, boundary] of [
+  for (const [rel, start, boundary, typedIngress, captureCall, leaseExtraction] of [
     ['v3/crates/routecodex-v3-server/src/endpoint_handlers.rs',
       'pub(crate) async fn pending_endpoint_after_responses_admission_inner(',
-      'V3EntryProtocolExecutionMode::Direct'],
+      'V3EntryProtocolExecutionMode::Direct',
+      /let ingress = routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::http\(\s*entry_protocol\.clone\(\),?\s*\);/u,
+      /let captured = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json\(\s*payload,\s*ingress\s*\)/u,
+      /let \(payload, request_lease\) = captured\.into_parts\(\);/u],
     ['v3/crates/routecodex-v3-server/src/websocket.rs',
       'pub(crate) async fn handle_responses_websocket_message_with_mode(',
-      'match effective_execution_mode'],
+      'match effective_execution_mode',
+      /routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::responses_websocket\(\)/u,
+      /let captured = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json\(\s*payload,\s*routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::responses_websocket\(\),?\s*\)/u,
+      /let \(payload, _lease\) = captured\.into_parts\(\);/u],
   ]) {
     const source = fs.readFileSync(path.join(root, rel), 'utf8');
     const functionStart = source.indexOf(start);
@@ -1336,6 +1342,16 @@ if (captureEntry?.status === 'runtime_bound') {
     const beforeDispatch = functionStart < 0 || dispatch < 0 ? '' : source.slice(functionStart, dispatch);
     if (beforeDispatch.split(symbol).length - 1 !== 1) {
       failures.push(`${rel}: ${symbol} must be called exactly once before Direct/Relay dispatch`);
+    }
+    if (!typedIngress.test(beforeDispatch) || !captureCall.test(beforeDispatch)) {
+      failures.push(`${rel}: capture_client_json must receive the selected typed ingress before Direct/Relay dispatch`);
+    }
+    if (!leaseExtraction.test(beforeDispatch)) {
+      failures.push(`${rel}: capture_client_json must retain the Runtime request lease before Direct/Relay dispatch`);
+    }
+    if (rel.endsWith('/endpoint_handlers.rs')
+      && !/hold_response_body_request_lease\(response, request_lease\)/u.test(source.slice(functionStart))) {
+      failures.push(`${rel}: HTTP response Body must retain the Runtime request lease`);
     }
   }
 }

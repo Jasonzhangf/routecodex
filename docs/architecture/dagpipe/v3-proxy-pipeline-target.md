@@ -146,6 +146,6 @@ stateDiagram-v2
 | G3 | 请求入口到模式分支 | `v3/crates/routecodex-v3-server/src/lib.rs` 声明 HTTP 入口；`endpoint_handlers.rs`、`executors.rs` 接到 Runtime；`v3-mainline-call-map.yml` 有 `v3.responses_direct.required_mainline`。 | 用真实请求 ID 核对 Direct/Relay 决策和候选引用；不能把 map 的 `anchored` 或测试锚点当成所有协议的运行证明。 |
 | G4 | Relay 与 Direct 的响应分支 | `v3.hub_pipeline.v1.request/response` 与 `v3.hub_relay.*` map 分别列静态骨架及 Relay source slice；`hub_v1.rs` 导出相邻 builder 与 Direct/Relay 路径。 | 各选一个真实成功样本，对比 provider raw、Chat/Direct 作用点、continuation、客户端 JSON/SSE；再决定 Operator 边界。 |
 | G5 | 错误、重选与终端 | `v3.debug_error_foundation.mainline` map 列 Error01–06；`v3.hub_relay.response_failure_entry` 声明响应治理失败接 Error01；Runtime `kernel.rs` 持有尝试计数和传输尝试。 | 分别用 Server/请求、provider、响应阶段失败样本核对状态；仅对已绑定 provider 身份且策略要求冷却的类型化失败更新健康，验证请求局部排除、目标内重选、598/599/502 及客户端与 provider 状态隔离。为新尝试 ID、响应失败接线及释放终点补类型化证据。 |
-| G6 | 取消、提交后流中断与资源释放 | 当前 map 主要记录请求/响应/错误调用边，也有提交后 SSE 观测与 EOF/error/drop 的局部合同；本轮未绑定 DAGPipe 状态机与每终点资源收据。 | 明确连接断开、上游尝试取消、SSE 关闭的 owner、事件与验收；核对提交前完整缓冲与现有提交后观测的关系，补同入口取消/流中断回放。 |
+| G6 | 取消、提交后流中断与资源释放 | 本候选的 Server Responses WebSocket Close/EOF 触发每请求类型化取消，Runtime Direct/Relay 将同一令牌交给 Provider，执行完成后请求 lease 释放；真实入口红测已观察到上游连接关闭。HTTP body drop 与 SDK cancellation 另有候选测试，尚未安装为运行版本。 | 复核提交前完整缓冲与现有提交后观测的关系；以精确候选 SHA 绑定 HTTP、WebSocket 和 SDK 资源收据，审查通过后再做产品接线与运行时验收。 |
 
 **审计结论：三张静态图已登记，Node01 切片已接入；整条请求、响应、错误图仍未运行。** 后续沿 G2–G6 逐节点核对图、Operator、调用边和真实入口证据，不以静态校验或 Node01 证据推断全图完成。修改项目锁定骨架节点、边、owner 或资源流之前，先遵守 `docs/architecture/wiki/v3-mainline-skeleton-sop.md` 的授权边界。

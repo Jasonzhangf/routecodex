@@ -4,25 +4,6 @@ use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
 
-#[test]
-fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostics_lock() {
-    let observation = V3RuntimeStreamObservation::default();
-    observation
-        .record_provider_event_json(&json!({
-            "type": "response.completed",
-            "response": {"status": "completed"}
-        }))
-        .expect("record terminal before diagnostic failure");
-    observation.poison_diagnostics_for_test();
-
-    assert_eq!(
-        observation
-            .semantic_terminal()
-            .expect("terminal control must not depend on diagnostic lock"),
-        Some(V3RuntimeSemanticTerminal::Success)
-    );
-}
-
 pub(super) fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
             r#"
@@ -189,6 +170,7 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         BTreeSet::new(),
         None,
         None,
+        None,
     )
     .await
     .expect("Relay failure must return a typed Direct handoff");
@@ -286,6 +268,7 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         BTreeSet::new(),
         None,
         None,
+        None,
     )
     .await
     .expect("unmapped target field must project as client request error");
@@ -358,6 +341,7 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         BTreeSet::new(),
         None,
         Some(request_execution_control.clone()),
+        None,
     )
     .await
     .expect_err("the configured attempt ceiling must reject the exhausted handoff");

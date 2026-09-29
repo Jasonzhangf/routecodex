@@ -95,11 +95,12 @@ fn capture_client_json_entry_preserves_exact_json_value() {
 
     let output = crate::operation_runner::execute_v3_operation_runner_request_capture_client_json(
         payload.clone(),
+        super::RuntimeIngressDescriptor::http("openai-chat"),
     )
     .expect("capture client json RuntimeRequestGraphEntry must succeed");
 
-    assert_eq!(output, payload);
-    let captured_arguments = output["tool_calls"][1]["arguments"]
+    assert_eq!(output.payload, payload);
+    let captured_arguments = output.payload["tool_calls"][1]["arguments"]
         .as_str()
         .expect("exec_command arguments remain the original JSON string");
     assert!(captured_arguments.len() > 65_536);
@@ -119,9 +120,10 @@ fn capture_client_json_passes_all_raw_json_shapes_to_the_protocol_owner() {
         let captured =
             crate::operation_runner::execute_v3_operation_runner_request_capture_client_json(
                 payload.clone(),
+                super::RuntimeIngressDescriptor::http("openai-chat"),
             )
             .expect("capture accepts every valid JSON value");
-        assert_eq!(captured, payload);
+        assert_eq!(captured.payload, payload);
     }
 }
 

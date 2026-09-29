@@ -8525,6 +8525,7 @@ chains:
       consumes: [v3.request.normal_payload, v3.config.published_manifest]
       produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_reads:
+      - v3.operation_runner.ingress_contract
       - v3.operation_runner.request_origin_kind
       - v3.operation_runner.request_inverse_context
       - v3.operation_runner.metadata_center_control
