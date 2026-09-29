@@ -943,6 +943,20 @@ fn anthropic_wire_consumes_chat_store_false_without_projecting_it() {
 }
 
 #[test]
+fn anthropic_wire_preserves_service_tier_request_field() {
+    let payload = json!({
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "service_tier": "priority"
+    });
+
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
+            .expect("service_tier is a registered target-specific Anthropic request field");
+    assert_eq!(request["service_tier"], "priority");
+}
+
+#[test]
 fn anthropic_wire_rejects_chat_store_true_without_silent_semantic_loss() {
     let payload = json!({
         "model": "claude-test",
