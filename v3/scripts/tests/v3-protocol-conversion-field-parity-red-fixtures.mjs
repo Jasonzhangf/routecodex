@@ -16,6 +16,7 @@ const files = [
   'docs/design/v3-protocol-request-field-projection.md',
   'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
+  'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
   'docs/architecture/reviews/v3-protocol-semantic-matrix-review.md',
   'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
   'docs/architecture/wiki/html/v3-protocol-semantic-field-matrix.html',
@@ -33,6 +34,7 @@ const files = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
@@ -73,6 +75,27 @@ const files = [
 
 const cases = [
   {
+    name: 'Anthropic content union loses its scalar semantic mapping',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        anthropic:\n          - request.messages\n          - request.messages[].content\n        gemini:\n',
+    to: '        anthropic:\n          - request.messages\n        gemini:\n',
+    diagnostic: /source field anthropic\.request\.messages\[\]\.content mapped to superset 0 times/u,
+  },
+  {
+    name: 'Anthropic hosted tool id branch loses its target semantic',
+    file: 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
+    from: 'semantic_id: request.messages_items.content_items.server_tool_use.id',
+    to: 'semantic_id: request.messages_items.content_items.server_tool_use.id_removed',
+    diagnostic: /source field anthropic\.request\.messages\[\]\.content\[\]\.id mapped to superset 2 times/u,
+  },
+  {
+    name: 'Anthropic hosted tool id branch overlaps ordinary tool use',
+    file: 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
+    from: 'semantic_id: request.messages_items.content_items.server_tool_use.id\n          operator: routecodex.v3.field.array_container_shape@1\n          predicates:\n            - path: request.messages[].content[].type\n              value: server_tool_use',
+    to: 'semantic_id: request.messages_items.content_items.server_tool_use.id\n          operator: routecodex.v3.field.array_container_shape@1\n          predicates:\n            - path: request.messages[].content[].type\n              value: tool_use',
+    diagnostic: /source field anthropic\.request\.messages\[\]\.content\[\]\.id mapped to superset 2 times/u,
+  },
+  {
     name: 'Provider response projection is collapsed into the client inbound error variant',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
     from: 'V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(\n                                    error.to_string(),\n                                )',
@@ -99,13 +122,6 @@ const cases = [
     from: 'if object.get("type").and_then(Value::as_str) == Some("custom") {',
     to: 'if custom_tool_names.contains("custom") {',
     diagnostic: /missing if object\.get\("type"\)/u,
-  },
-  {
-    name: 'Native OpenAI Chat custom grammar regression test is removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
-    from: 'openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade',
-    to: 'openai_chat_wire_accepts_unknown_custom_format_without_function_downgrade',
-    diagnostic: /native_openai_chat_custom_tool_tests/u,
   },
   {
     name: 'Responses outbound leaks local client_metadata onto provider wire',
@@ -229,18 +245,25 @@ const cases = [
     diagnostic: /missing manual semantic translation group tool\.call\.arguments/u,
   },
   {
-    name: 'Tool call id group collapses function arguments',
+    name: 'Tool call id collapses function arguments',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - extended_openai_chat_field: request.messages[].tool_calls[].id\n      semantic_id: request.messages[].tool_calls[].id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].function_call.call_id\n          - request.input[].custom_tool_call.call_id\n',
-    to: '    - extended_openai_chat_field: request.messages[].tool_calls[].id\n      semantic_id: request.messages[].tool_calls[].id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].function_call.call_id\n          - request.input[].function_call.arguments\n          - request.input[].custom_tool_call.call_id\n',
-    diagnostic: /tool\.call\.id|must not collapse|function_call\.arguments/u,
+    from: '    - extended_openai_chat_field: request.messages[].tool_calls[].id\n      semantic_id: request.messages[].tool_calls[].id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].call_id\n',
+    to: '    - extended_openai_chat_field: request.messages[].tool_calls[].id\n      semantic_id: request.messages[].tool_calls[].id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].call_id\n          - request.input[].arguments\n',
+    diagnostic: /source field responses\.request\.input\[\]\.arguments mapped to superset 2 times/u,
   },
   {
     name: 'Tool result pairing id collapses output payload',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - extended_openai_chat_field: request.messages[].tool_call_id\n      semantic_id: request.messages[].tool_call_id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].function_call_output.call_id\n',
-    to: '    - extended_openai_chat_field: request.messages[].tool_call_id\n      semantic_id: request.messages[].tool_call_id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].function_call_output.call_id\n          - request.input[].function_call_output.output\n',
-    diagnostic: /tool\.result\.call_id|must not collapse|function_call_output\.output/u,
+    from: '    - extended_openai_chat_field: request.messages[].tool_call_id\n      semantic_id: request.messages[].tool_call_id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].call_id\n',
+    to: '    - extended_openai_chat_field: request.messages[].tool_call_id\n      semantic_id: request.messages[].tool_call_id\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: covered\n      gap: none\n      equivalent_fields:\n        responses:\n          - request.input[].call_id\n          - request.input[].output\n',
+    diagnostic: /responses\.request\.input\[\]\.output mapped to superset 2 times \(request\.messages\[\]\.tool_call_id, request\.messages\[\]\.tool_result\.output\)/u,
+  },
+  {
+    name: 'Tool call and result id discriminator branches overlap',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        - direction: request\n          source_path: request.input[].call_id\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: function_call_output\n',
+    to: '        - direction: request\n          source_path: request.input[].call_id\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: function_call\n',
+    diagnostic: /source field responses\.request\.input\[\]\.call_id mapped to superset 2 times \(request\.messages\[\]\.tool_call_id, request\.messages\[\]\.tool_calls\[\]\.id\)/u,
   },
   {
     name: 'Gemini functionResponse name collapses into tool_call_id',
@@ -252,8 +275,8 @@ const cases = [
   {
     name: 'Image URL semantic collapses Gemini inline MIME type',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - extended_openai_chat_field: request.messages[].content[].image_url.url\n      semantic_id: request.messages[].content[].image_url.url\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: shape_branch_gap\n      gap: Anthropic image.source requires source.type branch; Gemini inline/file data is extension-only\n      equivalent_fields:\n        responses:\n          - request.input[].input_image.image_url\n        openai_chat:\n          - request.messages[].content[].image_url.url\n        anthropic:\n          - request.messages[].content[].image.source\n        gemini: []\n',
-    to: '    - extended_openai_chat_field: request.messages[].content[].image_url.url\n      semantic_id: request.messages[].content[].image_url.url\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: shape_branch_gap\n      gap: Anthropic image.source requires source.type branch; Gemini inline/file data is extension-only\n      equivalent_fields:\n        responses:\n          - request.input[].input_image.image_url\n        openai_chat:\n          - request.messages[].content[].image_url.url\n        anthropic:\n          - request.messages[].content[].image.source\n        gemini:\n          - request.contents[].parts[].inlineData.mimeType\n',
+    from: '        anthropic:\n          - request.messages[].content[].source.url\n        gemini: []\n',
+    to: '        anthropic:\n          - request.messages[].content[].source.url\n        gemini:\n          - request.contents[].parts[].inlineData.mimeType\n',
     diagnostic: /image_url\.url|inlineData\.mimeType|must not collapse/u,
   },
   {
@@ -262,6 +285,34 @@ const cases = [
     from: '    shape_branch_cases:\n      positive:\n        - protocol: responses\n',
     to: '    shape_branch_cases_removed:\n      positive:\n        - protocol: responses\n',
     diagnostic: /content\.image_url|shape_branch_cases\.negative|must not be empty|missing anthropic branch/u,
+  },
+  {
+    name: 'Text branch contract drops a Responses text discriminator case',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        - direction: response\n          source_path: response.output[].content[].text\n          provenance: response_provenance.output_content_type\n          predicates:\n            - path: response.output[].type\n              value: reasoning\n            - path: response.output[].content[].type\n              value: reasoning_text\n',
+    to: '        - direction: response\n          source_path: response.output[].content[].text\n          provenance: response_provenance.output_content_type\n          predicates:\n            - path: response.output[].type\n              value: reasoning\n            - path: response.output[].content[].type\n              value: reasoning_text_dropped\n',
+    diagnostic: /response\.message_text missing branch case response\.output\[\]\.content\[\]\.text[\s\S]*response\.message_text overlaps or declares undeclared branch case[\s\S]*reasoning_text_dropped/su,
+  },
+  {
+    name: 'Text branch contract duplicates a discriminator case',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        - direction: request\n          source_path: request.input[].content[].text\n          provenance: request_inverse_context.responses_input_item_shape\n          predicates:\n            - path: request.input[].type\n              state: missing\n            - path: request.input[].content[].type\n              value: input_text\n',
+    to: '        - direction: request\n          source_path: request.input[].content[].text\n          provenance: request_inverse_context.responses_input_item_shape\n          predicates:\n            - path: request.input[].type\n              state: missing\n            - path: request.input[].content[].type\n              value: input_text\n        - direction: request\n          source_path: request.input[].content[].text\n          provenance: request_inverse_context.responses_input_item_shape\n          predicates:\n            - path: request.input[].type\n              state: missing\n            - path: request.input[].content[].type\n              value: input_text\n',
+    diagnostic: /content\.text_part duplicate branch predicate set request\.input\[\]\.content\[\]\.type=input_text & request\.input\[\]\.type=missing/u,
+  },
+  {
+    name: 'Missing type falls back to message without discriminator provenance',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        - direction: request\n          source_path: request.input[].arguments\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: function_call\n',
+    to: '        - direction: request\n          source_path: request.input[].arguments\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              state: missing\n        - direction: request\n          source_path: request.input[].arguments\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: function_call\n',
+    diagnostic: /tool\.call\.arguments overlaps or declares undeclared branch case/u,
+  },
+  {
+    name: 'One-to-many tool branch coverage drops tool_call case',
+    file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
+    from: '        - direction: request\n          source_path: request.input[].arguments\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: tool_call\n',
+    to: '        - direction: request\n          source_path: request.input[].arguments\n          provenance: request_inverse_context.responses_input_item_type\n          predicates:\n            - path: request.input[].type\n              value: tool_call_removed\n',
+    diagnostic: /tool\.call\.arguments missing branch case.*tool_call|overlaps or declares undeclared branch case.*tool_call_removed/u,
   },
   {
     name: 'Shape branch contract assigns media branch to non-codec owner',
@@ -371,8 +422,8 @@ const cases = [
   {
     name: 'Gemini stopSequences reintroduced as extension row',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini:\n          - request.generationConfig.stopSequences\n',
-    to: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop; cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini: []\n    - extended_openai_chat_field: request.stop_sequences\n      semantic_id: request.stop_sequences\n      direction: request\n      mapping_status: extension_added\n      semantic_owner: chat.extension_semantics\n      current_impl: extension_declared\n      gap: runtime mapping partial or extension-only gap\n      equivalent_fields:\n        responses: []\n        openai_chat: []\n        anthropic: []\n        gemini:\n          - request.generationConfig.stopSequences\n',
+    from: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop;\n        cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini:\n          - request.generationConfig.stopSequences\n      source_classification: canonical_chat_fields\n      chat_extension_association: []\n',
+    to: '    - extended_openai_chat_field: request.stop\n      semantic_id: request.stop\n      direction: request\n      mapping_status: mapped\n      semantic_owner: chat.canonical_semantics\n      current_impl: partial\n      gap: Gemini stopSequences source codec extracts Chat request.stop;\n        cross-protocol/live closeout pending\n      equivalent_fields:\n        responses: []\n        openai_chat:\n          - request.stop\n        anthropic:\n          - request.stop_sequences\n        gemini: []\n      source_classification: canonical_chat_fields\n      chat_extension_association: []\n    - extended_openai_chat_field: request.stop_sequences\n      semantic_id: request.stop_sequences\n      direction: request\n      mapping_status: extension_added\n      semantic_owner: chat.extension_semantics\n      current_impl: extension_declared\n      gap: runtime mapping partial or extension-only gap\n      equivalent_fields:\n        responses: []\n        openai_chat: []\n        anthropic: []\n        gemini:\n          - request.generationConfig.stopSequences\n      source_classification: protocol_specific_chat_extension_fields\n      chat_extension_association: []\n',
     diagnostic: /request\.stop.*stopSequences|source field gemini\.request\.generationConfig\.stopSequences mapped to superset/u,
   },
   {
@@ -393,8 +444,8 @@ const cases = [
   {
     name: 'Manual semantic translation removes Anthropic transform',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '        transform: Valid Chat function.arguments JSON maps exactly to Anthropic tool_use.input. Malformed raw argument text uses compatibility id v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the exact raw text on reverse projection.\n',
-    to: '      transform: \n',
+    from: '        transform: Valid Chat function.arguments JSON maps exactly to Anthropic\n          content[].input. Malformed raw argument text uses compatibility id\n          v3.function_call.anthropic_raw_argument_wrapper.v1 and restores the\n          exact raw text on reverse projection.\n',
+    to: '        transform: \n',
     diagnostic: /tool\.call\.arguments|anthropic|missing manual transform/u,
   },
   {
@@ -407,8 +458,8 @@ const cases = [
   {
     name: 'Audit truth status count drifts from matrix',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    extension_declared: 220\n',
-    to: '    extension_declared: 219\n',
+    from: '    extension_declared: 226\n',
+    to: '    extension_declared: 225\n',
     diagnostic: /audited_status_counts\.extension_declared|must equal current_impl count/u,
   },
   {
@@ -796,7 +847,7 @@ const cases = [
   },
   {
     name: 'Responses function history forwards non-fc item id to provider',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs',
     from: '        Some(item_id) => compact_tool_id("fc_", item_id),',
     to: '        Some(item_id) => item_id.to_string(),',
     diagnostic: /responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids|responses_function_item_id/u,
@@ -847,9 +898,9 @@ const cases = [
   {
     name: 'Outbound projection contract drops control forbidden status',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '    control_forbidden: RouteCodex-owned internal control fields must raise ControlFieldLeak with exact JSON paths before provider send; payload-owned underscore fields such as `_id` remain data-plane.\n',
+    from: '    control_forbidden: RouteCodex-owned internal control fields must raise\n      ControlFieldLeak with exact JSON paths before provider send; payload-owned\n      underscore fields such as `_id` remain data-plane.\n',
     to: '',
-    diagnostic: /control_forbidden/u,
+    diagnostic: /missing legacy outbound projection status bridge control_forbidden/u,
   },
   {
     name: 'Provider outbound strips all metadata by substring',
@@ -882,8 +933,8 @@ const cases = [
   {
     name: 'Anthropic max_tokens mapping contract is relabeled',
     file: 'docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml',
-    from: '        transform: Anthropic max_tokens maps to Chat max_completion_tokens; output_tokens is response usage only.\n',
-    to: '        transform: Anthropic max_tokens maps to Chat max_output_tokens; output_tokens is response usage only.\n',
+    from: '        transform: Anthropic max_tokens maps to Chat max_completion_tokens;\n',
+    to: '        transform: Anthropic max_tokens maps to Chat max_output_tokens;\n',
     diagnostic: /Anthropic max_tokens|closed protocol matrix|out of sync/u,
   },
   {
@@ -996,7 +1047,10 @@ for (const testCase of cases) {
     }
     const target = resolve(root, testCase.file);
     const source = readFileSync(target, 'utf8');
-    if (!source.includes(testCase.from)) throw new Error(`${testCase.name}: mutation source missing`);
+    if (!source.includes(testCase.from)) {
+      failures.push(`${testCase.name}: mutation source missing`);
+      continue;
+    }
     writeFileSync(
       target,
       testCase.all

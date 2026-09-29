@@ -2,8 +2,8 @@
 // Split from verify-v3-protocol-conversion-field-parity.mjs to satisfy the
 // v3-file-size ratchet. Helpers close over the gate context (failures/paths/text).
 
-export function attachParityHelpers(context) {
-  const { failures, paths, text } = context;
+export function attachParityHelpers(context, matrixRef) {
+  const { failures, paths, text, operationFieldProfiles } = context;
 
 function requireMatrixProtocols(matrix, protocols) {
   for (const protocol of protocols) {
@@ -51,7 +51,7 @@ function requireClassificationCoversSourceInventory(matrix) {
       failures.push(`${paths.fieldMatrix}: missing source/classification for ${protocol}`);
       continue;
     }
-    const sourceFields = new Set();
+    const sourceFields = collectSourceInventoryFields(matrix, protocol);
     for (const rows of Object.values(source)) {
       if (Array.isArray(rows)) for (const row of rows) sourceFields.add(row);
     }
@@ -302,51 +302,51 @@ function requireManualSemanticTranslationGroups(matrix) {
   if (manyToOne.length < 12) failures.push(`${paths.fieldMatrix}: manual semantic groups must include many-to-one/one-to-many mappings; found only ${manyToOne.length}`);
 
   requireGroupFields(byId, 'tool.call.id', 'request.messages[].tool_calls[].id', {
-    responses: ['request.input[].function_call.call_id'],
-    anthropic: ['request.messages[].content[].tool_use.id'],
+    responses: ['request.input[].call_id'],
+    anthropic: ['request.messages[].content[].id'],
     gemini: ['request.contents[].parts[].functionCall.id'],
   });
   forbidGroupFields(byId, 'tool.call.id', {
-    responses: ['request.input[].function_call.arguments', 'request.input[].function_call.name'],
-    anthropic: ['request.messages[].content[].tool_use.input', 'request.messages[].content[].tool_use.name'],
+    responses: ['request.input[].arguments', 'request.input[].name'],
+    anthropic: ['request.messages[].content[].input', 'request.messages[].content[].name'],
     gemini: ['request.contents[].parts[].functionCall.args', 'request.contents[].parts[].functionCall.name'],
   });
   requireGroupFields(byId, 'tool.call.name', 'request.messages[].tool_calls[].function.name', {
-    responses: ['request.input[].function_call.name'],
-    anthropic: ['request.messages[].content[].tool_use.name'],
+    responses: ['request.input[].name'],
+    anthropic: ['request.messages[].content[].name'],
     gemini: ['request.contents[].parts[].functionCall.name'],
   });
   requireGroupFields(byId, 'tool.call.arguments', 'request.messages[].tool_calls[].function.arguments', {
-    responses: ['request.input[].function_call.arguments'],
-    anthropic: ['request.messages[].content[].tool_use.input'],
+    responses: ['request.input[].arguments'],
+    anthropic: ['request.messages[].content[].input'],
     gemini: ['request.contents[].parts[].functionCall.args'],
   });
   requireGroupFields(byId, 'tool.result.call_id', 'request.messages[].tool_call_id', {
-    responses: ['request.input[].function_call_output.call_id'],
-    anthropic: ['request.messages[].content[].tool_result.tool_use_id'],
+    responses: ['request.input[].call_id'],
+    anthropic: ['request.messages[].content[].tool_use_id'],
     gemini: ['request.contents[].parts[].functionResponse.id'],
   });
   forbidGroupFields(byId, 'tool.result.call_id', {
-    responses: ['request.input[].function_call_output.output'],
-    anthropic: ['request.messages[].content[].tool_result.content', 'request.messages[].content[].tool_result.is_error'],
+    responses: ['request.input[].output'],
+    anthropic: ['request.messages[].content[].content', 'request.messages[].content[].is_error'],
     gemini: ['request.contents[].parts[].functionResponse.name', 'request.contents[].parts[].functionResponse.response'],
   });
   requireGroupFields(byId, 'tool.result.output', 'request.messages[].tool_result.output', {
-    responses: ['request.input[].function_call_output.output'],
-    anthropic: ['request.messages[].content[].tool_result.content'],
+    responses: ['request.input[].output'],
+    anthropic: ['request.messages[].content[].content'],
     gemini: ['request.contents[].parts[].functionResponse.response'],
   });
   requireGroupFields(byId, 'tool.result.name', 'request.messages[].tool_result.name', {
     gemini: ['request.contents[].parts[].functionResponse.name'],
   });
   requireGroupFields(byId, 'tool.result.error_status', 'request.messages[].tool_result.is_error', {
-    anthropic: ['request.messages[].content[].tool_result.is_error'],
+    anthropic: ['request.messages[].content[].is_error'],
   });
   requireGroupFields(byId, 'content.image_url', 'request.messages[].content[].image_url.url', {
-    responses: ['request.input[].input_image.image_url'],
+    responses: ['request.input[].content[].url'],
   });
   forbidGroupFields(byId, 'content.image_url', {
-    responses: ['request.input[].input_image.file_id', 'request.input[].input_image.detail'],
+    responses: ['request.input[].content[].file_id', 'request.input[].content[].detail'],
     gemini: ['request.contents[].parts[].inlineData.data', 'request.contents[].parts[].inlineData.mimeType', 'request.contents[].parts[].fileData.fileUri'],
   });
   requireGroupFields(byId, 'content.media_mime_type', 'request.messages[].content[].media.mime_type', {
@@ -357,23 +357,23 @@ function requireManualSemanticTranslationGroups(matrix) {
   });
 
   requireSupersetRowFields(matrix, 'request.messages[].tool_calls[].id', {
-    responses: ['request.input[].function_call.call_id'],
-    anthropic: ['request.messages[].content[].tool_use.id'],
+    responses: ['request.input[].call_id'],
+    anthropic: ['request.messages[].content[].id'],
     gemini: ['request.contents[].parts[].functionCall.id'],
   });
   forbidSupersetRowFields(matrix, 'request.messages[].tool_calls[].id', {
-    responses: ['request.input[].function_call.arguments', 'request.input[].function_call.name'],
-    anthropic: ['request.messages[].content[].tool_use.input', 'request.messages[].content[].tool_use.name'],
+    responses: ['request.input[].arguments', 'request.input[].name'],
+    anthropic: ['request.messages[].content[].input', 'request.messages[].content[].name'],
     gemini: ['request.contents[].parts[].functionCall.args', 'request.contents[].parts[].functionCall.name'],
   });
   requireSupersetRowFields(matrix, 'request.messages[].tool_calls[].function.arguments', {
-    responses: ['request.input[].function_call.arguments'],
-    anthropic: ['request.messages[].content[].tool_use.input'],
+    responses: ['request.input[].arguments'],
+    anthropic: ['request.messages[].content[].input'],
     gemini: ['request.contents[].parts[].functionCall.args'],
   });
   requireSupersetRowFields(matrix, 'request.messages[].tool_result.output', {
-    responses: ['request.input[].function_call_output.output'],
-    anthropic: ['request.messages[].content[].tool_result.content'],
+    responses: ['request.input[].output'],
+    anthropic: ['request.messages[].content[].content'],
     gemini: ['request.contents[].parts[].functionResponse.response'],
   });
   requireSupersetRowFields(matrix, 'request.messages[].tool_result.name', {
@@ -383,9 +383,111 @@ function requireManualSemanticTranslationGroups(matrix) {
     gemini: ['request.contents[].parts[].inlineData.mimeType'],
   });
   forbidSupersetRowFields(matrix, 'request.messages[].content[].image_url.url', {
-    responses: ['request.input[].input_image.file_id', 'request.input[].input_image.detail'],
+    responses: ['request.input[].content[].file_id', 'request.input[].content[].detail'],
     gemini: ['request.contents[].parts[].inlineData.data', 'request.contents[].parts[].inlineData.mimeType', 'request.contents[].parts[].fileData.fileUri'],
   });
+
+  const textContentGroup = byId.get('content.text_part');
+  const textBranches = textContentGroup?.branch_contract?.cases ?? [];
+  const textBranchText = JSON.stringify(textContentGroup ?? {});
+  requireBranchContractShape('content.text_part', textBranches, {
+    direction: 'request',
+    required: [
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { state: 'missing' }, 'request.input[].content[].type': 'input_text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { state: 'missing' }, 'request.input[].content[].type': 'output_text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { state: 'missing' }, 'request.input[].content[].type': 'text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { value: 'message' }, 'request.input[].content[].type': 'input_text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { value: 'message' }, 'request.input[].content[].type': 'output_text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { value: 'message' }, 'request.input[].content[].type': 'text' } },
+      { source_path: 'request.input[].content[].text', predicates: { 'request.input[].type': { value: 'reasoning' }, 'request.input[].content[].type': 'reasoning_text' } },
+    ],
+  });
+  for (const phrase of ['request.input[].text', 'request.input[].content[].text', 'response.output[].text']) {
+    if (!textBranchText.includes(phrase)) failures.push(`${paths.fieldMatrix}: content.text_part missing text path evidence ${phrase}`);
+  }
+}
+
+function requireInverseResponseTextBranchContract(matrix) {
+  const groups = matrix?.chat_semantic_translation_groups ?? [];
+  const group = groups.find((item) => item?.group_id === 'response.message_text');
+  const branches = group?.inverse_branch_contract?.cases ?? [];
+  requireBranchContractShape('response.message_text', branches, {
+    direction: 'response',
+    required: [
+      { source_path: 'response.output[].content[].text', predicates: { 'response.output[].type': { value: 'message' }, 'response.output[].content[].type': 'output_text' } },
+      { source_path: 'response.output[].content[].text', predicates: { 'response.output[].type': { value: 'reasoning' }, 'response.output[].content[].type': 'reasoning_text' } },
+    ],
+  });
+}
+
+function inventoryHasPath(path) {
+  for (const protocolInventory of Object.values(matrixRef?.current?.source_inventory ?? {})) {
+    for (const rows of Object.values(protocolInventory ?? {})) {
+      if (Array.isArray(rows) && rows.includes(path)) return true;
+    }
+  }
+  return false;
+}
+
+function predicateMatches(expected, actual) {
+  if (!expected || !actual) return false;
+  if (typeof expected === 'string') {
+    return actual.value === expected;
+  }
+  if (actual.state === 'missing' || actual.state === 'present') {
+    return expected.state === actual.state;
+  }
+  return expected.value !== undefined && expected.value === actual.value;
+}
+
+function requireBranchContractShape(groupId, branches, contract) {
+  if (!Array.isArray(branches) || branches.length === 0) {
+    failures.push(`${paths.fieldMatrix}: ${groupId} missing branch_contract.cases`);
+    return;
+  }
+  const signatures = new Set();
+  for (const branch of branches) {
+    if (!branch?.direction || !branch?.source_path || !branch?.provenance) {
+      failures.push(`${paths.fieldMatrix}: ${groupId} branch_contract case missing direction/source_path/provenance`);
+      continue;
+    }
+    if (!Array.isArray(branch.predicates) || branch.predicates.length === 0) {
+      failures.push(`${paths.fieldMatrix}: ${groupId} branch_contract case ${branch.source_path} missing conjunctive predicates`);
+      continue;
+    }
+    const byPath = new Map();
+    for (const predicate of branch.predicates) {
+      const path = predicate?.path;
+      if (!path || !inventoryHasPath(path)) failures.push(`${paths.fieldMatrix}: ${groupId} branch predicate uses path not in source_inventory: ${path}`);
+      else if (byPath.has(path)) failures.push(`${paths.fieldMatrix}: ${groupId} branch predicates duplicate path ${path}`);
+      else byPath.set(path, predicate);
+    }
+    if (!inventoryHasPath(branch.source_path)) failures.push(`${paths.fieldMatrix}: ${groupId} branch source_path not in source_inventory: ${branch.source_path}`);
+    const signature = branch.predicates.map((predicate) => `${predicate?.path}=${predicate?.value ?? predicate?.state ?? '<bad>'}`).sort().join(' & ');
+    if (signatures.has(signature)) failures.push(`${paths.fieldMatrix}: ${groupId} duplicate branch predicate set ${signature}`);
+    signatures.add(signature);
+  }
+  for (const expected of contract.required ?? []) {
+    const expectedPredicates = Object.entries(expected.predicates).sort();
+    const match = branches.some((branch) => {
+      if (branch?.source_path !== expected.source_path) return false;
+      const actual = Object.fromEntries((branch?.predicates ?? []).map((predicate) => [predicate?.path, predicate]));
+      const paths = Object.keys(actual).sort();
+      return paths.length === expectedPredicates.length && expectedPredicates.every(([path, value]) => predicateMatches(value, actual[path]));
+    });
+    if (!match) failures.push(`${paths.fieldMatrix}: ${groupId} missing branch case ${expected.source_path} ${JSON.stringify(expected.predicates)}`);
+  }
+  const allowed = new Set((contract.required ?? []).map((expected) => {
+    const predicates = Object.entries(expected.predicates).map(([path, predicate]) => [
+      path,
+      typeof predicate === 'string' ? { path, value: predicate } : { path, ...predicate },
+    ]).sort();
+    return JSON.stringify([expected.source_path, predicates]);
+  }));
+  for (const branch of branches) {
+    const signature = JSON.stringify([branch?.source_path, Object.entries(Object.fromEntries((branch?.predicates ?? []).map((predicate) => [predicate?.path, predicate]))).sort()]);
+    if (!allowed.has(signature)) failures.push(`${paths.fieldMatrix}: ${groupId} overlaps or declares undeclared branch case ${signature}`);
+  }
 }
 
 function requireShapeBranchTransformContract(matrix) {
@@ -398,6 +500,7 @@ function requireShapeBranchTransformContract(matrix) {
   const allowedOwnerFiles = new Set([
     paths.responsesOpenaiCodec,
     paths.requestOutboundFormat,
+    paths.requestOutboundResponsesItems,
     paths.anthropicCodec,
     'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs',
   ]);
@@ -412,7 +515,7 @@ function requireShapeBranchTransformContract(matrix) {
       positive: ['anthropic', 'gemini'],
       negative: ['anthropic', 'gemini'],
       target: 'request.messages[].content[].media.inline_data',
-      forbiddenTokens: ['image.source.type == "url"', 'inlineData.mimeType'],
+      forbiddenTokens: ['request.messages[].content[].source.type == "url"', 'inlineData.mimeType'],
     },
     'content.media_mime_type': {
       positive: ['anthropic', 'gemini'],
@@ -436,7 +539,7 @@ function requireShapeBranchTransformContract(matrix) {
       positive: ['responses', 'gemini'],
       negative: ['responses', 'gemini'],
       target: 'request.messages[].content[].file.file_url',
-      forbiddenTokens: ['input_image.image_url', 'inlineData.data'],
+      forbiddenTokens: ['request.input[].content[].url', 'inlineData.data'],
     },
   };
   const byId = new Map(groups.map((group) => [group?.group_id, group]));
@@ -471,6 +574,90 @@ function requireShapeBranchTransformContract(matrix) {
       if (!negativeText.includes(token)) failures.push(`${paths.fieldMatrix}: ${groupId} shape_branch_cases.negative must lock forbidden token ${token}`);
     }
   }
+}
+
+function requireBranchAwareSemanticGroups(matrix) {
+  const groups = matrix?.chat_semantic_translation_groups;
+  if (!Array.isArray(groups)) return;
+  const required = {
+    'tool.call.id': { direction: 'request', required: [{ source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'function_call' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'tool_call' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'custom_tool_call' } } }] },
+    'tool.call.arguments': { direction: 'request', required: [{ source_path: 'request.input[].arguments', predicates: { 'request.input[].type': { value: 'function_call' } } }, { source_path: 'request.input[].arguments', predicates: { 'request.input[].type': { value: 'tool_call' } } }] },
+    'tool.custom.name': { direction: 'request', required: [{ source_path: 'request.input[].name', predicates: { 'request.input[].type': { value: 'custom_tool_call' } } }] },
+    'tool.custom.input': { direction: 'request', required: [{ source_path: 'request.input[].input', predicates: { 'request.input[].type': { value: 'custom_tool_call' } } }] },
+    'tool.result.call_id': { direction: 'request', required: [{ source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'function_call_output' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'tool_call_output' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'custom_tool_call_output' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'tool_result' } } }, { source_path: 'request.input[].call_id', predicates: { 'request.input[].type': { value: 'tool_message' } } }] },
+  };
+  const byId = new Map(groups.map((group) => [group?.group_id, group]));
+  for (const [groupId, contract] of Object.entries(required)) {
+    const group = byId.get(groupId);
+    if (!group) continue;
+    const branches = group?.branch_contract?.cases;
+    if (!Array.isArray(branches) || branches.length === 0) {
+      failures.push(`${paths.fieldMatrix}: ${groupId} missing branch_contract.cases`);
+      continue;
+    }
+    const seen = new Set();
+    for (const branch of branches) {
+      if (branch?.direction !== contract.direction || !branch?.source_path || !branch?.provenance) failures.push(`${paths.fieldMatrix}: ${groupId} branch_contract case missing ${contract.direction} source_path/provenance`);
+    }
+    requireBranchContractShape(groupId, branches, contract);
+  }
+}
+
+function hasDisjointSourceBranchCoverage(matrix, protocol, sourcePath, hits) {
+  if (protocol !== 'responses' || hits.length < 2) return false;
+  const groupsByField = new Map(
+    (matrix?.chat_semantic_translation_groups ?? []).map((group) => [group?.standard_chat_field, group]),
+  );
+  const branchSets = [];
+  for (const row of hits) {
+    const group = groupsByField.get(row?.extended_openai_chat_field);
+    if (row?.direction !== 'request' || group?.direction !== 'request') return false;
+    const branches = (group?.branch_contract?.cases ?? []).filter(
+      (branch) => branch?.direction === 'request' && branch?.source_path === sourcePath,
+    );
+    if (branches.length === 0) return false;
+    const values = new Set();
+    for (const branch of branches) {
+      const predicates = branch?.predicates ?? [];
+      if (predicates.length !== 1 || predicates[0]?.path !== 'request.input[].type') return false;
+      const value = predicates[0]?.value;
+      if (typeof value !== 'string' || value.length === 0 || values.has(value)) return false;
+      values.add(value);
+    }
+    if (branchSets.some((other) => [...values].some((value) => other.has(value)))) return false;
+    branchSets.push(values);
+  }
+  return branchSets.length === hits.length;
+}
+
+function hasExactAnthropicBranchContractCoverage(matrix, protocol, sourcePath, hits) {
+  if (protocol !== 'anthropic' || hits.length < 2) return false;
+  const binding = operationFieldProfiles?.path_consumers?.find((item) => item.protocol === protocol
+    && item.path === sourcePath);
+  const cases = binding?.typed_discriminator_cases?.cases ?? [];
+  const targets = new Set(hits.map((row) => row?.extended_openai_chat_field));
+  if (cases.length < hits.length || cases.some((item) => !targets.has(item.semantic_id))) return false;
+  const inventory = collectSourceInventoryFields(matrix, protocol);
+  for (const target of targets) {
+    if (!cases.some((item) => item.semantic_id === target)) return false;
+  }
+  for (const branch of cases) {
+    if (!Array.isArray(branch.predicates) || branch.predicates.length === 0
+      || branch.predicates.some((predicate) => !inventory.has(predicate.path)
+        || typeof predicate.value !== 'string' || predicate.value.length === 0)
+      || !branch.predicates.some((predicate) => predicate.path === binding.typed_discriminator_cases.discriminator_path
+        && predicate.value === branch.type_value)) return false;
+  }
+  for (let left = 0; left < cases.length; left += 1) {
+    for (let right = left + 1; right < cases.length; right += 1) {
+      if (cases[left].semantic_id === cases[right].semantic_id) continue;
+      const leftPredicates = new Map(cases[left].predicates.map((item) => [item.path, item.value]));
+      const overlaps = cases[right].predicates.every((item) =>
+        !leftPredicates.has(item.path) || leftPredicates.get(item.path) === item.value);
+      if (overlaps) return false;
+    }
+  }
+  return true;
 }
 
 function requireShapeCaseProtocols(groupId, kind, rows, protocols) {
@@ -945,7 +1132,7 @@ function requireExtendedOpenAiChatSemanticSuperset(matrix) {
       for (const field of fields ?? []) {
         const key = `${protocol}\u0000${field}`;
         if (!sourceCoverage.has(key)) sourceCoverage.set(key, []);
-        sourceCoverage.get(key).push(row?.semantic_id);
+        sourceCoverage.get(key).push(row);
       }
     }
   }
@@ -956,7 +1143,16 @@ function requireExtendedOpenAiChatSemanticSuperset(matrix) {
     for (const field of sourceFields) {
       const key = `${protocol}\u0000${field}`;
       const hits = sourceCoverage.get(key) ?? [];
-      if (hits.length !== 1) failures.push(`${paths.fieldMatrix}: source field ${protocol}.${field} mapped to superset ${hits.length} times (${hits.join(', ')})`);
+      const structural = operationFieldProfiles?.path_consumers?.find((item) => item.protocol === protocol
+        && item.path === field && item.structure_only === true && item.parent_owned === true
+        && item.union_shape !== true && !item.scalar_consumer && !item.consumers
+        && Array.isArray(item.shape_children)
+        && item.shape_children.length > 0 && item.shape_children.every((child) => sourceFields.has(child)));
+      if (hits.length !== 1 && !(hits.length === 0 && structural)
+        && !hasDisjointSourceBranchCoverage(matrix, protocol, field, hits)
+        && !hasExactAnthropicBranchContractCoverage(matrix, protocol, field, hits)) {
+        failures.push(`${paths.fieldMatrix}: source field ${protocol}.${field} mapped to superset ${hits.length} times (${hits.map((row) => row?.semantic_id).join(', ')})`);
+      }
       const bucket = classificationBucketForField(matrix, protocol, field);
       const row = rows.find((candidate) => candidate?.equivalent_fields?.[protocol]?.includes(field));
       if (!row) continue;
@@ -1095,6 +1291,8 @@ function sectionSlice(source, startMarker, endMarker) {
     walkCurrentImpl,
     requireManualSemanticTranslationGroups,
     requireShapeBranchTransformContract,
+    requireBranchAwareSemanticGroups,
+    requireInverseResponseTextBranchContract,
     requireShapeCaseProtocols,
     requireShapeCaseFields,
     requireGeminiToolConfigSemanticContract,

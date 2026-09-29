@@ -16,6 +16,7 @@ const paths = {
   requestFieldProjectionDesign: 'docs/design/v3-protocol-request-field-projection.md',
   requestFieldProjectionManifest: 'docs/architecture/manifests/v3.protocol_request_field_projection.yml',
   requestFieldProjectionModules: 'docs/architecture/manifests/v3.protocol_request_field_projection.modules.yml',
+  operationFieldProfiles: 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
   gapCloseoutPlan: 'docs/goals/v3-protocol-semantic-field-gap-closeout-plan.md',
   hub: 'v3/crates/routecodex-v3-runtime/src/hub_v1.rs',
   hubTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/tests.rs',
@@ -23,6 +24,7 @@ const paths = {
   responsesOpenaiCodec: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs',
   clientMetadataProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs',
   requestOutboundFormat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs',
+  requestOutboundResponsesItems: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs',
   requestOutboundToolProjection: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs',
   requestOutboundMetadata: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs',
   requestOutboundFormatExtraTests: 'v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs',
@@ -67,6 +69,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const repoPath = (relativePath) => resolve(repoRoot, relativePath);
 const text = Object.fromEntries(Object.entries(paths).map(([key, path]) => [key, readFileSync(repoPath(path), 'utf8')]));
 const failures = [];
+const parityMatrixRef = { current: null };
 const {
   addUnique,
   classificationBucketForField,
@@ -89,6 +92,8 @@ const {
   requireGeminiToolConfigSemanticContract,
   requireGroupFields,
   requireInventoryFields,
+  requireBranchAwareSemanticGroups,
+  requireInverseResponseTextBranchContract,
   requireManualSemanticTranslationGroups,
   requireMatrixFields,
   requireMatrixProtocols,
@@ -105,8 +110,9 @@ const {
   supersetRowByField,
   featureBlock,
   walkCurrentImpl,
-} = attachParityHelpers({ failures, paths, text });
+} = attachParityHelpers({ failures, paths, text, operationFieldProfiles: YAML.parse(text.operationFieldProfiles) }, parityMatrixRef);
 const fieldMatrix = YAML.parse(text.fieldMatrix);
+parityMatrixRef.current = fieldMatrix;
 const functionMap = YAML.parse(text.functionMap);
 const mainlineMap = YAML.parse(text.mainlineMap);
 const verificationMap = YAML.parse(text.verificationMap);
@@ -207,7 +213,7 @@ for (const status of ['mapped', 'transformed', 'consumed_by_transform', 'target_
 for (const phrase of ['mapped_exact', 'mapped_compatible_registered', 'unsupported']) {
   if (!String(JSON.stringify(outboundContract?.projection_class_bridge ?? {})).includes(phrase)) failures.push(`${paths.fieldMatrix}: projection class bridge missing ${phrase}`);
 }
-for (const phrase of ['UnmappedOutboundFields', 'ControlFieldLeak', 'recursive automatic strip', 'unknown source field ignore']) {
+for (const phrase of ['no_local_business_shape_rejection', 'opaque_original_value_forwarded_with_inverse_association', 'ControlFieldLeak', 'recursive automatic strip', 'unknown source field ignore']) {
   if (!JSON.stringify(outboundContract ?? {}).includes(phrase)) failures.push(`${paths.fieldMatrix}: outbound projection contract missing ${phrase}`);
 }
 for (const field of ['request.include', 'request.client_metadata', 'request.container', 'request.safetySettings', 'metadata_center', '_debug']) {
@@ -341,14 +347,12 @@ for (const phrase of [
   'row.insert("top_logprobs".to_string(), value)',
   'project_outbound_payload_for_target_protocol',
   'ControlFieldLeak target_protocol={}',
-  'UnmappedOutboundFields target_protocol={}',
   'fn is_provider_outbound_control_key',
   '"metadata_center"',
   '"runtime_control"',
 ]) requireText(text.requestOutboundFormat, paths.requestOutboundFormat, phrase);
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'project_outbound_payload_for_target_protocol');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'ControlFieldLeak target_protocol={}');
-requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::explicit_outbound_projection`, 'UnmappedOutboundFields target_protocol={}');
 forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::no_silent_strip_projector`, [
   /strip_private_fields/,
   /!is_provider_outbound_control_key\(key\)\s*&&\s*!key\.starts_with\('_'\)/,
@@ -360,7 +364,6 @@ requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::res
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::client_metadata_user_id_only`, 'pub(super) fn unsupported_client_metadata_paths(');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, 'REGISTERED_CLIENT_LOCAL_METADATA_KEYS');
 requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::registered_client_local_metadata`, '"x-codex-turn-metadata"');
-requireText(text.clientMetadataProjection, `${paths.clientMetadataProjection}::unknown_client_metadata_rejected`, '!REGISTERED_CLIENT_LOCAL_METADATA_KEYS.contains(&key.as_str())');
 forbid(text.clientMetadataProjection, `${paths.clientMetadataProjection}::no_unknown_client_metadata_silent_consumption`, [
   /CONSUMED_CODEX_CLIENT_METADATA_KEYS/,
   /"unknown"/,
@@ -390,7 +393,6 @@ requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormat
 requireText(text.requestOutboundMetadata, `${paths.requestOutboundMetadata}::openai_chat_reasoning_summary_compatible_projection`, 'pub(super) fn project_openai_chat_reasoning_summary_policy');
 requireText(text.requestFieldProjectionManifest, `${paths.requestFieldProjectionManifest}::openai_chat_reasoning_summary_compatible_projection`, 'compatible_reasoning_effort_auto_medium_concise_low_detailed_high_merge_higher');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_registered_client_metadata_local_context`, 'openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context');
-requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::openai_chat_unknown_client_metadata_rejected`, 'openai_chat_wire_rejects_unknown_client_metadata_before_provider_wire');
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_client_metadata_target_validation_lock`, 'codex_client_metadata_does_not_reach_responses_wire');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::responses_reasoning_projection`, 'fn project_openai_responses_reasoning_extensions_to_reasoning');
 requireText(text.requestOutboundFormat, `${paths.requestOutboundFormat}::openai_chat_max_output_tokens_mapping`, 'row.entry("max_completion_tokens".to_string())');
@@ -409,8 +411,8 @@ requireText(
   'responses_wire_projects_non_fc_function_item_ids_to_matching_fc_ids',
 );
 requireText(
-  text.requestOutboundFormat,
-  `${paths.requestOutboundFormat}::responses_function_item_id`,
+  text.requestOutboundResponsesItems,
+  `${paths.requestOutboundResponsesItems}::responses_function_item_id`,
   'Some(item_id) => compact_tool_id("fc_", item_id)',
 );
 forbid(text.requestOutboundFormat, `${paths.requestOutboundFormat}::metadata_data_plane`, [/contains\("metadata"\)/, /metadata.*side-channel fields/i]);
@@ -520,21 +522,17 @@ const openaiChatCustomToolProjection = functionSlice(
   'fn normalize_openai_chat_custom_tool(',
   'fn normalize_openai_chat_tool_search(',
 );
-// 现状契约（opencode-go 兼容）：custom -> function 扁平化（parameters 最小
-// {"type":"object"}），format(grammar) 按协议收窄丢弃，未知字段必须拒绝
-// （UnmappedOutboundFields），禁止静默降级丢失。
+// Legacy custom -> function projection is characterized here only until its
+// Outbound owner is replaced. This gate does not authorize discarding grammar
+// or rejecting unknown business fields; the new field profile keeps them opaque.
 for (const phrase of [
   'Value::String("function".to_string())',
-  'UnmappedOutboundFields',
   '"type":"object"',
 ]) requireText(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, phrase);
 forbid(openaiChatCustomToolProjection, `${paths.requestOutboundToolProjection}::native_openai_chat_custom_tool`, [/Value::String\("custom"\.to_string\(\)/]);
 requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::responses_web_search_projection`, 'openai_chat_wire_projects_responses_web_search_tool_to_options');
 for (const testName of [
   'openai_chat_wire_projects_complete_codex_tool_declaration_matrix',
-  // grammar 投影行为已移除（chat wire 无法表达 format，按协议收窄丢弃），
-  // 仅保留拒绝未知格式（openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade）。
-  'openai_chat_wire_rejects_unknown_custom_format_without_function_downgrade',
 ]) requireText(text.requestOutboundFormatExtraTests, `${paths.requestOutboundFormatExtraTests}::native_openai_chat_custom_tool_tests`, testName);
 for (const testName of [
   'responses_custom_tool_projects_registered_anthropic_wrapper',
@@ -1056,13 +1054,13 @@ for (const [source, sha256] of [
 
 for (const [protocol, section, fields] of [
   ['responses', 'request_fields', ['request.background', 'request.context_management', 'request.conversation', 'request.prompt_cache_key', 'request.prompt_cache_options.ttl', 'request.text.format', 'request.top_logprobs']],
-  ['responses', 'input_fields', ['request.input[].input_image.detail', 'request.input[].input_file.file_data', 'request.input[].reasoning.summary[].text', 'request.input[].function_call.call_id']],
+  ['responses', 'input_fields', ['request.input[].content[].detail', 'request.input[].content[].file_data', 'request.input[].summary[].text', 'request.input[].call_id']],
   ['responses', 'response_fields', ['response.completed_at', 'response.prompt_cache_retention', 'response.safety_identifier', 'response.usage.total_tokens']],
   ['openai_chat', 'request_fields', ['request.audio.format', 'request.modalities', 'request.reasoning_effort', 'request.web_search_options', 'request.stream_options.include_usage']],
   ['openai_chat', 'message_fields', ['request.messages[].content[].input_audio.data', 'request.messages[].content[].file.file_id', 'request.messages[].tool_calls[].custom.input']],
   ['openai_chat', 'response_fields', ['response.choices[].message.audio', 'response.choices[].message.tool_calls', 'response.system_fingerprint', 'response.usage.total_tokens']],
   ['anthropic', 'request_fields', ['request.container', 'request.output_config.format.schema', 'request.thinking.budget_tokens', 'request.user_profile_id']],
-  ['anthropic', 'content_block_fields', ['request.messages[].content[].tool_use.caller', 'request.messages[].content[].tool_result.is_error', 'request.messages[].content[].mid_conv_system.content']],
+  ['anthropic', 'content_block_fields', ['request.messages[].content[].caller', 'request.messages[].content[].is_error', 'request.messages[].content[].content']],
   ['anthropic', 'response_fields', ['response.container.id', 'response.stop_details', 'response.usage.cache_creation_input_tokens', 'response.usage.service_tier']],
   ['gemini', 'request_fields', ['request.systemInstruction.parts', 'request.serviceTier', 'request.store']],
   ['gemini', 'content_part_fields', ['request.contents[].parts[].thoughtSignature', 'request.contents[].parts[].toolCall.args', 'request.contents[].parts[].videoMetadata.fps']],
@@ -1118,6 +1116,8 @@ requireCanonicalExtensionRegistry(fieldMatrix);
 requireAuditTruthContract(fieldMatrix);
 requireManualSemanticTranslationGroups(fieldMatrix);
 requireShapeBranchTransformContract(fieldMatrix);
+requireBranchAwareSemanticGroups(fieldMatrix);
+requireInverseResponseTextBranchContract(fieldMatrix);
 requireGeminiToolConfigSemanticContract(fieldMatrix);
 requireGeminiThinkingConfigSemanticContract(fieldMatrix);
 requireGeminiGenerationConfigScalarSemanticContract(fieldMatrix);

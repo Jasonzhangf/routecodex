@@ -12,6 +12,7 @@ await run(
     '--exclude',
     'routecodex-v3-lifecycle',
     '--',
+    '--test-threads=1',
     '--nocapture',
   ],
   { timeoutMs: 45 * 60_000 },

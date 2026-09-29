@@ -8280,3 +8280,467 @@ chains:
       produces: [v3.response.client_payload]
       side_channel_reads: [v3.error.chain]
       side_channel_writes: []
+
+- chain_id: v3.operation_runner.dagpipe.request
+  owner_feature_id: v3.unified_operation_runner_design
+  manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  entry_contract:
+    node: V3OperationRunnerCaptureClientJson
+    owner_doc: docs/design/v3-unified-operation-runner-design.md
+    first_delivery_binding:
+      status: runtime_bound
+      operation_owner: routecodex-v3-runtime
+      operation_owner_file: v3/crates/routecodex-v3-runtime/src/operation_runner/operators/capture_client_json.rs
+      operation_symbol: capture_v3_operation_runner_client_json
+      input_output: same serde_json::Value; capture does not add, remove, or rewrite fields
+      dagpipe_slice:
+        source_graph: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+        selected_node: capture_client_json
+        node_selection: selected_node_and_transitive_ancestors
+        input_arc: source-request
+        output_arc: client-json
+        derived_graph_id: v3.operation_runner.request.capture_client_json
+        graph_version: inherited_from_source_graph
+        runtime_owner: RuntimeRequestGraphEntry
+        compile_api: pipeline_runtime::compile
+        run_api: pipeline_runtime::Runtime::run
+        unregistered_operator: compile_failure_enters_error_err01
+      ingress_callers:
+      - transport: http
+        protocol_scope: [openai_chat, responses, anthropic, gemini]
+        caller_symbol: pending_endpoint_after_responses_admission_inner
+        caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+        point: after validated JSON is available and before Direct/Relay dispatch
+        operation_call: execute_v3_operation_runner_request_capture_client_json
+      - transport: responses_websocket
+        protocol_scope: [responses]
+        caller_symbol: handle_responses_websocket_message_with_mode
+        caller_file: v3/crates/routecodex-v3-server/src/websocket.rs
+        point: after the existing response.create frame adapter produces the request Value and before mode dispatch
+        operation_call: execute_v3_operation_runner_request_capture_client_json
+      current_owner_adapters:
+      - mode: direct
+        current_boundary: V3Server03HttpRequestRaw -> C::build_standardized
+        source_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        rule: use the exact captured Value; Direct does not call the Relay normalizer
+      - mode: openai_chat_or_gemini_relay
+        current_boundary: V3HubReqInbound01ClientRaw -> existing protocol Req02
+        source_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        rule: typed adaptation only; no second capture or mapping in the adapter
+      - mode: responses_relay
+        current_boundary: Responses Relay input -> existing protocol Req02
+        source_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+        rule: typed adaptation only; no second capture or mapping in the adapter
+      - mode: anthropic_relay
+        current_boundary: Anthropic Relay input -> existing protocol Req02
+        source_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        rule: typed adaptation only; no second capture or mapping in the adapter
+      direct_to_relay_handoff:
+        caller_files:
+        - v3/crates/routecodex-v3-server/src/executors.rs
+        - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+        captured_value: reuse the same in-flight Value; do not call the ingress operation again
+        request_execution_control: preserve the existing typed handoff unchanged
+      unsupported_modes:
+      - Anthropic Direct remains pending/unsupported
+      - Gemini Direct remains pending/unsupported
+  edges:
+  - step_id: v3-op-runner-req-01
+    from_node: V3OperationRunnerCaptureClientJson
+    to_node: V3OperationRunnerNormalizeRequest
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload]
+      produces: [v3.request.normal_payload]
+      side_channel_reads:
+      - v3.operation_runner.dagpipe_manifest
+      - v3.operation_runner.field_profile_manifest
+      - v3.operation_runner.operator_registry
+      side_channel_writes: []
+  - step_id: v3-op-runner-req-02
+    from_node: V3OperationRunnerNormalizeRequest
+    to_node: V3OperationRunnerResolveTarget
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.config.published_manifest]
+      produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_reads:
+      - v3.operation_runner.request_origin_kind
+      - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.metadata_center_control
+      side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+  - step_id: v3-op-runner-req-02b
+    from_node: V3OperationRunnerNormalizeRequest
+    to_node: V3OperationRunnerPlanExecution
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.config.published_manifest]
+      produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_reads:
+      - v3.operation_runner.request_origin_kind
+      - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.metadata_center_control
+      side_channel_writes: [v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+  - step_id: v3-op-runner-req-03
+    from_node: V3OperationRunnerResolveTarget
+    to_node: V3OperationRunnerPlanExecution
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.hub.resolved_target]
+      produces: [v3.operation_runner.execution_mode]
+      side_channel_reads: [v3.hub.resolved_target]
+      side_channel_writes: [v3.operation_runner.execution_mode]
+  - step_id: v3-op-runner-req-04
+    from_node: V3OperationRunnerPlanExecution
+    to_node: V3OperationRunnerGovernChatRequest
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.operation_runner.execution_mode, v3.operation_runner.tool_thinking_turn_context, v3.operation_runner.explicit_history_pairing]
+      produces: [v3.operation_runner.tool_thinking_turn_context]
+      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.explicit_history_pairing]
+      side_channel_writes: [v3.operation_runner.tool_thinking_turn_context]
+  - step_id: v3-op-runner-req-05
+    from_node: V3OperationRunnerGovernChatRequest
+    to_node: V3OperationRunnerProjectProviderSemantic
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      produces: [v3.request.provider_semantic, v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+      side_channel_reads: [v3.operation_runner.execution_mode, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
+      side_channel_writes: [v3.operation_runner.attempt_projection_context, v3.operation_runner.attempt_declaration_map]
+  - step_id: v3-op-runner-req-06
+    from_node: V3OperationRunnerProjectProviderSemantic
+    to_node: V3OperationRunnerCompatRequest
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.request.provider_semantic]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-op-runner-req-07
+    from_node: V3OperationRunnerCompatRequest
+    to_node: V3OperationRunnerEncodeWire
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.hub.provider_wire_payload]
+      produces: [v3.hub.provider_wire_payload]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-op-runner-req-08
+    from_node: V3OperationRunnerEncodeWire
+    to_node: V3OperationRunnerConstructTransport
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.hub.provider_wire_payload]
+      produces: [v3.provider.transport_request]
+      side_channel_reads: []
+      side_channel_writes: []
+  request_typed_resource_edges:
+    request_origin_kind:
+      resource: v3.operation_runner.request_origin_kind
+      producer: RuntimeRequestGraphEntry
+      readers:
+      - V3OperationRunnerNormalizeRequest
+      legal_values: [client_entry, retry, internal_followup]
+      client_entry:
+        effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
+      retry:
+        effect: RuntimeRetryLaunch routes re-entry through RuntimeRequestGraphEntry, which creates originKind=retry before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+      internal_followup:
+        effect: RuntimeInternalFollowup routes re-entry through RuntimeRequestGraphEntry, which creates originKind=internal_followup before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+      payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
+      release: graph_invocation_return; storage none; RuntimeRequestFinalizer does not consume or release it
+    request_inverse_context:
+      resource: v3.operation_runner.request_inverse_context
+      producer: V3OperationRunnerNormalizeRequest
+      conditional_write: initialized only when request_origin_kind=client_entry
+      readers:
+      - V3OperationRunnerNormalizeRequest
+      - V3OperationRunnerProjectProviderSemantic
+      - V3OperationRunnerInverseProjectClient
+      reentry_rule: when request_origin_kind=retry or internal_followup, V3OperationRunnerNormalizeRequest reads and preserves the existing slot and never overwrites it from follow-up payload
+      release: runtime_request_finalizer
+
+- chain_id: v3.operation_runner.dagpipe.response
+  owner_feature_id: v3.unified_operation_runner_design
+  manifest: docs/architecture/dagpipe/v3.operation_runner.response.graph.json
+  summary: Design-only DAGpipe response graph; one source provider raw and one staged client-frame-candidate sink. Every node runs in fixed order; Runtime consumes Resp03 disposition after the graph and alone decides commit versus servertool follow-up. Client_commit reaches RuntimeClientCommit and RuntimeRequestFinalizer; servertool_followup runs RuntimeInternalFollowup, typed attempt_cleanup, and re-enters the request graph without request-scoped finalization. Retry is Error05-owned; cancellation is Runtime-owned.
+  entry_contract:
+    node: V3OperationRunnerCompatResponse
+    owner_doc: docs/design/v3-unified-operation-runner-design.md
+  edges:
+  - step_id: v3-op-runner-resp-01
+    from_node: V3OperationRunnerCompatResponse
+    to_node: V3OperationRunnerNormalizeResponse
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.response.provider_raw, v3.operation_runner.attempt_projection_context]
+      produces: [v3.hub.response_semantic]
+      side_channel_reads: [v3.operation_runner.attempt_projection_context]
+      side_channel_writes: []
+  - step_id: v3-op-runner-resp-02
+    from_node: V3OperationRunnerNormalizeResponse
+    to_node: V3OperationRunnerGovernResponse
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes:
+      - v3.hub.response_semantic
+      - v3.operation_runner.attempt_projection_context
+      - v3.operation_runner.attempt_declaration_map
+      produces:
+      - v3.hub.response_semantic
+      - v3.operation_runner.response_provenance
+      side_channel_reads:
+      - v3.operation_runner.attempt_projection_context
+      - v3.operation_runner.attempt_declaration_map
+      - v3.operation_runner.response_provenance
+      side_channel_writes: [v3.operation_runner.response_provenance]
+  - step_id: v3-op-runner-resp-03
+    from_node: V3OperationRunnerGovernResponse
+    to_node: V3OperationRunnerInverseProjectClient
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes:
+      - v3.hub.response_semantic
+      - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.attempt_projection_context
+      - v3.operation_runner.attempt_declaration_map
+      - v3.operation_runner.explicit_history_pairing
+      - v3.operation_runner.response_provenance
+      - v3.operation_runner.tool_thinking_turn_context
+      produces: [v3.hub.response_semantic, v3.operation_runner.response_tool_binding, v3.operation_runner.execution_disposition]
+      side_channel_reads:
+      - v3.operation_runner.request_inverse_context
+      - v3.operation_runner.attempt_projection_context
+      - v3.operation_runner.attempt_declaration_map
+      - v3.operation_runner.explicit_history_pairing
+      - v3.operation_runner.response_provenance
+      - v3.operation_runner.tool_thinking_turn_context
+      side_channel_writes: [v3.operation_runner.response_tool_binding, v3.operation_runner.execution_disposition, v3.operation_runner.servertool_sidecar_plan]
+  - step_id: v3-op-runner-resp-04
+    from_node: V3OperationRunnerInverseProjectClient
+    to_node: V3OperationRunnerFrameClient
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.operation_runner.client_semantic_response]
+      produces: [v3.operation_runner.client_frame_candidate]
+      side_channel_reads: [v3.operation_runner.execution_disposition]
+      side_channel_writes: [v3.operation_runner.client_frame_candidate]
+  execution_disposition:
+    resource: v3.operation_runner.execution_disposition
+    producer: V3OperationRunnerGovernResponse
+    legal_values: [client_commit, servertool_followup]
+    client_commit:
+      consumers: [V3OperationRunnerInverseProjectClient, V3OperationRunnerFrameClient, RuntimeClientCommit, RuntimeRequestFinalizer]
+      effect: all response nodes run and stage a candidate; RuntimeClientCommit alone submits it after the graph returns; typed attempt_cleanup then releases successful-attempt resources before RuntimeRequestFinalizer releases request scope
+    servertool_followup:
+      consumers: [V3OperationRunnerInverseProjectClient, V3OperationRunnerFrameClient, RuntimeInternalFollowup, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
+      effect: inverse and frame stages return an empty candidate; Runtime discards it, runs typed attempt_cleanup after the sidecar, and re-enters the request graph with internal origin; RuntimeRequestFinalizer is not triggered by this hop
+  response_typed_resource_edges:
+    attempt_declaration_map:
+      resource: v3.operation_runner.attempt_declaration_map
+      producer: V3OperationRunnerProjectProviderSemantic
+      readers:
+      - V3OperationRunnerNormalizeResponse
+      - V3OperationRunnerGovernResponse
+      - V3OperationRunnerInverseProjectClient
+      content: tools actually emitted for this successful attempt only
+      release: failed_attempt_before_next_candidate; successful_attempt_after_final_client_projection_or_after_servertool_followup_attempt_cleanup
+      payload_rule: arguments and inputs remain opaque business payload; only identity, namespace, kind, encoding, and call/output references enter the typed resource
+    explicit_history_pairing:
+      resource: v3.operation_runner.explicit_history_pairing
+      producer: V3OperationRunnerNormalizeRequest
+      readers:
+      - V3OperationRunnerGovernChatRequest
+      - V3OperationRunnerProjectProviderSemantic
+      - V3OperationRunnerGovernResponse
+      authority: current request history call/output identity for validation and pass-through; it never authorizes a new provider call
+      release: runtime_request_finalizer
+    response_provenance:
+      resource: v3.operation_runner.response_provenance
+      producer: V3OperationRunnerNormalizeResponse
+      readers:
+      - V3OperationRunnerGovernResponse
+      - V3OperationRunnerInverseProjectClient
+      content: successful attempt provider response source and canonical-path provenance
+      release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+      payload_rule: provenance is typed control metadata and is never reconstructed from response payload fields
+    response_tool_binding:
+      resource: v3.operation_runner.response_tool_binding
+      producer: V3OperationRunnerGovernResponse
+      readers:
+      - V3OperationRunnerInverseProjectClient
+      content: new provider call returned in this successful attempt bound to response provenance and attempt declaration map
+      release: after_final_client_inverse_projection_or_after_servertool_followup_attempt_cleanup_or_runtime_request_finalizer
+    client_frame_candidate:
+      resource: v3.operation_runner.client_frame_candidate
+      producer: V3OperationRunnerFrameClient
+      readers: [RuntimeClientCommit]
+      staging_only: the graph sink is a staged candidate and never writes directly to a client body
+      commit_owner: RuntimeClientCommit alone may submit the staged candidate to Server/SSE after execution_disposition=client_commit
+      servertool_rule: RespOutbound and frame staging return an empty candidate for servertool_followup; Runtime discards it before servertool re-entry
+      release: runtime_client_commit; empty_servertool_candidate_released_by_attempt_cleanup_before_request_reentry
+    servertool_sidecar_plan:
+      resource: v3.operation_runner.servertool_sidecar_plan
+      producer: V3OperationRunnerGovernResponse
+      readers: [RuntimeInternalFollowup]
+      condition: emitted only when execution_disposition=servertool_followup
+      content: declared sidecar identity and execution plan for the servertool follow-up
+      release: after_sidecar_execution_before_request_reentry
+      payload_rule: sidecar plan is typed control state and never serialized into client or provider body
+
+- chain_id: v3.operation_runner.dagpipe.error
+  owner_feature_id: v3.unified_operation_runner_design
+  manifest: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
+  summary: Design-only DAGpipe error graph; exact ErrorErr01-06 chain with HostCaptured. Error06 stages an optional projection; Runtime consumes Error05 decision after the graph and alone submits terminal error output through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; only terminal_client_error reaches RuntimeRequestFinalizer.
+  entry_contract:
+    node: ErrorErr01SourceRaised
+    owner_doc: docs/design/v3-unified-operation-runner-design.md
+  edges:
+  - step_id: v3-op-runner-err-01
+    from_node: ErrorErr01SourceRaised
+    to_node: ErrorErr02HostCaptured
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.error.chain]
+      side_channel_reads:
+      - v3.operation_runner.metadata_center_control
+      side_channel_writes: [v3.error.chain]
+  - step_id: v3-op-runner-err-02
+    from_node: ErrorErr02HostCaptured
+    to_node: ErrorErr03RuntimeClassified
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.error.chain]
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: [v3.error.chain]
+  - step_id: v3-op-runner-err-03
+    from_node: ErrorErr03RuntimeClassified
+    to_node: ErrorErr04RouterPolicyApplied
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.error.chain]
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: [v3.error.chain]
+  - step_id: v3-op-runner-err-04
+    from_node: ErrorErr04RouterPolicyApplied
+    to_node: ErrorErr05ExecutionDecision
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.error.chain]
+      produces: [v3.error.chain]
+      side_channel_reads: [v3.error.chain]
+      side_channel_writes: [v3.error.chain]
+  - step_id: v3-op-runner-err-05
+    from_node: ErrorErr05ExecutionDecision
+    to_node: ErrorErr06ClientProjected
+    caller_symbol: pending
+    caller_file: pending
+    callee_symbol: pending
+    callee_file: pending
+    status: binding_pending
+    owner_feature_id: v3.unified_operation_runner_design
+    resource_flow:
+      consumes: [v3.error.chain, v3.error.execution_decision]
+      produces: [v3.error.client_projection_candidate]
+      side_channel_reads: [v3.error.chain, v3.error.execution_decision]
+      side_channel_writes: [v3.error.client_projection_candidate]
+  error_execution_decision:
+    resource: v3.error.execution_decision
+    producer: ErrorErr05ExecutionDecision
+    legal_values: [retry, terminal_client_error]
+    retry:
+      consumers: [ErrorErr06ClientProjected, RuntimeRetryLaunch, RuntimeAttemptCleanup, V3OperationRunnerNormalizeRequest]
+      effect: Error06 stages no client error; Runtime discards that empty result, releases failed attempt context through typed attempt_cleanup, and re-enters the request graph; RuntimeRequestFinalizer is not triggered
+    terminal_client_error:
+      consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRequestFinalizer]
+      effect: Error06 stages the terminal projection; Runtime alone submits it through Server/SSE
