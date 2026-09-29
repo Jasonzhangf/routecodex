@@ -10,28 +10,27 @@ const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
   ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
   : path.resolve(v3Root, '..');
 
-// Node 01 gate: the request graph is mandatory; response and error graphs
-// are deferred design targets validated only when present, never blocking
-// the first-node delivery.
+// Node02 requires request and Error graphs; the response graph remains deferred.
+const failures = [];
 const requiredGraphs = [
   'docs/architecture/dagpipe/v3.operation_runner.request.graph.json',
+  'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
 ];
 const deferredGraphs = [
   'docs/architecture/dagpipe/v3.operation_runner.response.graph.json',
-  'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
 ];
-// Iterate mandatory graphs, then deferred graphs that exist on disk.
-// Missing deferred graphs never block Node 01; present ones are still
-// validated to catch design regressions.
+// Iterate mandatory graphs, then any deferred graph present on disk.
 function forEachGraph(callback) {
-  for (const rel of requiredGraphs) callback(rel, false);
+  for (const rel of requiredGraphs) {
+    if (fs.existsSync(path.join(root, rel))) callback(rel, false);
+    else failures.push(`${rel}: required graph missing`);
+  }
   for (const rel of deferredGraphs) {
     if (fs.existsSync(path.join(root, rel))) callback(rel, true);
   }
 }
 const fieldProfilesRel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
 const fieldProfiles = loadYaml(fieldProfilesRel);
-const failures = [];
 
 function loadYaml(rel) {
   return YAML.parse(fs.readFileSync(path.join(root, rel), 'utf8')) ?? {};
@@ -1221,7 +1220,9 @@ const node02Slice = JSON.parse(fs.readFileSync(path.join(root, node02SliceRel), 
 const node02ErrorGraph = fs.existsSync(path.join(root, node02ErrorGraphRel))
   ? JSON.parse(fs.readFileSync(path.join(root, node02ErrorGraphRel), 'utf8'))
   : null;
-if (node02ErrorGraph && (node02Failure?.source_graph !== node02SliceRel
+if (!node02ErrorGraph) {
+  failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 required Error graph is missing');
+} else if (node02Failure?.source_graph !== node02SliceRel
   || node02Failure?.source_node !== 'normalize_request_losslessly'
   || node02Failure?.runtime_result !== 'typed_source_failure'
   || node02Failure?.error_input_arc !== 'source-failure'
@@ -1233,7 +1234,7 @@ if (node02ErrorGraph && (node02Failure?.source_graph !== node02SliceRel
   || !node02Slice.nodes?.some((node) => node.id === node02Failure?.source_node)
   || !node02ErrorGraph.inputs?.some((input) => input.id === node02Failure?.error_input_arc)
   || !node02ErrorGraph.nodes?.some((node) => node.id === node02Failure?.error_entry_node
-    && node.inputs?.includes(node02Failure?.error_input_arc)))) {
+    && node.inputs?.includes(node02Failure?.error_input_arc))) {
   failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01');
 }
 

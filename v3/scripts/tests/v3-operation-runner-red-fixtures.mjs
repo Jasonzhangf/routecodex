@@ -1450,6 +1450,13 @@ const mutations = [
     },
     expect: /Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01/u,
   },
+  {
+    name: 'node02-required-error-graph-missing',
+    mutate(tmp) {
+      fs.rmSync(path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json'));
+    },
+    expect: /Node02 required Error graph is missing/u,
+  },
 ];
 
 let failed = 0;
@@ -1476,9 +1483,8 @@ try {
   fs.rmSync(positiveTmp, { recursive: true, force: true });
 }
 
-// Positive fixture: removing deferred response and error graph files must
-// not block the Node 01 gate. The verifier should still PASS.
-const noDeferredTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-operation-runner-no-deferred-graphs-'));
+// The response graph remains deferred while Node02's Error graph is required.
+const noDeferredTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-operation-runner-no-response-graph-'));
 try {
   for (const rel of files) {
     const src = path.join(repo, rel);
@@ -1487,7 +1493,6 @@ try {
     fs.cpSync(src, dest);
   }
   fs.rmSync(path.join(noDeferredTmp, 'docs/architecture/dagpipe/v3.operation_runner.response.graph.json'));
-  fs.rmSync(path.join(noDeferredTmp, 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json'));
   const result = spawnSync(process.execPath, [verifyScript], {
     cwd: noDeferredTmp,
     env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: noDeferredTmp },
@@ -1495,9 +1500,9 @@ try {
   });
   if (result.status !== 0) {
     failed += 1;
-    console.error(`[v3-operation-runner-red] no-deferred-graphs: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
+    console.error(`[v3-operation-runner-red] no-response-graph: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
   } else {
-    console.log('[v3-operation-runner-red] no-deferred-graphs: PASS');
+    console.log('[v3-operation-runner-red] no-response-graph: PASS');
   }
 } finally {
   fs.rmSync(noDeferredTmp, { recursive: true, force: true });
