@@ -955,6 +955,84 @@ fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
     drop(occupied);
 }
 
+#[tokio::test]
+async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Stopping,
+        Some("child exited before terminal status".to_string()),
+    )
+    .unwrap();
+
+    wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_millis(50))
+        .await
+        .expect("stale owned stop must reach the existing reap safety check");
+    reap_inactive_runtime_files(&instance_dir, &declaration).unwrap();
+}
+
+#[tokio::test]
+async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Stopping,
+        None,
+    )
+    .unwrap();
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"active control socket").unwrap();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            pid: std::process::id(),
+            start_nonce: "active-stop".to_string(),
+            started_at_epoch_ms: 1,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            socket_path: socket_path.display().to_string(),
+            start_nonce: "active-stop".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_millis(50)).await,
+        Err(V3LifecycleError::Timeout(_))
+    ));
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(socket_path.exists());
+    fs::remove_file(socket_path).unwrap();
+}
+
 #[test]
 fn stale_running_state_allows_release_snapshot_executable_rollover_when_control_is_gone() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();

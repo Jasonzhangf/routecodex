@@ -1281,6 +1281,12 @@ features:
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
     owner_boundary: provider-standard request format helpers; no lifecycle/node transition
       owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
+    owner_boundary: Responses item and content projection helpers owned by provider-standard
+      request formatting; no lifecycle/node transition owner
+  - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
+    owner_boundary: OpenAI Chat content-part normalization helper included by request_outbound_format.rs;
+      no lifecycle/node transition owner
   - file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
     owner_boundary: Gemini provider-standard request projection helpers included by
       request_outbound_format.rs; no lifecycle/node transition owner
@@ -1350,6 +1356,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_metadata.rs
@@ -2453,6 +2460,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
@@ -2558,6 +2566,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/client_metadata_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_openai_chat_content_part.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format_extra_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_gemini_tests.rs
@@ -5708,4 +5717,101 @@ features:
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-ci
+  - git diff --check
+
+- feature_id: v3.unified_operation_runner_design
+  status: node01_capture_runtime_candidate_full_runner_pending
+  change_risk: high
+  owner_kind: design_architecture
+  owner_scope: Unified operation runner DAGpipe design, lifecycle manifest, exact ErrorErr01-06 binding, typed owner/release table, RuntimeRequestGraphEntry owner for invocation origin, and first runtime slice. The current runtime candidate implements only Node 01 capture_client_json; later nodes remain pending. The first slice owns one Runtime capture operation; Server HTTP and Responses WebSocket are caller/forwarding boundaries only.
+  owner_crate: routecodex-v3-runtime
+  owner_file: docs/design/v3-unified-operation-runner-design.md
+  resource_bindings:
+  - v3.operation_runner.dagpipe_manifest
+  - v3.operation_runner.operator_registry
+  - v3.operation_runner.execution_mode
+  - v3.operation_runner.request_origin_kind
+  - v3.operation_runner.request_inverse_context
+  - v3.operation_runner.attempt_projection_context
+  - v3.operation_runner.attempt_declaration_map
+  - v3.operation_runner.explicit_history_pairing
+  - v3.operation_runner.response_provenance
+  - v3.operation_runner.tool_thinking_turn_context
+  - v3.operation_runner.response_tool_binding
+  - v3.operation_runner.execution_disposition
+  - v3.operation_runner.client_frame_candidate
+  - v3.operation_runner.servertool_sidecar_plan
+  - v3.error.client_projection_candidate
+  - v3.error.execution_decision
+  - v3.operation_runner.metadata_center_control
+  - v3.operation_runner.field_profile_manifest
+  mainline_bindings:
+  - v3-op-runner-req-01
+  - v3-op-runner-req-02
+  - v3-op-runner-req-03
+  - v3-op-runner-req-04
+  - v3-op-runner-req-05
+  - v3-op-runner-req-06
+  - v3-op-runner-req-07
+  - v3-op-runner-req-08
+  - v3-op-runner-resp-01
+  - v3-op-runner-resp-02
+  - v3-op-runner-resp-03
+  - v3-op-runner-resp-04
+  - v3-op-runner-err-01
+  - v3-op-runner-err-02
+  - v3-op-runner-err-03
+  - v3-op-runner-err-04
+  - v3-op-runner-err-05
+  entry_symbols:
+  - RuntimeRequestGraphEntry
+  - pending_endpoint_after_responses_admission_inner
+  - handle_responses_websocket_message_with_mode
+  - capture_v3_operation_runner_client_json
+  - register_v3_operation_runner_operator
+  - compile_v3_operation_runner_graph
+  - plan_v3_operation_runner_execution
+  - normalize_v3_operation_runner_request_losslessly
+  - project_v3_operation_runner_standard_provider_request
+  - govern_v3_operation_runner_chat_response
+  - inverse_project_v3_operation_runner_client_response
+  allowed_paths:
+  - docs/architecture/dagpipe
+  - docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml
+  - docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
+  - docs/design/v3-unified-operation-runner-design.md
+  - docs/goals/v3-unified-operation-runner-astra-r1-plan.md
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  - v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs
+  - v3/scripts/tests/v3-operation-runner-red-fixtures.mjs
+  - package.json
+  - v3/crates/routecodex-v3-runtime/src/operation_runner
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_01_client_raw.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_responses_items.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/src/websocket.rs
+  - v3/crates/routecodex-v3-server/src/executors.rs
+  - v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+  - v3/crates/routecodex-v3-server/tests
+  forbidden_paths:
+  - v3/crates/routecodex-v3-provider-responses/src
+  - src
+  - sharedmodule
+  required_gates:
+  - npm run verify:v3-operation-runner-dagpipe
+  - npm run test:v3-operation-runner-red-fixtures
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime operation_runner --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server p6_responses_endpoint_uses_runtime_provider_path_and_projects_json
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_direct_last_default_projects_after_provider_failure
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
   - git diff --check

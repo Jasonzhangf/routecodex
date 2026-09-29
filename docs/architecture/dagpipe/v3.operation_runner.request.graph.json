@@ -1,0 +1,147 @@
+{
+  "id": "v3.operation_runner.request",
+  "version": "1",
+  "inputs": [
+    { "id": "source-request", "schema": "Any", "schema_ref": "v3.operation_runner.arc.source_request" }
+  ],
+  "nodes": [
+    {
+      "id": "capture_client_json",
+      "operator": "routecodex.v3.operation.capture_client_json",
+      "operator_version": "1",
+      "inputs": ["source-request"],
+      "output": { "id": "client-json", "schema": "Any", "schema_ref": "v3.operation_runner.arc.client_json" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "id": "normalize_request_losslessly",
+      "operator": "routecodex.v3.operation.normalize_request_losslessly",
+      "operator_version": "1",
+      "inputs": ["client-json"],
+      "output": { "id": "canonical-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.canonical_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.operation_runner.request_origin_kind", "v3.operation_runner.request_inverse_context"],
+        "writes": ["v3.request.normal_payload", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"]
+      }
+    },
+    {
+      "id": "resolve_target",
+      "operator": "routecodex.v3.operation.resolve_target",
+      "operator_version": "1",
+      "inputs": ["canonical-request"],
+      "output": { "id": "selected-target", "schema": "Object", "schema_ref": "v3.operation_runner.arc.selected_target" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.normal_payload"],
+        "writes": ["v3.hub.resolved_target"]
+      }
+    },
+    {
+      "id": "plan_execution",
+      "operator": "routecodex.v3.operation.plan_execution",
+      "operator_version": "1",
+      "inputs": ["canonical-request", "selected-target"],
+      "output": { "id": "execution-plan", "schema": "Object", "schema_ref": "v3.operation_runner.arc.execution_plan" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.resolved_target"],
+        "writes": ["v3.operation_runner.execution_mode"]
+      }
+    },
+    {
+      "id": "govern_chat_request",
+      "operator": "routecodex.v3.operation.govern_chat_request",
+      "operator_version": "1",
+      "inputs": ["execution-plan"],
+      "output": { "id": "governed-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.governed_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.operation_runner.execution_mode", "v3.operation_runner.explicit_history_pairing"],
+        "writes": ["v3.operation_runner.tool_thinking_turn_context"]
+      }
+    },
+    {
+      "id": "project_standard_provider_request",
+      "operator": "routecodex.v3.operation.project_standard_provider_request",
+      "operator_version": "1",
+      "inputs": ["governed-request"],
+      "output": { "id": "standard-provider-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.standard_provider_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.normal_payload", "v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
+        "writes": ["v3.request.provider_semantic", "v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map"]
+      }
+    },
+    {
+      "id": "adjust_provider_private_request",
+      "operator": "routecodex.v3.operation.adjust_provider_private_request",
+      "operator_version": "1",
+      "inputs": ["standard-provider-request"],
+      "output": { "id": "compatible-provider-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.compatible_provider_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.provider_wire_payload"],
+        "writes": ["v3.hub.provider_wire_payload"]
+      }
+    },
+    {
+      "id": "encode_provider_wire",
+      "operator": "routecodex.v3.operation.encode_provider_wire",
+      "operator_version": "1",
+      "inputs": ["compatible-provider-request"],
+      "output": { "id": "provider-wire", "schema": "Object", "schema_ref": "v3.operation_runner.arc.provider_wire" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.provider_wire_payload"],
+        "writes": []
+      }
+    },
+    {
+      "id": "construct_transport_request",
+      "operator": "routecodex.v3.operation.construct_transport_request",
+      "operator_version": "1",
+      "inputs": ["provider-wire"],
+      "output": { "id": "transport-request", "schema": "Object", "schema_ref": "v3.operation_runner.arc.transport_request" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.provider_wire_payload"],
+        "writes": ["v3.provider.transport_request"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "capture_client_json", "to": "normalize_request_losslessly", "arc_id": "client-json" },
+    { "from": "normalize_request_losslessly", "to": "resolve_target", "arc_id": "canonical-request" },
+    { "from": "normalize_request_losslessly", "to": "plan_execution", "arc_id": "canonical-request" },
+    { "from": "resolve_target", "to": "plan_execution", "arc_id": "selected-target" },
+    { "from": "plan_execution", "to": "govern_chat_request", "arc_id": "execution-plan" },
+    { "from": "govern_chat_request", "to": "project_standard_provider_request", "arc_id": "governed-request" },
+    { "from": "project_standard_provider_request", "to": "adjust_provider_private_request", "arc_id": "standard-provider-request" },
+    { "from": "adjust_provider_private_request", "to": "encode_provider_wire", "arc_id": "compatible-provider-request" },
+    { "from": "encode_provider_wire", "to": "construct_transport_request", "arc_id": "provider-wire" }
+  ],
+  "outputs": ["transport-request"]
+}

@@ -19,6 +19,8 @@
   "allowList": [
     "scripts/tests/v3-provider-action-gate-red-fixtures.mjs",
     "v3/scripts/architecture/verify-v3-hub-relay-runtime-closeout.mjs",
-    "v3/scripts/architecture/verify-v3-provider-action-gate.mjs"
+    "v3/scripts/architecture/verify-v3-provider-action-gate.mjs",
+    "v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs",
+    "v3/scripts/tests/v3-operation-runner-red-fixtures.mjs"
   ]
 }

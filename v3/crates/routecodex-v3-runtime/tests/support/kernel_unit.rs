@@ -2370,12 +2370,14 @@ async fn only_provider_429_reselects_and_soft_limit_never_skips_a_busy_candidate
         first_send: tokio::sync::Notify::new(),
         sends: Mutex::new(Vec::new()),
     };
-    let raw = test_responses_raw(
+    let mut raw = test_responses_raw(
         "default",
         "req-recovery-reselect-busy",
         "exec-recovery-reselect-busy",
         json!({"model":"client-model","input":"hello"}),
     );
+    raw.failure_session_scope =
+        test_failure_session_scope_for("default", "session-recovery-reselect-busy");
     let output = tokio::time::timeout(
         Duration::from_millis(V3_PROVIDER_ACTION_ISOLATED_DELAY_MS + 1_000),
         execute_v3_responses_direct_runtime_kernel_core(
@@ -2644,12 +2646,14 @@ async fn provider_concurrency_recovery_sends_saturated_later_candidate_without_w
     let transport = FirstFailsSecondMustNotSend {
         sends: Arc::new(Mutex::new(Vec::new())),
     };
-    let raw = test_responses_raw(
+    let mut raw = test_responses_raw(
         "default",
         "req-conc-recovery-busy",
         "exec-conc-recovery-busy",
         json!({"model":"client-model","input":"hello"}),
     );
+    raw.failure_session_scope =
+        test_failure_session_scope_for("default", "session-conc-recovery-busy");
 
     let started = std::time::Instant::now();
     let output = tokio::time::timeout(

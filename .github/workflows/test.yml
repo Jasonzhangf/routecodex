@@ -92,6 +92,9 @@ jobs:
         run: npm ci --prefix v3 --ignore-scripts --no-audit --no-fund
       - name: Fetch Rust dependencies for V3 checks
         run: cargo fetch --locked --manifest-path v3/Cargo.toml
+      - name: Install pinned DAGPipe graph CLI
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
       - name: V3 CI gate wiring regression
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: node --test tests/scripts/v3-ci-gate-dedup.test.mjs

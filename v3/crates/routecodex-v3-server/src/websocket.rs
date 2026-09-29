@@ -149,6 +149,19 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
+    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+        Ok(captured) => captured,
+        Err(error) => {
+            let projected = project_v3_server_runtime_failure(
+                "V3OperationRunnerCaptureClientJson",
+                "operation_runner_capture_client_json_failed",
+                error.to_string(),
+                598,
+            );
+            let _ = send_responses_websocket_projected_error(socket, projected).await;
+            return Err(());
+        }
+    };
     if payload
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
@@ -648,6 +661,13 @@ pub(crate) async fn send_responses_websocket_error(
     message: impl Into<String>,
 ) -> Result<(), ()> {
     let projected = project_v3_server_websocket_error(code, message);
+    send_responses_websocket_projected_error(socket, projected).await
+}
+
+async fn send_responses_websocket_projected_error(
+    socket: &mut WebSocket,
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+) -> Result<(), ()> {
     let event = json!({
         "type": "error",
         "error": projected.body["error"].clone()

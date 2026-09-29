@@ -2684,6 +2684,62 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
 }
 
 #[tokio::test]
+async fn capture_node_preconnection_matches_responses_http_success_and_failure() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-node01-compare");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
+            .await
+            .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let valid =
+        json!({"model":"client-test","input":"hello","metadata":{"client_field":"preserve"}});
+    let captured_valid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(valid.clone())
+        .expect("capture valid request");
+    assert_eq!(captured_valid, valid);
+    let original = client.post(&endpoint).json(&valid).send().await.unwrap();
+    let projected = client
+        .post(&endpoint)
+        .json(&captured_valid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(original.status(), projected.status());
+    let original_body: Value = original.json().await.unwrap();
+    let projected_body: Value = projected.json().await.unwrap();
+    assert_eq!(original_body["output_text"], projected_body["output_text"]);
+    assert_eq!(
+        captures.recv().await.unwrap().body,
+        captures.recv().await.unwrap().body
+    );
+
+    let invalid = json!([]);
+    let captured_invalid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(invalid.clone())
+        .expect("capture preserves invalid protocol shape");
+    assert_eq!(captured_invalid, invalid);
+    let original = client.post(&endpoint).json(&invalid).send().await.unwrap();
+    let projected = client
+        .post(&endpoint)
+        .json(&captured_invalid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(original.status(), projected.status());
+    let original_body: Value = original.json().await.unwrap();
+    let projected_body: Value = projected.json().await.unwrap();
+    assert_eq!(
+        original_body["error"]["code"],
+        projected_body["error"]["code"]
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, release, shutdown) =
@@ -2958,7 +3014,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     shutdown.send(()).unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
@@ -3043,7 +3099,7 @@ async fn responses_direct_previous_response_id_is_rejected_after_continuation_re
     let _ = shutdown.send(());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_sse_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
@@ -3234,6 +3290,53 @@ async fn responses_inbound_websocket_projects_json_completed_event_and_enters_ru
     let _ = socket.close(None).await;
     handle.shutdown().await;
     let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn capture_node_preconnection_matches_responses_websocket_projection() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_url, mut captures, shutdown) = start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-node01-ws-compare");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &provider_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let original = json!({
+        "type":"response.create", "model":"test", "input":"use tool",
+        "tools":[{"type":"function","name":"lookup"}]
+    });
+    let captured = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(original.clone())
+        .expect("capture WebSocket JSON frame");
+    assert_eq!(captured, original);
+    let mut request = endpoint.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request
+        .headers_mut()
+        .insert("session-id", HeaderValue::from_static("node01-ws-captured"));
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(captured.to_string()))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["output"][0]["type"], "function_call");
+    let _handshake_capture = captures.recv().await.unwrap();
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["model"], "wire-test");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]

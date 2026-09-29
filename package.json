@@ -282,6 +282,8 @@
     "test:agent-p0-payload-control-guard-red-fixtures": "node scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs",
     "verify:v3-dagpipe-governance": "node scripts/architecture/verify-v3-dagpipe-governance.mjs",
     "verify:v3-architecture-ci": "npm --prefix v3 run verify:v3-architecture-ci",
+    "verify:v3-operation-runner-dagpipe": "node v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs",
+    "test:v3-operation-runner-red-fixtures": "node v3/scripts/tests/v3-operation-runner-red-fixtures.mjs",
     "test:v3-architecture-ci-failure-aggregation-regression": "node v3/scripts/tests/v3-architecture-ci-failure-aggregation-regression.mjs",
     "verify:v4-active-link": "npm --prefix v4 run verify:v4-active-link",
     "verify:v4-foundation": "npm --prefix v4 run verify:v4-foundation",

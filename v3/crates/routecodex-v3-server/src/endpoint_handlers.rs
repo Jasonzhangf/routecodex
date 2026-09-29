@@ -136,6 +136,23 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
         }
     };
+    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+        Ok(captured) => captured,
+        Err(error) => {
+            return error_output_response_for_server_with_project_path(
+                &state.server,
+                &path,
+                &request_id,
+                project_v3_server_runtime_failure(
+                    "V3OperationRunnerCaptureClientJson",
+                    "operation_runner_capture_client_json_failed",
+                    error.to_string(),
+                    598,
+                ),
+                None,
+            );
+        }
+    };
     let responses_protocol_plan = if entry_protocol == "responses"
         && responses_entry_facts
             .as_ref()

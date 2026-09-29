@@ -135,17 +135,17 @@ stateDiagram-v2
 | 分支与重试 | Router/Target 选目标与候选，Runtime 独立决定模式；失败只输出新尝试事件，重试跨执行。 | 两种 owner 的绑定、尝试 ID 的状态机/ARC 绑定与成功、失败测试。 |
 | 透明代理 | 保留可表达语义和扩展；Direct/Relay 改写权限分开；无多余语义拒绝。 | 协议字段正反例、上游 wire 与客户端结果的同入口对照。 |
 | 终点 | 成功、任一来源的终端错误、取消均到资源释放；响应处理失败进入错误图，上游失败不被伪装成 200。 | 真实入口和连接断开回放、错误链与资源关闭收据。 |
-| 图与代码 | 业务图未由当前 Rust runtime 执行；下列绑定只表示现有实现线索。 | 后续 Operator 注册、SDK compile、实际入口 journal/ARC 与相同语义结果。 |
+| 图与代码 | 三张目标图已登记；当前 Rust runtime 只编译并运行请求图的 `capture_client_json` Node01 切片。 | 后续节点逐一完成 Operator 注册、SDK compile、实际入口 journal/ARC 与相同语义结果。 |
 
 ## 现有实现线索与 gap
 
 | ID | 目标节点/边 | 当前可见证据 | Gap / 下一步 |
 | --- | --- | --- | --- |
-| G1 | 业务语义图成为项目真源 | `docs/architecture/v3-{resource-operation,function,mainline-call,verification}-map.yml` 是资源、owner、调用和 gate 地图；当前 V3 范围未见 DAGPipe 图文件。 | 把上述三个对象源细分为项目拥有的 DAGPipe JSON；确定 Direct/Relay 的静态条件分支及类型化失败 ARC/Runtime 转换，独立审查后验证。现有调用图不能充当业务图。 |
-| G2 | 节点绑定为可执行 Operator | `v3/Cargo.toml` 和 V3 crates 未见 DAGPipe SDK、`CompiledGraph` 或 Operator 注册引用。 | 按现有唯一 owner 建立节点→Operator 名称/版本→ARC schema→作用权限映射，再做 SDK compile；本轮不推断已有运行接线。 |
+| G1 | 业务语义图成为项目真源 | 请求、响应、错误三张 `v3.operation_runner.*.graph.json` 已登记；`v3-operation-runner-dagpipe` 验证图合同，`modules.json` 验证静态登记。 | 后续逐节点核对目标业务图、ARC/分支合同与现有图；静态图不能证明整条运行接线。 |
+| G2 | 节点绑定为可执行 Operator | `operation_runner` 已从请求图派生并编译 `capture_client_json` Node01 切片，HTTP 与 Responses WebSocket 入口使用同一编译结果；其余节点尚未运行。 | 沿唯一 owner 逐一落实余下节点的 Operator 名称/版本、ARC schema、作用权限和 SDK compile；每步核对真实入口。 |
 | G3 | 请求入口到模式分支 | `v3/crates/routecodex-v3-server/src/lib.rs` 声明 HTTP 入口；`endpoint_handlers.rs`、`executors.rs` 接到 Runtime；`v3-mainline-call-map.yml` 有 `v3.responses_direct.required_mainline`。 | 用真实请求 ID 核对 Direct/Relay 决策和候选引用；不能把 map 的 `anchored` 或测试锚点当成所有协议的运行证明。 |
 | G4 | Relay 与 Direct 的响应分支 | `v3.hub_pipeline.v1.request/response` 与 `v3.hub_relay.*` map 分别列静态骨架及 Relay source slice；`hub_v1.rs` 导出相邻 builder 与 Direct/Relay 路径。 | 各选一个真实成功样本，对比 provider raw、Chat/Direct 作用点、continuation、客户端 JSON/SSE；再决定 Operator 边界。 |
 | G5 | 错误、重选与终端 | `v3.debug_error_foundation.mainline` map 列 Error01–06；`v3.hub_relay.response_failure_entry` 声明响应治理失败接 Error01；Runtime `kernel.rs` 持有尝试计数和传输尝试。 | 分别用 Server/请求、provider、响应阶段失败样本核对状态；仅对已绑定 provider 身份的类型化失败更新健康，验证目标内重选、598/599/502/外部状态和最终响应。为新尝试 ID、响应失败接线及释放终点补类型化证据。 |
 | G6 | 取消、提交后流中断与资源释放 | 当前 map 主要记录请求/响应/错误调用边，也有提交后 SSE 观测与 EOF/error/drop 的局部合同；本轮未绑定 DAGPipe 状态机与每终点资源收据。 | 明确连接断开、上游尝试取消、SSE 关闭的 owner、事件与验收；核对提交前完整缓冲与现有提交后观测的关系，补同入口取消/流中断回放。 |
 
-**审计结论：设计候选可作 DAGPipe 建模基线，不能声称 DAGPipe 图已校验、Operator 已接线或真实入口已通过。** 首个实施依赖是 G1：锁定图的 ARC/分支合同并通过独立设计 review；再按依赖处理 G2，随后用 G3–G6 的真实入口证据证明或修正实现 gap。修改项目锁定骨架节点、边、owner 或资源流之前，先遵守 `docs/architecture/wiki/v3-mainline-skeleton-sop.md` 的授权边界。
+**审计结论：三张静态图已登记，Node01 切片已接入；整条请求、响应、错误图仍未运行。** 后续沿 G2–G6 逐节点核对图、Operator、调用边和真实入口证据，不以静态校验或 Node01 证据推断全图完成。修改项目锁定骨架节点、边、owner 或资源流之前，先遵守 `docs/architecture/wiki/v3-mainline-skeleton-sop.md` 的授权边界。

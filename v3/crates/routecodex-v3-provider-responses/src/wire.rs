@@ -222,7 +222,6 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
-    validate_provider_wire_tool_names(&request_id, &body)?;
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
@@ -918,66 +917,6 @@ fn is_namespace_component(value: &str) -> bool {
     value
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn validate_provider_wire_tool_names(
-    request_id: &str,
-    body: &Value,
-) -> Result<(), V3ProviderError> {
-    fn walk(request_id: &str, value: &Value, path: &str) -> Result<(), V3ProviderError> {
-        match value {
-            Value::Object(object) => {
-                let kind = object.get("type").and_then(Value::as_str);
-                if matches!(
-                    kind,
-                    Some("function_call" | "custom_tool_call" | "tool_use")
-                ) {
-                    if let Some(name) = object.get("name").and_then(Value::as_str) {
-                        if !is_provider_wire_tool_name(name) {
-                            return Err(V3ProviderError::FunctionToolShapeFailed {
-                                request_id: request_id.to_owned(),
-                                detail: format!(
-                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
-                                ),
-                            });
-                        }
-                    }
-                }
-                if kind == Some("function") {
-                    if let Some(function) = object.get("function").and_then(Value::as_object) {
-                        if let Some(name) = function.get("name").and_then(Value::as_str) {
-                            if !is_provider_wire_tool_name(name) {
-                                return Err(V3ProviderError::FunctionToolShapeFailed {
-                                    request_id: request_id.to_owned(),
-                                    detail: format!(
-                                        "{path}.function.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                }
-                for (key, child) in object {
-                    walk(request_id, child, &format!("{path}.{key}"))?;
-                }
-            }
-            Value::Array(items) => {
-                for (index, child) in items.iter().enumerate() {
-                    walk(request_id, child, &format!("{path}[{index}]"))?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    walk(request_id, body, "body")
-}
-
-fn is_provider_wire_tool_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 /// Console Go (`openai_chat`) 的 `/v1/responses` 端点使用 Chat 风格工具 serde 的变体：
