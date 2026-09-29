@@ -478,8 +478,7 @@ fn project_chat_canonical_web_search_tools_to_anthropic_wire(
             .and_then(Value::as_str)
             .unwrap_or("");
         let is_web_search_declaration = matches!(kind, "web_search" | "web_search_preview")
-            || name.trim().eq_ignore_ascii_case("websearch")
-            || name.trim().eq_ignore_ascii_case("web_search");
+            || name.trim().eq_ignore_ascii_case("websearch");
         if is_web_search_declaration {
             let converted = super::anthropic_codec::responses_web_search_tool_as_anthropic_tool(
                 row,
@@ -489,6 +488,18 @@ fn project_chat_canonical_web_search_tools_to_anthropic_wire(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn anthropic_wire_preserves_ordinary_function_named_web_search() {
+    let mut payload = json!({"tools": [
+        {"type":"function","name":"web_search","parameters":{"type":"object"}},
+        {"type":"web_search","name":"web_search"}
+    ]});
+    project_chat_canonical_web_search_tools_to_anthropic_wire(&mut payload).unwrap();
+    assert_eq!(payload["tools"][0]["type"], "function");
+    assert_eq!(payload["tools"][1]["type"], "web_search_20250305");
 }
 
 fn consume_gemini_transport_intent(projected: &mut Value) -> Result<(), String> {

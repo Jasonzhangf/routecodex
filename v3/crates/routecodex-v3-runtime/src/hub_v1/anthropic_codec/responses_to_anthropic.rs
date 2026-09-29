@@ -967,17 +967,11 @@ pub(super) fn responses_tool_as_anthropic_tool(
     // 为本地 function tool）在 Anthropic wire 上必须以官方 server tool 名
     // `web_search` 编码——MiniMax 等 Anthropic provider 不识别 `websearch`，
     // 否则 provider 收不到搜索工具（表现为"我没有 websearch 工具"纯文本回答）。
-    // Codex client 也可能声明 `name:"web_search"`（无 type），按 hosted
-    // 投影兼容处理。
     if tool
         .get("name")
         .or_else(|| tool.get("function").and_then(|f| f.get("name")))
         .and_then(Value::as_str)
-        .is_some_and(|name| {
-            let normalized = name.trim();
-            normalized.eq_ignore_ascii_case("websearch")
-                || normalized.eq_ignore_ascii_case("web_search")
-        })
+        .is_some_and(|name| name.trim().eq_ignore_ascii_case("websearch"))
     {
         return responses_web_search_tool_as_anthropic_tool(tool);
     }

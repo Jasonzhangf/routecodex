@@ -1,6 +1,18 @@
 use super::*;
 use serde_json::json;
 
+pub(crate) fn eligible_web_search_route() -> routecodex_v3_target::V3TargetWebSearchRouteEligibility
+{
+    routecodex_v3_target::V3TargetWebSearchRouteEligibility {
+        declaration: routecodex_v3_virtual_router::V3Router06WebSearchRouteDeclared {
+            declared: true,
+            pool_id: Some("web_search".to_string()),
+        },
+        eligible: true,
+        eligible_candidates: vec!["test".to_string()],
+    }
+}
+
 fn build_v3_openai_chat_provider_payload_from_responses_payload(
     payload: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
@@ -291,6 +303,7 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::OpenAiChat,
+        &eligible_web_search_route(),
     );
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
@@ -366,6 +379,7 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
+        &eligible_web_search_route(),
     );
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let payload = req_compat.provider_semantic_payload();
@@ -440,6 +454,7 @@ fn provider_req_compat_loads_selected_target_profile() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
+        &eligible_web_search_route(),
     );
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     assert_eq!(req_compat.profile().as_str(), "chat:minimax");

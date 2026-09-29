@@ -4161,6 +4161,155 @@ async fn responses_direct_provider_request_dry_run_does_not_send_to_any_provider
 }
 
 #[tokio::test]
+async fn undeclared_web_search_route_drops_tool_before_provider_request() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    for allowed_modes in [r#""direct", "relay""#, r#""relay""#] {
+        let mut manifest = responses_direct_binding_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            "responses",
+            "http://127.0.0.1:9/v1",
+            allowed_modes,
+        );
+        manifest
+            .providers
+            .get_mut("mixed")
+            .unwrap()
+            .models
+            .get_mut("wire-protocol")
+            .unwrap()
+            .capabilities
+            .push("web_search".to_string());
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("x-routecodex-dry-run", "provider-request")
+            .json(&json!({
+                "model": "mixed.wire-protocol",
+                "input": "search for a weather forecast",
+                "tools": [
+                    {"type": "web_search"},
+                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
+                ],
+                "tool_choice": {"type": "web_search"}
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        handle.shutdown().await;
+
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body["providerRequest"]["body"]["tools"][0]["name"], "lookup",
+            "{body}"
+        );
+        assert_eq!(
+            body["providerRequest"]["body"]["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(body["providerRequest"]["body"].get("tool_choice").is_none());
+        let nodes = body["dry_run"]["node_ids"].as_array().unwrap();
+        let expected_projection = if allowed_modes == r#""relay""# {
+            "V3HubReqOutbound07ProviderSemantic"
+        } else {
+            "V3ResponsesDirect11Policy"
+        };
+        assert!(
+            nodes.iter().any(|node| node == expected_projection),
+            "{body}"
+        );
+        assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    }
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn declared_web_search_route_retains_tool_for_direct_and_relay_provider_requests() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    for allowed_modes in [r#""direct", "relay""#, r#""relay""#] {
+        let mut manifest = responses_direct_binding_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            "responses",
+            "http://127.0.0.1:9/v1",
+            allowed_modes,
+        );
+        manifest
+            .providers
+            .get_mut("mixed")
+            .unwrap()
+            .models
+            .get_mut("wire-protocol")
+            .unwrap()
+            .capabilities
+            .push("web_search".to_string());
+        let group = manifest.route_groups.get_mut("default").unwrap();
+        let mut search_pool = group.pools.get("default").unwrap().clone();
+        search_pool.id = "search_backend".to_string();
+        search_pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+            precedence: 20,
+            entry_protocol: Some("responses".to_string()),
+            models: Vec::new(),
+            required_capabilities: vec!["web_search".to_string()],
+            min_input_tokens: None,
+            max_input_tokens: None,
+        });
+        group.pools.insert(search_pool.id.clone(), search_pool);
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("x-routecodex-dry-run", "provider-request")
+            .json(&json!({
+                "model": "mixed.wire-protocol",
+                "input": "search for a weather forecast",
+                "tools": [
+                    {"type": "web_search"},
+                    {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
+                ],
+                "tool_choice": {"type": "web_search"}
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body: Value = response.json().await.unwrap();
+        handle.shutdown().await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body["providerRequest"]["body"]["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2,
+            "{body}"
+        );
+        assert_eq!(
+            body["providerRequest"]["body"]["tool_choice"]["type"], "web_search",
+            "{body}"
+        );
+        let nodes = body["dry_run"]["node_ids"].as_array().unwrap();
+        let expected_projection = if allowed_modes == r#""relay""# {
+            "V3HubReqOutbound07ProviderSemantic"
+        } else {
+            "V3ResponsesDirect11Policy"
+        };
+        assert!(
+            nodes.iter().any(|node| node == expected_projection),
+            "{body}"
+        );
+        assert_eq!(body["evidence"]["providerNetworkSend"], false);
+    }
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
 async fn responses_direct_last_default_projects_after_provider_failure() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
@@ -5064,6 +5213,167 @@ async fn responses_relay_provider_request_dry_run_header_returns_final_request_w
     assert!(
         !response_body.contains("secret-key"),
         "dry-run projection must not leak auth secrets"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_provider_request_keeps_custom_web_search_without_a_search_route() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_anthropic_wire_upstream().await;
+    std::env::set_var("V3_P6_ANTHROPIC_KEY", "secret-key");
+    let handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model":"anthropic-client", "max_tokens":8,
+            "messages":[{"role":"user","content":"custom tool"}],
+            "tools":[{"name":"web_search","description":"my custom tool","input_schema":{"type":"object","properties":{"query":{"type":"string"}}}}],
+            "tool_choice":{"type":"tool","name":"web_search"}
+        }))
+        .send().await.unwrap();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
+    let builtin_response = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model":"anthropic-client", "max_tokens":8,
+            "messages":[{"role":"user","content":"builtin search"}],
+            "tools":[
+                {"type":"web_search_20250305","name":"web_search"},
+                {"name":"lookup","input_schema":{"type":"object"}}
+            ],
+            "tool_choice":{"type":"tool","name":"web_search"}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let builtin_status = builtin_response.status();
+    let builtin_body: Value = builtin_response.json().await.unwrap();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_ANTHROPIC_KEY");
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body["providerRequest"]["body"]["tools"][0]
+            .get("type")
+            .is_none(),
+        "{body}"
+    );
+    assert_eq!(
+        body["providerRequest"]["body"]["tools"][0]["name"], "web_search",
+        "{body}"
+    );
+    assert_eq!(
+        body["providerRequest"]["body"]["tools"][0]["input_schema"]["properties"]["query"]["type"],
+        "string",
+        "{body}"
+    );
+    assert_eq!(
+        body["providerRequest"]["body"]["tool_choice"]["name"], "web_search",
+        "{body}"
+    );
+    assert_eq!(builtin_status, 200, "{builtin_body}");
+    assert_eq!(
+        builtin_body["providerRequest"]["body"]["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "{builtin_body}"
+    );
+    assert_eq!(
+        builtin_body["providerRequest"]["body"]["tools"][0]["name"], "lookup",
+        "{builtin_body}"
+    );
+    assert!(
+        builtin_body["providerRequest"]["body"]
+            .get("tool_choice")
+            .is_none(),
+        "{builtin_body}"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_builtin_web_search_without_route_is_omitted_from_provider_request() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_anthropic_wire_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec!["responses".to_string(), "anthropic".to_string()];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test", "max_tokens": 8,
+            "messages": [{"role":"user","content":"search"}],
+            "tools": [
+                {"type":"web_search_20250305","name":"web_search"},
+                {"name":"lookup","input_schema":{"type":"object"}}
+            ],
+            "tool_choice": {"type":"tool","name":"web_search"}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
+    let same_name_response = reqwest::Client::new()
+        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
+        .header("x-routecodex-dry-run", "provider-request")
+        .json(&json!({
+            "model": "client-test", "max_tokens": 8,
+            "messages": [{"role":"user","content":"call the custom tool"}],
+            "tools": [{"name":"web_search","input_schema":{"type":"object"}}],
+            "tool_choice": {"type":"tool","name":"web_search"}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let same_name_status = same_name_response.status();
+    let same_name_body: Value = same_name_response.json().await.unwrap();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        body["providerRequest"]["body"]["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "{body}"
+    );
+    assert_eq!(
+        body["providerRequest"]["body"]["tools"][0]["name"], "lookup",
+        "{body}"
+    );
+    assert!(
+        body["providerRequest"]["body"].get("tool_choice").is_none(),
+        "{body}"
+    );
+    assert_eq!(same_name_status, 200, "{same_name_body}");
+    assert_eq!(
+        same_name_body["providerRequest"]["body"]["tools"][0]["type"],
+        "function"
+    );
+    assert_eq!(
+        same_name_body["providerRequest"]["body"]["tools"][0]["name"],
+        "web_search"
+    );
+    assert_eq!(
+        same_name_body["providerRequest"]["body"]["tool_choice"]["name"],
+        "web_search"
     );
 }
 

@@ -347,6 +347,7 @@ fn is_v3_deepseek_v4_compat_model(model_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub_v1::tests::eligible_web_search_route;
 
     const VALID_1X1_PNG_DATA_URL: &str =
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -434,7 +435,11 @@ mod tests {
             V3HubTargetResolution::Routed,
             selected_candidate(provider_protocol),
         );
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            provider_protocol,
+            &eligible_web_search_route(),
+        )
     }
 
     fn relay_req07_for_entry(
@@ -459,7 +464,11 @@ mod tests {
             V3HubTargetResolution::Routed,
             selected_candidate(provider_protocol),
         );
-        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+        build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            provider_protocol,
+            &eligible_web_search_route(),
+        )
     }
 
     #[test]
@@ -1281,10 +1290,8 @@ mod tests {
         req07.previous.selected_target.wire_model = "x-preview-f-free".to_string();
         req07.previous.selected_target.compatibility_profile =
             Some("compat:passthrough".to_string());
-
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("OpenCode Zen must receive a provider-supported effort value");
-
         assert_eq!(
             req_compat.provider_semantic_payload()["reasoning"]["effort"],
             "low"
@@ -1314,7 +1321,11 @@ mod tests {
             .selected_target
             .model_capabilities
             .push("web_search".to_string());
-
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req07.previous,
+            V3HubProviderWireProtocol::OpenAiChat,
+            &eligible_web_search_route(),
+        );
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).expect(
             "Mode B OpenAI Chat relay must project built-in web search to local websearch function",
         );
@@ -1338,7 +1349,6 @@ mod tests {
             json!(["text", "image"])
         );
     }
-
     #[test]
     fn minimax_openai_chat_profile_accepts_local_websearch_function_projection() {
         let mut req07 = relay_req07_for_entry(
@@ -1362,7 +1372,11 @@ mod tests {
             .model_capabilities
             .push("web_search".to_string());
         req07.previous.selected_target.compatibility_profile = Some("chat:minimax".to_string());
-
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req07.previous,
+            V3HubProviderWireProtocol::OpenAiChat,
+            &eligible_web_search_route(),
+        );
         let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
             .expect("MiniMax Chat compat must accept Mode B local websearch function");
         assert!(req_compat.provider_semantic_payload()["tools"]

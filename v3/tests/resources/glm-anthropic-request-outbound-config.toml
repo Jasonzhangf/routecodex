@@ -47,3 +47,8 @@ targets = [
 [route_groups.glm_test.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "forwarder", id = "fwd.v3.glm-5.2", priority = 1 }]
+
+[route_groups.glm_test.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "forwarder", id = "fwd.v3.glm-5.2", priority = 1 }]

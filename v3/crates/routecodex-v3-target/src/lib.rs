@@ -5,7 +5,10 @@ use routecodex_v3_config::{
     V3SelectionStrategy, V3WebSearchExecutionMode,
 };
 use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderSchedulingReader};
-use routecodex_v3_virtual_router::{priority_tier_indices, V3Router07OpaqueTargetHitOnce};
+use routecodex_v3_virtual_router::{
+    priority_tier_indices, V3Router06WebSearchRouteDeclaration, V3Router06WebSearchRouteDeclared,
+    V3Router07OpaqueTargetHitOnce, V3Router07OpaqueTargetPlanEntry,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -58,6 +61,13 @@ pub struct V3Target09CandidateSetExpanded {
     pub candidates: Vec<V3TargetCandidate>,
     pub provider_priority_schedule: routecodex_v3_config::V3ProviderPriorityScheduleAuthoringConfig,
     pub route_pool_tier_priorities: BTreeMap<String, Vec<i32>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3TargetWebSearchRouteEligibility {
+    pub declaration: V3Router06WebSearchRouteDeclared,
+    pub eligible: bool,
+    pub eligible_candidates: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,6 +324,95 @@ impl V3TargetInterpreter {
             candidates,
             provider_priority_schedule,
             route_pool_tier_priorities,
+        })
+    }
+
+    /// Read-only eligibility projection over an explicit web_search route
+    /// declaration. It uses the current scheduling/health state without
+    /// advancing any cursor, creating a provider attempt, reselecting the
+    /// main model, or touching a search backend.
+    pub fn resolve_web_search_route_eligibility<R: V3ProviderSchedulingReader>(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        declaration: V3Router06WebSearchRouteDeclaration,
+        scheduling: &R,
+        now_ms: u64,
+        deterministic_sample: u64,
+    ) -> Result<V3TargetWebSearchRouteEligibility, V3TargetError> {
+        if !declaration.declaration.declared {
+            return Ok(V3TargetWebSearchRouteEligibility {
+                declaration: declaration.declaration,
+                eligible: false,
+                eligible_candidates: Vec::new(),
+            });
+        }
+        let target_plan = declaration
+            .tiers
+            .iter()
+            .enumerate()
+            .flat_map(|(tier_index, tier)| {
+                tier.targets
+                    .iter()
+                    .enumerate()
+                    .map(
+                        move |(target_index, target)| V3Router07OpaqueTargetPlanEntry {
+                            tier_index,
+                            pool_id: tier.pool_id.clone(),
+                            target_index,
+                            target_kind: target.kind.clone(),
+                            target_id: target.id.clone(),
+                            priority: target.priority.unwrap_or(0),
+                            weight: target.weight.unwrap_or(1),
+                            direct_provider_model: None,
+                        },
+                    )
+            })
+            .collect::<Vec<_>>();
+        let first = target_plan
+            .first()
+            .ok_or(V3TargetError::OpaqueTargetMissing)?;
+        let route = V3Router07OpaqueTargetHitOnce {
+            server_id: declaration.server_id.clone(),
+            routing_group_id: declaration.routing_group_id.clone(),
+            pool_id: declaration.declaration.pool_id.clone().unwrap_or_default(),
+            route_classification_reason: "web_search.route_declaration".into(),
+            target_index: first.target_index,
+            target_kind: first.target_kind.clone(),
+            target_id: first.target_id.clone(),
+            target_plan,
+            request_client_model: None,
+            request_capabilities: BTreeSet::from(["web_search".into()]),
+            request_input_tokens: declaration.request_input_tokens,
+            hit_count: 0,
+        };
+        let classified = V3Target08KindClassified { route };
+        let expanded = self.expand_candidates(manifest, classified, deterministic_sample)?;
+        let mut eligible_candidates = Vec::new();
+        for candidate in expanded.candidates {
+            if !candidate_satisfies_required_capabilities(&candidate) {
+                continue;
+            }
+            if context_window_exceeded_reason(declaration.request_input_tokens, &candidate)
+                .is_some()
+            {
+                continue;
+            }
+            let projection = scheduling.scheduling_projection(
+                &candidate.provider_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+                candidate.priority,
+                candidate.weight,
+                now_ms,
+            );
+            if projection.available {
+                eligible_candidates.push(candidate.provider_id);
+            }
+        }
+        Ok(V3TargetWebSearchRouteEligibility {
+            declaration: declaration.declaration,
+            eligible: !eligible_candidates.is_empty(),
+            eligible_candidates,
         })
     }
 

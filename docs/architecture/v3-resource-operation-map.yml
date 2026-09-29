@@ -1675,6 +1675,42 @@ resources:
       - npm run verify:v3-mainline-caller-flow
       - npm run verify:v3-architecture-docs
 
+  - resource_id: v3.web_search.route_declaration
+    resource_kind: side_channel
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-virtual-router
+    owner_node: V3Router06RoutePoolResolved
+    identity: [requestId, serverId, routingGroupId, matchingExplicitPoolId]
+    semantic_contract:
+      explicit_only: implicit capability pools and direct main-model pins do not create a web_search route declaration
+      request_match: existing entry protocol, client model, token bounds, and required capability predicates all apply
+      absence: an explicit false is emitted when no matching route exists; a missing resource is a typed error
+    allowed_writers: [V3VirtualRouter]
+    allowed_readers: [V3TargetInterpreter, V3HubReqOutbound07ProviderSemantic, V3DirectRequestProjectionHook]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, ProviderReqCompat06ProviderCompat]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
+  - resource_id: v3.web_search.route_eligibility
+    resource_kind: side_channel
+    lifecycle: v3.web_search_servertool_state_machine
+    owner_feature_id: v3.web_search_servertool_state_machine
+    owner_crate: routecodex-v3-target
+    owner_node: V3Target10ConcreteProviderSelected
+    identity: [requestId, serverId, routingGroupId, matchingExplicitPoolId, schedulingGeneration, hasEligibleCandidate]
+    semantic_contract:
+      source: declared route candidates and v3.provider.scheduling_projection
+      read_only: checking eligibility does not mutate routing cursor, health, main target, or provider attempt count
+      absence: an explicit false is emitted when the declared route has no eligible candidate; a missing resource is a typed error
+    allowed_writers: [V3TargetInterpreter]
+    allowed_readers: [V3HubReqOutbound07ProviderSemantic, V3DirectRequestProjectionHook]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, ProviderReqCompat06ProviderCompat]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: design
   - resource_id: v3.web_search.execution_mode
     resource_kind: compiled_capability_truth
     lifecycle: v3.web_search_servertool_state_machine

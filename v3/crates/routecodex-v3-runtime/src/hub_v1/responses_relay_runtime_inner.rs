@@ -274,13 +274,30 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         let provider_wire_protocol = handle_error_before_resp03!(
             provider_wire_protocol_for_selected_candidate(&selected.candidate)
         );
+        let web_search_route_eligible =
+            crate::provider_failure_web_search_route::web_search_route_eligible_for_entry_request(
+                manifest,
+                &input.server_id,
+                "/v1/responses",
+                "responses",
+                &route_facts_body,
+                &input.failure_session_scope,
+                &provider_health,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3ResponsesRelayRuntimeError::Target)?,
+                deterministic_sample,
+            )
+            .map_err(V3ResponsesRelayRuntimeError::Target)?;
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
             V3HubTargetResolution::Routed,
             selected.candidate.clone(),
         );
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            provider_wire_protocol,
+            &web_search_route_eligible,
+        );
         let target =
             handle_error_before_resp03!(provider_target(manifest, req07.selected_target()));
         let mut selected_observability =

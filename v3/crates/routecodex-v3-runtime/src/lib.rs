@@ -13,6 +13,7 @@ mod provider_action_gate;
 mod provider_error_policy_matching;
 mod provider_failure_global_probe;
 mod provider_failure_runtime_policy;
+mod provider_failure_web_search_route;
 pub mod route_policy;
 mod runtime_timing;
 mod selected_provider_model_binding;

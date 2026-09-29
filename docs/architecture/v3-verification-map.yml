@@ -2469,6 +2469,11 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   mainline_bindings:
+  - v3-web-search-route-exposure-00
+  - v3-web-search-route-exposure-01
+  - v3-web-search-route-exposure-02
+  - v3-web-search-route-exposure-03
+  - v3-web-search-route-exposure-04
   - v3-web-search-sm-sidecar-socket-01
   - v3-web-search-sm-01
   - v3-web-search-sm-02
@@ -2479,6 +2484,8 @@ features:
   - v3-web-search-sm-07
   - v3-web-search-sm-08
   required_positive:
+  - A matching explicit web_search route with an eligible candidate retains the built-in tool only for a selected main model that supports the search tool; the original canonical request and other tools remain complete.
+  - Each Direct or Relay retry recomputes the provider copy from the unchanged canonical request and current typed route eligibility.
   - A completed WebSearchResult carries normalized content or typed source references, while a failed result carries only a typed error.
   - The hooks sidecar carries the typed WebSearchHookRequest through ControlRequest::ExecuteWebSearch and returns a call-id-bound completed or typed failed WebSearchHookOutcome.
   - Explicit latest-turn search intent activates web_search route.
@@ -2487,6 +2494,8 @@ features:
   - MiniMax/search-only mode starts ServerTool state and strips ordinary tools only inside search dispatch.
   - Captured search result is paired to the original tool_call_id and injected on the next governed request.
   required_negative:
+  - No matching explicit web_search route or no currently eligible declared-route candidate omits only built-in web_search declarations and dependent forced choice/options from the provider copy; an ordinary function named web_search is preserved.
+  - Missing route-exposure control resources fail through the typed Error chain rather than silently omitting tools; the policy read does not change routing cursor, health, or provider attempt count.
   - A completed WebSearchResult without call identity is rejected; WebSearchHookRequest scope/deadline binding is required before the adapter executes.
   - A mismatched call id, malformed adapter output, NotApplicable result, missing adapter, expired deadline, or unavailable subagent fails explicitly.
   - A configured sidecar path is passed only through the typed runtime control state; an absent socket path or failed typed response enters the existing error chain without a second provider attempt.

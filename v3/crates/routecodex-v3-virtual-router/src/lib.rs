@@ -28,6 +28,21 @@ impl V3RouterRequestFacts {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct V3Router06WebSearchRouteDeclared {
+    pub declared: bool,
+    pub pool_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3Router06WebSearchRouteDeclaration {
+    pub server_id: String,
+    pub routing_group_id: String,
+    pub request_input_tokens: u64,
+    pub declaration: V3Router06WebSearchRouteDeclared,
+    pub tiers: Vec<V3Router06SelectionPlanTier>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Router05RequestClassified {
     pub server_id: String,
@@ -47,10 +62,10 @@ pub struct V3Router06RoutePoolResolved {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Router06SelectionPlanTier {
-    pool_id: String,
+    pub pool_id: String,
     selection: V3SelectionStrategy,
-    targets: Vec<V3RoutePoolTargetManifest>,
-    direct_provider_model: Option<(String, String)>,
+    pub targets: Vec<V3RoutePoolTargetManifest>,
+    pub direct_provider_model: Option<(String, String)>,
 }
 
 impl V3Router06RoutePoolResolved {
@@ -216,6 +231,77 @@ impl V3VirtualRouter {
         manifest: &V3Config05ManifestPublished,
         classified: V3Router05RequestClassified,
     ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
+        self.selection_plan(manifest, &classified)
+    }
+
+    /// Read-only explicit web_search declaration check for the current server
+    /// and request. Implicit capability pools and a synthetic direct main-model
+    /// pool do not create a declaration; an explicit search pool still may.
+    pub fn resolve_web_search_route_declaration(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        classified: V3Router05RequestClassified,
+    ) -> Result<V3Router06WebSearchRouteDeclaration, V3VirtualRouterError> {
+        let is_compaction = classified.facts.route_classification.route_name == "compact"
+            || classified
+                .endpoint
+                .trim_end_matches('/')
+                .ends_with("/responses/compact");
+        if is_compaction {
+            return Ok(V3Router06WebSearchRouteDeclaration {
+                server_id: classified.server_id.clone(),
+                routing_group_id: classified.routing_group_id.clone(),
+                request_input_tokens: classified.facts.input_tokens,
+                declaration: V3Router06WebSearchRouteDeclared::default(),
+                tiers: Vec::new(),
+            });
+        }
+
+        let group = manifest
+            .route_groups
+            .get(&classified.routing_group_id)
+            .ok_or_else(|| {
+                V3VirtualRouterError::RouteGroupMissing(classified.routing_group_id.clone())
+            })?;
+
+        let result = select_best_matching_pool(
+            &classified.routing_group_id,
+            &group.pools,
+            &classified.facts,
+            Some("web_search"),
+            |pool_id, rule| pool_route_signal_matches(pool_id, rule, "web_search"),
+        )?;
+        let (declaration, tiers) = if let Some(pool) = result {
+            if pool.targets.is_empty() {
+                return Err(V3VirtualRouterError::PoolEmpty {
+                    group_id: classified.routing_group_id.clone(),
+                    pool_id: pool.id.clone(),
+                });
+            }
+            (
+                V3Router06WebSearchRouteDeclared {
+                    declared: true,
+                    pool_id: Some(pool.id.clone()),
+                },
+                vec![build_plan_tier(pool)],
+            )
+        } else {
+            (V3Router06WebSearchRouteDeclared::default(), Vec::new())
+        };
+        Ok(V3Router06WebSearchRouteDeclaration {
+            server_id: classified.server_id.clone(),
+            routing_group_id: classified.routing_group_id.clone(),
+            request_input_tokens: classified.facts.input_tokens,
+            declaration,
+            tiers,
+        })
+    }
+
+    fn selection_plan(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        classified: &V3Router05RequestClassified,
+    ) -> Result<V3Router06RoutePoolResolved, V3VirtualRouterError> {
         let is_compaction = classified.facts.route_classification.route_name == "compact"
             || classified
                 .endpoint
@@ -242,9 +328,9 @@ impl V3VirtualRouter {
                     });
                 }
                 return Ok(V3Router06RoutePoolResolved {
-                    server_id: classified.server_id,
-                    routing_group_id: classified.routing_group_id,
-                    facts: classified.facts,
+                    server_id: classified.server_id.clone(),
+                    routing_group_id: classified.routing_group_id.clone(),
+                    facts: classified.facts.clone(),
                     tiers: vec![build_plan_tier(pool)],
                 });
             }
@@ -281,9 +367,9 @@ impl V3VirtualRouter {
                 });
             }
             return Ok(V3Router06RoutePoolResolved {
-                server_id: classified.server_id,
-                routing_group_id: classified.routing_group_id,
-                facts: classified.facts,
+                server_id: classified.server_id.clone(),
+                routing_group_id: classified.routing_group_id.clone(),
+                facts: classified.facts.clone(),
                 tiers: vec![build_plan_tier(compact_pool)],
             });
         }
@@ -302,7 +388,7 @@ impl V3VirtualRouter {
         })?;
         if default_pool.targets.is_empty() {
             return Err(V3VirtualRouterError::DefaultPoolEmpty(
-                classified.routing_group_id,
+                classified.routing_group_id.clone(),
             ));
         }
 
@@ -437,9 +523,9 @@ impl V3VirtualRouter {
         tiers.push(build_plan_tier(default_pool));
 
         Ok(V3Router06RoutePoolResolved {
-            server_id: classified.server_id,
-            routing_group_id: classified.routing_group_id,
-            facts: classified.facts,
+            server_id: classified.server_id.clone(),
+            routing_group_id: classified.routing_group_id.clone(),
+            facts: classified.facts.clone(),
             tiers,
         })
     }

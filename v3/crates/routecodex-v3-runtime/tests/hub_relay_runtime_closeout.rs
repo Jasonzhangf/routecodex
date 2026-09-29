@@ -2877,6 +2877,10 @@ wire_name = "chat-wire-model"
 supports_streaming = true
 supports_thinking = true
 capabilities = ["text", "tools", "tool_outputs", "reasoning", "web_search"]
+[route_groups.controlled.pools.web_search]
+selection = { strategy = "priority" }
+match = { precedence = 20, required_capabilities = ["web_search"] }
+targets = [{ kind = "provider_model", provider = "chat", model = "chat-wire-model", key = "controlled", priority = 1 }]
 [route_groups.controlled.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "chat", model = "chat-wire-model", key = "controlled", priority = 1 }]

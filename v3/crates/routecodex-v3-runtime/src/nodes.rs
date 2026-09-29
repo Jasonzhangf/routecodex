@@ -192,6 +192,7 @@ pub struct V3ChatDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
+    pub allow_builtin_web_search_exposure: bool,
 }
 
 pub fn build_v3_chat_direct_11_policy_from_v3_target_10(
@@ -202,6 +203,7 @@ pub fn build_v3_chat_direct_11_policy_from_v3_target_10(
         target: selected,
         request_id: standardized.request_id.clone(),
         request_body: standardized.body.clone(),
+        allow_builtin_web_search_exposure: false,
     }
 }
 
@@ -210,6 +212,7 @@ pub struct V3ResponsesDirect11Policy {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub request_id: String,
     pub request_body: Value,
+    pub allow_builtin_web_search_exposure: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -684,6 +687,7 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         target: selected,
         request_id: standardized.request_id.clone(),
         request_body: standardized.body.clone(),
+        allow_builtin_web_search_exposure: false,
     }
 }
 

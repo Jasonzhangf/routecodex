@@ -8,6 +8,20 @@ use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::json;
 use std::collections::BTreeSet;
 
+fn web_search_policy_for_projection() -> V3ResponsesDirect11Policy {
+    let mut policy = direct_policy_with_models("client", "canonical", "wire");
+    policy.request_body = json!({
+        "model": "client",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [
+            {"type": "web_search"},
+            {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
+        ],
+        "tool_choice": {"type": "web_search"}
+    });
+    policy
+}
+
 fn request_key_notify(_view: &V3DirectRequestKeyView) {}
 
 fn direct_system_wire_mount(
@@ -95,6 +109,7 @@ fn direct_policy_with_models(
         },
         request_id: "req-direct-model-binding".to_string(),
         request_body: json!({"model": client_model, "input": "hello"}),
+        allow_builtin_web_search_exposure: false,
     }
 }
 
@@ -181,29 +196,22 @@ fn direct_responses_projection_reprojects_chat_messages_back_to_responses_input(
 
 #[test]
 fn direct_responses_default_target_drops_only_hosted_search() {
-    let mut policy = direct_policy_with_models("client", "canonical", "wire");
-    policy.request_body = json!({
-        "model": "client",
-        "messages": [{"role": "user", "content": "hello"}],
-        "tools": [
-            {"type": "web_search"},
-            {"type": "function", "name": "lookup", "parameters": {"type": "object"}}
-        ],
-        "tool_choice": {"type": "web_search"}
-    });
+    let policy = web_search_policy_for_projection();
     let wire = responses_direct_request_projection_hook(&policy).unwrap();
     assert_eq!(wire.body()["tools"].as_array().unwrap().len(), 1);
     assert_eq!(wire.body()["tools"][0]["name"], "lookup");
     assert!(wire.body().get("tool_choice").is_none());
 
-    policy
+    let mut declared_policy = web_search_policy_for_projection();
+    declared_policy
         .target
         .candidate
         .model_capabilities
         .push("web_search".to_string());
-    let hosted_wire = responses_direct_request_projection_hook(&policy).unwrap();
-    assert_eq!(hosted_wire.body()["tools"].as_array().unwrap().len(), 2);
-    assert_eq!(hosted_wire.body()["tool_choice"]["type"], "web_search");
+    declared_policy.allow_builtin_web_search_exposure = true;
+    let declared_wire = responses_direct_request_projection_hook(&declared_policy).unwrap();
+    assert_eq!(declared_wire.body()["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(declared_wire.body()["tool_choice"]["type"], "web_search");
 }
 
 #[test]
@@ -322,6 +330,7 @@ fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
     let policy = V3ChatDirect11Policy {
         target: base.target,
         request_id: base.request_id,
+        allow_builtin_web_search_exposure: false,
         request_body: json!({
             "model":"client-route-alias",
             "messages":[
@@ -378,6 +387,7 @@ fn chat_direct_default_target_drops_unavailable_hosted_web_search_tool() {
     let policy = V3ChatDirect11Policy {
         target: base.target,
         request_id: base.request_id,
+        allow_builtin_web_search_exposure: false,
         request_body: json!({
             "model": "gpt-5.5",
             "messages": [{"role": "user", "content": "summarize this"}],
@@ -407,6 +417,7 @@ fn chat_direct_applies_declared_provider_compat_after_standard_projection() {
     let policy = V3ChatDirect11Policy {
         target,
         request_id: base.request_id,
+        allow_builtin_web_search_exposure: false,
         request_body: json!({
             "model": "client-route-alias",
             "messages": [{"role": "user", "content": "hello"}],
@@ -431,6 +442,7 @@ fn chat_direct_codec_consumes_the_registered_key_catalog() {
     let policy = V3ChatDirect11Policy {
         target: base.target,
         request_id: base.request_id,
+        allow_builtin_web_search_exposure: false,
         request_body: json!({
             "model":"client-route-alias",
             "messages":[{"role":"system","content":"base system"}],

@@ -736,14 +736,30 @@ where
                 continue;
             }
         };
+        let web_search_route_eligible =
+            crate::provider_failure_web_search_route::web_search_route_eligible_for_entry_request(
+                manifest,
+                server_id,
+                endpoint_path,
+                C::ENTRY_KIND,
+                routing_payload_ref,
+                &failure_session_scope,
+                &provider_health,
+                v3_relay_provider_policy_now_epoch_ms().map_err(V3RelayCoreError::Target)?,
+                deterministic_sample,
+            )
+            .map_err(V3RelayCoreError::Target)?;
         let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
             req05.clone(),
             V3HubTargetResolution::Routed,
             selected.candidate.clone(),
         );
         trace.push("V3HubReqTarget06Resolved");
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            provider_wire_protocol,
+            &web_search_route_eligible,
+        );
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target(), C::EXPECTED_PROVIDER_TYPE)
             .map_err(V3RelayCoreError::Target)?;

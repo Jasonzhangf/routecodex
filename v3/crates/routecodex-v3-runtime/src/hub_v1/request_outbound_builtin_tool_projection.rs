@@ -15,22 +15,50 @@ pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
     payload: &mut Value,
     has_web_search_capability: bool,
 ) {
-    if has_web_search_capability {
+    project_builtin_web_search_exposure(payload, has_web_search_capability);
+}
+
+const BUILTIN_WEB_SEARCH_TOOL_TYPES: [&str; 3] =
+    ["web_search", "web_search_preview", "web_search_20250305"];
+
+pub(crate) fn project_builtin_web_search_exposure(
+    payload: &mut Value,
+    allow_builtin_web_search_exposure: bool,
+) {
+    if allow_builtin_web_search_exposure {
         return;
     }
+    let forced_declared_builtin = payload
+        .get("tool_choice")
+        .filter(|choice| choice.get("type").and_then(Value::as_str) == Some("function"))
+        .and_then(|choice| choice.get("name").and_then(Value::as_str))
+        .is_some_and(|choice_name| {
+            payload
+                .get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool.get("type")
+                            .and_then(Value::as_str)
+                            .is_some_and(|kind| BUILTIN_WEB_SEARCH_TOOL_TYPES.contains(&kind))
+                            && tool.get("name").and_then(Value::as_str) == Some(choice_name)
+                    })
+                })
+        });
     if let Some(tools) = payload.get_mut("tools").and_then(Value::as_array_mut) {
         tools.retain(|tool| {
-            !matches!(
-                tool.get("type").and_then(Value::as_str),
-                Some("web_search" | "web_search_preview" | "web_search_20250305")
-            )
+            !tool
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| BUILTIN_WEB_SEARCH_TOOL_TYPES.contains(&kind))
         });
     }
     if let Some(root) = payload.as_object_mut() {
         root.remove("web_search_options");
-        if root
-            .get("tool_choice")
-            .is_some_and(is_hosted_web_search_choice)
+        if forced_declared_builtin
+            || root
+                .get("tool_choice")
+                .is_some_and(is_hosted_web_search_choice)
         {
             root.remove("tool_choice");
         }
@@ -38,13 +66,85 @@ pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
 }
 
 fn is_hosted_web_search_choice(choice: &Value) -> bool {
-    matches!(
-        choice
-            .get("type")
-            .and_then(Value::as_str)
-            .or_else(|| choice.as_str()),
-        Some("web_search" | "web_search_preview" | "web_search_20250305")
-    )
+    choice
+        .get("type")
+        .and_then(Value::as_str)
+        .or_else(|| choice.as_str())
+        .is_some_and(|kind| BUILTIN_WEB_SEARCH_TOOL_TYPES.contains(&kind))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_builtin_web_search_exposure;
+    use serde_json::json;
+
+    fn mixed_request() -> serde_json::Value {
+        json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role":"user","content":"use both"},
+                {"role":"tool","name":"web_search","content":"{\"query\":\"kept\",\"opaque\":\"x\"}"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "ordinary client function",
+                        "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
+                    }
+                },
+                {"type": "web_search"},
+                {
+                    "type": "web_search_preview",
+                    "search_context_size": "medium"
+                },
+                {"type": "web_search_20250305", "name": "web_search"},
+                {"type": "unknown_extension", "payload": "opaque"}
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+            "web_search_options": {"search_context_size": "medium"},
+            "unknown_root": {"nested": [1, 2]}
+        })
+    }
+
+    #[test]
+    fn allowed_builtin_web_search_projection_is_identity() {
+        let before = mixed_request();
+        let mut after = before.clone();
+
+        project_builtin_web_search_exposure(&mut after, true);
+
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn denied_builtin_web_search_projection_removes_only_builtin_declarations_and_forced_refs() {
+        let mut after = mixed_request();
+
+        project_builtin_web_search_exposure(&mut after, false);
+
+        let expected = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role":"user","content":"use both"},
+                {"role":"tool","name":"web_search","content":"{\"query\":\"kept\",\"opaque\":\"x\"}"}
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "ordinary client function",
+                        "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
+                    }
+                },
+                {"type": "unknown_extension", "payload": "opaque"}
+            ],
+            "unknown_root": {"nested": [1, 2]}
+        });
+        assert_eq!(after, expected);
+    }
 }
 
 pub(super) fn promote_tool_search_output_tools_to_provider_tools(

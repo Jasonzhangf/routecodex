@@ -20,6 +20,40 @@ struct Availability {
     blocked: BTreeSet<String>,
 }
 
+struct RecordingAvailability {
+    blocked: BTreeSet<String>,
+    calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl V3ProviderAvailabilityReader for RecordingAvailability {
+    fn availability(
+        &self,
+        provider_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        _now_ms: u64,
+    ) -> V3ProviderAvailabilityProjection {
+        let label = format!(
+            "{provider_id}:{}:{}",
+            auth_alias.unwrap_or(""),
+            model_id.unwrap_or("")
+        );
+        self.calls.lock().unwrap().push(label.clone());
+        V3ProviderAvailabilityProjection {
+            provider_id: provider_id.into(),
+            auth_alias: auth_alias.map(Into::into),
+            model_id: model_id.map(Into::into),
+            available: !self.blocked.contains(&label),
+            blocked_scopes: self
+                .blocked
+                .contains(&label)
+                .then_some(label)
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
 impl V3ProviderAvailabilityReader for Availability {
     fn availability(
         &self,
@@ -434,6 +468,48 @@ fn expanded_tools() -> V3Target09CandidateSetExpanded {
         .unwrap()
 }
 
+fn web_search_manifest(capabilities: &[&str]) -> V3Config05ManifestPublished {
+    let source = format!(
+        r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.search]
+type = "responses"
+base_url = "http://search.invalid/v1"
+default_model = "m"
+auth = {{ type = "api_key", entries = [{{ alias = "ks", env = "SEARCH_KEY" }}] }}
+[providers.search.models.m]
+capabilities = {capabilities:?}
+[route_groups.g.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "search", model = "m", key = "ks", priority = 1 }}]
+[route_groups.g.pools.web_search]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client"], required_capabilities = ["web_search"], min_input_tokens = 1, max_input_tokens = 100 }}
+targets = [
+  {{ kind = "provider_model", provider = "search", model = "m", key = "ks", priority = 1 }}
+]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn web_search_declaration(
+    manifest: &V3Config05ManifestPublished,
+    router: &V3VirtualRouter,
+    facts: V3RouterRequestFacts,
+) -> routecodex_v3_virtual_router::V3Router06WebSearchRouteDeclaration {
+    let classified = router
+        .classify_request_with_facts(manifest, "s", "/v1/responses", facts)
+        .unwrap();
+    router
+        .resolve_web_search_route_declaration(manifest, classified)
+        .unwrap()
+}
+
 fn direct_selected(
     requested_model: &str,
     blocked: BTreeSet<String>,
@@ -464,6 +540,116 @@ fn direct_selected(
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
     target.select_available(expanded, &Availability { blocked }, 0)
+}
+
+#[test]
+fn web_search_route_eligibility_is_read_only_and_honors_scheduling() {
+    let manifest = web_search_manifest(&["text", "tools", "web_search"]);
+    let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+    let declaration = web_search_declaration(
+        &manifest,
+        &router,
+        V3RouterRequestFacts {
+            entry_protocol: "responses".into(),
+            client_model: Some("client".into()),
+            capabilities: BTreeSet::from(["web_search".into()]),
+            input_tokens: 10,
+            route_classification: test_route("web_search", &["web_search", "default"]),
+        },
+    );
+    let availability = RecordingAvailability {
+        blocked: BTreeSet::new(),
+        calls: std::sync::Mutex::new(Vec::new()),
+    };
+
+    let eligible = target
+        .resolve_web_search_route_eligibility(
+            &manifest,
+            declaration.clone(),
+            &V3AvailabilitySchedulingAdapter::new(&availability),
+            0,
+            0,
+        )
+        .unwrap();
+    let second_read = target
+        .resolve_web_search_route_eligibility(
+            &manifest,
+            declaration,
+            &V3AvailabilitySchedulingAdapter::new(&availability),
+            0,
+            0,
+        )
+        .unwrap();
+
+    assert!(eligible.eligible);
+    assert_eq!(eligible.eligible_candidates, vec!["search"]);
+    assert!(second_read.eligible);
+    assert_eq!(
+        availability.calls.lock().unwrap().as_slice(),
+        ["search:ks:m", "search:ks:m"],
+        "eligibility reads scheduling state without advancing a cursor or making an attempt"
+    );
+}
+
+#[test]
+fn web_search_route_eligibility_is_false_without_declaration_or_when_all_cool_down() {
+    let manifest = web_search_manifest(&["text", "tools", "web_search"]);
+    let router = V3VirtualRouter::default();
+    let target = V3TargetInterpreter::default();
+
+    let absent = web_search_declaration(
+        &manifest,
+        &router,
+        V3RouterRequestFacts {
+            entry_protocol: "responses".into(),
+            client_model: Some("direct.model".into()),
+            capabilities: BTreeSet::from(["web_search".into()]),
+            input_tokens: 10,
+            route_classification: test_route("web_search", &["web_search", "default"]),
+        },
+    );
+    assert!(
+        !target
+            .resolve_web_search_route_eligibility(
+                &manifest,
+                absent,
+                &V3AvailabilitySchedulingAdapter::new(&Availability {
+                    blocked: BTreeSet::new()
+                }),
+                0,
+                0
+            )
+            .unwrap()
+            .eligible
+    );
+
+    let declared = web_search_declaration(
+        &manifest,
+        &router,
+        V3RouterRequestFacts {
+            entry_protocol: "responses".into(),
+            client_model: Some("client".into()),
+            capabilities: BTreeSet::from(["web_search".into()]),
+            input_tokens: 10,
+            route_classification: test_route("web_search", &["web_search", "default"]),
+        },
+    );
+    let ineligible = target
+        .resolve_web_search_route_eligibility(
+            &manifest,
+            declared.clone(),
+            &V3AvailabilitySchedulingAdapter::new(&Availability {
+                blocked: BTreeSet::from(["search:ks:m".into()]),
+            }),
+            0,
+            0,
+        )
+        .unwrap();
+
+    assert!(declared.declaration.declared);
+    assert!(!ineligible.eligible);
+    assert!(ineligible.eligible_candidates.is_empty());
 }
 
 #[test]

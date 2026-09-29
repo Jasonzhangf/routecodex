@@ -2,6 +2,11 @@ use super::anthropic_codec::{V3AnthropicCodecError, V3AnthropicResponsesProjecti
 use serde_json::{json, Map, Value};
 
 pub(super) fn anthropic_tool_as_responses_function_tool(tool: &Map<String, Value>) -> Value {
+    if tool.get("type").and_then(Value::as_str) == Some("web_search_20250305") {
+        let mut canonical = tool.clone();
+        canonical.insert("type".to_string(), Value::String("web_search".to_string()));
+        return Value::Object(canonical);
+    }
     let mut output = Map::new();
     output.insert("type".to_string(), Value::String("function".to_string()));
     output.insert(

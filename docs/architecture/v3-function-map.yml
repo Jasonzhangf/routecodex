@@ -3846,8 +3846,11 @@ features:
     tool/result pairing, provider compat owns wire shape only.
   design:
   - docs/goals/v3-web-search-servertool-state-machine-proposal.md
+  - docs/goals/v3-web-search-route-tool-exposure-20260928.md
   resource_bindings:
   - v3.servertool.state_machine_control
+  - v3.web_search.route_declaration
+  - v3.web_search.route_eligibility
   - v3.web_search.execution_mode
   - v3.web_search.backend_binding
   - v3.web_search.hook_request
@@ -3882,8 +3885,15 @@ features:
   - v3-web-search-sm-07
   - v3-web-search-sm-08
   - v3-hooks-sidecar-web-search-01
+  - v3-web-search-route-exposure-00
+  - v3-web-search-route-exposure-01
+  - v3-web-search-route-exposure-02
+  - v3-web-search-route-exposure-03
+  - v3-web-search-route-exposure-04
   allowed_paths:
   - docs/goals/v3-web-search-servertool-state-machine-proposal.md
+  - docs/goals/v3-web-search-route-tool-exposure-20260928.md
+  - docs/architecture/dagpipe/v3.operation_runner.request.graph.json
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
