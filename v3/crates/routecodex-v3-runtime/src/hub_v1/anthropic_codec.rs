@@ -485,7 +485,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     project_responses_text_as_anthropic_output_config(&mut output, responses_request_extension)?;
     validate_responses_cache_and_store_for_anthropic(responses_request_extension)?;
     project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
-    for key in ["temperature", "top_p", "top_k"] {
+    for key in ["temperature", "top_p", "top_k", "service_tier"] {
         if let Some(value) = object.get(key) {
             output.insert(key.to_string(), value.to_owned());
         }

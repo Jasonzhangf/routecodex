@@ -123,6 +123,7 @@
    "stop_sequences",
    "metadata",
    "store",
+   "service_tier",
    "reasoning_effort",
    "reasoning_budget_tokens",
    "reasoning_summary_policy",
