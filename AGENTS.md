@@ -12,7 +12,7 @@
 - RouteCodex V4 is a refactor of V3 and is not connected to the production baseline.
 - RouteCodex V2 is retired completely. Do not retain or restore a V2 runtime, V2 config reader, V2 migration path, or V2 backup.
 - Runtime, routing, protocol projection, provider execution, lifecycle, and CLI live in the `v3/` Rust workspace.
-- Installed command: `rccv3`. Default authoring: `~/.rcc/config.v3.toml`.
+- Installed command: `rccv3`. Default V3 authoring file and active local 4444 route config: `~/.rcc/config.toml`; verify with `rccv3 config check -c ~/.rcc/config.toml` and `rccv3 status -c ~/.rcc/config.toml`. Debug samples: `~/.rcc/codex-samples`; locate a failing request by endpoint, port and request ID before replay.
 - `routecodex` and `rcc` are compatibility shims; do not create new runtime or config ownership under them.
 
 ## Semantic Invariants
@@ -20,7 +20,7 @@
 - **Highest protocol priority: RouteCodex is a transparent proxy whose goal is to maximize successful pass-through.** Field and protocol-shape validation selects mappings and supplies diagnostics; it is never, by itself, a reason to reject a client request or provider response. Preserve unknown or unrepresentable business fields as opaque data through the paired request/response cycle. Repair the responsible mapping; do not fail locally, silently drop data, or change its meaning. Actual transport, provider, and internal execution failures remain explicit in their owning error path.
 - General safety, ablation, rule precedence, and review policy inherit the global AGENTS.md. This section adds RouteCodex protocol and ownership constraints.
 - The runtime is a fixed skeleton configured by typed declarations. Data-plane payloads and control-plane resources remain physically separate.
-- Proxy behavior stays transparent: preserve request, response, history, and observable protocol meaning.
+- Proxy behavior stays transparent: maximize cross-protocol compatibility and connectivity while preserving request, response, history, and observable protocol meaning. Extra semantic validation must not reject a passable request or intercept a compatible response.
 - Every request enters as JSON. Inbound only performs lossless request/response normalization into Chat Process: it preserves every field, maps Chat semantics into the canonical Chat shape, and carries non-Chat semantics as extensions. Inbound never filters or rewrites payload meaning.
 - Relay payload rewriting is owned only by request/response Chat Process. Direct payload rewriting is owned only by registered Direct hooks. No other stage rewrites payloads.
 - Outbound projects canonical Chat plus extensions into the target standard protocol. It forwards business fields without a known compatible mapping as opaque original values, preserving their inverse association; allowlists and denylists may choose a known mapping, but may not discard or locally reject business fields.
@@ -54,6 +54,7 @@
 
 ## Architecture Truth
 
+- DAGPipe 业务目标、逐模块接入状态与静态图治理入口：`docs/architecture/dagpipe/README.md`。先审业务图，再核对现有 map 和代码；未登记图不代表模块已接入。DAGPipe CLI 校验只证明静态拓扑，不能证明 Operator 编译或代理真实入口。
 - Resource relations: `docs/architecture/v3-resource-operation-map.yml`.
 - Feature owner and allowed/forbidden paths: `docs/architecture/v3-function-map.yml`.
 - Request/response/error caller edges: `docs/architecture/v3-mainline-call-map.yml`.

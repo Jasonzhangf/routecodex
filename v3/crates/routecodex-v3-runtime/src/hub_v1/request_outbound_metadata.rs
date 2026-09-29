@@ -123,6 +123,24 @@ pub(super) fn project_openai_chat_reasoning_summary_policy(
     Ok(())
 }
 
+pub(super) fn project_openai_chat_reasoning_effort_from_reasoning(
+    row: &mut Map<String, Value>,
+) -> Option<Value> {
+    let reasoning = row.remove("reasoning")?;
+    let effort = reasoning
+        .get("effort")
+        .and_then(Value::as_str)
+        .or_else(|| reasoning.as_str())
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())?
+        .to_ascii_lowercase();
+    (!matches!(
+        effort.as_str(),
+        "none" | "off" | "disabled" | "disable" | "false"
+    ))
+    .then(|| Value::String(effort))
+}
+
 pub(super) fn project_openai_chat_reasoning_context_policy(
     projected: &mut Value,
 ) -> Result<(), String> {
