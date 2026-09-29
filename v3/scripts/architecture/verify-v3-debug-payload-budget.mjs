@@ -139,8 +139,58 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /persist_v3_error_evidence_payload[\s\S]*?state\.codex_sample_store\.persist\([\s\S]*?payload,[\s\S]*?true,/,
-  "Error evidence must force-write samples even when sampling is disabled",
+  /persist_v3_error_evidence_payload[\s\S]*?state\s*\.codex_sample_store\s*\.enqueue_persist\([\s\S]*?V3CodexSamplePersistJob[\s\S]*?force:\s*true,/,
+  "Error evidence must enqueue force-write samples even when sampling is disabled",
+);
+requireMatch(
+  sampleStore,
+  /async fn run_v3_codex_sample_persist_worker[\s\S]*persist_v3_codex_sample_persist_job[\s\S]*V3CodexSamplePersistQueueMessage::Barrier/,
+  "The single Debug worker must drain queued sample writes and provide a completion barrier",
+);
+requireMatch(
+  sampleStore,
+  /fn record_v3_codex_sample_persist_failure[\s\S]*failures\.record[\s\S]*codex sample persist failed/,
+  "Asynchronous sample write failures must be retained in a bounded ledger and logged",
+);
+requireMatch(
+  sampleStore,
+  /mpsc::channel\(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY\)[\s\S]*try_send[\s\S]*TrySendError::Full/,
+  "Sample persistence must use a bounded queue and report overload without awaiting capacity",
+);
+requireMatch(
+  sampleStore,
+  /queued_payload_bytes:[\s\S]*Semaphore[\s\S]*serialized_v3_codex_sample_payload_size[\s\S]*try_acquire_many_owned/,
+  "Queued and in-flight sample payload bytes must stay within the declared byte budget",
+);
+requireMatch(
+  sampleStore,
+  /fn persist_failure_snapshot[\s\S]*\.snapshot\(\)/,
+  "A barrier must observe failures without clearing the shutdown failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub async fn shutdown[\s\S]*self\.store\.persist_failures\(\)/,
+  "Worker shutdown must report the residual failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub fn persist_failures[\s\S]*ledger\.take\(\)/,
+  "Terminal failure reporting must drain the ledger only at shutdown",
+);
+requireMatch(
+  sampleStore,
+  /V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT[\s\S]*additional_failures[\s\S]*additional codex sample persistence failures omitted/,
+  "Failure ledger overflow must remain bounded and report its omitted count",
+);
+forbidMatch(
+  sampleStore,
+  /UnboundedSender|UnboundedReceiver|unbounded_channel/,
+  "Sample persistence must not retain an unbounded payload queue",
+);
+forbidMatch(
+  sampleStore,
+  /persist_failures\.lock\(\)\.ok\(\)/,
+  "Sample persistence failures must never be dropped when the failure ledger lock is poisoned",
 );
 requireMatch(
   serverLiveSnapshot,

@@ -1,14 +1,33 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Error snapshots are retained by request-id directory.  A request may have
 /// client request/response plus provider request/response files, but those four
 /// files are one evidence record and must consume one retention slot.
 pub const V3_CODEX_SAMPLE_REQUEST_RETENTION: usize = 100;
+const V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY: usize = 64;
+const V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET: u32 = 64 * 1024 * 1024;
+const V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT: usize = 256;
+
+enum V3CodexSamplePersistQueueMessage {
+    Persist {
+        job: V3CodexSamplePersistJob,
+        _payload_permit: tokio::sync::OwnedSemaphorePermit,
+    },
+    Barrier {
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+}
+
+#[derive(Default)]
+struct V3CodexSamplePersistFailureLedger {
+    failures: Vec<V3CodexSamplePersistFailure>,
+    additional_failures: usize,
+}
 
 pub struct V3CodexSampleStore {
     enabled: bool,
@@ -17,6 +36,125 @@ pub struct V3CodexSampleStore {
     /// 与 `--snap` 运行时授权（full_codex_sampling）组合传入。
     error_samples_only: bool,
     persistence_guard: Mutex<()>,
+    enqueue: RwLock<Option<tokio::sync::mpsc::Sender<V3CodexSamplePersistQueueMessage>>>,
+    queued_payload_bytes: Arc<tokio::sync::Semaphore>,
+    persist_failures: Mutex<V3CodexSamplePersistFailureLedger>,
+}
+
+pub struct V3CodexSamplePersistHandle {
+    stop: Option<tokio::sync::mpsc::Sender<V3CodexSamplePersistQueueMessage>>,
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    store: Arc<V3CodexSampleStore>,
+}
+
+impl std::fmt::Debug for V3CodexSamplePersistHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("V3CodexSamplePersistHandle")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone)]
+pub struct V3CodexSamplePersistJob {
+    pub port: u16,
+    pub entry_protocol: String,
+    pub endpoint: String,
+    pub request_id: String,
+    pub file_name: String,
+    pub payload: Arc<Value>,
+    pub force: bool,
+    pub status: Option<u16>,
+}
+
+impl Default for V3CodexSamplePersistJob {
+    fn default() -> Self {
+        Self {
+            port: 10000,
+            entry_protocol: "responses".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            request_id: "req-test".to_string(),
+            file_name: "request.json".to_string(),
+            payload: Arc::new(Value::Object(Map::new())),
+            force: false,
+            status: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct V3CodexSamplePersistFailure {
+    pub request_id: String,
+    pub file_name: String,
+    pub reason: String,
+}
+
+impl std::fmt::Display for V3CodexSamplePersistFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "request={} file={} reason={}",
+            self.request_id, self.file_name, self.reason
+        )
+    }
+}
+
+impl V3CodexSamplePersistHandle {
+    /// Wait until every accepted persistence job ahead of this barrier finishes.
+    pub async fn wait_until_idle(&self) -> Result<(), String> {
+        let sender = self
+            .store
+            .enqueue
+            .read()
+            .map_err(|error| format!("codex sample persist queue lock poisoned: {error}"))?
+            .clone()
+            .or_else(|| self.stop.as_ref().cloned())
+            .ok_or_else(|| "codex sample persist worker is not running".to_string())?;
+        let (reply, result) = tokio::sync::oneshot::channel();
+        sender
+            .send(V3CodexSamplePersistQueueMessage::Barrier { reply })
+            .await
+            .map_err(|_| "codex sample persist queue unavailable".to_string())?;
+        result
+            .await
+            .map_err(|error| format!("codex sample persist barrier failed: {error}"))?
+    }
+
+    /// Await worker termination and return failures not already reported by a barrier.
+    pub async fn shutdown(&mut self) -> Vec<V3CodexSamplePersistFailure> {
+        self.store
+            .enqueue
+            .write()
+            .unwrap_or_else(|error| {
+                eprintln!("codex sample persist queue lock poisoned during shutdown: {error}");
+                error.into_inner()
+            })
+            .take();
+        self.stop.take();
+        let task = self
+            .task
+            .lock()
+            .unwrap_or_else(|error| {
+                eprintln!("codex sample persist task lock poisoned: {error}");
+                error.into_inner()
+            })
+            .take();
+        if let Some(task) = task.as_ref() {
+            while !task.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        }
+        if let Some(task) = task {
+            if let Err(error) = task.await {
+                eprintln!("codex sample persist worker task failed: {error}");
+            }
+        }
+        self.store.persist_failures()
+    }
+
+    pub fn persist_failures(&self) -> Vec<V3CodexSamplePersistFailure> {
+        self.store.persist_failures()
+    }
 }
 
 impl V3CodexSampleStore {
@@ -26,6 +164,11 @@ impl V3CodexSampleStore {
             retention,
             error_samples_only,
             persistence_guard: Mutex::new(()),
+            enqueue: RwLock::new(None),
+            queued_payload_bytes: Arc::new(tokio::sync::Semaphore::new(
+                V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize,
+            )),
+            persist_failures: Mutex::new(V3CodexSamplePersistFailureLedger::default()),
         }
     }
 
@@ -100,6 +243,300 @@ impl V3CodexSampleStore {
 
     pub fn enforce_listener_retention(&self, _port: u16) -> Result<(), String> {
         self.enforce_retention()
+    }
+
+    pub fn persist_failures(&self) -> Vec<V3CodexSamplePersistFailure> {
+        let mut ledger = self.persist_failures.lock().unwrap_or_else(|error| {
+            eprintln!("codex sample persist failure ledger lock poisoned: {error}");
+            error.into_inner()
+        });
+        ledger.take()
+    }
+
+    fn persist_failure_snapshot(&self) -> Vec<V3CodexSamplePersistFailure> {
+        self.persist_failures
+            .lock()
+            .unwrap_or_else(|error| {
+                eprintln!("codex sample persist failure ledger lock poisoned: {error}");
+                error.into_inner()
+            })
+            .snapshot()
+    }
+
+    /// Spawn the single async owner for sample persistence.
+    pub fn start_persist_worker(self: &Arc<Self>) -> tokio::io::Result<V3CodexSamplePersistHandle> {
+        let mut enqueue = self.enqueue.write().map_err(|error| {
+            tokio::io::Error::other(format!("codex sample persist queue lock poisoned: {error}"))
+        })?;
+        if enqueue.is_some() {
+            return Err(tokio::io::Error::new(
+                tokio::io::ErrorKind::AlreadyExists,
+                "codex sample persist worker already started",
+            ));
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY);
+        let stop_tx = tx.clone();
+        let worker_store = Arc::clone(self);
+        *enqueue = Some(tx.clone());
+        drop(enqueue);
+        let task = tokio::spawn(run_v3_codex_sample_persist_worker(worker_store, rx));
+
+        Ok(V3CodexSamplePersistHandle {
+            stop: Some(stop_tx),
+            task: Mutex::new(Some(task)),
+            store: Arc::clone(self),
+        })
+    }
+
+    /// Hot-path enqueue owner. A rejected diagnostic write is reported out of band so it
+    /// cannot turn a passable business request into a server error.
+    pub fn enqueue_persist(self: &Arc<Self>, job: V3CodexSamplePersistJob) -> Result<(), String> {
+        let failure_request_id = job.request_id.clone();
+        let failure_file_name = job.file_name.clone();
+        let enqueue = match self.enqueue.read() {
+            Ok(enqueue) => enqueue.clone(),
+            Err(error) => {
+                record_v3_codex_sample_persist_failure(
+                    self,
+                    failure_request_id,
+                    failure_file_name,
+                    format!("codex sample persist queue lock poisoned: {error}"),
+                );
+                return Ok(());
+            }
+        };
+        let Some(enqueue) = enqueue else {
+            record_v3_codex_sample_persist_failure(
+                self,
+                failure_request_id,
+                failure_file_name,
+                "codex sample persist worker is not running".to_string(),
+            );
+            return Ok(());
+        };
+        let payload_size = match serialized_v3_codex_sample_payload_size(&job.payload) {
+            Ok(payload_size) => payload_size,
+            Err(error) => {
+                record_v3_codex_sample_persist_failure(
+                    self,
+                    failure_request_id,
+                    failure_file_name,
+                    format!("codex sample payload size could not be measured: {error}"),
+                );
+                return Ok(());
+            }
+        };
+        let payload_permits = match u32::try_from(payload_size) {
+            Ok(payload_permits) => payload_permits,
+            Err(_) => {
+                record_v3_codex_sample_persist_failure(
+                    self,
+                    failure_request_id,
+                    failure_file_name,
+                    "payload exceeds 64 MiB persistence budget".to_string(),
+                );
+                return Ok(());
+            }
+        };
+        let payload_permit =
+            match Arc::clone(&self.queued_payload_bytes).try_acquire_many_owned(payload_permits) {
+                Ok(payload_permit) => payload_permit,
+                Err(_) => {
+                    record_v3_codex_sample_persist_failure(
+                        self,
+                        failure_request_id,
+                        failure_file_name,
+                        "payload exceeds 64 MiB persistence budget".to_string(),
+                    );
+                    return Ok(());
+                }
+            };
+        let message = V3CodexSamplePersistQueueMessage::Persist {
+            job,
+            _payload_permit: payload_permit,
+        };
+        match enqueue.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(
+                V3CodexSamplePersistQueueMessage::Persist { job, .. },
+            )) => {
+                record_v3_codex_sample_persist_failure(
+                    self,
+                    job.request_id,
+                    job.file_name,
+                    "codex sample persist queue full".to_string(),
+                );
+                Ok(())
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(
+                V3CodexSamplePersistQueueMessage::Persist { job, .. },
+            )) => {
+                record_v3_codex_sample_persist_failure(
+                    self,
+                    job.request_id,
+                    job.file_name,
+                    "codex sample persist queue unavailable".to_string(),
+                );
+                Ok(())
+            }
+            Err(_) => unreachable!("sample persistence barriers use the awaited send path"),
+        }
+    }
+}
+
+fn serialized_v3_codex_sample_payload_size(payload: &Value) -> serde_json::Result<u64> {
+    struct CountingWriter(u64);
+
+    impl Write for CountingWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(buffer.len() as u64);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut writer = CountingWriter(0);
+    serde_json::to_writer(&mut writer, payload)?;
+    Ok(writer.0)
+}
+
+async fn run_v3_codex_sample_persist_worker(
+    store: Arc<V3CodexSampleStore>,
+    mut rx: tokio::sync::mpsc::Receiver<V3CodexSamplePersistQueueMessage>,
+) {
+    while let Some(message) = rx.recv().await {
+        match message {
+            V3CodexSamplePersistQueueMessage::Persist {
+                job,
+                _payload_permit,
+            } => {
+                persist_v3_codex_sample_persist_job(Arc::clone(&store), job).await;
+            }
+            V3CodexSamplePersistQueueMessage::Barrier { reply } => {
+                let failures = store.persist_failure_snapshot();
+                let result = if failures.is_empty() {
+                    Ok(())
+                } else {
+                    Err(failures
+                        .into_iter()
+                        .map(|failure| {
+                            format!(
+                                "request={} file={} reason={}",
+                                failure.request_id, failure.file_name, failure.reason
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; "))
+                };
+                let _ = reply.send(result);
+            }
+        }
+    }
+}
+
+async fn persist_v3_codex_sample_persist_job(
+    store: Arc<V3CodexSampleStore>,
+    job: V3CodexSamplePersistJob,
+) {
+    let failure_request_id = job.request_id.clone();
+    let failure_file_name = job.file_name.clone();
+    let io_failure_store = Arc::clone(&store);
+    let join_failure_store = Arc::clone(&store);
+    let join_failure_request_id = job.request_id.clone();
+    let join_failure_file_name = job.file_name.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = store.persist(
+            job.port,
+            &job.entry_protocol,
+            &job.endpoint,
+            &job.request_id,
+            &job.file_name,
+            &job.payload,
+            job.force,
+            job.status,
+        );
+        if let Err(error) = result {
+            record_v3_codex_sample_persist_failure(
+                &io_failure_store,
+                failure_request_id,
+                failure_file_name,
+                error,
+            );
+        }
+    })
+    .await
+    .unwrap_or_else(|error| {
+        record_v3_codex_sample_persist_failure(
+            &join_failure_store,
+            join_failure_request_id,
+            join_failure_file_name,
+            format!("codex sample persist worker join failed: {error}"),
+        );
+    })
+}
+
+fn record_v3_codex_sample_persist_failure(
+    store: &Arc<V3CodexSampleStore>,
+    request_id: String,
+    file_name: String,
+    reason: String,
+) {
+    let mut failures = store.persist_failures.lock().unwrap_or_else(|error| {
+        eprintln!("codex sample persist failure ledger lock poisoned: {error}");
+        error.into_inner()
+    });
+    let failure = V3CodexSamplePersistFailure {
+        request_id,
+        file_name,
+        reason,
+    };
+    if failures.record(failure.clone()) {
+        eprintln!("codex sample persist failed: {failure}");
+    }
+}
+
+impl V3CodexSamplePersistFailureLedger {
+    fn record(&mut self, failure: V3CodexSamplePersistFailure) -> bool {
+        if self.failures.len() < V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT {
+            self.failures.push(failure);
+            true
+        } else {
+            self.additional_failures = self.additional_failures.saturating_add(1);
+            false
+        }
+    }
+
+    fn snapshot(&self) -> Vec<V3CodexSamplePersistFailure> {
+        let mut failures = self.failures.clone();
+        if self.additional_failures > 0 {
+            failures.push(V3CodexSamplePersistFailure {
+                request_id: "multiple".to_string(),
+                file_name: "multiple".to_string(),
+                reason: format!(
+                    "{} additional codex sample persistence failures omitted",
+                    self.additional_failures
+                ),
+            });
+        }
+        failures
+    }
+
+    fn take(&mut self) -> Vec<V3CodexSamplePersistFailure> {
+        let mut failures = std::mem::take(&mut self.failures);
+        let additional_failures = std::mem::take(&mut self.additional_failures);
+        if additional_failures > 0 {
+            failures.push(V3CodexSamplePersistFailure {
+                request_id: "multiple".to_string(),
+                file_name: "multiple".to_string(),
+                reason: format!(
+                    "{additional_failures} additional codex sample persistence failures omitted"
+                ),
+            });
+        }
+        failures
     }
 }
 
@@ -279,12 +716,19 @@ fn enforce_v3_codex_sample_global_retention(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs::Permissions;
+
+    static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn with_test_home(f: impl FnOnce(&std::path::Path)) {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
-        let base =
-            std::env::temp_dir().join(format!("v3-codex-sample-store-test-{}", std::process::id()));
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let _guard = TEST_HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "v3-codex-sample-store-test-{}-{}",
+            std::process::id(),
+            seq
+        ));
         let _ = fs::remove_dir_all(&base);
         let home = base.join("home");
         fs::create_dir_all(&home).unwrap();
@@ -297,6 +741,37 @@ mod tests {
             std::env::remove_var("HOME");
         }
         let _ = fs::remove_dir_all(&base);
+    }
+
+    fn with_test_home_async<F, Fut>(f: F)
+    where
+        F: Send + 'static + FnOnce(&std::path::Path) -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let _guard = TEST_HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "v3-codex-sample-store-async-test-{}-{}",
+            std::process::id(),
+            seq
+        ));
+        let _ = fs::remove_dir_all(&base);
+        let home = base.join("home");
+        fs::create_dir_all(&home).unwrap();
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        let previous_home = previous;
+        let cleanup_base = base.clone();
+        std::thread::spawn(move || tokio::runtime::Runtime::new().unwrap().block_on(f(&base)))
+            .join()
+            .unwrap();
+        if let Some(previous) = previous_home {
+            std::env::set_var("HOME", previous);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = fs::remove_dir_all(cleanup_base);
     }
 
     fn sample_dir(home_base: &std::path::Path) -> std::path::PathBuf {
@@ -638,5 +1113,247 @@ mod tests {
             ),
             "router-gpt-5.6-sol-20260810T223407524-738231-8043"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_writes_without_business_thread_file_io() {
+        with_test_home_async(|home_base| {
+            let home_base = home_base.to_path_buf();
+            Box::pin(async move {
+                let store = Arc::new(V3CodexSampleStore::new(
+                    true,
+                    V3_CODEX_SAMPLE_REQUEST_RETENTION,
+                    false,
+                ));
+                let mut handle = store
+                    .start_persist_worker()
+                    .expect("persist worker should start");
+                store
+                    .enqueue_persist(V3CodexSamplePersistJob {
+                        port: 10000,
+                        entry_protocol: "responses".to_string(),
+                        endpoint: "/v1/responses".to_string(),
+                        request_id: "req-async".to_string(),
+                        file_name: "request.json".to_string(),
+                        payload: Arc::new(json!({"hello": "async"})),
+                        force: false,
+                        status: None,
+                    })
+                    .expect("queued sample should be accepted");
+                let _ = store.enqueue_persist(V3CodexSamplePersistJob {
+                    port: 10000,
+                    entry_protocol: "responses".to_string(),
+                    endpoint: "/v1/responses".to_string(),
+                    request_id: "req-after-stop".to_string(),
+                    file_name: "request.json".to_string(),
+                    payload: Arc::new(json!({"hello": "after-stop"})),
+                    force: false,
+                    status: None,
+                });
+                handle.shutdown().await;
+                let path = sample_dir(&home_base)
+                    .join("req-async")
+                    .join("request.json");
+                assert!(fs::read_to_string(path).unwrap().contains("async"));
+                let after_stop_path = sample_dir(&home_base)
+                    .join("req-after-stop")
+                    .join("request.json");
+                assert!(
+                    fs::read_to_string(after_stop_path)
+                        .unwrap()
+                        .contains("after-stop"),
+                    "accepted jobs must drain after stop"
+                );
+            })
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_records_explicit_failure_terminal() {
+        with_test_home_async(|home_base| {
+            let home_base = home_base.to_path_buf();
+            Box::pin(async move {
+                let store = Arc::new(V3CodexSampleStore::new(
+                    true,
+                    V3_CODEX_SAMPLE_REQUEST_RETENTION,
+                    false,
+                ));
+                fs::create_dir_all(sample_dir(&home_base)).unwrap();
+                fs::set_permissions(sample_dir(&home_base), Permissions::from_mode(0o555)).unwrap();
+                let mut handle = store
+                    .start_persist_worker()
+                    .expect("persist worker should start");
+                store
+                    .enqueue_persist(V3CodexSamplePersistJob {
+                        port: 10000,
+                        entry_protocol: "responses".to_string(),
+                        endpoint: "/v1/responses".to_string(),
+                        request_id: "req-fail".to_string(),
+                        file_name: "request.json".to_string(),
+                        payload: Arc::new(json!({"hello": "failure"})),
+                        force: false,
+                        status: None,
+                    })
+                    .expect("queued sample should be accepted");
+                let failures = handle.shutdown().await;
+                assert_eq!(
+                    failures.len(),
+                    1,
+                    "persist worker failure terminal must not be silent"
+                );
+                assert_eq!(
+                    failures[0].request_id, "req-fail",
+                    "persist failure terminal must identify the request"
+                );
+                let failure_reason = failures[0].reason.to_ascii_lowercase();
+                assert!(
+                    failure_reason.contains("create")
+                        || failure_reason.contains("permission denied")
+                );
+                assert!(
+                    handle.persist_failures().is_empty(),
+                    "shutdown must take ownership of the residual failure ledger"
+                );
+                let _ = fs::set_permissions(sample_dir(&home_base), Permissions::from_mode(0o755));
+            })
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_bounds_queue_and_reports_overload() {
+        with_test_home_async(|home_base| {
+            let home_base = home_base.to_path_buf();
+            Box::pin(async move {
+                let store = Arc::new(V3CodexSampleStore::new(
+                    true,
+                    V3_CODEX_SAMPLE_REQUEST_RETENTION,
+                    false,
+                ));
+                let persist_guard = store.persistence_guard.lock().unwrap();
+                let mut handle = store
+                    .start_persist_worker()
+                    .expect("persist worker should start");
+                store
+                    .enqueue_persist(V3CodexSamplePersistJob {
+                        port: 10000,
+                        entry_protocol: "responses".to_string(),
+                        endpoint: "/v1/responses".to_string(),
+                        request_id: "req-saturated".to_string(),
+                        file_name: "request.json".to_string(),
+                        payload: Arc::new(json!({"hello": "in-flight"})),
+                        force: false,
+                        status: None,
+                    })
+                    .expect("sampling overload must not reject the business request");
+                for _ in 0..=V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY {
+                    store
+                        .enqueue_persist(V3CodexSamplePersistJob {
+                            port: 10000,
+                            entry_protocol: "responses".to_string(),
+                            endpoint: "/v1/responses".to_string(),
+                            request_id: "req-saturated".to_string(),
+                            file_name: "request.json".to_string(),
+                            payload: Arc::new(json!({"hello": "queued"})),
+                            force: false,
+                            status: None,
+                        })
+                        .expect("sampling overload must be reported out of band");
+                }
+                drop(persist_guard);
+
+                let failures = handle.shutdown().await;
+                assert!(
+                    failures
+                        .iter()
+                        .any(|failure| failure.reason.contains("queue full")),
+                    "overload must be retained as an explicit persistence failure: {failures:?}"
+                );
+                assert!(failures.len() <= V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 1);
+                assert!(handle.persist_failures().is_empty());
+                assert!(sample_dir(&home_base)
+                    .join("req-saturated")
+                    .join("request.json")
+                    .exists());
+            })
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_async_worker_rejects_payload_over_byte_budget() {
+        let store = Arc::new(V3CodexSampleStore::new(
+            true,
+            V3_CODEX_SAMPLE_REQUEST_RETENTION,
+            false,
+        ));
+        let mut handle = store
+            .start_persist_worker()
+            .expect("persist worker should start");
+        let payload = Arc::new(json!({
+            "payload": "x".repeat(V3_CODEX_SAMPLE_PERSIST_QUEUE_BYTE_BUDGET as usize + 1)
+        }));
+
+        store
+            .enqueue_persist(V3CodexSamplePersistJob {
+                request_id: "req-byte-budget".to_string(),
+                payload,
+                ..V3CodexSamplePersistJob::default()
+            })
+            .expect("sample byte-budget exhaustion must not reject the business request");
+
+        let failures = handle.shutdown().await;
+        assert!(failures.iter().any(|failure| {
+            failure.request_id == "req-byte-budget"
+                && failure.reason.contains("64 MiB persistence budget")
+        }));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn persist_failure_barrier_keeps_ledger_when_reply_receiver_is_dropped() {
+        let store = Arc::new(V3CodexSampleStore::new(
+            true,
+            V3_CODEX_SAMPLE_REQUEST_RETENTION,
+            false,
+        ));
+        record_v3_codex_sample_persist_failure(
+            &store,
+            "req-barrier".to_string(),
+            "request.json".to_string(),
+            "disk full".to_string(),
+        );
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        let (reply, reply_receiver) = tokio::sync::oneshot::channel();
+        drop(reply_receiver);
+        sender
+            .send(V3CodexSamplePersistQueueMessage::Barrier { reply })
+            .await
+            .expect("barrier should be queued");
+        drop(sender);
+
+        run_v3_codex_sample_persist_worker(Arc::clone(&store), receiver).await;
+
+        let failures = store.persist_failures();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].request_id, "req-barrier");
+    }
+
+    #[test]
+    fn persist_failure_ledger_bounds_records_and_summarizes_overflow() {
+        let mut ledger = V3CodexSamplePersistFailureLedger::default();
+        for index in 0..(V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 3) {
+            ledger.record(V3CodexSamplePersistFailure {
+                request_id: format!("req-{index}"),
+                file_name: "request.json".to_string(),
+                reason: "disk full".to_string(),
+            });
+        }
+
+        let failures = ledger.snapshot();
+        assert_eq!(failures.len(), V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 1);
+        assert!(failures.last().unwrap().reason.contains("3 additional"));
+        assert_eq!(
+            ledger.take().len(),
+            V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT + 1
+        );
+        assert!(ledger.snapshot().is_empty());
     }
 }

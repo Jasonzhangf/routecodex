@@ -1309,16 +1309,18 @@ pub(crate) fn persist_v3_codex_sample_payload(
     file_name: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    state.codex_sample_store.persist(
-        state.server.port,
-        entry_protocol,
-        endpoint,
-        request_id,
-        file_name,
-        payload,
-        false,
-        None,
-    )
+    state
+        .codex_sample_store
+        .enqueue_persist(routecodex_v3_debug::V3CodexSamplePersistJob {
+            port: state.server.port,
+            entry_protocol: entry_protocol.to_owned(),
+            endpoint: endpoint.to_owned(),
+            request_id: request_id.to_owned(),
+            file_name: file_name.to_owned(),
+            payload: Arc::new(payload.clone()),
+            force: false,
+            status: None,
+        })
 }
 
 pub(crate) fn persist_v3_error_evidence_payload(
@@ -1330,16 +1332,18 @@ pub(crate) fn persist_v3_error_evidence_payload(
     payload: &Value,
     status: Option<u16>,
 ) -> Result<(), String> {
-    state.codex_sample_store.persist(
-        state.server.port,
-        entry_protocol,
-        endpoint,
-        request_id,
-        file_name,
-        payload,
-        true,
-        status,
-    )
+    state
+        .codex_sample_store
+        .enqueue_persist(routecodex_v3_debug::V3CodexSamplePersistJob {
+            port: state.server.port,
+            entry_protocol: entry_protocol.to_owned(),
+            endpoint: endpoint.to_owned(),
+            request_id: request_id.to_owned(),
+            file_name: file_name.to_owned(),
+            payload: Arc::new(payload.clone()),
+            force: true,
+            status,
+        })
 }
 
 pub(crate) fn v3_codex_sample_scope_allows(

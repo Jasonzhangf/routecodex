@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 78 functional paths, 464 caller edges.
+Generated view: 78 functional paths, 472 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -43,6 +43,7 @@ flowchart TD
   module_v3_cli -->|1 edges / 1 paths| module_v3_lifecycle
   module_v3_config -->|1 edges / 1 paths| module_docs__manifest
   module_v3_config -->|16 edges / 7 paths| module_v3_config
+  module_v3_debug -->|6 edges / 2 paths| module_v3_debug
   module_v3_error -->|5 edges / 1 paths| module_v3_error
   module_v3_lifecycle -->|1 edges / 1 paths| module_routecodex_v3_hooks
   module_v3_lifecycle -->|1 edges / 1 paths| module_v3_config
@@ -70,7 +71,7 @@ flowchart TD
   module_v3_runtime -->|5 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
-  module_v3_server -->|5 edges / 3 paths| module_v3_debug
+  module_v3_server -->|7 edges / 3 paths| module_v3_debug
   module_v3_server -->|3 edges / 2 paths| module_v3_error
   module_v3_server -->|4 edges / 3 paths| module_v3_runtime
   module_v3_server -->|6 edges / 5 paths| module_v3_runtime__hub_v1
@@ -91,6 +92,7 @@ flowchart TD
 | v3-cli | v3-lifecycle | 1 | `v3.server.managed_lifecycle` |
 | v3-config | docs::manifest | 1 | `v3.entry_protocol_endpoint_binding.mainline` |
 | v3-config | v3-config | 16 | `v3.config.compact_hub_v1_defaults`<br/>`v3.config.compile`<br/>`v3.config.provider_sse_timeout_projection.mainline`<br/>`v3.config.server_manifest_compile.mainline`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.entry_protocol_registry_contract.mainline`<br/>`v3.user_config.compile` |
+| v3-debug | v3-debug | 6 | `v3.codex_sample_retention_snap_scope`<br/>`v3.error.raw_wire_evidence` |
 | v3-error | v3-error | 5 | `v3.debug_error_foundation.mainline` |
 | v3-lifecycle | routecodex-v3-hooks | 1 | `v3.rcc_internal_hooks_sidecar` |
 | v3-lifecycle | v3-config | 1 | `v3.user_config.compile` |
@@ -118,7 +120,7 @@ flowchart TD
 | v3-runtime | v3-virtual-router | 5 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
-| v3-server | v3-debug | 5 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
+| v3-server | v3-debug | 7 | `v3.codex_sample_retention_snap_scope`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
 | v3-server | v3-error | 3 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 4 | `v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline` |
 | v3-server | v3-runtime::hub_v1 | 6 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
@@ -430,7 +432,7 @@ flowchart TD
 
 ## v3.codex_sample_retention_snap_scope
 
-Debug-bounded request and response copies move from explicit manifest authorization to the single V3CodexSampleStore-owned filesystem persistence without entering MetadataCenter or normal payload truth; diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 200 request directories.
+Debug-bounded request and response copies move from explicit manifest authorization through a single V3CodexSampleStore-owned queue and worker to the filesystem without entering MetadataCenter or normal payload truth. The queue bounds work to 64 jobs and 64 MiB of serialized payload across queued and in-flight writes; overload is failure-ledger reported without rejecting business requests. Barriers wait for previously accepted writes and report a non-destructive failure snapshot; worker shutdown drains the bounded ledger, including any omitted-count summary, for aggregate lifecycle reporting. Server startup starts the worker after fallible listener preparation and before listener tasks begin accepting requests. Diagnostic payloads remain verbatim, dev builds sample by default, error evidence force-writes, and each port retains at most 100 request directories.
 
 Owner feature: `v3.codex_sample_retention_snap_scope`
 
@@ -438,26 +440,46 @@ Owner feature: `v3.codex_sample_retention_snap_scope`
 flowchart TD
   subgraph c_9_v3_codex_sample_retention_snap_scope_m_v3_debug["v3-debug"]
     c_9_v3_codex_sample_retention_snap_scope_1["v3-debug<br/>V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small>"]
-    c_9_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_2["v3-debug<br/>V3CodexSampleStore::enqueue_persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_4["v3-debug<br/>run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_5["v3-debug<br/>persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_6["v3-debug<br/>V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_7["v3-debug<br/>record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_8["v3-debug<br/>V3CodexSamplePersistHandle::shutdown<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_9["v3-debug<br/>V3CodexSampleStore::persist_failures<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
   end
   subgraph c_9_v3_codex_sample_retention_snap_scope_m_v3_server["v3-server"]
     c_9_v3_codex_sample_retention_snap_scope_0["v3-server<br/>capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_9_v3_codex_sample_retention_snap_scope_3["v3-server<br/>capture_v3_responses_direct_provider_snapshots<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_10["v3-server<br/>V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_9_v3_codex_sample_retention_snap_scope_11["v3-server<br/>V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_9_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-01<br/>V3CodexSample02ManifestAuthorizationPublished → V3DebugPayloadBudgetApplied| c_9_v3_codex_sample_retention_snap_scope_1
-  c_9_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSample06RetentionEnforced| c_9_v3_codex_sample_retention_snap_scope_2
-  c_9_v3_codex_sample_retention_snap_scope_3 -->|v3-codex-sample-03<br/>V3ProviderResp14Raw → V3CodexSample06RetentionEnforced| c_9_v3_codex_sample_retention_snap_scope_2
+  c_9_v3_codex_sample_retention_snap_scope_0 -->|v3-codex-sample-02<br/>V3DebugPayloadBudgetApplied → V3CodexSamplePersistJobQueued| c_9_v3_codex_sample_retention_snap_scope_2
+  c_9_v3_codex_sample_retention_snap_scope_3 -->|v3-codex-sample-03<br/>V3ProviderResp14Raw → V3CodexSamplePersistJobQueued| c_9_v3_codex_sample_retention_snap_scope_2
+  c_9_v3_codex_sample_retention_snap_scope_4 -->|v3-codex-sample-04<br/>V3CodexSamplePersistJobQueued → V3CodexSamplePersistJobDispatched| c_9_v3_codex_sample_retention_snap_scope_5
+  c_9_v3_codex_sample_retention_snap_scope_5 -->|v3-codex-sample-05<br/>V3CodexSamplePersistJobDispatched → V3CodexSample06RetentionEnforced| c_9_v3_codex_sample_retention_snap_scope_6
+  c_9_v3_codex_sample_retention_snap_scope_5 -->|v3-codex-sample-06<br/>V3CodexSamplePersistJobFailed → V3CodexSamplePersistFailureReported| c_9_v3_codex_sample_retention_snap_scope_7
+  c_9_v3_codex_sample_retention_snap_scope_8 -->|v3-codex-sample-07<br/>V3CodexSamplePersistFailureReported → V3CodexSamplePersistFailureDrained| c_9_v3_codex_sample_retention_snap_scope_9
+  c_9_v3_codex_sample_retention_snap_scope_10 -->|v3-codex-sample-08<br/>V3CodexSamplePersistFailureDrained → V3CodexSamplePersistFailureReturned| c_9_v3_codex_sample_retention_snap_scope_8
+  c_9_v3_codex_sample_retention_snap_scope_11 -->|v3-codex-sample-09<br/>V3CodexSamplePersistFailureDrained → V3CodexSamplePersistFailureReturned| c_9_v3_codex_sample_retention_snap_scope_8
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
 | `v3-codex-sample-01` | `V3CodexSample02ManifestAuthorizationPublished` → `V3DebugPayloadBudgetApplied` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3DebugRuntime::project_payload_verbatim<br/><small>routecodex-v3-debug/src/lib.rs</small> | `v3.codex_sample_retention_snap_scope` |
-| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
-| `v3-codex-sample-03` | `V3ProviderResp14Raw` → `V3CodexSample06RetentionEnforced` | anchored | capture_v3_responses_direct_provider_snapshots<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-02` | `V3DebugPayloadBudgetApplied` → `V3CodexSamplePersistJobQueued` | anchored | capture_v3_live_raw_request<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::enqueue_persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-03` | `V3ProviderResp14Raw` → `V3CodexSamplePersistJobQueued` | anchored | capture_v3_responses_direct_provider_snapshots<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | V3CodexSampleStore::enqueue_persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-04` | `V3CodexSamplePersistJobQueued` → `V3CodexSamplePersistJobDispatched` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-05` | `V3CodexSamplePersistJobDispatched` → `V3CodexSample06RetentionEnforced` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | V3CodexSampleStore::persist<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-06` | `V3CodexSamplePersistJobFailed` → `V3CodexSamplePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-07` | `V3CodexSamplePersistFailureReported` → `V3CodexSamplePersistFailureDrained` | anchored | V3CodexSamplePersistHandle::shutdown<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | V3CodexSampleStore::persist_failures<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-08` | `V3CodexSamplePersistFailureDrained` → `V3CodexSamplePersistFailureReturned` | anchored | V3ServerAggregateHandle::shutdown<br/><small>routecodex-v3-server/src/lib.rs</small> | V3CodexSamplePersistHandle::shutdown<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
+| `v3-codex-sample-09` | `V3CodexSamplePersistFailureDrained` → `V3CodexSamplePersistFailureReturned` | anchored | V3ServerAggregateHandle::prepare_for_exec<br/><small>routecodex-v3-server/src/lib.rs</small> | V3CodexSamplePersistHandle::shutdown<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.codex_sample_retention_snap_scope` |
 
 ## v3.server.managed_lifecycle
 
-One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill.
+One Rust owner validates Config, declares aggregate instance identity, locks lifecycle operations, preserves old rcc start takeover for configured listener ports through managed control, foreign managed port-scoped release, and explicit listener PID signals, runs top-level start in the foreground with real Server console, retains hidden detached-child compatibility, publishes PID/control identity, restarts through one in-place exec with a nonce-bound restart plan when executable/snapshot overrides are needed, and gracefully stops the exact instance without broad kill while preserving terminal Codex sample persistence failures in managed status.
 
 Owner feature: `v3.managed_server_lifecycle`
 Manifest: `docs/architecture/manifests/v3.managed_server_lifecycle.mainline.yml`
@@ -1739,22 +1761,31 @@ flowchart TD
 
 ## v3.error.raw_wire_evidence
 
-Terminal Responses Relay failure flushes verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel only.
+Terminal Responses Relay failure enqueues verbatim request, Error chain, and provider wire evidence through the Server-owned failure diagnostic side channel; the shared Debug sample worker writes it to the declared filesystem resource.
 
 Owner feature: `v3.error.raw_wire_evidence`
 
 ```mermaid
 flowchart TD
+  subgraph c_42_v3_error_raw_wire_evidence_m_v3_debug["v3-debug"]
+    c_42_v3_error_raw_wire_evidence_2["v3-debug<br/>run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_42_v3_error_raw_wire_evidence_3["v3-debug<br/>persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+    c_42_v3_error_raw_wire_evidence_4["v3-debug<br/>record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small>"]
+  end
   subgraph c_42_v3_error_raw_wire_evidence_m_v3_server["v3-server"]
     c_42_v3_error_raw_wire_evidence_0["v3-server<br/>finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
     c_42_v3_error_raw_wire_evidence_1["v3-server<br/>persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small>"]
   end
-  c_42_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidenceFlushOnTerminalFailure| c_42_v3_error_raw_wire_evidence_1
+  c_42_v3_error_raw_wire_evidence_0 -->|v3-responses-relay-error-evidence-01<br/>V3Error06ClientProjected → V3ErrorEvidencePersistQueued| c_42_v3_error_raw_wire_evidence_1
+  c_42_v3_error_raw_wire_evidence_2 -->|v3-responses-relay-error-evidence-02<br/>V3ErrorEvidencePersistQueued → V3ErrorEvidenceFlushOnTerminalFailure| c_42_v3_error_raw_wire_evidence_3
+  c_42_v3_error_raw_wire_evidence_3 -->|v3-responses-relay-error-evidence-03<br/>V3ErrorEvidencePersistFailed → V3ErrorEvidencePersistFailureReported| c_42_v3_error_raw_wire_evidence_4
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-01` | `V3Error06ClientProjected` → `V3ErrorEvidencePersistQueued` | anchored | finalize_v3_responses_relay_server_output<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | persist_v3_error_evidence_payload<br/><small>routecodex-v3-server/src/live_snapshot.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-02` | `V3ErrorEvidencePersistQueued` → `V3ErrorEvidenceFlushOnTerminalFailure` | anchored | run_v3_codex_sample_persist_worker<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
+| `v3-responses-relay-error-evidence-03` | `V3ErrorEvidencePersistFailed` → `V3ErrorEvidencePersistFailureReported` | anchored | persist_v3_codex_sample_persist_job<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | record_v3_codex_sample_persist_failure<br/><small>routecodex-v3-debug/src/sample_store.rs</small> | `v3.error.raw_wire_evidence` |
 
 ## v3.servertool_center.skeleton
 

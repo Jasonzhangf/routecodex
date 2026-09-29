@@ -257,6 +257,20 @@ fn test_v3_listener_state_with_debug(
     })
 }
 
+fn start_test_codex_sample_worker(
+    state: &V3ListenerState,
+) -> (
+    tokio::runtime::Runtime,
+    routecodex_v3_debug::V3CodexSamplePersistHandle,
+) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let worker = {
+        let _runtime = runtime.enter();
+        state.codex_sample_store.start_persist_worker().unwrap()
+    };
+    (runtime, worker)
+}
+
 #[test]
 fn test_listener_state_owns_request_counter_path_beside_log_file() {
     let log_file = test_v3_console_log_file("request-counter-isolation");
@@ -405,8 +419,9 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         std::process::id()
     ));
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
 
-    let persistence_error = persist_v3_error_evidence_payload(
+    persist_v3_error_evidence_payload(
         &state,
         "responses",
         "/v1/responses",
@@ -415,7 +430,10 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         &json!({"input":"must fail explicitly"}),
         Some(502),
     )
-    .expect_err("missing HOME must not silently skip an authorized sample write");
+    .expect("authorized evidence must enter the sample worker");
+    let persistence_error = sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .expect_err("missing HOME must not silently skip an authorized sample write");
     assert!(persistence_error.contains("HOME"), "{persistence_error}");
 
     let startup_error = state
@@ -423,6 +441,7 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         .enforce_listener_retention(5555)
         .expect_err("missing HOME must fail startup retention explicitly");
     assert!(startup_error.contains("HOME"), "{startup_error}");
+    sample_runtime.block_on(sample_worker.shutdown());
 }
 
 #[tokio::test]
@@ -551,6 +570,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         Some("client-response".to_string()),
         true,
     );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let chunk = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
     let provider_observation = test_runtime_stream_observation_from_provider_event_json(json!({
         "type": "response.output_text.delta",
@@ -584,6 +604,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         &frame,
     );
     recorder.persist_initial().unwrap();
+    sample_worker.wait_until_idle().await.unwrap();
     let response_path =
         root.join(".rcc/codex-samples/openai-responses/ports/5555/terminal-only/response.json");
     let initial: Value =
@@ -602,6 +623,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         "stream chunks must not trigger synchronous full-artifact rewrites"
     );
     assert!(stream.next().await.is_none());
+    sample_worker.wait_until_idle().await.unwrap();
     let terminal: Value =
         serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
     assert!(terminal["rawSse"]
@@ -624,6 +646,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         &frame,
     );
     live_recorder.persist_initial().unwrap();
+    sample_worker.wait_until_idle().await.unwrap();
     let live_response_path =
         root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/response.json");
     let live_stream: V3ClientSseStream =
@@ -634,6 +657,7 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
     let mut live_stream = live_recorder.wrap_live(live_stream);
     assert!(live_stream.next().await.is_some());
     assert!(live_stream.next().await.is_none());
+    sample_worker.wait_until_idle().await.unwrap();
     let live_provider_response_path =
         root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json");
     let live_provider_response: Value =
@@ -655,18 +679,21 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         &frame,
     );
     failed_recorder.persist_initial().unwrap();
+    sample_worker.wait_until_idle().await.unwrap();
     let failed_response_path =
         root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json");
     fs::remove_file(&failed_response_path).unwrap();
     fs::create_dir(&failed_response_path).unwrap();
     let failed_stream: V3ClientSseStream = Box::pin(futures_util::stream::empty());
     let mut failed_stream = failed_recorder.wrap_live(failed_stream);
-    let failure = failed_stream
-        .next()
+    assert!(failed_stream.next().await.is_none());
+    let persistence_failure = sample_worker
+        .wait_until_idle()
         .await
-        .expect("capture failure must become a stream error")
-        .expect_err("terminal persistence failure must not be swallowed");
-    assert_eq!(failure.code, "codex_sample_persistence_failed");
+        .expect_err("terminal filesystem failure must remain observable");
+    assert!(persistence_failure.contains("request=live-sse-failure"));
+    assert!(persistence_failure.contains("file=response.json"));
+    sample_worker.shutdown().await;
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -689,6 +716,7 @@ async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
         Some("client-response".to_string()),
         true,
     );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
     let frame = V3Server16HttpFrame {
         status: 200,
         content_type: "text/event-stream".to_string(),
@@ -724,6 +752,7 @@ async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
     ])));
     assert!(stream.next().await.is_some());
     drop(stream);
+    sample_worker.wait_until_idle().await.unwrap();
 
     let dropped: Value =
         serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
@@ -735,6 +764,7 @@ async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
         "client disconnected before SSE replay completed"
     );
 
+    sample_worker.shutdown().await;
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -750,6 +780,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
     let media = format!("data:image/png;base64,{}", "A".repeat(16_384));
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
@@ -779,6 +810,9 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         &mut output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
 
     let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/redaction-request");
     let request = fs::read_to_string(sample_dir.join("provider-request.json")).unwrap();
@@ -803,6 +837,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         "consumed debug payload must be released after persistence"
     );
 
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -857,6 +892,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     let _home = TestHomeGuard::set(&root);
     let state =
         test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
     let output = V3AnthropicRelayRuntimeOutput {
         status: 200,
         client_response: json!({
@@ -880,6 +916,9 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         &output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
 
     let response_path = root.join(
         ".rcc/codex-samples/anthropic-messages/ports/5555/anthropic-client-response/response.json",
@@ -888,6 +927,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     assert!(response.contains("调用工具 pwd：确认当前工作目录"));
     assert!(response.contains("V3Resp03ToolReason"));
 
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -903,6 +943,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     let _home = TestHomeGuard::set(&root);
     let state =
         test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
     let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
         client_payload: V3Resp15ClientPayload {
             status: 200,
@@ -934,6 +975,9 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         &mut output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
     let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/typed-carrier");
     assert!(sample_dir.join("provider-request.json").is_file());
     assert!(sample_dir.join("provider-response.json").is_file());
@@ -1017,6 +1061,10 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     )
     .is_none());
     assert_eq!(streaming_missing_carrier.client_payload.status, 200);
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
