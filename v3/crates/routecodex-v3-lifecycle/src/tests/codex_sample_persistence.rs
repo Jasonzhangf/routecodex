@@ -1,6 +1,7 @@
 use super::*;
 
 const FAILED_EXEC_RESTART_CHILD_ENV: &str = "ROUTECODEX_TEST_FAILED_EXEC_RESTART_CHILD";
+const FAILED_EXEC_RESTART_TEST_FILTER: &str = "tests::codex_sample_persistence::failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files";
 
 struct SamplePersistenceTestEnvironment {
     previous_home: Option<std::ffi::OsString>,
@@ -237,7 +238,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "tests::codex_sample_persistence::failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files",
+                FAILED_EXEC_RESTART_TEST_FILTER,
                 "--nocapture",
             ])
             .env(FAILED_EXEC_RESTART_CHILD_ENV, root.path())
@@ -248,6 +249,14 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
             "isolated failed exec-restart process failed: status={} stdout={} stderr={}",
             output.status,
             String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let child_stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            child_stdout.contains(FAILED_EXEC_RESTART_TEST_FILTER),
+            "isolated failed exec-restart process exited without running its target test: status={} stdout={} stderr={}",
+            output.status,
+            child_stdout,
             String::from_utf8_lossy(&output.stderr)
         );
         return;
