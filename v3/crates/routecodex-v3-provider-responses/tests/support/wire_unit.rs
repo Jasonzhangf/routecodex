@@ -269,6 +269,39 @@ mod tests {
     }
 
     #[test]
+    fn wire_preserves_declared_anthropic_custom_dotted_tool_history() {
+        let mut anthropic_target = target();
+        anthropic_target.provider_type = "anthropic".into();
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"name":"mcp__mcpx.exec","input_schema":{"type":"object","properties":{"input":{"type":"string"}}}}],
+            "messages": [
+                {"role":"assistant","content":[{"type":"tool_use","id":"call_dotted","name":"mcp__mcpx.exec","input":{"input":"pwd"}}]},
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_dotted","content":"/tmp"}]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-custom-dotted",
+            anthropic_target,
+            body,
+        )
+        .expect("declared Anthropic custom tool and result must reach provider");
+        assert_eq!(wire.body()["tools"][0]["name"], "mcp__mcpx.exec");
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["name"],
+            "mcp__mcpx.exec"
+        );
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["id"],
+            "call_dotted"
+        );
+        assert_eq!(
+            wire.body()["messages"][1]["content"][0]["tool_use_id"],
+            "call_dotted"
+        );
+    }
+
+    #[test]
     fn wire_maps_legacy_functions_mcp_names_before_provider_validation() {
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
@@ -309,8 +342,9 @@ mod tests {
             ]
         });
         let expected = body.clone();
-        let wire = build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
-            .expect("historical Chat call and result must reach the next model turn");
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
+                .expect("historical Chat call and result must reach the next model turn");
         assert_eq!(wire.body(), &expected);
     }
 
@@ -323,12 +357,9 @@ mod tests {
                 "name": "read 1", "parameters": {"type": "object"}
             }}]
         });
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-invalid-declaration",
-            target(),
-            body,
-        )
-        .expect("provider decides whether its tool declaration name is acceptable");
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-invalid-declaration", target(), body)
+                .expect("provider decides whether its tool declaration name is acceptable");
         assert_eq!(wire.body()["tools"][0]["name"], "read 1");
         assert_eq!(wire.body()["tools"][0]["function"]["name"], "read 1");
     }
@@ -820,12 +851,9 @@ mod tests {
             "tools": [{"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}],
             "input": [{"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}]
         });
-        let wire = build_v3_provider_12_responses_wire_payload(
-            "req-flat-dotted-tool",
-            target(),
-            body,
-        )
-        .expect("flat declaration and call retain their exact matching name");
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-flat-dotted-tool", target(), body)
+                .expect("flat declaration and call retain their exact matching name");
         assert_eq!(wire.body()["tools"][0]["name"], "functions.exec_command");
         assert_eq!(wire.body()["input"][0]["name"], "functions.exec_command");
     }
