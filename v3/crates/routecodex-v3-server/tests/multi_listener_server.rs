@@ -4767,6 +4767,7 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
         .json(&json!({
             "model": "client-test",
             "input": "route anthropic provider through relay",
+            "service_tier": "priority",
             "stream": false
         }))
         .send()
@@ -4794,6 +4795,7 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());
+    assert_eq!(body["providerRequest"]["body"]["service_tier"], "priority");
     let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
     assert!(
         node_ids
