@@ -5,6 +5,27 @@ use routecodex_v3_provider_responses::build_v3_transport_13_responses_http_reque
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+struct AnthropicToolSearchJsonTransport;
+
+#[async_trait::async_trait]
+impl ResponsesTransport for AnthropicToolSearchJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"f433f0f7029b4727a2538edc7c6a7df0","type":"message","role":"assistant","model":"glm-5.3","content":[{"type":"tool_use","id":"call_3dqpgqh0jjwwie2wrul1zjb0","name":"mcp__rcc_probe__echo","input":{"text":"RCC_MCP_IDENTITY_BASELINE"}}],"stop_reason":"tool_use","usage":{"input_tokens":549,"output_tokens":60}}"#.to_vec(),
+        ))
+    }
+}
+
 #[test]
 fn responses_tool_search_output_provider_call_restores_identity_for_tool_followup() {
     let request = json!({
@@ -42,7 +63,10 @@ fn responses_tool_search_output_provider_call_restores_identity_for_tool_followu
     assert_eq!(response["output"][0]["namespace"], "mcp__codex_review");
     assert_eq!(response["output"][0]["name"], "review_start");
     assert_eq!(response["output"][0]["call_id"], "call_review_start");
-    assert_eq!(response["output"][0]["arguments"], "{\"repo\":\"/tmp/project\"}");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"repo\":\"/tmp/project\"}"
+    );
 
     let followup = json!({
         "tools": request["tools"],
@@ -80,11 +104,103 @@ fn responses_tool_search_output_provider_call_restores_identity_for_tool_followu
     );
     let provider_result = messages
         .iter()
-        .find(|message| {
-            message["tool_call_id"] == "call_review_start" && message["role"] == "tool"
-        })
+        .find(|message| message["tool_call_id"] == "call_review_start" && message["role"] == "tool")
         .expect("provider history must retain the discovered MCP result");
     assert_eq!(provider_result["content"], "review started");
+}
+
+#[tokio::test]
+async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundtrip() {
+    std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
+    std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "mcp-tool-search-json-relay-session",
+            )
+            .expect("session scope"),
+            request_id: "req-mcp-tool-search-json-relay".to_string(),
+            payload: json!({
+                "model":"client-model",
+                "stream":false,
+                "tools":[{"type":"tool_search"}],
+                "input":[
+                    {"type":"tool_search_call","call_id":"call_search_rcc_baseline","execution":"client","arguments":{"query":"rcc probe echo"}},
+                    {"type":"tool_search_output","call_id":"call_search_rcc_baseline","execution":"client","tools":[{"type":"namespace","name":"mcp__rcc_probe","tools":[{"type":"function","name":"echo","description":"Echo the supplied text exactly","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}]}
+                ]
+            }),
+        },
+        &AnthropicToolSearchJsonTransport,
+        None,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Anthropic JSON response must traverse the full Relay runtime");
+
+    assert_eq!(output.status, 200);
+    let V3ResponsesRelayClientBody::Json(response) = output.client_body else {
+        panic!("non-streaming request must return a JSON response");
+    };
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["namespace"], "mcp__rcc_probe");
+    assert_eq!(response["output"][0]["name"], "echo");
+    assert_eq!(
+        response["output"][0]["call_id"],
+        "call_3dqpgqh0jjwwie2wrul1zjb0"
+    );
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"text\":\"RCC_MCP_IDENTITY_BASELINE\"}"
+    );
+
+    let followup = json!({
+        "tools": [{"type":"tool_search"}],
+        "input": [
+            {"type":"tool_search_call","call_id":"call_search_rcc_baseline","execution":"client","arguments":{"query":"rcc probe echo"}},
+            {"type":"tool_search_output","call_id":"call_search_rcc_baseline","execution":"client","tools":[{"type":"namespace","name":"mcp__rcc_probe","tools":[{"type":"function","name":"echo","description":"Echo the supplied text exactly","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}]},
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_3dqpgqh0jjwwie2wrul1zjb0","output":"RCC_MCP_FOLLOWUP_OK"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&followup)
+        .expect("the restored function call and result must normalize for the follow-up turn");
+    let anthropic_request =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
+            .expect("the follow-up must preserve the MCP dispatch identity to Anthropic");
+    let tool_use = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_use" && part["id"] == "call_3dqpgqh0jjwwie2wrul1zjb0")
+        .expect("provider history must preserve the matching MCP tool call");
+    assert_eq!(tool_use["name"], "mcp__rcc_probe__echo");
+    assert_eq!(tool_use["input"]["text"], "RCC_MCP_IDENTITY_BASELINE");
+    let tool_result = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| {
+            part["type"] == "tool_result" && part["tool_use_id"] == "call_3dqpgqh0jjwwie2wrul1zjb0"
+        })
+        .expect("provider history must preserve the matching MCP result");
+    assert_eq!(tool_result["content"], "RCC_MCP_FOLLOWUP_OK");
 }
 
 #[tokio::test]
