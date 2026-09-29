@@ -33,6 +33,8 @@ rg -n "feature_id: ${rcc_task_feature}" \
 npm run verify:v3-architecture-ci
 ```
 
+For runtime code changes, passing local gates on the exact candidate immediately triggers steps 9–10. Run GitHub PR CI in parallel; pending remote CI does not delay local candidate runtime acceptance.
+
 9. Runtime-impacting change: load `references/50-rcc-config-ssot.md`; prove build, install, config check, managed restart, all-listener health, and same-entry replay. `rccv3 restart` controls an existing instance and exits non-zero with `NotRunning` when none is live, leaving the service down; a non-zero restart exit or a status that is not `running` is an incomplete step. Stop this lifecycle path and record the blocker. Do not substitute `start` or another lifecycle action unless that action is explicitly authorized by the applicable project contract or user.
 10. If a failing runtime sample exists, include its exact replay or same-entry semantic equivalent in step 9 evidence. For tool/function-call flows, verify the full client round trip: tool identity/namespace, complete arguments, actual client execution receipt/output, and any follow-up request; HTTP 200 or `requires_action` alone is not tool success. Review only after verification; do not repeat an unchanged replay solely for this step.
 
@@ -51,6 +53,9 @@ required by global `AGENTS.md` L3: Codex Review and AGY Review. Bind both to the
 same validated candidate SHA and apply their shared review standards, project
 Semantic Invariants, and mapped owner/edge/gate bindings. Do not duplicate the
 shared checklist or historical-finding policy here.
+Merge still requires applicable review and PR CI PASS. After merge, rebuild,
+install, managed restart, and replay from `main`; candidate acceptance does not
+prove the merged runtime.
 
 ## Routes
 
