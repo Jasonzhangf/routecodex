@@ -83,6 +83,20 @@ const cases = [
     diagnostic: /pending_message|request handler/,
   },
   {
+    name: 'full pending slot stops Close polling',
+    file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+    from: 'client_message = socket.next() => {',
+    to: 'client_message = socket.next(), if pending_message.is_none() => {',
+    diagnostic: /request handler|Provider-pending/,
+  },
+  {
+    name: 'queue overflow has no visible client error',
+    file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
+    from: '"response.create queue capacity exceeded while another response.create is in flight"',
+    to: '"queue overflow ignored"',
+    diagnostic: /visible queue overflow/,
+  },
+  {
     name: 'Close does not signal typed cancellation',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
     from: 'Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {\n                        provider_cancellation.cancel();',
@@ -152,6 +166,13 @@ const cases = [
     from: 'responses_websocket_client_disconnect_during_provider_operation',
     to: 'responses_websocket_disconnect_test_removed',
     diagnostic: /responses_websocket_client_disconnect_during_provider_operation/,
+  },
+  {
+    name: 'queued create then Close regression test removed',
+    file: 'v3/crates/routecodex-v3-server/tests/node02_websocket_ingress.rs',
+    from: 'responses_websocket_queued_create_then_close_cancels_pending_provider',
+    to: 'queued_create_then_close_test_removed',
+    diagnostic: /responses_websocket_queued_create_then_close_cancels_pending_provider/,
   },
   {
     name: 'map owner removed',

@@ -243,32 +243,44 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     };
     tokio::pin!(operation);
     let mut pending_message = None;
-    let (client_disconnected, outcome) = loop {
+    let (client_disconnected, queue_overflow, outcome) = loop {
         tokio::select! {
             biased;
-            client_message = socket.next(), if pending_message.is_none() => {
+            client_message = socket.next() => {
                 match client_message {
                     Some(Ok(Message::Ping(payload))) => {
                         if socket.send(Message::Pong(payload)).await.is_err() {
                             provider_cancellation.cancel();
-                            break (true, None);
+                            break (true, false, None);
                         }
                     }
                     Some(Ok(Message::Pong(_))) => {}
                     Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                        if pending_message.is_some() {
+                            provider_cancellation.cancel();
+                            break (false, true, None);
+                        }
                         pending_message = Some(message);
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
                         provider_cancellation.cancel();
-                        break (true, None);
+                        break (true, false, None);
                     }
                 }
             }
-            outcome = &mut operation => break (false, outcome),
+            outcome = &mut operation => break (false, false, outcome),
         }
     };
-    if client_disconnected {
+    if client_disconnected || queue_overflow {
         let _ = operation.await;
+        if queue_overflow {
+            send_responses_websocket_error(
+                socket,
+                "invalid_client_event",
+                "response.create queue capacity exceeded while another response.create is in flight",
+            )
+            .await?;
+        }
         return Err(());
     }
     let Some(outcome) = outcome else {

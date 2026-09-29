@@ -109,9 +109,13 @@ if (handlerStart < 0 || relayStart <= handlerStart) {
     'execute_responses_direct_server_outcome_with_cancellation(',
     'execute_responses_relay_websocket_output(',
     'pending_message = Some(message);',
-    'client_message = socket.next(), if pending_message.is_none() =>',
+    'client_message = socket.next() =>',
     'let _ = operation.await;',
   ]) requireText(files.websocket + ': request handler', handler, phrase);
+  requirePattern(files.websocket + ': single-slot overflow', handler,
+    /Some\(Ok\(message @ \(Message::Text\(_\) \| Message::Binary\(_\)\)\)\) => \{\s*if pending_message\.is_some\(\) \{\s*provider_cancellation\.cancel\(\);\s*break \(false, true, None\);\s*\}\s*pending_message = Some\(message\);/);
+  requirePattern(files.websocket + ': visible queue overflow', handler,
+    /if client_disconnected \|\| queue_overflow \{\s*let _ = operation\.await;\s*if queue_overflow \{\s*send_responses_websocket_error\(\s*socket,\s*"invalid_client_event",\s*"response\.create queue capacity exceeded while another response\.create is in flight",/);
   const directBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::Direct => Some(');
   const relayBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::Relay => Some(');
   const pendingBranchStart = handler.indexOf('V3EntryProtocolExecutionMode::PendingNotImplemented => None');
@@ -126,13 +130,15 @@ if (handlerStart < 0 || relayStart <= handlerStart) {
       /execute_responses_relay_websocket_output\([\s\S]*?provider_cancellation\.clone\(\),/);
   }
   requirePattern(files.websocket + ': Close cancellation', handler,
-    /Some\(Ok\(Message::Close\(_\)\)\) \| None \| Some\(Err\(_\)\) => \{\s*provider_cancellation\.cancel\(\);\s*break \(true, None\);/);
+    /Some\(Ok\(Message::Close\(_\)\)\) \| None \| Some\(Err\(_\)\) => \{\s*provider_cancellation\.cancel\(\);\s*break \(true, false, None\);/);
   requirePattern(files.websocket + ': cancellation drain', handler,
-    /if client_disconnected \{\s*let _ = operation\.await;\s*return Err\(\(\)\);/);
+    /if client_disconnected \|\| queue_overflow \{\s*let _ = operation\.await;[\s\S]*?return Err\(\(\)\);/);
 }
 for (const phrase of [
   'responses_websocket_real_endpoint_captures_body_without_protocol_discriminator',
   'responses_websocket_client_disconnect_during_provider_operation',
+  'responses_websocket_queued_create_then_close_cancels_pending_provider',
+  'responses_websocket_queue_overflow_reports_error_and_cancels_provider',
   'responses_websocket_queues_next_create_without_reordering',
   'provider must observe cancellation before it sends a response',
 ]) requireText(files.node02Tests, text.node02Tests, phrase);
@@ -238,8 +244,8 @@ if (wsStart < 0 || wsEnd <= wsStart) {
 
 
 const clientSocketPolls = text.websocket.match(/client_message = socket\.next\(\) =>/g) ?? [];
-if (clientSocketPolls.length !== 2) {
-  failures.push(files.websocket + ': expected Direct and Relay WebSocket stream client disconnect polling, got ' + clientSocketPolls.length);
+if (clientSocketPolls.length !== 3) {
+  failures.push(files.websocket + ': expected Provider-pending, Direct stream, and Relay stream client socket polling, got ' + clientSocketPolls.length);
 }
 const runtimeSseDecodeGuards = text.websocket.match(/match decoder\.push\(build_v3_sse_transport_in_01_raw_chunk\(&chunk\)\) \{\s*Ok\(frames\) => frames,\s*Err\(error\) => \{\s*return send_responses_websocket_error\(\s*socket,\s*"runtime_stream_error",/g) ?? [];
 if (runtimeSseDecodeGuards.length !== 2) {

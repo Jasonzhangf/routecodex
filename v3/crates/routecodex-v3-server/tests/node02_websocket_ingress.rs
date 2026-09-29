@@ -168,10 +168,18 @@ async fn responses_websocket_real_endpoint_captures_body_without_protocol_discri
     std::env::remove_var("V3_NODE02_WS_TEST_KEY");
 }
 
-#[tokio::test]
-async fn responses_websocket_client_disconnect_during_provider_operation() {
+async fn assert_client_disconnect_during_provider_operation(
+    queue_second_create: bool,
+    queue_overflow: bool,
+) {
     let _lock = TEST_LOCK.lock().await;
-    let _counter = RequestIdCounterGuard::new("disconnect");
+    let _counter = RequestIdCounterGuard::new(if queue_overflow {
+        "queue-overflow"
+    } else if queue_second_create {
+        "queued-disconnect"
+    } else {
+        "disconnect"
+    });
     let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider_url = format!(
         "ws://{}/v1/responses",
@@ -217,7 +225,37 @@ async fn responses_websocket_client_disconnect_during_provider_operation() {
         .unwrap();
     assert_eq!(provider_value["type"], "response.create");
 
-    client.close(None).await.unwrap();
+    if queue_second_create {
+        client
+            .send(Message::Text(
+                json!({"type": "response.create", "model": "test", "input": "queued"}).to_string(),
+            ))
+            .await
+            .unwrap();
+    }
+    if queue_overflow {
+        client
+            .send(Message::Text(
+                json!({"type": "response.create", "model": "test", "input": "overflow"})
+                    .to_string(),
+            ))
+            .await
+            .unwrap();
+        let event = timeout(Duration::from_secs(5), client.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let body: Value = serde_json::from_str(event.to_text().unwrap()).unwrap();
+        assert_eq!(body["type"], "error", "{body}");
+        assert_eq!(body["error"]["code"], "invalid_client_event", "{body}");
+        assert!(body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("queue capacity exceeded"));
+    } else {
+        client.close(None).await.unwrap();
+    }
     drop(client);
     timeout(Duration::from_secs(5), provider_closed_rx)
         .await
@@ -229,6 +267,21 @@ async fn responses_websocket_client_disconnect_during_provider_operation() {
         .unwrap();
     handle.shutdown().await;
     std::env::remove_var("V3_NODE02_WS_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_websocket_client_disconnect_during_provider_operation() {
+    assert_client_disconnect_during_provider_operation(false, false).await;
+}
+
+#[tokio::test]
+async fn responses_websocket_queued_create_then_close_cancels_pending_provider() {
+    assert_client_disconnect_during_provider_operation(true, false).await;
+}
+
+#[tokio::test]
+async fn responses_websocket_queue_overflow_reports_error_and_cancels_provider() {
+    assert_client_disconnect_during_provider_operation(true, true).await;
 }
 
 #[tokio::test]
