@@ -23,7 +23,9 @@ const deferredGraphs = [
 function forEachGraph(callback) {
   for (const rel of requiredGraphs) {
     if (fs.existsSync(path.join(root, rel))) callback(rel, false);
-    else failures.push(`${rel}: required graph missing`);
+    else if (rel === 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json') {
+      failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 required Error graph is missing');
+    } else failures.push(`${rel}: required graph missing`);
   }
   for (const rel of deferredGraphs) {
     if (fs.existsSync(path.join(root, rel))) callback(rel, true);
@@ -1219,10 +1221,8 @@ const node02Failure = lifecycleManifest.node02_failure_handoff;
 const node02Slice = JSON.parse(fs.readFileSync(path.join(root, node02SliceRel), 'utf8'));
 const node02ErrorGraph = fs.existsSync(path.join(root, node02ErrorGraphRel))
   ? JSON.parse(fs.readFileSync(path.join(root, node02ErrorGraphRel), 'utf8'))
-  : null;
-if (!node02ErrorGraph) {
-  failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 required Error graph is missing');
-} else if (node02Failure?.source_graph !== node02SliceRel
+  : { inputs: [], nodes: [] };
+if (node02Failure?.source_graph !== node02SliceRel
   || node02Failure?.source_node !== 'normalize_request_losslessly'
   || node02Failure?.runtime_result !== 'typed_source_failure'
   || node02Failure?.error_input_arc !== 'source-failure'
