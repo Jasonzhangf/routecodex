@@ -5,6 +5,305 @@ use routecodex_v3_provider_responses::build_v3_transport_13_responses_http_reque
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+struct AnthropicToolSearchJsonTransport;
+
+#[async_trait::async_trait]
+impl ResponsesTransport for AnthropicToolSearchJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"f433f0f7029b4727a2538edc7c6a7df0","type":"message","role":"assistant","model":"glm-5.3","content":[{"type":"tool_use","id":"call_3dqpgqh0jjwwie2wrul1zjb0","name":"mcp__rcc_probe__echo","input":{"text":"RCC_MCP_IDENTITY_BASELINE"}}],"stop_reason":"tool_use","usage":{"input_tokens":549,"output_tokens":60}}"#.to_vec(),
+        ))
+    }
+}
+
+#[test]
+fn responses_tool_search_output_provider_call_restores_identity_for_tool_followup() {
+    let request = json!({
+        "model":"gpt-5.5",
+        "tools":[{"type":"tool_search"}],
+        "input":[
+            {"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":{"query":"codex review"}},
+            {"type":"tool_search_output","call_id":"call_search","execution":"client","tools":[{
+                "type":"namespace","name":"mcp__codex_review","tools":[{
+                    "type":"function","name":"review_start","parameters":{"type":"object","properties":{"repo":{"type":"string"}}}
+                }]
+            }]}
+        ]
+    });
+    let provider_response = json!({"id":"chatcmpl_dynamic_mcp","choices":[{
+        "message":{"role":"assistant","tool_calls":[{
+            "id":"call_review_start","type":"function",
+            "function":{"name":"mcp__codex_review__review_start","arguments":"{\"repo\":\"/tmp/project\"}"}
+        }]},
+        "finish_reason":"tool_calls"
+    }]});
+    let semantic_request =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &request,
+        )
+        .expect("Responses request must normalize to the runtime Chat canonical body");
+
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &provider_response,
+        &semantic_request,
+    )
+    .expect("provider tool call must project through the Responses response owner");
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["namespace"], "mcp__codex_review");
+    assert_eq!(response["output"][0]["name"], "review_start");
+    assert_eq!(response["output"][0]["call_id"], "call_review_start");
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"repo\":\"/tmp/project\"}"
+    );
+
+    let followup = json!({
+        "tools": request["tools"],
+        "input": [
+            request["input"][0].clone(),
+            request["input"][1].clone(),
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_review_start","output":"review started"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client followup must canonicalize the discovered MCP tool result");
+    let chat = build_v3_openai_chat_standard_request_from_chat_canonical(&canonical)
+        .expect("client followup must project back to the provider MCP identity");
+
+    let messages = chat["messages"]
+        .as_array()
+        .expect("provider followup messages");
+    let provider_call = messages
+        .iter()
+        .flat_map(|message| message["tool_calls"].as_array().into_iter().flatten())
+        .find(|call| call["id"] == "call_review_start")
+        .expect("provider history must retain the discovered MCP call id");
+    assert_eq!(
+        provider_call["function"]["name"],
+        "mcp__codex_review__review_start"
+    );
+    assert_eq!(
+        provider_call["function"]["arguments"],
+        "{\"repo\":\"/tmp/project\"}"
+    );
+    let provider_result = messages
+        .iter()
+        .find(|message| message["tool_call_id"] == "call_review_start" && message["role"] == "tool")
+        .expect("provider history must retain the discovered MCP result");
+    assert_eq!(provider_result["content"], "review started");
+}
+
+#[tokio::test]
+async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundtrip() {
+    std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
+    std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "mcp-tool-search-json-relay-session",
+            )
+            .expect("session scope"),
+            request_id: "req-mcp-tool-search-json-relay".to_string(),
+            payload: json!({
+                "model":"client-model",
+                "stream":false,
+                "tools":[{"type":"tool_search"}],
+                "input":[
+                    {"type":"tool_search_call","call_id":"call_search_rcc_baseline","execution":"client","arguments":{"query":"rcc probe echo"}},
+                    {"type":"tool_search_output","call_id":"call_search_rcc_baseline","execution":"client","tools":[{"type":"namespace","name":"mcp__rcc_probe","tools":[{"type":"function","name":"echo","description":"Echo the supplied text exactly","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}]}
+                ]
+            }),
+        },
+        &AnthropicToolSearchJsonTransport,
+        None,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        None,
+        None,
+    )
+    .await
+    .expect("Anthropic JSON response must traverse the full Relay runtime");
+
+    assert_eq!(output.status, 200);
+    let V3ResponsesRelayClientBody::Json(response) = output.client_body else {
+        panic!("non-streaming request must return a JSON response");
+    };
+    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["output"][0]["namespace"], "mcp__rcc_probe");
+    assert_eq!(response["output"][0]["name"], "echo");
+    assert_eq!(
+        response["output"][0]["call_id"],
+        "call_3dqpgqh0jjwwie2wrul1zjb0"
+    );
+    assert_eq!(
+        response["output"][0]["arguments"],
+        "{\"text\":\"RCC_MCP_IDENTITY_BASELINE\"}"
+    );
+
+    let followup = json!({
+        "tools": [{"type":"tool_search"}],
+        "input": [
+            {"type":"tool_search_call","call_id":"call_search_rcc_baseline","execution":"client","arguments":{"query":"rcc probe echo"}},
+            {"type":"tool_search_output","call_id":"call_search_rcc_baseline","execution":"client","tools":[{"type":"namespace","name":"mcp__rcc_probe","tools":[{"type":"function","name":"echo","description":"Echo the supplied text exactly","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}]},
+            response["output"][0].clone(),
+            {"type":"function_call_output","call_id":"call_3dqpgqh0jjwwie2wrul1zjb0","output":"RCC_MCP_FOLLOWUP_OK"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&followup)
+        .expect("the restored function call and result must normalize for the follow-up turn");
+    let anthropic_request =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
+            .expect("the follow-up must preserve the MCP dispatch identity to Anthropic");
+    let tool_use = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_use" && part["id"] == "call_3dqpgqh0jjwwie2wrul1zjb0")
+        .expect("provider history must preserve the matching MCP tool call");
+    assert_eq!(tool_use["name"], "mcp__rcc_probe__echo");
+    assert_eq!(tool_use["input"]["text"], "RCC_MCP_IDENTITY_BASELINE");
+    let tool_result = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| {
+            part["type"] == "tool_result" && part["tool_use_id"] == "call_3dqpgqh0jjwwie2wrul1zjb0"
+        })
+        .expect("provider history must preserve the matching MCP result");
+    assert_eq!(tool_result["content"], "RCC_MCP_FOLLOWUP_OK");
+}
+
+#[tokio::test]
+async fn responses_tool_search_output_anthropic_sse_restores_identity_for_tool_followup() {
+    let inbound = json!({
+        "model":"glm-5.3",
+        "tools":[{"type":"tool_search"}],
+        "input":[
+            {"type":"tool_search_call","call_id":"call_search","execution":"client","arguments":{"query":"codex review"}},
+            {"type":"tool_search_output","call_id":"call_search","execution":"client","tools":[{
+                "type":"namespace","name":"mcp__codex_review","tools":[{
+                    "type":"function","name":"review_start","parameters":{"type":"object","properties":{"repo":{"type":"string"}}}
+                }]
+            }]}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &inbound,
+        )
+        .expect("Responses discovery history must normalize for the Relay runtime");
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&canonical)
+        .expect("projection context must read dynamic MCP identity from canonical history");
+    let event = |kind: &str, body: serde_json::Value| {
+        Ok(format!("event: {kind}\ndata: {body}\n\n").into_bytes())
+    };
+    let provider = Box::pin(stream::iter(vec![
+        event(
+            "message_start",
+            json!({"type":"message_start","message":{"id":"msg_dynamic_mcp","type":"message","role":"assistant","model":"glm-5.3","content":[],"usage":{"input_tokens":10}}}),
+        ),
+        event(
+            "content_block_start",
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_review_start","name":"mcp__codex_review__review_start","input":{}}}),
+        ),
+        event(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"repo\":\"/tmp/project\"}"}}),
+        ),
+        event(
+            "content_block_stop",
+            json!({"type":"content_block_stop","index":0}),
+        ),
+        event(
+            "message_delta",
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":2}}),
+        ),
+        event("message_stop", json!({"type":"message_stop"})),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &V3RuntimeStreamObservation::default(),
+            &context,
+        )
+        .await
+        .expect("Anthropic provider SSE tool_use must project through Responses response owner");
+    let call = &response["output"][0];
+    assert_eq!(call["type"], "function_call");
+    assert_eq!(call["namespace"], "mcp__codex_review");
+    assert_eq!(call["name"], "review_start");
+    assert_eq!(call["call_id"], "call_review_start");
+    assert_eq!(call["arguments"], "{\"repo\":\"/tmp/project\"}");
+
+    let followup = json!({
+        "model": inbound["model"],
+        "tools": inbound["tools"],
+        "input": [
+            inbound["input"][0].clone(),
+            inbound["input"][1].clone(),
+            call.clone(),
+            {"type":"function_call_output","call_id":"call_review_start","output":"review started"},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ]
+    });
+    let canonical =
+        super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(
+            &followup,
+        )
+        .expect("client must be able to return the restored call and tool result");
+    let anthropic_request =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
+            .expect("the followup must project to the same Anthropic provider protocol");
+    let tool_use = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_use" && part["id"] == "call_review_start")
+        .expect("provider request must preserve the tool call identity");
+    assert_eq!(tool_use["name"], "mcp__codex_review__review_start");
+    assert_eq!(tool_use["input"]["repo"], "/tmp/project");
+    let tool_result = anthropic_request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .find(|part| part["type"] == "tool_result" && part["tool_use_id"] == "call_review_start")
+        .expect("provider request must preserve the tool result pairing");
+    assert_eq!(tool_result["content"], "review started");
+}
+
 #[test]
 fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
     let request = json!({
