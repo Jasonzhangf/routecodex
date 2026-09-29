@@ -15,6 +15,16 @@ business_unmatched_value:
   preserve: original_path_value_encoding_and_inverse_association
   admission: continue_request_or_response
   projection: return_to_same_client_protocol_without_semantic_rewrite
+request_inverse_contract:
+  owner: routecodex.v3.operation.normalize_request_losslessly@1
+  forward_direction: client_request_to_chat
+  inverse_method: inverse_to_entry
+  configuration_source: same_protocol_path_row_and_operator_as_forward
+  context_content: typed_path_encoding_identity_and_inverse_association_only
+  unknown_value_source: canonical_chat_extension_opaque_record
+  admission: every_configured_forward_request_operator_must_declare_inverse_to_entry_at_compile
+  output: exact_original_entry_protocol_request_view_for_legacy_consumer
+  forbidden_reuse: [chat_to_provider, chat_to_client_response]
 binding_contract:
   identity: one normalized protocol+path row may be consumed at most once per direction across standard and extension inventories
   row_shape:

@@ -614,6 +614,101 @@ unchanged request-control/budget continuity, typed failure entry to the existing
 no duplicate capture or bypass. Compare the same real-entry black-box samples before and after the
 candidate. Static validation of the final three graphs does not prove these callers are wired.
 
+### Node 02 design gate: lossless request normalization
+
+The next delivery is only `normalize_request_losslessly@1`. Its executable SESE
+slice is `client-json -> normalize_request_losslessly -> canonical-request`,
+derived from the canonical request graph. Node 01 has already run at HTTP or
+Responses WebSocket ingress, so this slice must not capture again. The Runtime
+entry creates an invocation-local Operator holding an immutable origin and a
+narrow request-scoped typed resource handle. It registers and compiles that
+slice for the invocation; the Node 01 process-wide `CompiledGraph` cache cannot
+hold this Operator. A Runtime-owned `V3NormalizedRequestLease` retains the
+canonical value and request-scoped resource handle across candidate retry and
+Direct-to-Relay handoff within this in-flight client request. Its `Drop` is the
+current Node 02 finalizer: it releases inverse/pairing resources on success,
+terminal Error, cancellation, or disconnect. Server HTTP and WebSocket only
+forward the lease. A later full-graph `RuntimeRequestFinalizer` consumes this
+same lease instead of adding a second release path. An invocation origin
+expires when its DAGpipe run returns. A new client request carrying a remote
+continuation reference creates a new lease; it never inherits the prior
+request's tool declarations or inverse context.
+
+The Operator walks every client field using the entry protocol's configured
+field operators. Its output is canonical Chat plus losslessly carried business
+extensions. Unknown business values live only in canonical extensions; typed
+request resources record the entry protocol, paths, encoding, mapped field
+provenance, tool declaration identity, and explicit history pairing. Tool
+argument bytes/JSON remain opaque.
+An unrecognized but representable field is preserved, not rejected or silently
+discarded. The response inverse projection later reads this same request
+context; it never guesses the client's tool shape from the provider model or
+from a new follow-up payload. No routing, retry, health, or execution decision
+is written to business payload or protocol metadata.
+
+The current Direct kernel constructs `C::Standardized` before selecting an
+execution mode. Therefore Node 02 needs a **mode-independent legacy consumer
+view** until `resolve_target` and `plan_execution` are migrated. Each
+`client_request_to_chat` field Operator must declare an `inverse_to_entry`
+method: its forward step emits the typed path/encoding reference needed by its
+inverse step. The registry/compiler admits the Node 02 slice only when every
+configured request Operator supports this inverse; fields carried as extensions
+use their canonical value and recorded path. Node 02 derives the exact
+entry-protocol view from its canonical output through those same registered
+Operators and the request inverse context. There is no second field map or
+control source. The response-only `inverse_client_projection` and filtering
+provider projection are not request inverses. The existing mode-neutral builder
+may wrap this view and supply routing facts, but it must become a pure typed
+wrapper: its history-image mutation and any other payload rewrite move to
+their registered Direct hook or Relay Chat Process owner. Mode selection still
+uses the existing router for this delivery. Once selected, Direct consumes the
+view in its declared Direct hook; Relay consumes Node 02 canonical directly.
+Direct-to-Relay handoff carries the same canonical output and request-scoped
+inverse context without re-entering Node 01 or Node 02. This temporary view
+does not claim that `resolve_target` is already running through DAGpipe.
+
+| Current entry/event | Actual caller and input | Node 01 / Node 02 invocation | Lease rule |
+| --- | --- | --- | --- |
+| HTTP client entry | `pending_endpoint_after_responses_admission_inner` receives parsed entry-protocol JSON | once / once before protocol dispatch | Runtime wrapper retains lease through Direct or Relay future |
+| Responses WebSocket `response.create` | `handle_responses_websocket_message_with_mode` receives framed entry-protocol JSON | once / once before mode dispatch | Runtime wrapper retains lease until the request future exits |
+| Candidate retry | existing `v3_direct_core` or `relay_runtime_core` loop reuses its prepared request | no rerun / no rerun in this delivery | same lease; only attempt resources change |
+| Internal servertool follow-up | no current append-and-reenter-Req04 caller is bound; response closeout can only report follow-up required | not connected in this delivery | future graph re-entry must supply typed `AlreadyCanonical` input and retain the read-only original context |
+| External tool-output follow-up | a new HTTP or WebSocket client request carries the tool receipt | once / once as a new client entry | new lease and new current-request declaration/history identity |
+| Direct-to-Relay handoff | `executors` and Responses handoff paths currently reuse Server payload | no rerun / no rerun | replace raw handoff with the same canonical value and lease |
+
+`retry` and `internal_followup` remain legal origins in the full request graph
+for a future separate graph invocation. Current in-loop candidate retry does
+not emit one, and an internal append-and-reenter path is not yet connected.
+When those paths are migrated, the Runtime entry must
+supply a typed `AlreadyCanonical` input contract and preserve the read-only
+original inverse context; it must never infer the input shape from JSON.
+
+All production Relay ingress paths must accept the typed canonical handoff:
+the shared `relay_runtime_core` path, Responses `responses_relay_runtime_inner`,
+Anthropic `anthropic_relay_runtime`, and the public `relay_request::run` path.
+Their old Req02 field mappings are removed when these edges are connected;
+Req04 keeps its Chat governance. Consumers that currently inspect entry-shape
+fields, including Gemini tool identity over `contents`, must instead use the
+canonical fields and typed provenance. Keeping any old Req02 mapping after
+Node 02 is connected creates a second normalization owner and fails the gate.
+
+The Node 02 failure exit is a typed source failure into ErrorErr01. The Server
+does not project it directly. If a configured field operator cannot express a
+client field losslessly, Node 02 must preserve it as an extension when the
+protocol permits; an actual conversion failure is reported through Error and
+never wrapped as success. No provider attempt or client response is committed
+before this result. The Runtime-owned lease releases the same request resource
+on success, terminal error, cancellation, and disconnect.
+
+Acceptance compares pre/post real-entry black-box samples for OpenAI Chat,
+Responses HTTP and WebSocket, Anthropic, and Gemini in their supported modes;
+it checks Direct, Relay, Direct-to-Relay, complete tool execution/output and
+follow-up, exact client response inverse shape, unknown fields, failure path,
+retry resource reuse, and cancellation cleanup. A test that only runs the new
+Operator while the old consumer still reads the original raw payload is a
+shadow test and does not qualify as Node 02 cutover. The design and caller/
+resource bindings require independent architecture PASS before product edits.
+
 After that delivery, replace exactly one node from the declared schedule per delivery. For each
 node, change only its owner and required direct typed edge, remove the superseded implementation,
 and retain all not-yet-migrated owners. Run focused positive/negative tests, mapped gates, build,

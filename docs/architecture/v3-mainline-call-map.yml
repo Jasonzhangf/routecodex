@@ -8284,7 +8284,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.request
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
-  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  summary: Design-only full DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each graph invocation; only normalize reads it. Current in-loop candidate retry retains the request lease and does not rerun capture/normalize. Internal servertool append-and-reenter is not currently bound; future separate graph invocations for retry or internal follow-up must preserve the original inverse/pairing lease.
   entry_contract:
     node: V3OperationRunnerCaptureClientJson
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -8345,6 +8345,31 @@ chains:
       unsupported_modes:
       - Anthropic Direct remains pending/unsupported
       - Gemini Direct remains pending/unsupported
+    second_delivery_design_binding:
+      status: design_pending_review; no runtime cutover claimed
+      selected_node: normalize_request_losslessly
+      input_arc: client-json
+      output_arc: canonical-request
+      derived_graph_id: v3.operation_runner.request.normalize_request_losslessly
+      slice_rule: select only normalize_request_losslessly; capture_client_json already ran at client ingress
+      runtime_owner: RuntimeRequestGraphEntry
+      operator_scope: invocation-local with immutable request_origin_kind and narrow typed request-resource handle
+      resource_guard: V3NormalizedRequestLease owned by Runtime; dropped after terminal result or cancelled request future
+      client_entry_callers: [pending_endpoint_after_responses_admission_inner, handle_responses_websocket_message_with_mode]
+      in_loop_candidate_retry: reuse canonical value and original inverse context; do not rerun capture or normalize
+      internal_servertool_followup: future_runtime_reentry_not_currently_bound
+      external_tool_output_followup: new_client_entry_with_new_request_lease
+      direct_legacy_view: derived by request inverse of the same configured client_request_to_chat operators; mode-neutral before current mode selection
+      direct_builder: pure typed wrapper after payload normalization is removed from build_v3_req_04_standardized_responses_from_v3_server_03 and build_v3_chat_req_04_standardized_from_v3_server_03
+      relay_canonical_consumers:
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+      - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+      direct_to_relay_handoff: carry same canonical value and lease through executors.rs and responses_direct_server_outcome.rs
+      response_inverse: reads original client-entry tool declaration and field provenance from the same lease
+      terminal_error: ErrorErr01
+      later_nodes: resolve_target and plan_execution remain on current runtime owners
   edges:
   - step_id: v3-op-runner-req-01
     from_node: V3OperationRunnerCaptureClientJson
@@ -8491,9 +8516,9 @@ chains:
       client_entry:
         effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
       retry:
-        effect: RuntimeRetryLaunch routes re-entry through RuntimeRequestGraphEntry, which creates originKind=retry before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+        effect: Future RuntimeRetryLaunch separate graph invocation creates originKind=retry and reads the existing request_inverse_context; current in-loop retry reuses canonical output without a new invocation
       internal_followup:
-        effect: RuntimeInternalFollowup routes re-entry through RuntimeRequestGraphEntry, which creates originKind=internal_followup before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+        effect: Future RuntimeInternalFollowup separate graph invocation creates originKind=internal_followup and reads the existing request_inverse_context; no current append-and-reenter caller is bound
       payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
       release: graph_invocation_return; storage none; RuntimeRequestFinalizer does not consume or release it
     request_inverse_context:
