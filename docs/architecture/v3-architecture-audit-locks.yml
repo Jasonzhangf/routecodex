@@ -453,6 +453,13 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260929-v3-hooks-sidecar-chain-lock
+    item_id: chain:v3.rcc_internal_hooks_sidecar
+    approved_by: Jason
+    approved_at: '2026-09-29T05:31:17-07:00'
+    reason: "Jason explicitly requested an architecture lock and dedicated black-box regression for the repaired hooks sidecar lifecycle. This is the initial lock for the existing chain; there is no earlier locked fingerprint to refresh. The reviewed caller graph, managed lifecycle failure edges, and real CLI start/status/stop test define its scope."
+    fingerprint_before: sha256:a36cd78a9447757a8f6b2adb5353b4d822b17658baf9defd0ee9c218c2b7e431
+    fingerprint_after: sha256:a36cd78a9447757a8f6b2adb5353b4d822b17658baf9defd0ee9c218c2b7e431
   - authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
     item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
     approved_by: Jason

@@ -28,19 +28,27 @@ legacy supervisor.
 ```mermaid
 flowchart TB
   A[V3Lifecycle04ChildSpawned] --> B[Read hooks install record]
+  B -- malformed or unreadable --> I[Publish managed Running with hooks_unavailable:reason]
   B --> C{supervisor_enabled true}
-  C -- no --> Z[No sidecar in this lifecycle]
+  C -- no --> N[Publish managed Running without sidecar]
   C -- yes --> D{valid hooks_runtime}
+  D -- invalid --> I
   D -- internal_hooksd or unset --> E[Resolve installed rccv3-hooksd]
+  D -- legacy_supervisor --> E2[Resolve declared legacy supervisor]
+  E -- missing or invalid --> I
   E --> F[Start lifecycle-owned process group]
-  F --> G[rccv3-hooksd readiness protocol rcc-hooks-sidecar/v1]
+  E2 -- missing or invalid --> I
+  E2 --> F
+  F -- spawn failure --> I
+  F --> G[Check selected sidecar readiness; internal uses rcc-hooks-sidecar/v1]
   G -- ready --> H[Publish managed Running with sidecar healthy]
   G -- missing/crash/timeout --> I[Publish managed Running with hooks_unavailable:reason]
-  H --> J[Control socket live; status/timer/forward events]
+  H --> J[Managed status/control; sidecar events only when available]
   I --> J
+  N --> J
   J --> K[Lifecycle stop / sidecar process-group stop]
   K --> L[Remove hooks-sidecar.pid, socket, state when owned]
-  L --> Z
+  L --> Z[Managed lifecycle exit]
 ```
 
 ### Current-state notes
