@@ -8,6 +8,61 @@ use tempfile::TempDir;
 
 #[tokio::test]
 #[cfg(unix)]
+async fn default_install_record_mode_is_internal_hooksd() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    let record_path = root.path().join("install.json");
+    let bin_directory = root.path().join("bin");
+    let supervisor_wrapper = root.path().join("supervisor-wrapper");
+    fs::create_dir(&instance_dir).unwrap();
+    fs::create_dir(&bin_directory).unwrap();
+    fs::write(
+        bin_directory.join("rccv3-hooksd"),
+        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
+        .unwrap()
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
+    fs::write(
+        &supervisor_wrapper,
+        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&supervisor_wrapper, permissions).unwrap();
+    fs::write(
+        &record_path,
+        serde_json::json!({
+            "supervisor_enabled": true,
+            "supervisor_wrapper": supervisor_wrapper,
+            "bin_directory": bin_directory,
+            "install_root": root.path(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
+
+    let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
+
+    assert!(
+        sidecar.is_some(),
+        "default install record must start internal hooksd"
+    );
+    assert!(
+        detail.is_none(),
+        "internal hooksd started without hooks_unavailable detail"
+    );
+    std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
+}
+
+#[tokio::test]
+#[cfg(unix)]
 async fn ready_hooks_sidecar_stop_removes_only_startup_owned_codexapp_socket() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new_in("/tmp").unwrap();
