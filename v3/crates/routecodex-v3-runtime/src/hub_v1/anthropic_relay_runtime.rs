@@ -592,12 +592,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 &selected.candidate.model_id,
             ),
         );
-        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
-            req05.clone(),
-            V3HubTargetResolution::Routed,
-            selected.candidate.clone(),
-        );
-        trace.push("V3HubReqTarget06Resolved");
         macro_rules! handle_provider_request_failure {
             ($stage:expr, $kind:expr, $error:expr) => {{
                 let terminal_failure = handle_provider_failure(
@@ -630,8 +624,31 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 error
             ),
         };
-        let req07 =
-            build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_wire_protocol);
+        let web_search_route_eligible =
+            crate::provider_failure_web_search_route::web_search_route_eligible_for_entry_request(
+                manifest,
+                &input.server_id,
+                "/v1/messages",
+                "anthropic",
+                &route_facts_body,
+                &input.failure_session_scope,
+                &provider_health,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(V3AnthropicRelayRuntimeError::Target)?,
+                deterministic_sample,
+            )
+            .map_err(V3AnthropicRelayRuntimeError::Target)?;
+        let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+            req05.clone(),
+            V3HubTargetResolution::Routed,
+            selected.candidate.clone(),
+        );
+        trace.push("V3HubReqTarget06Resolved");
+        let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
+            req06,
+            provider_wire_protocol,
+            &web_search_route_eligible,
+        );
         trace.push("V3HubReqOutbound07ProviderSemantic");
         let target = provider_target(manifest, req07.selected_target(), None)?;
         let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {

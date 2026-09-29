@@ -70,8 +70,8 @@ locked_items:
     locked_at: '2026-09-18T16:56:35-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:31869eb07abff120397b23bcae58f753b5414bea0fae937e587281ce887a63ff
-    last_manual_authorization_id: auth-20260918-v3-responses-direct-lock-drift-repair
+    fingerprint: sha256:e6adafa058db5fc6916adffb51b9f6013680852ca2e6bebed2f688411451d617
+    last_manual_authorization_id: auth-20260928-v3-web-search-direct-exposure
   - item_id: chain:v3.hub_pipeline.v1.request
     chain_id: v3.hub_pipeline.v1.request
     status: audited_locked
@@ -79,8 +79,8 @@ locked_items:
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
     sop: docs/architecture/wiki/v3-mainline-skeleton-sop.md
-    fingerprint: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-hub-request
+    fingerprint: sha256:c369cadf63ee913fe7ce9bd13ca181792a9abb1466910e70023928d2a00fb6e8
+    last_manual_authorization_id: auth-20260928-v3-web-search-route-tool-exposure
   - item_id: chain:v3.hub_pipeline.v1.response
     chain_id: v3.hub_pipeline.v1.response
     status: audited_locked
@@ -445,6 +445,20 @@ locked_items:
     fingerprint: sha256:487da1203d72afc7ff984d1e24ab4ee9703a739e8170ee883c23526d1abaf70e
     last_manual_authorization_id: auth-20260830-v3-execution-control-provider-global
 manual_authorizations:
+  - authorization_id: auth-20260928-v3-web-search-direct-exposure
+    item_id: chain:v3.responses_direct.required_mainline
+    approved_by: Jason
+    approved_at: '2026-09-28T22:42:53-07:00'
+    reason: "Jason instructed removal of the built-in web_search tool from provider-bound requests when its route is undeclared or unavailable. The Direct policy and registered request projection hook consume the same typed route declaration and eligibility facts as Relay; the client's normal payload and unrelated tools remain intact."
+    fingerprint_before: sha256:31869eb07abff120397b23bcae58f753b5414bea0fae937e587281ce887a63ff
+    fingerprint_after: sha256:e6adafa058db5fc6916adffb51b9f6013680852ca2e6bebed2f688411451d617
+  - authorization_id: auth-20260928-v3-web-search-route-tool-exposure
+    item_id: chain:v3.hub_pipeline.v1.request
+    approved_by: Jason
+    approved_at: '2026-09-28T22:42:53-07:00'
+    reason: "Jason instructed that an undeclared or unavailable web_search route must remove the built-in web_search tool from the provider-bound request. The ReqTarget06-to-ReqOutbound07 typed resource edge carries only explicit route declaration and read-only candidate eligibility; Req04 keeps the canonical request and Provider Compat does not decide routing. No node order or other tool semantics change."
+    fingerprint_before: sha256:066f368a851c78f829302259adf7d10ebfebb51a0965dc6f0b759bac702474e3
+    fingerprint_after: sha256:c369cadf63ee913fe7ce9bd13ca181792a9abb1466910e70023928d2a00fb6e8
   - authorization_id: auth-20260921-v3-gemini-selected-target-outbound-helper-bind
     item_id: chain:v3.protocol_conversion_field_parity.outbound_helper_bindings
     approved_by: Jason

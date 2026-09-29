@@ -181,6 +181,7 @@ where
     };
     trace.push("V3Router05RequestClassified");
     let route_policy_group_id = classified.routing_group_id.clone();
+    let web_search_classified = classified.clone();
     let plan = match router.resolve_route_pool_plan(manifest, classified) {
         Ok(value) => value,
         Err(error) => {
@@ -357,6 +358,21 @@ where
         }
         let server_id = C::server_id(&standardized).to_string();
         let request_id = C::request_id(&standardized).to_string();
+        let web_search_route_eligible = match crate::provider_failure_web_search_route::web_search_route_eligible_for_classified_request(
+            manifest,
+            web_search_classified.clone(),
+            &direct_failure_session_scope,
+            &provider_health,
+            now_epoch_ms,
+            0,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error_output(
+                runtime_source("V3TargetWebSearchRouteEligibility", error),
+                trace,
+                &crate::hooks::register_responses_direct_hooks(),
+            ),
+        };
         let tool_thinking_enabled = match C::prepare_before_send(
             &mut control,
             manifest,
@@ -375,7 +391,13 @@ where
                 )
             }
         };
-        let policy = C::run_route(selected.clone(), &standardized);
+        let mut policy = C::run_route(selected.clone(), &standardized);
+        C::set_web_search_exposure(
+            &mut policy,
+            web_search_route_eligible.declaration.declared
+                && web_search_route_eligible.eligible
+                && selected.candidate.model_capabilities.iter().any(|capability| capability == "web_search"),
+        );
         trace.push(C::POLICY_STAGE);
         let wire = match C::run_request_projection(&policy, request_key_catalog) {
             Ok(value) => value,

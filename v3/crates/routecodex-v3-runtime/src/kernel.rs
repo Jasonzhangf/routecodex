@@ -136,6 +136,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             );
         }
     };
+    let web_search_route_facts_body = standardized.body.clone();
     trace.push("V3Req04StandardizedResponses");
     let request_execution_control = match resolve_v3_direct_request_execution_control(
         request_execution_control,
@@ -641,6 +642,24 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 request_execution_control,
             );
         }
+        let web_search_route_eligible = match crate::provider_failure_web_search_route::web_search_route_eligible_for_entry_request(
+            manifest,
+            &standardized.server_id,
+            &standardized.endpoint,
+            "responses",
+            &web_search_route_facts_body,
+            &direct_failure_session_scope,
+            &provider_health,
+            now_epoch_ms,
+            0,
+        ) {
+            Ok(value) => value,
+            Err(error) => return error_output(
+                runtime_source("V3TargetWebSearchRouteEligibility", error),
+                trace,
+                &hook_registry,
+            ),
+        };
         match prepare_v3_responses_direct_web_search_control_request(
             manifest,
             server_tool_state.as_deref(),
@@ -678,7 +697,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             return error_output(source, trace, &hook_registry);
         }
 
-        let policy = hook_registry.run_route(selected, &standardized);
+        let selected_can_search = selected
+            .candidate
+            .model_capabilities
+            .iter()
+            .any(|capability| capability == "web_search");
+        let mut policy = hook_registry.run_route(selected, &standardized);
+        policy.allow_builtin_web_search_exposure = web_search_route_eligible.declaration.declared
+            && web_search_route_eligible.eligible
+            && selected_can_search;
         trace.push("V3ResponsesDirect11Policy");
 
         let wire = match hook_registry.run_request_projection(&policy) {

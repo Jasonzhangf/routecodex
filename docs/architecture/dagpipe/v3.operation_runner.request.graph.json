@@ -43,8 +43,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload"],
-        "writes": ["v3.hub.resolved_target"]
+        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.provider.scheduling_projection"],
+        "writes": ["v3.hub.resolved_target", "v3.web_search.route_declaration", "v3.web_search.route_eligibility"]
       }
     },
     {
@@ -85,7 +85,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload", "v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
+        "reads": ["v3.request.normal_payload", "v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing", "v3.web_search.route_declaration", "v3.web_search.route_eligibility"],
         "writes": ["v3.request.provider_semantic", "v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map"]
       }
     },

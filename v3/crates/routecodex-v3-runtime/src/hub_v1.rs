@@ -67,6 +67,7 @@ mod request_outbound_format;
 mod request_outbound_mcp_names;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
+pub(crate) use request_outbound_builtin_tool_projection::project_builtin_web_search_exposure;
 pub(crate) use request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 pub(crate) use request_outbound_format::{
     build_v3_anthropic_provider_request_source_from_chat_canonical,

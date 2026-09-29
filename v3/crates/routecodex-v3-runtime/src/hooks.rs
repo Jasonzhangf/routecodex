@@ -437,10 +437,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
         {
             crate::hub_v1::build_v3_openai_responses_standard_request_for_selected_target(
                 &request_body,
-                candidate
-                    .model_capabilities
-                    .iter()
-                    .any(|capability| capability == "web_search"),
+                policy.allow_builtin_web_search_exposure,
             )
             .map_err(|error| {
                 build_v3_error_01_source_raised_internal(
@@ -467,10 +464,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
             })?;
         crate::hub_v1::project_openai_responses_hosted_web_search_for_selected_target(
             &mut request_body,
-            candidate
-                .model_capabilities
-                .iter()
-                .any(|capability| capability == "web_search"),
+            policy.allow_builtin_web_search_exposure,
         );
     }
     let direct_request_protocol = match provider_protocol {
@@ -717,7 +711,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
     key_catalog: &V3DirectRequestKeyHookCatalog,
 ) -> Result<V3Provider12ResponsesWirePayload, V3Error01SourceRaised> {
     let candidate = &policy.target.candidate;
-    let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
+    let mut request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
     )
@@ -731,6 +725,10 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
             V3InternalErrorCode::V3Provider12ResponsesWirePayload,
         )
     })?;
+    crate::hub_v1::project_builtin_web_search_exposure(
+        &mut request_body,
+        policy.allow_builtin_web_search_exposure,
+    );
     let hosted_web_search_declared = request_body
         .get("tools")
         .and_then(serde_json::Value::as_array)
@@ -746,10 +744,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
         crate::hub_v1::build_v3_openai_chat_standard_request_for_selected_web_search_mode(
             &request_body,
             candidate.web_search_execution_mode,
-            candidate
-                .model_capabilities
-                .iter()
-                .any(|capability| capability == "web_search"),
+            policy.allow_builtin_web_search_exposure,
         )
     } else {
         crate::hub_v1::build_v3_openai_chat_standard_request_from_chat_canonical(&request_body)

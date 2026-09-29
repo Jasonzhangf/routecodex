@@ -600,6 +600,218 @@ fn add_model_match_pool(
     );
 }
 
+fn web_search_route_declaration_manifest() -> V3Config05ManifestPublished {
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .remove("tools");
+    add_match_pool(
+        &mut manifest,
+        "search_backend",
+        10,
+        vec!["web_search"],
+        Some(1),
+    );
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("search_backend")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .models = vec!["search-model".into()];
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("search_backend")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .max_input_tokens = Some(100);
+    manifest
+}
+
+fn web_search_facts(
+    client_model: Option<&str>,
+    capabilities: BTreeSet<String>,
+    input_tokens: u64,
+) -> V3RouterRequestFacts {
+    V3RouterRequestFacts {
+        entry_protocol: "responses".into(),
+        client_model: client_model.map(str::to_string),
+        capabilities,
+        input_tokens,
+        route_classification: test_route("web_search", &["web_search", "default"]),
+    }
+}
+
+#[test]
+fn web_search_declaration_requires_explicit_matching_route_pool() {
+    let router = V3VirtualRouter::default();
+    let manifest = web_search_route_declaration_manifest();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            web_search_facts(
+                Some("search-model"),
+                BTreeSet::from(["web_search".into()]),
+                10,
+            ),
+        )
+        .unwrap();
+
+    let declaration = router
+        .resolve_web_search_route_declaration(&manifest, classified)
+        .unwrap();
+
+    assert!(declaration.declaration.declared);
+    assert_eq!(
+        declaration.declaration.pool_id.as_deref(),
+        Some("search_backend")
+    );
+    assert_eq!(declaration.tiers.len(), 1);
+}
+
+#[test]
+fn web_search_declaration_rejects_entry_model_token_and_capability_mismatch() {
+    let router = V3VirtualRouter::default();
+    let manifest = web_search_route_declaration_manifest();
+    let cases = [
+        (
+            Some("search-model"),
+            BTreeSet::from(["web_search".into()]),
+            10,
+        ),
+        (
+            Some("other-model"),
+            BTreeSet::from(["web_search".into()]),
+            10,
+        ),
+        (
+            Some("search-model"),
+            BTreeSet::from(["web_search".into()]),
+            101,
+        ),
+    ];
+
+    for (index, (client_model, capabilities, input_tokens)) in cases.into_iter().enumerate() {
+        let mut classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                web_search_facts(client_model, capabilities, input_tokens),
+            )
+            .unwrap();
+        if index == 0 {
+            classified.facts.entry_protocol = "openai_chat".into();
+        }
+        let declaration = router
+            .resolve_web_search_route_declaration(&manifest, classified)
+            .unwrap();
+        assert!(!declaration.declaration.declared);
+        assert!(declaration.declaration.pool_id.is_none());
+        assert!(declaration.tiers.is_empty());
+    }
+
+    let mut needs_vision = manifest.clone();
+    needs_vision
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("search_backend")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .required_capabilities
+        .push("vision".into());
+    let classified = router
+        .classify_request_with_facts(
+            &needs_vision,
+            "s",
+            "/v1/responses",
+            web_search_facts(
+                Some("search-model"),
+                BTreeSet::from(["web_search".into()]),
+                10,
+            ),
+        )
+        .unwrap();
+    assert!(
+        !router
+            .resolve_web_search_route_declaration(&needs_vision, classified)
+            .unwrap()
+            .declaration
+            .declared
+    );
+}
+
+#[test]
+fn web_search_declaration_does_not_use_implicit_or_direct_pool() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = web_search_route_declaration_manifest();
+
+    let implicit = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            web_search_facts(None, BTreeSet::from(["web_search".into()]), 10),
+        )
+        .unwrap();
+    assert!(
+        !router
+            .resolve_web_search_route_declaration(&manifest, implicit)
+            .unwrap()
+            .declaration
+            .declared
+    );
+
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("search_backend")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .models = vec!["prov.model-x".into()];
+    let direct = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            web_search_facts(
+                Some("prov.model-x"),
+                BTreeSet::from(["web_search".into()]),
+                10,
+            ),
+        )
+        .unwrap();
+    assert!(
+        router
+            .resolve_web_search_route_declaration(&manifest, direct)
+            .unwrap()
+            .declaration
+            .declared
+    );
+}
+
 #[test]
 fn web_search_capability_does_not_override_route_pool_reason() {
     let router = V3VirtualRouter::default();

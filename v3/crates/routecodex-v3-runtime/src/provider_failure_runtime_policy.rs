@@ -312,10 +312,10 @@ pub(crate) fn select_v3_target_with_session_then_global(
     target.select_available_with_health(expanded, &reader, now_ms, deterministic_sample)
 }
 
-struct V3SessionGlobalSchedulingReader<'health> {
-    session: &'health dyn V3ProviderAvailabilityReader,
-    global: &'health V3ProviderFailureRuntimeHealth,
-    excluded: &'health BTreeSet<String>,
+pub(crate) struct V3SessionGlobalSchedulingReader<'health> {
+    pub(crate) session: &'health dyn V3ProviderAvailabilityReader,
+    pub(crate) global: &'health V3ProviderFailureRuntimeHealth,
+    pub(crate) excluded: &'health BTreeSet<String>,
 }
 
 impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {

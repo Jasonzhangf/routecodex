@@ -94,6 +94,8 @@ pub trait V3DirectProtocolCodec {
         standardized: &Self::Standardized,
     ) -> Self::Policy;
 
+    fn set_web_search_exposure(policy: &mut Self::Policy, allow: bool);
+
     fn run_request_projection(
         policy: &Self::Policy,
         request_key_catalog: &V3DirectRequestKeyHookCatalog,
@@ -271,6 +273,10 @@ impl V3DirectProtocolCodec for V3ResponsesDirectCodec {
         standardized: &Self::Standardized,
     ) -> Self::Policy {
         crate::nodes::build_v3_responses_direct_11_policy_from_v3_target_10(selected, standardized)
+    }
+
+    fn set_web_search_exposure(policy: &mut Self::Policy, allow: bool) {
+        policy.allow_builtin_web_search_exposure = allow;
     }
 
     fn run_request_projection(
@@ -465,6 +471,10 @@ impl V3DirectProtocolCodec for V3ChatDirectCodec {
         standardized: &Self::Standardized,
     ) -> Self::Policy {
         crate::nodes::build_v3_chat_direct_11_policy_from_v3_target_10(selected, standardized)
+    }
+
+    fn set_web_search_exposure(policy: &mut Self::Policy, allow: bool) {
+        policy.allow_builtin_web_search_exposure = allow;
     }
 
     fn run_request_projection(

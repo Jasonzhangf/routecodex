@@ -1287,12 +1287,16 @@ chains:
       - v3.target.concrete_provider
       - v3.request.normal_payload
       - v3.request.protocol_fields
+      - v3.web_search.route_declaration
+      - v3.web_search.route_eligibility
       produces:
       - v3.responses_direct.policy
       side_channel_reads:
       - v3.execution.protocol_decision
       - v3.target.concrete_provider
       - v3.request.protocol_fields
+      - v3.web_search.route_declaration
+      - v3.web_search.route_eligibility
       side_channel_writes:
       - v3.responses_direct.policy
       - v3.request.tool_thinking_turn_context
@@ -1525,11 +1529,15 @@ chains:
       consumes:
       - v3.request.normal_payload
       - v3.hub.resolved_target
+      - v3.web_search.route_declaration
+      - v3.web_search.route_eligibility
       produces:
       - v3.request.provider_semantic
       - v3.hub.provider_protocol
       side_channel_reads:
       - v3.hub.execution_plan
+      - v3.web_search.route_declaration
+      - v3.web_search.route_eligibility
       side_channel_writes:
       - v3.hub.provider_protocol
   - step_id: v3-hub-req-06
@@ -5211,6 +5219,76 @@ chains:
       - v3.servertool.state_machine_control
       side_channel_writes: []
     status: as_is_bound
+  - step_id: v3-web-search-route-exposure-00
+    from_node: V3Router05RequestClassified
+    to_node: V3Router06RoutePoolResolved
+    caller_symbol: web_search_route_eligible_for_classified_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_web_search_route.rs
+    callee_symbol: V3VirtualRouter::resolve_web_search_route_declaration
+    callee_file: v3/crates/routecodex-v3-virtual-router/src/lib.rs
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes: [v3.config.published_manifest, v3.request.normal_payload, v3.request.protocol_fields]
+      produces: [v3.web_search.route_declaration]
+      side_channel_reads: []
+      side_channel_writes: [v3.web_search.route_declaration]
+    status: anchored
+  - step_id: v3-web-search-route-exposure-01
+    from_node: V3Router06RoutePoolResolved
+    to_node: V3Target10ConcreteProviderSelected
+    caller_symbol: web_search_route_eligible_for_classified_request
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_web_search_route.rs
+    callee_symbol: V3TargetInterpreter::resolve_web_search_route_eligibility
+    callee_file: v3/crates/routecodex-v3-target/src/lib.rs
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes: [v3.config.published_manifest, v3.web_search.route_declaration, v3.provider.scheduling_projection]
+      produces: [v3.web_search.route_eligibility]
+      side_channel_reads: [v3.web_search.route_declaration, v3.provider.scheduling_projection]
+      side_channel_writes: [v3.web_search.route_eligibility]
+    status: anchored
+  - step_id: v3-web-search-route-exposure-02
+    from_node: V3HubReqTarget06Resolved
+    to_node: V3HubReqOutbound07ProviderSemantic
+    caller_symbol: build_v3_hub_req_outbound_07_from_v3_hub_req_target_06
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
+    callee_symbol: project_builtin_web_search_exposure
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.web_search.route_declaration, v3.web_search.route_eligibility]
+      produces: [v3.request.provider_semantic]
+      side_channel_reads: [v3.web_search.route_declaration, v3.web_search.route_eligibility]
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-web-search-route-exposure-03
+    from_node: V3ResponsesDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: responses_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: project_openai_responses_hosted_web_search_for_selected_target
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.responses_direct.policy]
+      produces: [v3.provider.responses_wire_payload]
+      side_channel_reads: [v3.responses_direct.policy]
+      side_channel_writes: []
+    status: anchored
+  - step_id: v3-web-search-route-exposure-04
+    from_node: V3ChatDirect11Policy
+    to_node: V3Provider12ResponsesWirePayload
+    caller_symbol: chat_direct_request_projection_hook
+    caller_file: v3/crates/routecodex-v3-runtime/src/hooks.rs
+    callee_symbol: project_builtin_web_search_exposure
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_builtin_tool_projection.rs
+    owner_feature_id: v3.web_search_servertool_state_machine
+    resource_flow:
+      consumes: [v3.request.normal_payload, v3.target.concrete_provider]
+      produces: [v3.provider.responses_wire_payload]
+      side_channel_reads: [v3.target.concrete_provider]
+      side_channel_writes: []
+    status: anchored
 - chain_id: v3.console_request_count_visibility.mainline
   owner_feature_id: v3.console_request_count_visibility
   summary: One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.
