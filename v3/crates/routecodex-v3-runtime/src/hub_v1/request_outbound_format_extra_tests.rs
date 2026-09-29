@@ -41,9 +41,15 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
     assert_eq!(tool["type"], "function");
     assert_eq!(tool["function"]["name"], "apply_patch");
     assert_eq!(tool["function"]["parameters"]["required"], json!(["input"]));
-    assert!(tool["function"]["parameters"]["properties"].get("reason").is_none());
-    assert!(tool["function"]["parameters"]["properties"].get("goal_alignment_confidence").is_none());
-    assert!(tool["function"]["parameters"]["properties"].get("model_id").is_none());
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("reason")
+        .is_none());
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("goal_alignment_confidence")
+        .is_none());
+    assert!(tool["function"]["parameters"]["properties"]
+        .get("model_id")
+        .is_none());
 }
 
 #[test]
