@@ -17,6 +17,37 @@ pub(crate) fn read_live_status_detail(
     Ok(status.detail)
 }
 
+pub(crate) fn read_pending_startup_detail(
+    instance_dir: &Path,
+    instance_id: &str,
+) -> Result<Option<String>, V3LifecycleError> {
+    let status_path = instance_dir.join("status.json");
+    if !status_path.exists() {
+        return Ok(None);
+    }
+    let status: V3ManagedStatusRecord = read_json(&status_path)?;
+    if status.instance_id != instance_id {
+        return Err(V3LifecycleError::IdentityMismatch(
+            "startup status instance id differs from managed child identity".to_string(),
+        ));
+    }
+    if status.state != V3ManagedRunState::Starting {
+        return Ok(None);
+    }
+    let Some(detail) = status.detail else {
+        return Ok(None);
+    };
+    if detail == "exec restart accepted" {
+        return Ok(None);
+    }
+    Ok(Some(
+        detail
+            .strip_prefix("exec restart accepted; ")
+            .unwrap_or(&detail)
+            .to_string(),
+    ))
+}
+
 pub(crate) fn append_status_detail(base: Option<&str>, update: String) -> String {
     match base {
         Some(base) if !base.is_empty() => format!("{base}; {update}"),
@@ -62,19 +93,37 @@ pub(crate) async fn fail_managed_runtime_with_hooks_cleanup(
     hooks_sidecar: V3HooksSidecarSupervisor,
     primary_error: V3LifecycleError,
 ) -> Result<(), V3LifecycleError> {
-    if let Some(handle) = handle {
-        let _ = tokio::time::timeout(Duration::from_secs(2), handle.shutdown()).await;
-    }
+    let codex_sample_persist_detail = if let Some(handle) = handle {
+        match tokio::time::timeout(Duration::from_secs(2), handle.shutdown()).await {
+            Ok(failures) if failures.is_empty() => None,
+            Ok(failures) => Some(format!(
+                "codex sample persistence shutdown failed: {}",
+                failures
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
+            Err(error) => Some(format!(
+                "codex sample persistence shutdown timed out: {error}"
+            )),
+        }
+    } else {
+        None
+    };
     let hooks_cleanup_detail = hooks_sidecar
         .stop()
         .await
         .err()
         .map(|error| format!("hooks sidecar cleanup failed: {error}"));
     let hooks_record_detail = hooks_sidecar_cleanup_incomplete_detail(instance_dir);
-    let cleanup_detail = match hooks_cleanup_detail.as_deref() {
+    let mut cleanup_detail = match hooks_cleanup_detail.as_deref() {
         Some(cleanup) => cleanup.to_string(),
         None => hooks_record_detail.unwrap_or_else(|| "managed runtime failure".to_string()),
     };
+    if let Some(sample_persist_detail) = codex_sample_persist_detail {
+        cleanup_detail = append_status_detail(Some(&cleanup_detail), sample_persist_detail);
+    }
     let detail = append_status_detail(Some(&primary_error.to_string()), cleanup_detail);
     if let Err(status_error) = write_status(
         instance_dir,
@@ -114,17 +163,33 @@ pub(crate) async fn shutdown_managed_runtime(
     hooks_sidecar: V3HooksSidecarSupervisor,
 ) -> Result<(), V3LifecycleError> {
     write_status(instance_dir, instance_id, V3ManagedRunState::Stopping, None)?;
-    handle.shutdown().await;
+    let codex_sample_persist_failures = handle.shutdown().await;
     let hooks_cleanup_detail = hooks_sidecar
         .stop()
         .await
         .err()
         .map(|error| format!("hooks sidecar shutdown failed: {error}"));
+    let detail = if codex_sample_persist_failures.is_empty() {
+        hooks_cleanup_detail
+    } else {
+        let failure_detail = format!(
+            "codex sample persistence shutdown failed: {}",
+            codex_sample_persist_failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        Some(append_status_detail(
+            hooks_cleanup_detail.as_deref(),
+            failure_detail,
+        ))
+    };
     write_status(
         instance_dir,
         instance_id,
         V3ManagedRunState::Stopped,
-        hooks_cleanup_detail,
+        detail,
     )?;
     let _ = fs::remove_file(instance_dir.join("pid.cache"));
     let _ = fs::remove_file(instance_dir.join("control.json"));
@@ -145,33 +210,54 @@ pub(crate) async fn restart_managed_runtime_in_place(
         instance_dir,
         &restart_plan.control_instance_id,
         V3ManagedRunState::Starting,
-        Some("exec restart accepted".to_string()),
+        None,
     )?;
     let provider_checkpoints =
         routecodex_v3_runtime::default_provider_transport_handoff_checkpoints();
-    let checkpoints = handle.prepare_for_exec().await;
-    write_json_atomic(&instance_dir.join(FRONT_HANDOFF_FILE), &checkpoints)?;
+    let preparation = handle.prepare_for_exec().await;
+    write_json_atomic(
+        &instance_dir.join(FRONT_HANDOFF_FILE),
+        &preparation.front_checkpoints,
+    )?;
     write_json_atomic(
         &instance_dir.join(PROVIDER_HANDOFF_FILE),
         &provider_checkpoints,
     )?;
+    let mut restart_detail = if preparation.codex_sample_persist_failures.is_empty() {
+        None
+    } else {
+        let failure_detail = format!(
+            "codex sample persistence shutdown failed during exec restart: {}",
+            preparation
+                .codex_sample_persist_failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+        eprintln!("{failure_detail}");
+        Some(failure_detail)
+    };
     let hooks_cleanup_detail = hooks_sidecar
         .stop()
         .await
         .err()
         .map(|error| format!("hooks sidecar shutdown failed: {error}"));
     if let Some(error) = hooks_cleanup_detail.as_deref() {
+        restart_detail = Some(match restart_detail.as_deref() {
+            Some(detail) => append_status_detail(Some(detail), error.to_string()),
+            None => error.to_string(),
+        });
+    } else {
+        let _ = fs::remove_file(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE));
+    }
+    if let Some(detail) = restart_detail.as_deref() {
         write_status(
             instance_dir,
             &restart_plan.control_instance_id,
             V3ManagedRunState::Starting,
-            Some(append_status_detail(
-                Some("exec restart accepted"),
-                error.to_string(),
-            )),
+            Some(detail.to_string()),
         )?;
-    } else {
-        let _ = fs::remove_file(instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE));
     }
     let _ = fs::remove_file(instance_dir.join(RESTART_PLAN_FILE));
     if restart_plan.control_instance_id == declaration.instance_id {
@@ -200,12 +286,10 @@ pub(crate) async fn restart_managed_runtime_in_place(
         command.arg("--sse-dump");
     }
     let error = command.exec();
-    let detail = match hooks_cleanup_detail {
-        Some(hooks_cleanup_detail) => {
-            format!("exec restart failed: {error}; {hooks_cleanup_detail}")
-        }
-        None => format!("exec restart failed: {error}"),
-    };
+    let detail = append_status_detail(
+        restart_detail.as_deref(),
+        format!("exec restart failed: {error}"),
+    );
     let _ = write_status(
         instance_dir,
         &restart_plan.control_instance_id,

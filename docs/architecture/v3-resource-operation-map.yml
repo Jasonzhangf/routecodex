@@ -1368,6 +1368,18 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.lifecycle.status_record
+    resource_kind: runtime_control_status
+    lifecycle: v3.server.managed_lifecycle
+    owner_crate: routecodex-v3-lifecycle
+    owner_node: V3Lifecycle07GracefullyStopped
+    identity: [instanceId, state, updatedAtEpochMs, detail]
+    allowed_writers: [write_status]
+    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live]
+    forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.lifecycle.operation_lock
     resource_kind: runtime_control_lock
     lifecycle: v3.server.managed_lifecycle
@@ -1925,10 +1937,44 @@ resources:
       payload_fidelity: diagnostic payloads are preserved verbatim; no sensitive-key replacement or secret-literal substitution is performed
       default_policy: dev builds enable sampling by default (cfg!(debug_assertions)); release builds require explicit opt-in
       error_evidence: error paths force-write samples even when sampling is disabled
-      retention_cap: at most 200 request directories per port are retained
+      retention_cap: at most 100 request directories per port are retained
     allowed_readers: [capture_v3_live_raw_request, capture_v3_responses_relay_response, capture_v3_responses_direct_response, capture_v3_responses_direct_provider_snapshots, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots, V3DebugBoundedTextCapture::rendered_text, developer_diagnostics]
     allowed_writers: [V3DebugRuntime::project_payload_verbatim, V3DebugBoundedTextCapture::append, V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-error, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run test:v3-debug-payload-budget-red-fixtures, npm run verify:v3-resource-map]
+
+  - resource_id: v3.debug.codex_sample_persist_queue
+    resource_kind: asynchronous_diagnostic_persistence_queue
+    lifecycle: v3.codex_sample_retention_snap_scope
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_crate: routecodex-v3-debug
+    owner_node: run_v3_codex_sample_persist_worker
+    identity: [requestId, artifactName]
+    semantic_contract: Bounded to 64 queued jobs and 64 MiB of serialized payload across queued and in-flight writes. Capacity or byte-budget exhaustion is logged and recorded as a persistence failure without rejecting the business request.
+    allowed_readers: [run_v3_codex_sample_persist_worker]
+    allowed_writers: [V3CodexSampleStore::enqueue_persist]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: anchored
+    required_gates: [npm run verify:v3-debug-payload-budget, npm run test:v3-debug-payload-budget-red-fixtures, npm run verify:v3-resource-map]
+
+  - resource_id: v3.debug.codex_sample_persist_failure
+    resource_kind: diagnostic_persistence_failure_ledger
+    lifecycle: v3.codex_sample_retention_snap_scope
+    owner_feature_id: v3.codex_sample_retention_snap_scope
+    owner_crate: routecodex-v3-debug
+    owner_node: record_v3_codex_sample_persist_failure
+    identity: [requestId, artifactName, reason]
+    semantic_contract: Retains at most 256 request-qualified failures plus one omitted-count summary. Barriers report a snapshot without draining it; worker shutdown drains the ledger for lifecycle reporting.
+    allowed_readers: [V3CodexSampleStore::persist_failures, V3CodexSamplePersistHandle::wait_until_idle, V3CodexSamplePersistHandle::shutdown, V3ServerAggregateHandle::shutdown, V3ServerAggregateHandle::prepare_for_exec, shutdown_managed_runtime, restart_managed_runtime_in_place, developer_logs]
+    allowed_writers: [record_v3_codex_sample_persist_failure]
+    forbidden_writers: [routecodex-v3-runtime, routecodex-v3-provider-responses, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
@@ -1955,11 +2001,11 @@ resources:
     resource_kind: failure_scoped_diagnostic_artifact
     lifecycle: v3.error.raw_wire_evidence
     owner_feature_id: v3.error.raw_wire_evidence
-    owner_crate: routecodex-v3-server
-    owner_node: V3ErrorEvidenceFlushOnTerminalFailure
+    owner_crate: routecodex-v3-debug
+    owner_node: V3CodexSampleStore
     identity: [entryProtocol, endpoint, port, requestId, artifactName]
     allowed_readers: [developer_diagnostics, incident_replay]
-    allowed_writers: [persist_v3_error_evidence_payload, capture_v3_responses_relay_provider_snapshots, capture_v3_relay_provider_snapshots]
+    allowed_writers: [V3CodexSampleStore::persist]
     forbidden_writers: [routecodex-v3-runtime, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     may_enter_provider_body: false
     may_enter_client_body: false
