@@ -1,6 +1,6 @@
 ---
 name: rcc-dev-skills
-description: "RouteCodex V3 evidence-first development: query resource/function/mainline/verification maps, prove first divergence, patch one owner, then run mapped gates and installed same-entry replay. Use for debug, protocol, provider, routing, continuation, SSE, servertool, or runtime changes."
+description: "RouteCodex V3 transparent-proxy development/debug: maximize cross-protocol passage; never block a passable request or response with extra validation. For 502/598/599, routing, provider, protocol/SSE, or tool failures, read the DAGPipe graph first, find the first divergence, and replay the installed entry. Active config: ~/.rcc/config.toml; samples: ~/.rcc/codex-samples."
 ---
 
 # RouteCodex V3 Development
@@ -10,6 +10,7 @@ This skill owns V3 command and gate sequencing. Inherit general methods from `co
 ## Command-First Flow
 
 1. Read `AGENTS.md`.
+   For a module under DAGPipe governance, first read `docs/architecture/dagpipe/README.md` and its business graph. Correct and review the target graph against the proxy contract, then compare it with the maps, code and same-entry evidence. Run `npm run verify:v3-dagpipe-governance` for registered static graphs. An unregistered module remains pending; CLI validation does not prove SDK compile or runtime execution.
 2. Query maps before source:
 
 ```bash

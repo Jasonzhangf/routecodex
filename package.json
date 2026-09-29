@@ -280,6 +280,7 @@
     "verify:agent-p0-payload-control-guard": "node scripts/architecture/verify-agent-p0-payload-control-guard.mjs",
     "verify:agent-p0-payload-control-guard-global": "node scripts/architecture/verify-agent-p0-payload-control-guard.mjs --include-global",
     "test:agent-p0-payload-control-guard-red-fixtures": "node scripts/tests/agent-p0-payload-control-guard-red-fixtures.mjs",
+    "verify:v3-dagpipe-governance": "node scripts/architecture/verify-v3-dagpipe-governance.mjs",
     "verify:v3-architecture-ci": "npm --prefix v3 run verify:v3-architecture-ci",
     "verify:v3-operation-runner-dagpipe": "node v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mjs",
     "test:v3-operation-runner-red-fixtures": "node v3/scripts/tests/v3-operation-runner-red-fixtures.mjs",

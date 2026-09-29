@@ -1,5 +1,7 @@
 # Architecture Wiki
 
+V3 DAGPipe 业务目标图和逐模块治理状态见 [`../dagpipe/README.md`](../dagpipe/README.md)；本目录的 caller 图用于核对现有代码接线，不代替业务图。
+
 ## Purpose
 
 这个 wiki 只解决一件事：当你要定位架构真源、主线调用边、owner、验证栈时，应该先看哪里。

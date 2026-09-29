@@ -7,8 +7,10 @@ use super::request_outbound_builtin_tool_projection::project_openai_responses_cu
 use super::request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 use super::request_outbound_builtin_tool_projection::promote_tool_search_output_tools_to_provider_tools;
 use super::request_outbound_metadata::{
-    project_openai_chat_reasoning_context_policy, project_openai_chat_reasoning_summary_policy,
-    project_openai_client_metadata_to_metadata, validate_openai_metadata,
+    project_openai_chat_reasoning_context_policy,
+    project_openai_chat_reasoning_effort_from_reasoning,
+    project_openai_chat_reasoning_summary_policy, project_openai_client_metadata_to_metadata,
+    validate_openai_metadata,
 };
 use std::collections::BTreeSet;
 #[path = "request_outbound_responses_items.rs"]
@@ -1137,24 +1139,6 @@ fn consume_routecodex_chat_extension_for_openai_chat_provider(
             remove_object_field(tool_call_row, "routecodex_chat_extension");
         }
     }
-}
-
-fn project_openai_chat_reasoning_effort_from_reasoning(
-    row: &mut Map<String, Value>,
-) -> Option<Value> {
-    let reasoning = remove_object_field(row, "reasoning")?;
-    let effort = reasoning
-        .get("effort")
-        .and_then(Value::as_str)
-        .or_else(|| reasoning.as_str())
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())?
-        .to_ascii_lowercase();
-    (!matches!(
-        effort.as_str(),
-        "none" | "off" | "disabled" | "disable" | "false"
-    ))
-    .then(|| Value::String(effort))
 }
 
 fn remove_object_field(row: &mut Map<String, Value>, key: &str) -> Option<Value> {

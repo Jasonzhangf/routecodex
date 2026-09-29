@@ -69,20 +69,19 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 
 ## rccv3 Live Closeout SOP
 
-Use this SOP for V3 native live surfaces served by `config.v3.toml`, including 4444/5555.
+Use this SOP for V3 native live surfaces served by the active config. The default local authoring file is `~/.rcc/config.toml`; read the listener set from that file at execution time.
 
 1. Build and install the native V3 binary:
    - `npm run install:v3`
 2. Validate the active V3 config:
-   - `rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml`
+   - `rccv3 config check -c ~/.rcc/config.toml`
 3. Restart the V3 instance with rccv3:
-   - `rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml`
+   - `rccv3 restart -c ~/.rcc/config.toml`
    - Do not use legacy `routecodex restart --port <port>` as the authoritative closeout for this rccv3 instance.
 4. Verify runtime identity:
    - `rccv3 --version`
-   - hash `dist/bin/rccv3`, `/Users/fanzhang/.rcc/install/current/dist/bin/rccv3`, and `/Volumes/extension/.rcc/install/current/dist/bin/rccv3`
-   - `curl http://127.0.0.1:4444/health`
-   - `curl http://127.0.0.1:5555/health`
+   - hash the candidate artifact, installed binary reported by the install path, and binary loaded by the running instance.
+   - check `/health` on every listener declared by the active config.
 5. Verify behavior on installed runtime:
    - provider-request dry-run for the involved model and port.
    - live JSON/SSE probe that proves client transport shape.
