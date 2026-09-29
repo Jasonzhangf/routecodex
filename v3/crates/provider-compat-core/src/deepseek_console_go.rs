@@ -197,9 +197,22 @@ pub(crate) fn apply_request_compat(payload: Value) -> Result<Value, String> {
 /// Single request-side owner for DeepSeek V4/OpenCode Go 400 compatibility.
 /// Handles both Responses input history and projected OpenAI Chat messages.
 pub fn apply_deepseek_v4_request_compat(payload: &mut Value) {
+    apply_deepseek_chat_transport_options_compat(payload);
     apply_deepseek_function_call_arguments_compat(payload);
     apply_deepseek_v4_thinking_chat_compat(payload);
     apply_deepseek_v4_tool_choice_compat(payload);
+}
+
+/// DeepSeek-compatible OpenAI Chat gateways reject Responses-only storage and
+/// stream-option fields as `inference request is invalid` when the model is
+/// otherwise compatible. These are transport/proxy concerns, so consume them at
+/// the provider boundary without changing client semantics.
+pub fn apply_deepseek_chat_transport_options_compat(payload: &mut Value) {
+    let Some(root) = payload.as_object_mut() else {
+        return;
+    };
+    root.remove("store");
+    root.remove("stream_options");
 }
 
 /// DeepSeek's Chat-compatible gateway requires every function-call argument

@@ -1483,4 +1483,7 @@ mod tests {
             json!({"type": "text", "text": "[Image]"})
         );
     }
+
+    #[path = "provider_req_compat_06_extra_tests.rs"]
+    mod provider_req_compat_06_extra_tests;
 }
