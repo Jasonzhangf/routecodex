@@ -15,6 +15,17 @@ business_unmatched_value:
   preserve: original_path_value_encoding_and_inverse_association
   admission: continue_request_or_response
   projection: return_to_same_client_protocol_without_semantic_rewrite
+request_inverse_contract:
+  owner: routecodex.v3.operation.normalize_request_losslessly@1
+  forward_direction: client_request_to_chat
+  inverse_method: inverse_to_entry
+  inverse_operator: routecodex.v3.field.inverse_to_entry_from_provenance@1
+  configuration_source: same_protocol_path_row_and_operator_as_forward
+  context_content: typed_path_encoding_identity_and_inverse_association_only
+  unknown_value_source: canonical_chat_extension_opaque_record
+  admission: every_configured_forward_request_operator_must_declare_inverse_to_entry_at_compile
+  output: typed_inverse_projection_reference_and_provenance_only; no request inverse view is authorized as a second normalization owner for current Direct or Relay consumers
+  forbidden_reuse: [chat_to_provider, chat_to_client_response]
 binding_contract:
   identity: one normalized protocol+path row may be consumed at most once per direction across standard and extension inventories
   row_shape:
@@ -61,6 +72,7 @@ binding_contract:
   static_vs_runtime:
     static_config: operator, protocol, section, path, shape, semantics, transform_id, collision_policy, failure_class
     runtime_injected: typed control resources passed by the fixed runner, never serialized into payload
+    forbidden_runtime_injected: request_origin_kind, invocationId, lease identity, and inverse provenance must never be serialized into request, response, provider, or client bodies, history values, protocol metadata, or debug snapshots
   typed_operator_profiles:
     routecodex.v3.field.lossless_preserve@1:
       client_request_to_chat:
@@ -9597,6 +9609,7 @@ operator_registry:
   field_operators:
     - operator: routecodex.v3.field.lossless_preserve
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.standard_projection
       operator_version: "1"
     - operator: routecodex.v3.field.provider_normalization
@@ -9605,12 +9618,16 @@ operator_registry:
       operator_version: "1"
     - operator: routecodex.v3.field.opaque_tool_payload
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.responses_include_transform
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.instructions_to_system_message
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.token_limit_rename
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.fold_role_developer_to_system
       operator_version: "1"
     - operator: routecodex.v3.field.fold_role_system_to_developer
@@ -9619,20 +9636,27 @@ operator_registry:
       operator_version: "1"
     - operator: routecodex.v3.field.identity_preserve
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.role_value_map
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.part_type_value_map
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.tool_choice_value_map
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.parallel_tool_calls_value_map
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.tool_choice_shape_branch
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.finish_reason_value_map
       operator_version: "1"
     - operator: routecodex.v3.field.usage_value_map
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.provider_event_value_map
       operator_version: "1"
     - operator: routecodex.v3.field.field_bidi_value_map
@@ -9641,17 +9665,26 @@ operator_registry:
       operator_version: "1"
     - operator: routecodex.v3.field.tool_identity_context
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.tool_declaration_transform
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.media_shape_branch
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.request_input_shape_branch
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.content_shape_branch
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.value_domain_transform
       operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
     - operator: routecodex.v3.field.array_container_shape
+      operator_version: "1"
+      inverse_to_entry: routecodex.v3.field.inverse_to_entry_from_provenance@1
+    - operator: routecodex.v3.field.inverse_to_entry_from_provenance
       operator_version: "1"
 runtime_table_identity:
   status: pre_cutover_runtime_identity_only

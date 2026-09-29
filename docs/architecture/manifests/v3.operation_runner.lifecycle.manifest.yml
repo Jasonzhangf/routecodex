@@ -4,9 +4,19 @@ status: design_only_binding_pending
 owner_feature_id: v3.unified_operation_runner_design
 graphs:
   request: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
+  request_node02_slice: docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json
   response: docs/architecture/dagpipe/v3.operation_runner.response.graph.json
   error: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
   error_chain_source: docs/architecture/manifests/error.mainline.yml
+node02_failure_handoff:
+  source_graph: docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json
+  source_node: normalize_request_losslessly
+  runtime_result: typed_source_failure
+  error_input_arc: source-failure
+  error_graph: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
+  error_entry_node: error_err01_source_raised
+  owner: RuntimeRequestGraphEntry
+  rule: the request slice has one success sink; on operator failure Runtime transfers the typed source failure to the separate Error graph before provider attempt or client commit
 field_profiles: docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
 operator_registry_source: docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml
 semantic_matrix: docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml
@@ -140,9 +150,9 @@ typed_resources:
     - normalize_v3_operation_runner_request_losslessly
     legal_values: [client_entry, retry, internal_followup]
     identity: [requestId, invocationId, originKind]
-    lifetime: immutable invocation-scoped typed control resource; RuntimeRequestGraphEntry creates client_entry, retry, or internal_followup before every request graph invocation; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
+    lifetime: immutable invocation-scoped typed control resource; current Node 02 slice receives originKind=client_entry only; future full-graph retry or internal_followup re-entry remains unbound until a real caller supplies a typed AlreadyCanonical input; scope ends naturally when the graph invocation returns, with no MetadataCenter slot and no cross-invocation storage to clean
     client_entry_rule: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; normalize_v3_operation_runner_request_losslessly initializes request_inverse_context and explicit_history_pairing from the original client entry payload
-    retry_internal_followup_rule: RuntimeRetryLaunch/RuntimeInternalFollowup route re-entry through RuntimeRequestGraphEntry, which creates originKind=retry or internal_followup before the next graph invocation; normalize_v3_operation_runner_request_losslessly reads the existing request_inverse_context and never rebuilds or overwrites it from an internal follow-up payload
+    retry_internal_followup_rule: future_full_request_graph_contract_only; current Node 02 slice never emits retry or internal_followup. When those origins are later bound, RuntimeRetryLaunch/RuntimeInternalFollowup must create originKind=retry or internal_followup before the next graph invocation, and normalize_v3_operation_runner_request_losslessly must read the existing request_inverse_context and never rebuild it from an internal follow-up payload
     payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
     release: graph_invocation_return; no MetadataCenter slot and no cross-invocation storage to clean; RuntimeRequestFinalizer does not consume or release it
   request_inverse_context:

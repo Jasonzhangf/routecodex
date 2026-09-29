@@ -10,28 +10,29 @@ const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
   ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
   : path.resolve(v3Root, '..');
 
-// Node 01 gate: the request graph is mandatory; response and error graphs
-// are deferred design targets validated only when present, never blocking
-// the first-node delivery.
+// Node02 requires request and Error graphs; the response graph remains deferred.
+const failures = [];
 const requiredGraphs = [
   'docs/architecture/dagpipe/v3.operation_runner.request.graph.json',
+  'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
 ];
 const deferredGraphs = [
   'docs/architecture/dagpipe/v3.operation_runner.response.graph.json',
-  'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
 ];
-// Iterate mandatory graphs, then deferred graphs that exist on disk.
-// Missing deferred graphs never block Node 01; present ones are still
-// validated to catch design regressions.
+// Iterate mandatory graphs, then any deferred graph present on disk.
 function forEachGraph(callback) {
-  for (const rel of requiredGraphs) callback(rel, false);
+  for (const rel of requiredGraphs) {
+    if (fs.existsSync(path.join(root, rel))) callback(rel, false);
+    else if (rel === 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json') {
+      failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 required Error graph is missing');
+    } else failures.push(`${rel}: required graph missing`);
+  }
   for (const rel of deferredGraphs) {
     if (fs.existsSync(path.join(root, rel))) callback(rel, true);
   }
 }
 const fieldProfilesRel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
 const fieldProfiles = loadYaml(fieldProfilesRel);
-const failures = [];
 
 function loadYaml(rel) {
   return YAML.parse(fs.readFileSync(path.join(root, rel), 'utf8')) ?? {};
@@ -356,6 +357,25 @@ for (const row of fieldProfiles?.extension_path_consumers ?? []) {
     if (!fieldOperatorLibrary.has(operatorKey)) {
       failures.push(`extension_path_consumers path ${row?.path ?? ''} direction ${direction} uses ${operatorKey} which is not a registered field_operator_library entry`);
     }
+  }
+}
+
+const inverseOperator = fieldProfiles?.request_inverse_contract?.inverse_operator;
+if (fieldProfiles?.request_inverse_contract?.inverse_method !== 'inverse_to_entry'
+  || !inverseOperator || !fieldOperatorLibrary.has(inverseOperator)) {
+  failures.push(`${fieldProfilesRel}: request inverse_to_entry operator must be registered`);
+}
+const forwardRequestOperators = new Set();
+for (const row of [
+  ...(fieldProfiles?.path_consumers ?? []),
+  ...(fieldProfiles?.extension_path_consumers ?? []),
+]) {
+  const operator = row?.consumers?.client_request_to_chat ?? row?.scalar_consumer?.client_request_to_chat;
+  if (operator) forwardRequestOperators.add(operator);
+}
+for (const operator of forwardRequestOperators) {
+  if (fieldOperatorLibrary.get(operator)?.inverse_to_entry !== inverseOperator) {
+    failures.push(`${fieldProfilesRel}: configured forward request operator ${operator} must declare registered inverse_to_entry ${inverseOperator}`);
   }
 }
 
@@ -1195,6 +1215,28 @@ if (lifecycleManifest.field_profiles !== fieldProfilesRel) {
   failures.push(`v3.operation_runner.lifecycle.manifest.yml: field_profiles must be ${fieldProfilesRel}`);
 }
 if (!lifecycleManifest.field_walker_contract) failures.push('v3.operation_runner.lifecycle.manifest.yml: missing field_walker_contract');
+const node02SliceRel = 'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json';
+const node02ErrorGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+const node02Failure = lifecycleManifest.node02_failure_handoff;
+const node02Slice = JSON.parse(fs.readFileSync(path.join(root, node02SliceRel), 'utf8'));
+const node02ErrorGraph = fs.existsSync(path.join(root, node02ErrorGraphRel))
+  ? JSON.parse(fs.readFileSync(path.join(root, node02ErrorGraphRel), 'utf8'))
+  : { inputs: [], nodes: [] };
+if (node02Failure?.source_graph !== node02SliceRel
+  || node02Failure?.source_node !== 'normalize_request_losslessly'
+  || node02Failure?.runtime_result !== 'typed_source_failure'
+  || node02Failure?.error_input_arc !== 'source-failure'
+  || node02Failure?.error_graph !== node02ErrorGraphRel
+  || node02Failure?.error_entry_node !== 'error_err01_source_raised'
+  || node02Failure?.owner !== 'RuntimeRequestGraphEntry'
+  || node02Slice.outputs?.length !== 1
+  || node02Slice.outputs[0] !== 'canonical-request'
+  || !node02Slice.nodes?.some((node) => node.id === node02Failure?.source_node)
+  || !node02ErrorGraph.inputs?.some((input) => input.id === node02Failure?.error_input_arc)
+  || !node02ErrorGraph.nodes?.some((node) => node.id === node02Failure?.error_entry_node
+    && node.inputs?.includes(node02Failure?.error_input_arc))) {
+  failures.push('v3.operation_runner.lifecycle.manifest.yml: Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01');
+}
 
 const resourceIds = new Set((resourceMap.resources ?? []).map((r) => r.resource_id));
 for (const id of [
@@ -1344,6 +1386,69 @@ if (!requestNormalizePlanMapEdge) {
   for (const field of ['caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
     if (requestNormalizePlanMapEdge[field] !== 'pending') {
       failures.push(`v3-mainline-call-map.yml: v3-op-runner-req-02b must keep ${field} pending, not fake source binding`);
+    }
+  }
+}
+
+const node02DesignBinding = requestChain?.entry_contract?.second_delivery_design_binding;
+const requiredNode02Consumers = [
+  'direct',
+  'relay',
+  'responses_relay',
+  'anthropic_relay',
+  'public_relay_hook',
+  'responses_relay_websocket',
+  'openai_chat_direct_to_relay',
+  'responses_direct_to_relay',
+];
+if (!node02DesignBinding) {
+  failures.push('v3-mainline-call-map.yml: request chain missing second_delivery_design_binding');
+} else {
+  const node02Entry = node02DesignBinding.node02_slice_entry ?? {};
+  if (node02Entry.output_arc !== 'canonical-request') {
+    failures.push('v3-mainline-call-map.yml: Node02 slice entry output_arc must be canonical-request');
+  }
+  if (node02Entry.caller_file !== 'v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs') {
+    failures.push('v3-mainline-call-map.yml: Node02 slice entry caller_file must be v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs');
+  }
+
+  const node02Consumers = node02DesignBinding.node02_slice_consumers;
+  if (!Array.isArray(node02Consumers)) {
+    failures.push('v3-mainline-call-map.yml: Node02 slice consumers must be an array');
+  } else {
+    const consumerModes = new Set(node02Consumers.map((consumer) => consumer?.mode));
+    for (const mode of requiredNode02Consumers) {
+      if (!consumerModes.has(mode)) failures.push(`v3-mainline-call-map.yml: Node02 slice consumers missing ${mode}`);
+    }
+    for (const consumer of node02Consumers) {
+      if (!requiredNode02Consumers.includes(consumer?.mode)) continue;
+      if (consumer?.handoff !== 'canonical-request') {
+        failures.push(`v3-mainline-call-map.yml: Node02 slice consumer ${consumer?.mode} handoff must be canonical-request`);
+      }
+    }
+  }
+
+  const futureNodeSymbols = new Set([
+    'V3OperationRunnerResolveTarget',
+    'V3OperationRunnerPlanExecution',
+  ]);
+  for (const consumer of node02Consumers ?? []) {
+    if (futureNodeSymbols.has(consumer?.consumer_symbol)) {
+      failures.push(`v3-mainline-call-map.yml: Node02 consumer ${consumer?.mode} cannot bind future node ${consumer.consumer_symbol}`);
+    }
+  }
+
+  const futureFullGraphEdges = node02DesignBinding.future_full_graph_edges;
+  if (!Array.isArray(futureFullGraphEdges)) {
+    failures.push('v3-mainline-call-map.yml: Node02 binding missing future_full_graph_edges');
+  } else {
+    for (const expectedStepId of ['v3-op-runner-req-02', 'v3-op-runner-req-02b']) {
+      const edge = futureFullGraphEdges.find((item) => item?.step_id === expectedStepId);
+      if (!edge) {
+        failures.push(`v3-mainline-call-map.yml: Node02 future full graph edge ${expectedStepId} missing`);
+      } else if (edge.status !== 'binding_pending') {
+        failures.push(`v3-mainline-call-map.yml: Node02 future full graph edge ${expectedStepId} must remain binding_pending`);
+      }
     }
   }
 }
