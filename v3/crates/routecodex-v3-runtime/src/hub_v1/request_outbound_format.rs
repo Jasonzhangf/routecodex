@@ -1115,7 +1115,6 @@ fn normalize_openai_chat_messages_payload(
             *content = Value::Array(normalized_parts);
         }
     }
-    ensure_openai_chat_tool_call_history_has_followup_user_message(messages);
     project_openai_chat_provider_tools_for_web_search_mode(
         &mut normalized,
         model_id,
@@ -1124,40 +1123,6 @@ fn normalize_openai_chat_messages_payload(
     )?;
     ensure_openai_chat_stream_usage_option(&mut normalized);
     Ok(normalized)
-}
-fn ensure_openai_chat_tool_call_history_has_followup_user_message(messages: &mut Vec<Value>) {
-    // Chat providers reject a message history whose final turns are only tool
-    // outputs. Keep the tool-call history verbatim and close the round with a
-    // deterministic user continuation so the provider sees a complete turn.
-    let mut tool_tail = 0usize;
-    while let Some(idx) = messages.len().checked_sub(tool_tail + 1) {
-        let is_tool = messages[idx]
-            .get("role")
-            .and_then(Value::as_str)
-            .is_some_and(|role| role.eq_ignore_ascii_case("tool"));
-        if !is_tool {
-            break;
-        }
-        tool_tail += 1;
-    }
-    if tool_tail == 0 {
-        return;
-    }
-    let Some(assistant_idx) = messages.len().checked_sub(tool_tail + 1) else {
-        return;
-    };
-    let assistant = &messages[assistant_idx];
-    let has_tool_calls = assistant
-        .get("role")
-        .and_then(Value::as_str)
-        .is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
-        && assistant
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .is_some_and(|calls| !calls.is_empty());
-    if has_tool_calls {
-        messages.push(json!({"role": "user", "content": "continue"}));
-    }
 }
 
 fn consume_routecodex_chat_extension_for_openai_chat_provider(
