@@ -15,11 +15,16 @@ async fn default_install_record_mode_is_internal_hooksd() {
     let record_path = root.path().join("install.json");
     let bin_directory = root.path().join("bin");
     let supervisor_wrapper = root.path().join("supervisor-wrapper");
+    let hooksd_started = root.path().join("hooksd-started");
+    let legacy_started = root.path().join("legacy-started");
     fs::create_dir(&instance_dir).unwrap();
     fs::create_dir(&bin_directory).unwrap();
     fs::write(
         bin_directory.join("rccv3-hooksd"),
-        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"rcc-hooks-sidecar/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            hooksd_started.display()
+        ),
     )
     .unwrap();
     let mut permissions = fs::metadata(bin_directory.join("rccv3-hooksd"))
@@ -29,7 +34,10 @@ async fn default_install_record_mode_is_internal_hooksd() {
     fs::set_permissions(bin_directory.join("rccv3-hooksd"), permissions).unwrap();
     fs::write(
         &supervisor_wrapper,
-        "#!/bin/sh\nprintf '%s\\n' '{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+        format!(
+            "#!/bin/sh\nprintf 'started\\n' > '{}'\nprintf '%s\\n' '{{\"protocol\":\"routecodex-hooks-supervisor/v1\",\"ready\":true}}'\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n",
+            legacy_started.display()
+        ),
     )
     .unwrap();
     let mut permissions = fs::metadata(&supervisor_wrapper).unwrap().permissions();
@@ -49,14 +57,25 @@ async fn default_install_record_mode_is_internal_hooksd() {
     std::env::set_var(HOOKS_INSTALL_RECORD_ENV, &record_path);
 
     let (sidecar, detail) = start_managed_hooks_sidecar(&instance_dir).await.unwrap();
+    let sidecar = sidecar.expect("default install record must start internal hooksd");
 
-    assert!(
-        sidecar.is_some(),
-        "default install record must start internal hooksd"
-    );
     assert!(
         detail.is_none(),
         "internal hooksd started without hooks_unavailable detail"
+    );
+    assert!(
+        hooksd_started.exists(),
+        "default must launch installed rccv3-hooksd"
+    );
+    assert!(
+        !legacy_started.exists(),
+        "default must not launch the legacy supervisor wrapper"
+    );
+
+    sidecar.stop().await.unwrap();
+    assert!(
+        !instance_dir.join(HOOKS_SIDECAR_PROCESS_FILE).exists(),
+        "test sidecar must be stopped before teardown"
     );
     std::env::remove_var(HOOKS_INSTALL_RECORD_ENV);
 }
