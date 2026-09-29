@@ -15,7 +15,10 @@ pub use observability_store::{
     v3_webui_observability_read_rows_bounded, V3WebuiObservabilityStoreError,
     V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };
-pub use sample_store::{V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION};
+pub use sample_store::{
+    V3CodexSamplePersistFailure, V3CodexSamplePersistHandle, V3CodexSamplePersistJob,
+    V3CodexSampleStore, V3_CODEX_SAMPLE_REQUEST_RETENTION,
+};
 
 pub const V3_DEFAULT_SNAPSHOT_STAGE_SELECTOR: &str =
     "client-request,provider-request,provider-response,client-response";
