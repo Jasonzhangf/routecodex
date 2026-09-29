@@ -2,8 +2,10 @@
   "target": "docs/architecture/dagpipe/v3-proxy-pipeline-target.md",
   "modules": [
     { "id": "request", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.request.graph.json" },
-    { "id": "request.normalize_request_losslessly", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json" },
     { "id": "response", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.response.graph.json" },
     { "id": "error", "status": "graph", "graph": "docs/architecture/dagpipe/v3.operation_runner.error.graph.json" }
+  ],
+  "derived_slices": [
+    { "id": "request.normalize_request_losslessly", "parent": "request", "graph": "docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json" }
   ]
 }

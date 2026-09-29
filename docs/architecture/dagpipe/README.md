@@ -4,7 +4,7 @@
 
 ## 逐模块登记
 
-`modules.json` 只记录 DAGPipe **静态图登记状态**，不复制节点或 owner 真相。请求、响应、错误是三个独立业务对象源，各自必须有单一输入 ARC 和单一输出 ARC。生命周期由 Runtime/Server 持有，重试启动新尝试，不在静态图中回边。三个 `v3.operation_runner.*.graph.json` 已登记；当前仅请求图的 `capture_client_json` Node01 切片完成 SDK 编译和真实入口接线，其余节点仍须逐一接入。静态图登记不代表整条请求、响应或错误图已运行。
+`modules.json` 只记录 DAGPipe **静态图登记状态**，不复制节点或 owner 真相。请求、响应、错误是三个顶层业务对象源；逐节点交付的派生图登记在 `derived_slices`，不得成为第四个顶层 module。每张图必须有单一输入 ARC 和单一输出 ARC。生命周期由 Runtime/Server 持有，重试启动新尝试，不在静态图中回边。三个 `v3.operation_runner.*.graph.json` 已登记；当前仅请求图的 `capture_client_json` Node01 切片完成 SDK 编译和真实入口接线，其余节点仍须逐一接入。静态图登记不代表整条请求、响应或错误图已运行。
 
 每次只推进一个模块，按以下顺序留下证据：
 
