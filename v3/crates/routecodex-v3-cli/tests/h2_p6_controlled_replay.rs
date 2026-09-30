@@ -13,8 +13,9 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
+use tempfile::TempDir;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -78,6 +79,12 @@ impl Drop for ControlledUpstream {
 
 struct CliProcess {
     child: Child,
+    _runtime_dir: TempDir,
+}
+
+struct H2Config {
+    path: PathBuf,
+    _config_dir: TempDir,
 }
 
 impl Drop for CliProcess {
@@ -505,7 +512,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "command": "npm run test:v3-h2-p6-controlled-replay",
         "expected_exit_code": 0,
         "scenarios": H2_SCENARIOS,
-        "config": config_path.display().to_string(),
+        "config": config_path.path.display().to_string(),
         "ports": {
             "success": ports.success,
             "reselect": ports.reselect,
@@ -724,16 +731,12 @@ fn write_h2_config(
     success: &ControlledUpstream,
     failure_a: &ControlledUpstream,
     failure_b: &ControlledUpstream,
-) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-h2-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    ));
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join("config.h2.toml");
+) -> H2Config {
+    let config_dir = tempfile::Builder::new()
+        .prefix("routecodex-v3-h2-")
+        .tempdir()
+        .unwrap();
+    let path = config_dir.path().join("config.h2.toml");
     fs::write(
         &path,
         format!(
@@ -894,22 +897,22 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
         ),
     )
     .unwrap();
-    path
+    H2Config {
+        path,
+        _config_dir: config_dir,
+    }
 }
 
-fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
-    let state_root = std::env::temp_dir().join(format!(
-        "rccv3-h2-state-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after UNIX epoch")
-            .as_nanos()
-    ));
-    let temp_dir = PathBuf::from("/tmp/rccv3-h2-runtime");
-    fs::create_dir_all(&temp_dir).expect("H2 lifecycle temp directory must be available");
+fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
+    let runtime_dir = tempfile::Builder::new()
+        .prefix("h2-")
+        .tempdir_in("/tmp")
+        .expect("H2 lifecycle temp directory must be available");
+    let temp_dir = runtime_dir.path();
+    let state_root = temp_dir.join("state");
     let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
-        .arg(config_path)
+        .arg(&config_path.path)
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
@@ -926,13 +929,16 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
         "H2 CLI pid={} binary={} config={}",
         child.id(),
         env!("CARGO_BIN_EXE_rccv3"),
-        config_path.display()
+        config_path.path.display()
     );
     assert!(
         matches!(child.try_wait(), Ok(None)),
         "rccv3 CLI server exited during startup"
     );
-    CliProcess { child }
+    CliProcess {
+        child,
+        _runtime_dir: runtime_dir,
+    }
 }
 
 async fn wait_for_health(
