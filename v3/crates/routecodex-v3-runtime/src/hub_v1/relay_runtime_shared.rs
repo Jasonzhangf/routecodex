@@ -301,6 +301,31 @@ pub fn eligible_external_http_witness(
     )
 }
 
+/// Preserve the received upstream status while recording that its body read
+/// failed. This remains a provider failure, never a complete HTTP witness.
+pub fn provider_http_body_read_failure(
+    response: &V3ProviderHttpFailure,
+    provider_id: &str,
+) -> V3RelayProviderFailure {
+    let reason = response
+        .body_read_failure
+        .as_deref()
+        .expect("body read failure helper requires a failed read");
+    let mut failure = provider_runtime_failure(
+        V3ProviderError::ResponseBody {
+            request_id: response.request_id.clone(),
+            provider_id: provider_id.to_string(),
+            reason: format!(
+                "provider HTTP {} error body read failed: {reason}",
+                response.status
+            ),
+        },
+        provider_id,
+    );
+    failure.status = response.status;
+    failure
+}
+
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
 pub fn provider_request_failure(
     source_stage: &'static str,
@@ -677,6 +702,10 @@ mod tests {
             body_read_failure: Some("connection closed while reading body".into()),
         };
         assert!(eligible_external_http_witness(&response).is_none());
+        let failure = provider_http_body_read_failure(&response, "provider-a");
+        assert_eq!(failure.status, 429);
+        assert!(provider_failure_message(&failure).contains("connection closed while reading body"));
+        assert!(failure.terminal_disposition.is_none());
     }
 
     #[test]

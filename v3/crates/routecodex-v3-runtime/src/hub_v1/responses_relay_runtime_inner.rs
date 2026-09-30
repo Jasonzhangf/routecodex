@@ -470,9 +470,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                 let failure = if let Some(reason) = &response.body_read_failure {
-                    provider_runtime_failure(
+                    let mut failure = provider_runtime_failure(
                         V3ProviderError::ResponseBody {
-                            request_id: input.request_id.clone(),
+                            request_id: response.request_id.clone(),
                             provider_id: selected_target_provider_id.clone(),
                             reason: format!(
                                 "provider HTTP {} error body read failed: {reason}",
@@ -481,7 +481,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         },
                         &selected_target_provider_id,
                         Some(selected_observability.clone()),
-                    )
+                    );
+                    failure.status = response.status;
+                    failure
                 } else {
                     provider_http_failure(
                         response.status,

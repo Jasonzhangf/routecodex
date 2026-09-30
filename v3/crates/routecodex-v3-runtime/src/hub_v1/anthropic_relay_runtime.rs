@@ -799,9 +799,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                     last_eligible_external_http = Some(witness);
                 }
                 let failure = if let Some(reason) = &response.body_read_failure {
-                    provider_runtime_failure(
+                    let mut failure = provider_runtime_failure(
                         V3ProviderError::ResponseBody {
-                            request_id: input.request_id.clone(),
+                            request_id: response.request_id.clone(),
                             provider_id: selected_target_provider_id.clone(),
                             reason: format!(
                                 "provider HTTP {} error body read failed: {reason}",
@@ -809,7 +809,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                             ),
                         },
                         &selected_target_provider_id,
-                    )
+                    );
+                    failure.status = response.status;
+                    failure
                 } else {
                     provider_http_failure(
                         response.status,

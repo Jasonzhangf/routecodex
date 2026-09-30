@@ -922,16 +922,9 @@ where
                     {
                         last_eligible_external_http = Some(witness);
                     }
-                    let failure = if let Some(reason) = &response.body_read_failure {
-                        provider_runtime_failure(
-                            V3ProviderError::ResponseBody {
-                                request_id: request_id.to_string(),
-                                provider_id: selected_target_provider_id.clone(),
-                                reason: format!(
-                                    "provider HTTP {} error body read failed: {reason}",
-                                    response.status
-                                ),
-                            },
+                    let failure = if response.body_read_failure.is_some() {
+                        crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
+                            &response,
                             &selected_target_provider_id,
                         )
                     } else {
