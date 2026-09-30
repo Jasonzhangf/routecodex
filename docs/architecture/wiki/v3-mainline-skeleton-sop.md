@@ -61,10 +61,10 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
 4. Apply provider-error rules:
    - every provider/runtime error, including 429/401/403/413/5xx/transport/codec failures, enters `V3Error01SourceRaised -> ... -> V3Error06ClientProjected`.
    - if a selected/explicit pool or default floor candidate remains, action must be provider reselect/switch, not client projection.
-   - client projection is allowed only after the selected route candidates and default floor are exhausted.
+   - after the selected route candidates and default floor are exhausted, project only an eligible real upstream HTTP error through Error06; with no eligible response, close the current client connection before response headers. Never fabricate a client 502.
 5. Required proof:
    - dry-run shows selected provider and provider request body `model`.
-   - live replay or exact old sample shows `[provider-error]` and `[provider-switch]` for failing candidates, then either final success or explicit exhausted error.
+   - live replay or exact old sample shows `[provider-error]` and `[provider-switch]` for failing candidates, then final success, a compatible real upstream error, or a no-response connection close.
    - marker-only 200 is not evidence unless logs/body prove selected provider/model.
 
 ## rccv3 Live Closeout SOP

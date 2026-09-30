@@ -220,20 +220,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
     let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert!(
-        error_body["error"].get("class").is_none()
-            && error_body["error"].get("error_node").is_none()
-            && error_body["error"].get("stage").is_none()
-            && error_body["error"].get("decision").is_none(),
-        "Error06 body must not carry control-plane fields: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("status").is_none(),
-        "provider raw Gemini status must not bypass ErrorErr06 projection: {error_body}"
+    assert_eq!(
+        error_body,
+        json!({"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}})
     );
     let _error_capture = captures_rx.recv().await.unwrap();
     while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())

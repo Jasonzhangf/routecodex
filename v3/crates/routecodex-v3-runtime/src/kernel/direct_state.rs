@@ -67,9 +67,7 @@ impl V3ResponsesDirectServerToolState {
         self.hooks_sidecar_socket.as_deref()
     }
 
-    fn web_search_center_key(
-        scope: &V3ResponsesDirectServerToolScope,
-    ) -> V3ServerToolCenterKey {
+    fn web_search_center_key(scope: &V3ResponsesDirectServerToolScope) -> V3ServerToolCenterKey {
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
             scope_key: format!(
@@ -305,6 +303,7 @@ impl V3ResponsesDirectRuntimeCoreState {
 #[derive(Debug)]
 pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
+    pub terminal_disposition: Option<V3ProviderTerminalDisposition>,
     pub provider_request_snapshot: Option<serde_json::Value>,
     pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,

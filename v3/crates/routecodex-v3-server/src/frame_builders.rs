@@ -235,20 +235,6 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
         }
     };
     let (code, message) = v3_error_body_code_message(&body);
-    if frame.status == 502 && code == "network_error" && message == "network error" {
-        if frame
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-        {
-            frame.error_body = Some(body);
-            frame.content_type = "text/event-stream".to_string();
-            frame.body = V3Server16Body::Json(json!({
-                "error": {"code": "network_error", "message": "network error"}
-            }));
-            return frame;
-        }
-    }
     let (code, message) = if code.starts_with("provider_response_") {
         (
             "response_stream_terminated".to_string(),
@@ -363,9 +349,6 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
-    if frame.content_type == "text/event-stream" && v3_is_sse_target_pool_exhaustion(&frame) {
-        return v3_sse_transport_disconnect_response();
-    }
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
         .header("content-type", &frame.content_type);
@@ -403,55 +386,64 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
-pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "text/event-stream")
-        .body(Body::from_stream(futures_util::stream::once(async {
-            Err::<Vec<u8>, std::io::Error>(std::io::Error::other(
-                "provider pool exhausted; SSE transport unavailable",
-            ))
-        })))
-        .expect("typed SSE transport disconnect response")
-}
-
-fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
-    let body = match &frame.body {
-        V3Server16Body::Json(body) => body,
-        _ => match frame.error_body.as_ref() {
-            Some(body) => body,
-            None => return false,
-        },
-    };
-    v3_is_sse_target_pool_exhaustion_parts(
-        frame.status,
-        &frame.node_trace,
-        &frame.error_chain,
-        body,
-    )
-}
-
-pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
-    status: u16,
-    node_trace: &[&str],
-    error_chain: &[&str],
-    body: &Value,
-) -> bool {
-    if error_chain.is_empty() || status != 502 {
-        return false;
+pub(crate) fn provider_terminal_response(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+) -> Response<Body> {
+    match disposition {
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
+            let mut hop_by_hop: Vec<String> = vec![
+                "connection",
+                "keep-alive",
+                "proxy-authenticate",
+                "proxy-authorization",
+                "te",
+                "trailer",
+                "transfer-encoding",
+                "upgrade",
+                "content-length",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+            for (name, value) in witness.headers() {
+                if name.eq_ignore_ascii_case("connection") {
+                    if let Ok(value) = std::str::from_utf8(value) {
+                        hop_by_hop.extend(value.split(',').map(|name| name.trim().to_string()));
+                    }
+                }
+            }
+            let mut response = Response::new(Body::from(witness.body().to_vec()));
+            *response.status_mut() =
+                StatusCode::from_u16(witness.status()).expect("eligible external HTTP status");
+            for (name, value) in witness.headers() {
+                if hop_by_hop
+                    .iter()
+                    .any(|excluded| name.eq_ignore_ascii_case(excluded))
+                {
+                    continue;
+                }
+                let name = axum::http::header::HeaderName::from_bytes(name.as_bytes())
+                    .expect("eligible external HTTP header name");
+                let value = axum::http::HeaderValue::from_bytes(&value)
+                    .expect("eligible external HTTP header value");
+                response.headers_mut().append(name, value);
+            }
+            response
+        }
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {
+            let connection = connection.expect("accepted Front connection identity");
+            assert!(
+                state
+                    .front_transport_broker
+                    .abort_current_connection_without_response(connection),
+                "current Front connection must be registered before no-response abort"
+            );
+            // The socket has been closed before Hyper can write this return value.
+            Response::new(Body::empty())
+        }
     }
-    let (code, message) = v3_error_body_code_message(body);
-    // Only the explicit pool-exhaustion witness selects transport disconnect.
-    // A terminal provider/network error without that witness must remain an
-    // explicit finite client SSE error frame.
-    code == "network_error"
-        && message == "network error"
-        && (node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion"))
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(

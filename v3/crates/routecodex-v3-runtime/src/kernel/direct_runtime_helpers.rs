@@ -89,9 +89,8 @@ fn record_v3_direct_provider_failure_record(
     source: &V3Error01SourceRaised,
     now_epoch_ms: u64,
 ) -> Result<V3ProviderFailureRecord, V3Error01SourceRaised> {
-    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
-        source.clone(),
-    );
+    let classified =
+        routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source.clone());
     // 统一错误模型：direct runtime 路径同样经 internal 全局策略表盖章，
     // 400/无状态码失败与 401/403 按既定阈值进入冷却，不允许绕过。
     let status = source
@@ -135,6 +134,60 @@ fn record_v3_direct_provider_success(
             now_epoch_ms,
         )
         .map_err(|error| runtime_source("V3ProviderHealthStateMutated", error))
+}
+
+fn eligible_external_http_from_provider_error(
+    error: &V3ProviderError,
+) -> Option<V3EligibleExternalHttpResponse> {
+    let V3ProviderError::HttpStatus { response } = error else {
+        return None;
+    };
+    if response.body_read_failure.is_some() {
+        return None;
+    }
+    V3EligibleExternalHttpResponse::new(
+        response.status,
+        response
+            .headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        response.body.clone(),
+    )
+}
+
+#[cfg(test)]
+mod external_http_witness_tests {
+    use super::*;
+
+    #[test]
+    fn direct_retains_exact_real_http_error_and_excludes_upstream_502() {
+        let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
+            request_id: "request".into(),
+            provider_id: "provider".into(),
+            status: 429,
+            headers: vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/html; charset=utf-8".to_vec(),
+            }],
+            body: b"<html>limit</html>".to_vec(),
+            body_read_failure: None,
+        };
+        let error = V3ProviderError::HttpStatus {
+            response: Box::new(response.clone()),
+        };
+        let witness = eligible_external_http_from_provider_error(&error).unwrap();
+        assert_eq!(witness.status(), 429);
+        assert_eq!(witness.headers()[0].1, b"text/html; charset=utf-8");
+        assert_eq!(witness.body(), response.body);
+        let upstream_502 = V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                status: 502,
+                ..response
+            }),
+        };
+        assert!(eligible_external_http_from_provider_error(&upstream_502).is_none());
+    }
 }
 
 pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabilityReader>(
@@ -236,7 +289,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             )
         },
     );
-    state.failed_candidates.extend(request_local_excluded.clone());
+    state
+        .failed_candidates
+        .extend(request_local_excluded.clone());
     let failed_with_current = state.failed_candidates.clone();
     let mut remaining = expanded_candidates.map_or(0, |expanded_candidates| {
         remaining_available_candidates(
@@ -368,7 +423,10 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 == crate::provider_failure_runtime_policy::V3RequestLocalProviderFailureScope::Candidate,
         });
     }
-    if matches!(decision.action, V3Error05ExecutionAction::WaitThenRetrySame { .. }) {
+    if matches!(
+        decision.action,
+        V3Error05ExecutionAction::WaitThenRetrySame { .. }
+    ) {
         return Err(runtime_source(
             "V3Error05ExecutionDecision",
             "retry_same is not a production provider failure action",
@@ -427,7 +485,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             &health_record,
             "terminal_default_floor_exhausted",
             None,
-            admission.as_ref().map(|admission| admission.minimum_delay_ms),
+            admission
+                .as_ref()
+                .map(|admission| admission.minimum_delay_ms),
         )),
         retryable_transient: false,
     })

@@ -28,11 +28,12 @@ use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_debug::{V3DebugError, V3DebugRuntime, V3DryRunFixture};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    is_v3_retryable_transient_source, V3Error01SourceRaised, V3Error05ExecutionAction,
-    V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
-    V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
-    V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    is_v3_retryable_transient_source, V3EligibleExternalHttpResponse, V3Error01SourceRaised,
+    V3Error05ExecutionAction, V3Error05ExecutionDecision, V3Error05RecoveryAdmissionWitness,
+    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
+    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ProviderFailureSessionScope, V3ProviderTerminalDisposition, V3_ERROR_CHAIN_NODE_IDS,
+    V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
@@ -317,6 +318,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
+    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
     let mut send_attempts = 0usize;
     let mut provider_request_snapshot = None;
     let mut pending_provider_action_recovery = None;
@@ -368,7 +370,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             unavailable_candidates: error.attempted_candidates.clone(),
                             ..V3RuntimeObservability::default()
                         };
-                        return direct_runtime_helpers_stream::error_output_with_observability(
+                        return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
                             build_v3_error_01_source_raised(
                                 V3ErrorSourceKind::TargetPoolExhausted,
                                 "V3Target10ConcreteProviderSelected",
@@ -378,6 +380,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     error.attempted_candidates.len()
                                 ),
                             ),
+                            last_external_http,
                             trace,
                             &hook_registry,
                             Some(exhausted_observability),
@@ -583,9 +586,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     continue;
                 }
                 V3Error05ExecutionAction::ProjectTerminal => {
-                    return projected_error_output_with_observability(
-                        V3ErrorHandlingCenter::project_terminal(policy_result.decision),
+                    return direct_runtime_helpers_stream::provider_terminal_output(
+                        policy_result.decision,
+                        last_external_http,
                         trace,
+                        None,
+                        None,
                         None,
                     );
                 }
@@ -784,6 +790,9 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }) {
             Ok(raw) => raw,
             Err(error) => {
+                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                    last_external_http = Some(witness);
+                }
                 if let Err(timing_error) = runtime_timing.finish_external() {
                     return error_output(
                         runtime_source("V3RuntimeTimingExternal", timing_error),
@@ -881,12 +890,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             provider_failure_events.clone(),
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        let projected =
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                        return projected_error_output_with_observability(
-                            projected,
+                        return direct_runtime_helpers_stream::provider_terminal_output(
+                            policy_result.decision,
+                            last_external_http,
                             trace,
                             Some(observability),
+                            provider_request_snapshot,
+                            None,
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
@@ -922,6 +932,19 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
         let provider_status = provider_raw.status();
         trace.push("V3ProviderResp14Raw");
+        if let Some(body) = provider_raw.json_body() {
+            if let Some(witness) = V3EligibleExternalHttpResponse::new(
+                provider_status,
+                provider_raw
+                    .headers()
+                    .iter()
+                    .map(|header| (header.name.clone(), header.value.clone()))
+                    .collect(),
+                body.to_vec(),
+            ) {
+                last_external_http = Some(witness);
+            }
+        }
 
         let direct_response_compat_context =
             match crate::kernel::v3_direct_protocol_codec::build_direct_response_compat_context(
@@ -1041,25 +1064,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             provider_failure_events.clone(),
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        if provider_response_is_stream
-                            && (transport_source.code == "provider_response_sse_stream"
-                                || transport_source.code == "provider_response_body_error")
-                        {
-                            return direct_runtime_helpers_stream::exhausted_sse_transport_error_output(
-                                transport_source,
-                                trace,
-                                &hook_registry,
-                                Some(observability),
-                                provider_request_snapshot,
-                                None,
-                            );
-                        }
-                        let projected =
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                        return projected_error_output_with_observability(
-                            projected,
+                        return direct_runtime_helpers_stream::provider_terminal_output(
+                            policy_result.decision,
+                            last_external_http,
                             trace,
                             Some(observability),
+                            provider_request_snapshot,
+                            None,
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
@@ -1332,13 +1343,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     );
                                     observability.attempts =
                                         Some(total_attempts(&accumulator, send_attempts));
-                                    let projected = V3ErrorHandlingCenter::project_terminal(
+                                    return direct_runtime_helpers_stream::provider_terminal_output(
                                         policy_result.decision,
-                                    );
-                                    return projected_error_output_with_observability(
-                                        projected,
+                                        last_external_http,
                                         trace,
                                         Some(observability),
+                                        provider_request_snapshot,
+                                        None,
                                     );
                                 }
                                 V3Error05ExecutionAction::ClientDisconnected => {
@@ -1427,6 +1438,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
 
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
+            terminal_disposition: None,
             stream_observation: response_projection.stream_observation.clone(),
             client_payload,
             provider_request_snapshot,

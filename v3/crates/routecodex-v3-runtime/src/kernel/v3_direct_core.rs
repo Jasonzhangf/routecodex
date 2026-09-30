@@ -224,13 +224,13 @@ where
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
+    let mut last_external_http = None::<V3EligibleExternalHttpResponse>;
     let mut send_attempts = 0usize;
     let mut pending_provider_action_recovery = None;
     let mut provider_request_snapshot = None;
     let mut provider_response_snapshot = None;
-    let mut provider_action_permit: Option<
-        crate::provider_action_gate::V3ProviderActionPermit,
-    > = None;
+    let mut provider_action_permit: Option<crate::provider_action_gate::V3ProviderActionPermit> =
+        None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
@@ -239,67 +239,71 @@ where
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3RuntimeProviderAdmission>,
         ) = match select_v3_expanded_target_with_admission_rescue(
-                manifest,
-                expanded.clone(),
-                &direct_failure_session_scope,
-                &provider_health,
-                &failed_candidates,
-                now_epoch_ms,
-                0,
-                allow_exhaustion_rescue_probe,
-                retry_selected.take(),
-            )
-            .await
-            {
-                V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
-                    (value.selected, Some(value.admission))
-                }
-                V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
-                    return error_output(
-                        source,
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                    );
-                }
-                V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
-                    // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
-                    // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
-                    // 哪个候选因何被冷却/排除。
-                    let detail = if error.attempted_candidates.is_empty() {
-                        "no candidates".to_string()
-                    } else {
-                        error.attempted_candidates.join(", ")
-                    };
-                    let exhausted_observability = V3RuntimeObservability {
-                        entry_protocol: C::ENTRY_PROTOCOL.to_string(),
-                        routing_group_id: Some(error.route.routing_group_id.clone()),
-                        pool_id: Some(error.route.pool_id.clone()),
-                        provider_status: None,
-                        response_status: Some("error".to_string()),
-                        unavailable_candidates: error.attempted_candidates.clone(),
-                        ..V3RuntimeObservability::default()
-                    };
-                    return error_output_with_observability(
-                        build_v3_error_01_source_raised(
-                            V3ErrorSourceKind::TargetPoolExhausted,
-                            "V3Target10ConcreteProviderSelected",
-                            "selected_target_exhausted",
-                            format!(
-                                "{} candidates unavailable: {detail}",
-                                error.attempted_candidates.len()
-                            ),
+            manifest,
+            expanded.clone(),
+            &direct_failure_session_scope,
+            &provider_health,
+            &failed_candidates,
+            now_epoch_ms,
+            0,
+            allow_exhaustion_rescue_probe,
+            retry_selected.take(),
+        )
+        .await
+        {
+            V3AdmittedTargetSelectionAfterRescue::Selected(value) => {
+                (value.selected, Some(value.admission))
+            }
+            V3AdmittedTargetSelectionAfterRescue::Failed(source) => {
+                return error_output(
+                    source,
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                );
+            }
+            V3AdmittedTargetSelectionAfterRescue::Exhausted(error) => {
+                // 可观测性：exhausted 时带全部候选明细（provider:alias:model:
+                // 原因），否则 console 只有 "N candidates unavailable" 无法诊断
+                // 哪个候选因何被冷却/排除。
+                let detail = if error.attempted_candidates.is_empty() {
+                    "no candidates".to_string()
+                } else {
+                    error.attempted_candidates.join(", ")
+                };
+                let exhausted_observability = V3RuntimeObservability {
+                    entry_protocol: C::ENTRY_PROTOCOL.to_string(),
+                    routing_group_id: Some(error.route.routing_group_id.clone()),
+                    pool_id: Some(error.route.pool_id.clone()),
+                    provider_status: None,
+                    response_status: Some("error".to_string()),
+                    unavailable_candidates: error.attempted_candidates.clone(),
+                    ..V3RuntimeObservability::default()
+                };
+                return direct_runtime_helpers_stream::target_exhausted_output_with_observability(
+                    build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::TargetPoolExhausted,
+                        "V3Target10ConcreteProviderSelected",
+                        "selected_target_exhausted",
+                        format!(
+                            "{} candidates unavailable: {detail}",
+                            error.attempted_candidates.len()
                         ),
-                        trace,
-                        &crate::hooks::register_responses_direct_hooks(),
-                        Some(exhausted_observability),
-                    );
-                }
-            };
-        if provider_action_permit_target.as_ref().is_some_and(|target| {
-            target.provider_id != selected.candidate.provider_id
-                || target.auth_alias != selected.candidate.auth_alias
-                || target.model_id != selected.candidate.model_id
-        }) {
+                    ),
+                    last_external_http,
+                    trace,
+                    &crate::hooks::register_responses_direct_hooks(),
+                    Some(exhausted_observability),
+                );
+            }
+        };
+        if provider_action_permit_target
+            .as_ref()
+            .is_some_and(|target| {
+                target.provider_id != selected.candidate.provider_id
+                    || target.auth_alias != selected.candidate.auth_alias
+                    || target.model_id != selected.candidate.model_id
+            })
+        {
             drop(provider_action_permit.take());
             provider_action_permit_target = None;
         }
@@ -506,12 +510,17 @@ where
             );
         }
         let transport_request = match selected_admission.take() {
-            Some(admission) => transport_request.with_pre_acquired_admission(admission.into_lease()),
+            Some(admission) => {
+                transport_request.with_pre_acquired_admission(admission.into_lease())
+            }
             None => transport_request,
         };
         let provider_raw = match transport.send(transport_request).await {
             Ok(raw) => raw,
             Err(error) => {
+                if let Some(witness) = eligible_external_http_from_provider_error(&error) {
+                    last_external_http = Some(witness);
+                }
                 if let Err(timing_error) = runtime_timing.finish_external() {
                     return error_output(
                         runtime_source("V3RuntimeTimingExternal", timing_error),
@@ -614,15 +623,16 @@ where
                             "json",
                             policy_result.event.as_ref().map(|event| event.status),
                             "failed",
-                provider_failure_events.clone(),
+                            provider_failure_events.clone(),
                         );
                         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                        let projected =
-                            V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                        return projected_error_output_with_observability(
-                            projected,
+                        return direct_runtime_helpers_stream::provider_terminal_output(
+                            policy_result.decision,
+                            last_external_http,
                             trace,
                             Some(observability),
+                            provider_request_snapshot,
+                            provider_response_snapshot,
                         );
                     }
                     V3Error05ExecutionAction::ClientDisconnected => {
@@ -658,7 +668,22 @@ where
         if provider_raw.status() >= 400 {
             let provider_status = provider_raw.status();
             let provider_name = provider_raw.provider_id().to_string();
-            let provider_detail = provider_raw.into_body_bytes().await.ok().and_then(|body| {
+            let response_headers = provider_raw
+                .headers()
+                .iter()
+                .map(|header| (header.name.clone(), header.value.clone()))
+                .collect();
+            let response_body = provider_raw.into_body_bytes().await.ok();
+            if let Some(body) = response_body.as_ref() {
+                if let Some(witness) = V3EligibleExternalHttpResponse::new(
+                    provider_status,
+                    response_headers,
+                    body.clone(),
+                ) {
+                    last_external_http = Some(witness);
+                }
+            }
+            let provider_detail = response_body.and_then(|body| {
                 serde_json::from_slice::<serde_json::Value>(&body)
                     .ok()
                     .and_then(|value| {
@@ -789,12 +814,12 @@ where
                         "json",
                         Some(provider_status),
                         "failed",
-                provider_failure_events.clone(),
+                        provider_failure_events.clone(),
                     );
                     observability.attempts = Some(total_attempts(&accumulator, send_attempts));
-                    let projected = V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                    return projected_error_output_with_observability_and_snapshots(
-                        projected,
+                    return direct_runtime_helpers_stream::provider_terminal_output(
+                        policy_result.decision,
+                        last_external_http,
                         trace,
                         Some(observability),
                         provider_request_snapshot,
@@ -922,14 +947,13 @@ where
                                 "json",
                                 policy_result.event.as_ref().map(|event| event.status),
                                 "failed",
-                provider_failure_events.clone(),
+                                provider_failure_events.clone(),
                             );
                             observability.attempts =
                                 Some(total_attempts(&accumulator, send_attempts));
-                            let projected =
-                                V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                            return projected_error_output_with_observability_and_snapshots(
-                                projected,
+                            return direct_runtime_helpers_stream::provider_terminal_output(
+                                policy_result.decision,
+                                last_external_http,
                                 trace,
                                 Some(observability),
                                 provider_request_snapshot,
@@ -1102,10 +1126,9 @@ where
                                 );
                                 observability.attempts =
                                     Some(total_attempts(&accumulator, send_attempts));
-                                let projected =
-                                    V3ErrorHandlingCenter::project_terminal(policy_result.decision);
-                                return projected_error_output_with_observability_and_snapshots(
-                                    projected,
+                                return direct_runtime_helpers_stream::provider_terminal_output(
+                                    policy_result.decision,
+                                    last_external_http,
                                     trace,
                                     Some(observability),
                                     provider_request_snapshot,
@@ -1191,7 +1214,7 @@ where
             v3_direct_client_transport_label(&client_payload),
             Some(provider_status),
             "completed",
-                provider_failure_events.clone(),
+            provider_failure_events.clone(),
         );
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
         if committed_client_sse {
@@ -1216,6 +1239,7 @@ where
         }
         return V3ResponsesDirectRuntimeOutput {
             client_payload,
+            terminal_disposition: None,
             provider_request_snapshot,
             provider_response_snapshot,
             node_trace: trace,

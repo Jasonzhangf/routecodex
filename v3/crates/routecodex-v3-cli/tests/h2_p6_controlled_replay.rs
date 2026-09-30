@@ -13,9 +13,12 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
+use tempfile::TempDir;
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
     sync::{mpsc, oneshot},
     time::{sleep, timeout},
 };
@@ -50,6 +53,8 @@ struct ProviderCapture {
 enum ProviderMode {
     Success,
     Failure { label: &'static str },
+    RateLimited,
+    UpstreamBadGateway,
 }
 
 #[derive(Clone)]
@@ -74,6 +79,12 @@ impl Drop for ControlledUpstream {
 
 struct CliProcess {
     child: Child,
+    _runtime_dir: TempDir,
+}
+
+struct H2Config {
+    path: PathBuf,
+    _config_dir: TempDir,
 }
 
 impl Drop for CliProcess {
@@ -83,6 +94,156 @@ impl Drop for CliProcess {
             let _ = self.child.wait();
         }
     }
+}
+
+#[tokio::test]
+async fn bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &rate_a, &rate_b);
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    for stream in [false, true] {
+        let response = client
+            .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
+            .json(&json!({"model":"client-test","input":"429 parity","stream":stream}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), ReqwestStatusCode::TOO_MANY_REQUESTS);
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("rate_limit_error"),
+            "stream={stream} body={body}"
+        );
+        assert!(
+            !body.contains("network_error"),
+            "stream={stream} body={body}"
+        );
+    }
+    next_capture(&mut rate_a.captures, "429 first upstream").await;
+    next_capture(&mut rate_b.captures, "429 second upstream").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselection_succeeds() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let mut no_response = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &rate, &no_response);
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+    wait_for_health(&client, &mut cli, ports.reselect, "h2_reselect").await;
+
+    let failure_response = client
+        .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
+        .json(&json!({"model":"client-test","input":"429 then no response"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        failure_response.status(),
+        ReqwestStatusCode::TOO_MANY_REQUESTS
+    );
+    let body = failure_response.text().await.unwrap();
+    assert!(body.contains("rate_limit_error"), "{body}");
+    assert!(!body.contains("network_error"), "{body}");
+    next_capture(&mut rate.captures, "429 before transport failure").await;
+    next_capture(&mut no_response.captures, "transport after 429").await;
+
+    let success_response = client
+        .post(format!("http://127.0.0.1:{}/v1/responses", ports.reselect))
+        .json(&json!({"model":"client-test","input":"failure then success"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(success_response.status(), ReqwestStatusCode::OK);
+    assert_eq!(
+        success_response.json::<Value>().await.unwrap(),
+        json!({"id":"h2_json","output_text":"ok"})
+    );
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_all_provider_no_response_closes_front_without_http_headers() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut no_response_a = start_no_response_upstream().await;
+    let mut no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b);
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    for stream in [false, true] {
+        assert_no_front_http_headers(ports.exhausted, stream).await;
+    }
+    next_capture(&mut no_response_a.captures, "first no-response transport").await;
+    next_capture(&mut no_response_b.captures, "second no-response transport").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut bad_gateway_a = start_controlled_upstream(ProviderMode::UpstreamBadGateway).await;
+    let mut bad_gateway_b = start_controlled_upstream(ProviderMode::UpstreamBadGateway).await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &bad_gateway_a, &bad_gateway_b);
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    for stream in [false, true] {
+        assert_no_front_http_headers(ports.exhausted, stream).await;
+    }
+    next_capture(
+        &mut bad_gateway_a.captures,
+        "first actual HTTP 502 upstream",
+    )
+    .await;
+    next_capture(
+        &mut bad_gateway_b.captures,
+        "second actual HTTP 502 upstream",
+    )
+    .await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+async fn assert_no_front_http_headers(port: u16, stream: bool) {
+    let payload = serde_json::to_string(
+        &json!({"model":"client-test","input":"upstream no response","stream":stream}),
+    )
+    .unwrap();
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        payload.len(), payload
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut response = [0u8; 8192];
+    let count = timeout(Duration::from_secs(10), socket.read(&mut response))
+        .await
+        .expect("front connection must terminate before timeout")
+        .unwrap_or(0);
+    assert_eq!(
+        count,
+        0,
+        "stream={stream} expected zero HTTP response bytes, got {}",
+        String::from_utf8_lossy(&response[..count])
+    );
 }
 
 #[tokio::test]
@@ -225,11 +386,16 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         .send()
         .await
         .unwrap();
-    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
+    assert_eq!(
+        exhausted_response.status(),
+        ReqwestStatusCode::SERVICE_UNAVAILABLE
+    );
     let exhausted_body: Value = exhausted_response.json().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "network_error");
-    assert_eq!(exhausted_body["error"]["message"], "network error");
-    assert!(exhausted_body["error"].get("internal_code").is_none());
+    assert!(
+        exhausted_body.to_string().contains("controlled_failure-b"),
+        "last real upstream HTTP 503 response must retain its external error meaning: {exhausted_body}"
+    );
+    assert!(!exhausted_body.to_string().contains("network_error"));
     assert!(
         exhausted_body["error"].get("target_exhausted").is_none()
             && exhausted_body["error"]
@@ -346,7 +512,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "command": "npm run test:v3-h2-p6-controlled-replay",
         "expected_exit_code": 0,
         "scenarios": H2_SCENARIOS,
-        "config": config_path.display().to_string(),
+        "config": config_path.path.display().to_string(),
         "ports": {
             "success": ports.success,
             "reselect": ports.reselect,
@@ -442,6 +608,20 @@ async fn controlled_responses_upstream(
             .header("content-type", "application/json")
             .body(Body::from(format!(r#"{{"error":"controlled_{label}"}}"#)))
             .unwrap(),
+        ProviderMode::RateLimited => Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled rate limit"}}"#,
+            ))
+            .unwrap(),
+        ProviderMode::UpstreamBadGateway => Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"upstream_gateway_error","message":"controlled upstream 502"}}"#,
+            ))
+            .unwrap(),
     }
 }
 
@@ -463,6 +643,34 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
             })
             .await
             .unwrap();
+    });
+    ControlledUpstream {
+        base_url: format!("http://{address}/v1"),
+        captures: captures_rx,
+        shutdown: Some(shutdown_tx),
+    }
+}
+
+async fn start_no_response_upstream() -> ControlledUpstream {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let (socket, _) = accepted.unwrap();
+                    captures_tx.send(ProviderCapture {
+                        authorization: None,
+                        accept: None,
+                        body: json!({"transport_connected": true}),
+                    }).unwrap();
+                    drop(socket);
+                }
+            }
+        }
     });
     ControlledUpstream {
         base_url: format!("http://{address}/v1"),
@@ -523,16 +731,12 @@ fn write_h2_config(
     success: &ControlledUpstream,
     failure_a: &ControlledUpstream,
     failure_b: &ControlledUpstream,
-) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-h2-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    ));
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join("config.h2.toml");
+) -> H2Config {
+    let config_dir = tempfile::Builder::new()
+        .prefix("routecodex-v3-h2-")
+        .tempdir()
+        .unwrap();
+    let path = config_dir.path().join("config.h2.toml");
     fs::write(
         &path,
         format!(
@@ -693,22 +897,22 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
         ),
     )
     .unwrap();
-    path
+    H2Config {
+        path,
+        _config_dir: config_dir,
+    }
 }
 
-fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
-    let state_root = std::env::temp_dir().join(format!(
-        "rccv3-h2-state-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after UNIX epoch")
-            .as_nanos()
-    ));
-    let temp_dir = PathBuf::from("/tmp/rccv3-h2-runtime");
-    fs::create_dir_all(&temp_dir).expect("H2 lifecycle temp directory must be available");
+fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
+    let runtime_dir = tempfile::Builder::new()
+        .prefix("h2-")
+        .tempdir_in("/tmp")
+        .expect("H2 lifecycle temp directory must be available");
+    let temp_dir = runtime_dir.path();
+    let state_root = temp_dir.join("state");
     let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
-        .arg(config_path)
+        .arg(&config_path.path)
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
@@ -725,13 +929,16 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
         "H2 CLI pid={} binary={} config={}",
         child.id(),
         env!("CARGO_BIN_EXE_rccv3"),
-        config_path.display()
+        config_path.path.display()
     );
     assert!(
         matches!(child.try_wait(), Ok(None)),
         "rccv3 CLI server exited during startup"
     );
-    CliProcess { child }
+    CliProcess {
+        child,
+        _runtime_dir: runtime_dir,
+    }
 }
 
 async fn wait_for_health(
