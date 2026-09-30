@@ -3347,6 +3347,8 @@ features:
   - npm run verify:v3-mainline-caller-flow
   - npm run verify:v3-architecture-docs
   - git diff --check
+  live_required:
+  - On the real /v1/responses entry, GCM gpt-5.5 and gpt-5.6-luna each complete exec_command, apply_patch, and a read-only MCP tool round trip; capture the client declaration, provider call, client projection, actual tool result, follow-up request, and completed response. The apply_patch case uses and removes a disposable worktree-local file.
   completion_boundary:
     source_controlled: true
     live_cutover: required
@@ -3645,8 +3647,15 @@ features:
   - RuntimeRequestGraphEntry owns slice derivation, pipeline_runtime::compile, and Runtime::run; there is no direct Operator call path
   - Direct-to-Relay handoff reuses the in-flight captured value and existing request_execution_control; it does not re-enter Server ingress or recapture
   - the first node does not claim one existing shared normalize_request_losslessly caller: Direct keeps its current V3Server03HttpRequestRaw/C::build_standardized owner, Relay keeps its protocol Req02 owner
+  - every inbound direction_bindings source names a path in that protocol's raw source inventory; outbound Chat sources are not constrained to wire inventory paths
+  - Responses request.input[].type is read per input array item, and the selected request branch remains paired with that same request's typed inverse provenance for the response projection
+  - the target request design assigns historical image placeholders to Chat Process request governance after lossless normalization, retaining current-turn images and stable historical placeholders for tool-only replay
   - currently unsupported Anthropic/Gemini Direct modes remain unsupported after the capture-node delivery
   negative_assertions:
+  - a protocol profile cannot authorize a field path absent from the source inventory
+  - an inbound direction binding cannot source a path absent from that protocol's source inventory
+  - an outbound chat_to_provider source is not required to appear in a client protocol inventory
+  - no Responses request input discriminator is modeled as the object-level path request.input.type or reconstructed from a global hardcoded tool-shape rule
   - no graph node or staged candidate resource is defined as writing directly to a client body
   - no response graph node may write v3.response.client_payload or a Server/SSE frame as its own output
   - no Server/SSE frame node appears in allowed_readers of v3.operation_runner.client_frame_candidate or v3.error.client_projection_candidate

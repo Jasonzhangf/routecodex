@@ -1279,6 +1279,38 @@ const mutations = [
     expect: /responses:input_fields:request\.input\[\]\.call_id must declare typed_discriminator_cases with discriminator_path request\.input\[\]\.type/u,
   },
   {
+    name: 'protocol-profile-cannot-authorize-uninventoried-field',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.path === 'request.max_output_tokens',
+      );
+      if (!row) throw new Error('missing Responses max_output_tokens profile row');
+      row.path = 'request.uninventoried_field';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /unknown path_consumer binding responses:request_fields:request\.uninventoried_field has no matrix source row/u,
+  },
+  {
+    name: 'inbound-binding-source-outside-protocol-inventory',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.path === 'request.max_output_tokens',
+      );
+      if (!row?.params?.direction_bindings?.client_request_to_chat) {
+        throw new Error('missing Responses client_request_to_chat binding');
+      }
+      row.params.direction_bindings.client_request_to_chat.source = 'request.uninventoried_field';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /responses:request_fields:request\.max_output_tokens direction_binding client_request_to_chat source request\.uninventoried_field is not in protocol source inventory/u,
+  },
+  {
     name: 'responses-input-item-role-missing-branch-deleted',
     mutate(tmp) {
       const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
@@ -1424,6 +1456,38 @@ try {
   }
 } finally {
   fs.rmSync(positiveTmp, { recursive: true, force: true });
+}
+
+// Positive fixture: outbound bindings may source canonical Chat paths; those
+// paths are not expected in client/provider protocol source inventories.
+const canonicalOutboundTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-operation-runner-canonical-outbound-'));
+try {
+  for (const rel of files) {
+    const src = path.join(repo, rel);
+    const dest = path.join(canonicalOutboundTmp, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.cpSync(src, dest);
+  }
+  const manifest = path.join(canonicalOutboundTmp, 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml');
+  const doc = YAML.parse(fs.readFileSync(manifest, 'utf8'));
+  const row = doc.path_consumers.find(
+    (item) => item.protocol === 'responses' && item.path === 'request.max_output_tokens',
+  );
+  row.params.direction_bindings.chat_to_provider.source = 'canonical_chat.request.max_output_tokens';
+  fs.writeFileSync(manifest, YAML.stringify(doc));
+  const result = spawnSync(process.execPath, [verifyScript], {
+    cwd: canonicalOutboundTmp,
+    env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: canonicalOutboundTmp },
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    failed += 1;
+    console.error(`[v3-operation-runner-red] canonical-outbound-source: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
+  } else {
+    console.log('[v3-operation-runner-red] canonical-outbound-source: PASS');
+  }
+} finally {
+  fs.rmSync(canonicalOutboundTmp, { recursive: true, force: true });
 }
 
 // Positive fixture: removing deferred response and error graph files must
