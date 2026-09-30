@@ -18,13 +18,14 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_01_source_raised, V3EligibleExternalHttpResponse, V3Error05ExecutionAction,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHttpFailure,
+    V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -282,6 +283,24 @@ pub fn provider_http_failure(
     }
 }
 
+/// A status and headers alone are not a complete upstream HTTP response.
+pub fn eligible_external_http_witness(
+    response: &V3ProviderHttpFailure,
+) -> Option<V3EligibleExternalHttpResponse> {
+    if response.body_read_failure.is_some() {
+        return None;
+    }
+    V3EligibleExternalHttpResponse::new(
+        response.status,
+        response
+            .headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        response.body.clone(),
+    )
+}
+
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
 pub fn provider_request_failure(
     source_stage: &'static str,
@@ -357,9 +376,7 @@ pub fn provider_runtime_failure(
             }),
             source_stage,
             terminal_projection: Some(projected),
-            terminal_disposition: Some(
-                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
-            ),
+            terminal_disposition: None,
             error_type_fn: extract_error_code_style,
             error_message_fn: extract_message_code_style,
         };
@@ -415,6 +432,9 @@ pub fn terminalize_provider_failure(
     mut failure: V3RelayProviderFailure,
     last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
 ) -> V3RelayProviderFailure {
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
@@ -645,6 +665,57 @@ fn observe_relay_client_sse_usage_chunk(
 mod tests {
     use super::*;
     use futures_util::StreamExt;
+
+    #[test]
+    fn incomplete_provider_http_error_body_is_not_an_external_http_witness() {
+        let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
+            request_id: "req-body-read".into(),
+            provider_id: "provider-a".into(),
+            status: 429,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("connection closed while reading body".into()),
+        };
+        assert!(eligible_external_http_witness(&response).is_none());
+    }
+
+    #[test]
+    fn incomplete_http_body_keeps_prior_complete_witness() {
+        let prior = V3EligibleExternalHttpResponse::new(429, vec![], b"rate limited".to_vec())
+            .expect("complete upstream error");
+        let incomplete = V3ProviderHttpFailure {
+            request_id: "req-next".into(),
+            provider_id: "provider-b".into(),
+            status: 400,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("truncated body".into()),
+        };
+        let mut last = Some(prior.clone());
+        if let Some(witness) = eligible_external_http_witness(&incomplete) {
+            last = Some(witness);
+        }
+        assert_eq!(last, Some(prior));
+    }
+
+    #[test]
+    fn internal_transport_terminalization_keeps_typed_error_without_no_response() {
+        let failure = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal".into(),
+                provider_id: "provider-a".into(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "admission lease mismatch".into(),
+            },
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        assert_eq!(
+            terminal.terminal_projection.as_ref().map(|p| p.status),
+            Some(598)
+        );
+        assert!(terminal.terminal_disposition.is_none());
+    }
 
     fn observe_one(
         protocol: V3HubEntryProtocol,

@@ -461,26 +461,35 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
         let provider_raw = match transport_result {
             Ok(raw) => raw,
             Err(V3ProviderError::HttpStatus { response }) => {
-                if let Some(witness) = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
-                    response.status,
-                    response
-                        .headers
-                        .iter()
-                        .map(|header| (header.name.clone(), header.value.clone()))
-                        .collect(),
-                    response.body.clone(),
-                ) {
+                if let Some(witness) =
+                    crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(&response)
+                {
                     last_eligible_external_http = Some(witness);
                 }
                 handle_error_before_resp03!(runtime_timing
                     .finish_external()
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                let failure = provider_http_failure(
-                    response.status,
-                    &response.body,
-                    &selected_target_provider_id,
-                    Some(selected_observability.clone()),
-                );
+                let failure = if let Some(reason) = &response.body_read_failure {
+                    provider_runtime_failure(
+                        V3ProviderError::ResponseBody {
+                            request_id: input.request_id.clone(),
+                            provider_id: selected_target_provider_id.clone(),
+                            reason: format!(
+                                "provider HTTP {} error body read failed: {reason}",
+                                response.status
+                            ),
+                        },
+                        &selected_target_provider_id,
+                        Some(selected_observability.clone()),
+                    )
+                } else {
+                    provider_http_failure(
+                        response.status,
+                        &response.body,
+                        &selected_target_provider_id,
+                        Some(selected_observability.clone()),
+                    )
+                };
                 drop(_provider_action_permit.take());
                 let terminal_failure = handle_error_before_resp03!(
                     handle_v3_responses_relay_provider_failure(

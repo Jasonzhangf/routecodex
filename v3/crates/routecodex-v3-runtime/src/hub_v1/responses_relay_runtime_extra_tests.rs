@@ -351,6 +351,7 @@ fn provider_internal_transport_request_lane_projects_598_without_provider_policy
 
     assert_eq!(failure.status, 598);
     assert!(failure.terminal_projection.is_some());
+    assert!(failure.terminal_disposition.is_none());
 }
 
 #[test]
@@ -368,6 +369,7 @@ fn provider_internal_transport_response_lane_projects_599_without_provider_polic
 
     assert_eq!(failure.status, 599);
     assert!(failure.terminal_projection.is_some());
+    assert!(failure.terminal_disposition.is_none());
 }
 
 fn test_provider_request(

@@ -915,22 +915,32 @@ where
                 }) {
                 Ok(raw) => raw,
                 Err(V3ProviderError::HttpStatus { response }) => {
-                    if let Some(witness) = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
-                        response.status,
-                        response
-                            .headers
-                            .iter()
-                            .map(|header| (header.name.clone(), header.value.clone()))
-                            .collect(),
-                        response.body.clone(),
-                    ) {
+                    if let Some(witness) =
+                        crate::hub_v1::relay_runtime_shared::eligible_external_http_witness(
+                            &response,
+                        )
+                    {
                         last_eligible_external_http = Some(witness);
                     }
-                    let failure = C::provider_http_failure(
-                        response.status,
-                        &response.body,
-                        &selected_target_provider_id,
-                    );
+                    let failure = if let Some(reason) = &response.body_read_failure {
+                        provider_runtime_failure(
+                            V3ProviderError::ResponseBody {
+                                request_id: request_id.to_string(),
+                                provider_id: selected_target_provider_id.clone(),
+                                reason: format!(
+                                    "provider HTTP {} error body read failed: {reason}",
+                                    response.status
+                                ),
+                            },
+                            &selected_target_provider_id,
+                        )
+                    } else {
+                        C::provider_http_failure(
+                            response.status,
+                            &response.body,
+                            &selected_target_provider_id,
+                        )
+                    };
                     let _ = runtime_timing.finish_external();
                     drop(provider_action_permit.take());
                     if let Some(failure) = handle_provider_failure(

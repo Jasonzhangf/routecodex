@@ -286,7 +286,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             }),
             source_stage,
             terminal_projection: Some(projected),
-            terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+            terminal_disposition: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         };
