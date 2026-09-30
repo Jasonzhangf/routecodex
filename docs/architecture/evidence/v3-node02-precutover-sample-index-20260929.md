@@ -36,6 +36,13 @@
 - 同样新建 `-m gpt-5.6-luna` 会话 `01a0efb9-6e59-73c3-9967-3ccff5dc35d7`。CLI 显示同一命令执行成功和相同路径，worker 最终答复 `tool_called=yes`。两个 worker 均未改文件。
 - 这两项只证明旧版 4444 下客户端确实收到并执行了一次工具调用。CLI 输出没有绑定 Provider 请求/响应形状、同一 call ID 的 follow-up，也没有候选 binary 哈希。近时段 gpt-5.6-luna sample 中存在无工具声明的失败请求，但尚未证明它与上述成功调用属于同一 request；不得混用作为完整往返证据。
 
+## Codex 客户端工具声明构造路径（源码只读核对）
+
+- 本机 `~/code/codex` HEAD `40eac3ce8a0c10cbcb9db910d529355eb2f8fc09` 的 `codex-rs/core/src/client.rs::build_responses_request` 根据当前 `model_info.use_responses_lite` 选择请求位置：Lite 把 `prompt.tools` 序列化后放入首个 `input` 项 `additional_tools.tools`，顶层 `tools` 为 `None`；非 Lite 则使用顶层 `tools`。这是客户端请求构造事实，不是 RouteCodex 可按模型名硬编码的投影规则。
+- 同一源码的 `codex-rs/tools/src/tool_spec.rs::create_tools_json_for_responses_lite` 将 `Function`/`Freeform` 合并到 `functions` namespace，保留其嵌套 `function`/`custom` 工具；其他类型仍按自身类型输出。`codex-rs/core/tests/suite/responses_lite.rs::responses_lite_uses_input_items_for_instructions_and_tools` 断言 `additional_tools` 中的 `functions.exec` 和 `functions.wait`，且该数组没有顶层 `function`/`custom` 项。
+- 本轮本机 `~/.codex/gcm-models.json` 快照中，gpt-5.6-luna 为 `use_responses_lite=true`、`tool_mode=code_mode_only`；gpt-5.5 为 `use_responses_lite=false`。本机源码 HEAD 与实际安装的 Codex CLI v0.156.1 没有建立构建哈希绑定，故此处源码只解释已观察到的两种入口形状，不能代替当前 CLI 的逐请求原始样本。
+- Node02 必须从**当前原始请求中实际出现的声明路径和嵌套工具身份**建立 request-scoped 逆映射；`additional_tools.tools=[]` 仅说明该请求没有在此声明工具，不能由模型名补造声明，也不能把另一个请求的工具表复用过来。
+
 ## 后续动作
 
 Node02 能力门禁和独立设计 review PASS 后，使用上述样本定位首个语义偏移，并创建最小可重放新样本补齐 gpt-5.6、OpenAI Chat、Anthropic、Gemini、失败/取消/断连路径。新旧比较只绑定同一个请求的动态 metadata，禁止按模型名或硬编码工具类型反推客户端形状。
