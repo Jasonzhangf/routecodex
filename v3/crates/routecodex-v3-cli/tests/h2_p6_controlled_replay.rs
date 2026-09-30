@@ -435,7 +435,11 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
     let body = response.text().await.unwrap();
     assert_eq!(status, ReqwestStatusCode::OK, "{body}");
     let added = sse_data_payload(&body, "response.output_item.added");
-    assert_eq!(added["item"]["input"].as_str(), Some(input.as_str()), "{body}");
+    assert_eq!(
+        added["item"]["input"].as_str(),
+        Some(input.as_str()),
+        "{body}"
+    );
     let completed = sse_data_payload(&body, "response.completed");
     let item = &completed["response"]["output"][0];
     assert_eq!(item["type"], "custom_tool_call", "{body}");
@@ -596,7 +600,7 @@ fn write_h2_config(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis()
+            .as_nanos()
     ));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("config.h2.toml");
