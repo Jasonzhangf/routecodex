@@ -565,7 +565,7 @@ pub struct V3ProviderAuthoringConfig {
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
-    /// per-request 总超时（毫秒）；默认 300_000（300s）。
+    /// per-request 总超时（毫秒）；默认 60_000（60s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
@@ -575,9 +575,9 @@ pub struct V3ProviderAuthoringConfig {
     pub sse_first_frame_timeout_ms: Option<u64>,
 }
 
-/// provider per-request 总超时默认值（毫秒）：300s。
+/// provider per-request 总超时默认值（毫秒）：60s。
 pub fn default_provider_request_timeout_ms() -> u64 {
-    300_000
+    60_000
 }
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。

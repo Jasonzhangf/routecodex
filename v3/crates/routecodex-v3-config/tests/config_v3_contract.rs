@@ -213,6 +213,19 @@ fn zero_sse_first_frame_timeout_is_rejected_at_config_owner() {
 }
 
 #[test]
+fn provider_request_timeout_must_cover_sse_first_frame_timeout() {
+    let invalid = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\" }\nrequest_timeout_ms = 60000\nsse_first_frame_timeout_ms = 90000",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("sse_first_frame_timeout_ms must not exceed request_timeout_ms"));
+}
+
+#[test]
 fn http_sse_keepalive_config_defaults_when_canonical_environment_input_is_absent() {
     assert_eq!(
         resolve_v3_http_sse_keepalive_ms(None, None).unwrap(),
