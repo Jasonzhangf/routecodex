@@ -34,6 +34,7 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope,
     V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
+pub use routecodex_v3_provider_responses::V3ProviderCancellation;
 use routecodex_v3_provider_responses::{
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderAvailabilityProjection,
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureRecord, V3ProviderResp14Raw,
@@ -81,13 +82,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core_resident(
+    Box::pin(execute_v3_responses_direct_runtime_kernel_core_resident(
         state,
         manifest,
         raw,
         hook_registry,
         transport,
-    )
+    ))
     .await
 }
 
@@ -121,6 +122,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
+        provider_cancellation,
         observability_accumulator: _,
         request_execution_control,
     } = state;
@@ -742,6 +744,10 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             Some(admission) => {
                 transport_request.with_pre_acquired_admission(admission.into_lease())
             }
+            None => transport_request,
+        };
+        let transport_request = match provider_cancellation.as_ref() {
+            Some(cancellation) => transport_request.with_cancellation(cancellation.clone()),
             None => transport_request,
         };
         trace.push("V3Transport13ResponsesHttpRequest");

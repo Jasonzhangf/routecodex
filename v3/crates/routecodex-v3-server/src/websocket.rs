@@ -1,8 +1,10 @@
+use crate::responses_direct_server_outcome::execute_responses_direct_server_outcome_with_cancellation;
 use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
+use routecodex_v3_runtime::kernel::V3ProviderCancellation;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -101,7 +103,15 @@ pub(crate) async fn responses_websocket_session(
     pending_owner_symbol: Option<String>,
     mut socket: WebSocket,
 ) {
-    while let Some(message) = socket.next().await {
+    let mut pending_message = None;
+    loop {
+        let message = match pending_message.take() {
+            Some(message) => Some(Ok(message)),
+            None => socket.next().await,
+        };
+        let Some(message) = message else {
+            break;
+        };
         let message = match message {
             Ok(message) => message,
             Err(_) => break,
@@ -118,7 +128,7 @@ pub(crate) async fn responses_websocket_session(
             Message::Pong(_) => continue,
             Message::Close(_) => break,
         };
-        if handle_responses_websocket_message_with_mode(
+        match handle_responses_websocket_message_with_mode(
             &state,
             &headers,
             &mut socket,
@@ -127,9 +137,9 @@ pub(crate) async fn responses_websocket_session(
             pending_owner_symbol.clone(),
         )
         .await
-        .is_err()
         {
-            break;
+            Ok(next_message) => pending_message = next_message,
+            Err(()) => break,
         }
     }
 }
@@ -141,7 +151,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     bytes: &[u8],
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
-) -> Result<(), ()> {
+) -> Result<Option<Message>, ()> {
     let payload = match responses_websocket_create_payload(bytes) {
         Ok(payload) => payload,
         Err(message) => {
@@ -149,7 +159,10 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
-    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+    let captured = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(
+        payload,
+        routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::responses_websocket(),
+    ) {
         Ok(captured) => captured,
         Err(error) => {
             let projected = project_v3_server_runtime_failure(
@@ -162,6 +175,7 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
+    let (payload, _lease) = captured.into_parts();
     if payload
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
@@ -188,66 +202,129 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
     let protocol_plan = None;
     let effective_execution_mode =
         responses_effective_execution_mode_for_entry_facts(execution_mode, &entry_facts);
-    match effective_execution_mode {
-        V3EntryProtocolExecutionMode::Direct => {
-            let outcome = execute_responses_direct_server_outcome(
-                state,
-                headers,
-                "WEBSOCKET".to_string(),
-                "/v1/responses".to_string(),
-                request_id,
-                Some(request_identity.pipeline_id.clone()),
-                execution_id,
-                payload,
-                protocol_plan.as_ref(),
-                None,
-                None,
-                None,
-                None,
-                V3RequestPurpose::Conversation,
-            )
-            .await;
-            match outcome {
-                V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
-                    send_responses_websocket_frame(socket, frame).await
-                }
-                V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
+    let provider_cancellation = V3ProviderCancellation::new();
+    let operation = async {
+        match effective_execution_mode {
+            V3EntryProtocolExecutionMode::Direct => Some(
+                execute_responses_direct_server_outcome_with_cancellation(
+                    state,
+                    headers,
+                    "WEBSOCKET".to_string(),
+                    "/v1/responses".to_string(),
+                    request_id,
+                    Some(request_identity.pipeline_id.clone()),
+                    execution_id,
+                    payload,
+                    protocol_plan.as_ref(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    V3RequestPurpose::Conversation,
+                    Some(provider_cancellation.clone()),
+                )
+                .await,
+            ),
+            V3EntryProtocolExecutionMode::Relay => Some(
+                execute_responses_relay_websocket_output(
+                    state,
+                    headers,
+                    request_id,
+                    request_identity.pipeline_id.clone(),
+                    execution_id,
+                    payload,
+                    protocol_plan.as_ref(),
+                    provider_cancellation.clone(),
+                )
+                .await,
+            ),
+            V3EntryProtocolExecutionMode::PendingNotImplemented => None,
+        }
+    };
+    tokio::pin!(operation);
+    let mut pending_message = None;
+    let (client_disconnected, queue_overflow, outcome) = loop {
+        tokio::select! {
+            biased;
+            client_message = socket.next() => {
+                match client_message {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if socket.send(Message::Pong(payload)).await.is_err() {
+                            provider_cancellation.cancel();
+                            break (true, false, None);
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(message @ (Message::Text(_) | Message::Binary(_)))) => {
+                        if pending_message.is_some() {
+                            provider_cancellation.cancel();
+                            break (false, true, None);
+                        }
+                        pending_message = Some(message);
+                    }
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
+                        provider_cancellation.cancel();
+                        break (true, false, None);
+                    }
                 }
             }
+            outcome = &mut operation => break (false, false, outcome),
         }
-        V3EntryProtocolExecutionMode::Relay => {
-            let outcome = execute_responses_relay_websocket_output(
-                state,
-                headers,
-                request_id,
-                request_identity.pipeline_id.clone(),
-                execution_id,
-                payload,
-                protocol_plan.as_ref(),
-            )
-            .await;
-            match outcome {
-                V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
-                    send_responses_websocket_frame(socket, frame).await
-                }
-                V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
-                }
-            }
-        }
-        V3EntryProtocolExecutionMode::PendingNotImplemented => {
-            let owner = pending_owner_symbol
-                .as_deref()
-                .unwrap_or("missing_pending_owner");
+    };
+    if client_disconnected || queue_overflow {
+        let _ = operation.await;
+        if queue_overflow {
             send_responses_websocket_error(
                 socket,
-                "runtime_error",
-                format!("Responses WebSocket binding is pending owner {owner}"),
+                "invalid_client_event",
+                "response.create queue capacity exceeded while another response.create is in flight",
             )
-            .await
+            .await?;
+        }
+        return Err(());
+    }
+    let Some(outcome) = outcome else {
+        let owner = pending_owner_symbol
+            .as_deref()
+            .unwrap_or("missing_pending_owner");
+        send_responses_websocket_error(
+            socket,
+            "runtime_error",
+            format!("Responses WebSocket binding is pending owner {owner}"),
+        )
+        .await?;
+        return Ok(pending_message);
+    };
+    let streaming = match &outcome {
+        V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
+            frame.status < 400
+                && frame.error_chain.is_empty()
+                && matches!(frame.body, V3Server16Body::CommittedSse(_))
+        }
+        V3ResponsesDirectServerOutcome::RelayOutput(output) => {
+            output.status < 400
+                && output.error_chain.as_ref().is_none_or(Vec::is_empty)
+                && matches!(output.client_body, V3ResponsesRelayClientBody::Sse(_))
+        }
+    };
+    if streaming && pending_message.is_some() {
+        send_responses_websocket_error(
+            socket,
+            "invalid_client_event",
+            "response.create is already in flight",
+        )
+        .await?;
+        return Ok(None);
+    }
+    match outcome {
+        V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
+            send_responses_websocket_frame(socket, frame).await?
+        }
+        V3ResponsesDirectServerOutcome::RelayOutput(output) => {
+            send_responses_relay_websocket_output(socket, output).await?
         }
     }
+    Ok(pending_message)
 }
 
 pub(crate) async fn execute_responses_relay_websocket_output(
@@ -258,6 +335,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     execution_id: String,
     payload: Value,
     protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
+    provider_cancellation: V3ProviderCancellation,
 ) -> V3ResponsesDirectServerOutcome {
     let server_tool_scope = match build_responses_relay_server_tool_scope(
         headers,
@@ -296,7 +374,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     };
     let output = match protocol_plan {
         Some(plan) => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
                 &state.manifest,
                 input,
                 &state.provider_health,
@@ -310,11 +388,12 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 BTreeSet::new(),
                 None,
                 None,
+                Some(provider_cancellation.clone()),
             )
             .await
         }
         None => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
                 &state.manifest,
                 input,
                 &state.provider_health,
@@ -328,6 +407,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 BTreeSet::new(),
                 None,
                 None,
+                Some(provider_cancellation.clone()),
             )
             .await
         }
@@ -348,7 +428,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             .unwrap_or_default();
         relay_events.extend(handoff.provider_failure_events);
         let request_execution_control = handoff.request_execution_control;
-        let outcome = execute_responses_direct_server_outcome(
+        let outcome = execute_responses_direct_server_outcome_with_cancellation(
             state,
             headers,
             "WEBSOCKET".to_string(),
@@ -363,6 +443,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             None,
             None,
             V3RequestPurpose::Conversation,
+            Some(provider_cancellation),
         )
         .await;
         return match outcome {

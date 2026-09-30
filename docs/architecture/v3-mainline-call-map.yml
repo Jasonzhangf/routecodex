@@ -8284,7 +8284,7 @@ chains:
 - chain_id: v3.operation_runner.dagpipe.request
   owner_feature_id: v3.unified_operation_runner_design
   manifest: docs/architecture/dagpipe/v3.operation_runner.request.graph.json
-  summary: Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+  summary: Design-only full DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for future full graph invocations; only normalize reads it. Current in-loop candidate retry does not emit retry origin and does not rerun capture/normalize. Internal servertool append-and-reenter is not currently bound; future separate graph invocations for retry or internal follow-up must preserve the original inverse/pairing request scope.
   entry_contract:
     node: V3OperationRunnerCaptureClientJson
     owner_doc: docs/design/v3-unified-operation-runner-design.md
@@ -8345,6 +8345,155 @@ chains:
       unsupported_modes:
       - Anthropic Direct remains pending/unsupported
       - Gemini Direct remains pending/unsupported
+    second_delivery_design_binding:
+      status: design_pending_review; no runtime cutover claimed
+      selected_node: normalize_request_losslessly
+      input_arc: client-json
+      output_arc: canonical-request
+      derived_graph_id: v3.operation_runner.request.normalize_request_losslessly
+      derived_graph_file: docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json
+      slice_rule: select only normalize_request_losslessly; capture_client_json already ran at client ingress
+      runtime_owner: RuntimeRequestGraphEntry
+      operator_scope: invocation-local with immutable request_origin_kind and narrow typed request-resource handle
+      resource_guard: V3NormalizedRequestLease owned by Runtime as the implementation container for request-scoped slots; RuntimeRequestFinalizer is the only release owner
+      client_entry_callers: [pending_endpoint_after_responses_admission_inner, handle_responses_websocket_message_with_mode]
+      origin_scope: current Node 02 design slice receives originKind=client_entry only; retry and internal_followup are future full-request-graph contract values, not current Node 02 slice values
+      in_loop_candidate_retry: reuse canonical value and original inverse context; do not rerun capture or normalize
+      internal_servertool_followup: future_runtime_reentry_not_currently_bound
+      external_tool_output_followup: new_client_entry_with_new_request_scope
+      direct_legacy_view: forbidden; deriving a mode-neutral legacy consumer view from canonical would create a second normalization owner with no canonical ARC consumer. Runtime cutover is blocked until current Direct/Relay owners consume the same canonical output in one cutover
+      current_direct_normalization_owners:
+      - mode: responses_direct
+        current_caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        current_mapping_symbol: V3ResponsesDirectCodec::build_standardized
+        current_mapping_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+        removal_owner_symbol: build_v3_req_04_standardized_responses_from_v3_server_03
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+        new_consumer_owner: execute_v3_direct_runtime_kernel_core_resident
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        new_input_arc: canonical-request
+      - mode: openai_chat_direct
+        current_caller_symbol: execute_v3_direct_runtime_kernel_core_resident
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        current_mapping_symbol: V3ChatDirectCodec::build_standardized
+        current_mapping_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+        removal_owner_symbol: build_v3_chat_req_04_standardized_from_v3_server_03
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+        new_consumer_owner: execute_v3_direct_runtime_kernel_core_resident
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        new_input_arc: canonical-request
+      relay_canonical_consumers:
+      - mode: openai_chat_or_gemini_relay
+        current_caller_symbol: execute_v3_relay_runtime_core
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        current_mapping_symbol: V3RelayProtocolCodec::req_inbound_02
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        new_consumer_owner: execute_v3_relay_runtime_core
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        new_input_arc: canonical-request
+      - mode: responses_relay
+        current_caller_symbol: execute_v3_responses_relay_runtime_inner
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+        current_mapping_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+        new_consumer_owner: execute_v3_responses_relay_runtime_inner
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+        new_input_arc: canonical-request
+      - mode: anthropic_relay
+        current_caller_symbol: execute_v3_anthropic_relay_runtime_inner
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        current_mapping_symbol: run_v3_anthropic_relay_runtime_req_inbound
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs
+        new_consumer_owner: execute_v3_anthropic_relay_runtime_inner
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        new_input_arc: canonical-request
+      - mode: public_relay_hook
+        current_caller_symbol: V3HubRelayRequestHooks::run
+        current_caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+        current_mapping_symbol: build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01
+        removal_owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+        new_consumer_owner: V3HubRelayRequestHooks::run
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+        new_input_arc: canonical-request
+      direct_to_relay_handoff:
+      - caller_symbol: execute_v3_openai_chat_direct_server_outcome
+        caller_file: v3/crates/routecodex-v3-server/src/executors.rs
+        current_mapping: reuse raw payload in V3OpenAiChatRelayRuntimeInput
+        new_consumer_owner: execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+        new_input_arc: canonical-request
+      - caller_symbol: execute_responses_direct_server_outcome
+        caller_file: v3/crates/routecodex-v3-server/src/responses_direct_server_outcome.rs
+        current_mapping: reuse raw payload in V3ResponsesRelayRuntimeInput and recursive direct handoff request_payload
+        new_consumer_owner: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
+        new_consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+        new_input_arc: canonical-request
+      http_entry:
+        caller_symbol: pending_endpoint_after_responses_admission_inner
+        caller_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+        boundary: after capture_client_json and before Direct/Relay dispatch
+      responses_websocket_entry:
+        caller_symbol: handle_responses_websocket_message_with_mode
+        caller_file: v3/crates/routecodex-v3-server/src/websocket.rs
+        boundary: after capture_client_json and before mode dispatch
+      response_inverse: reads original client-entry tool declaration and field provenance from the same request-scoped context
+      terminal_error: ErrorErr01
+      future_full_graph_edges:
+        - step_id: v3-op-runner-req-02
+          from_node: V3OperationRunnerNormalizeRequest
+          to_node: V3OperationRunnerResolveTarget
+          status: binding_pending
+          rule: full request graph future edge only; not a Node 02 canonical consumer and not eligible for Node 02 cutover
+        - step_id: v3-op-runner-req-02b
+          from_node: V3OperationRunnerNormalizeRequest
+          to_node: V3OperationRunnerPlanExecution
+          status: binding_pending
+          rule: full request graph future edge only; not a Node 02 canonical consumer and not eligible for Node 02 cutover
+      node02_slice_entry:
+        caller_symbol: RuntimeRequestGraphEntry
+        caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/mod.rs
+        entry_owners:
+          http: pending_endpoint_after_responses_admission_inner
+          responses_websocket: handle_responses_websocket_message_with_mode
+        source_arc: client-json
+        output_arc: canonical-request
+        binding_status: design_pending_runtime_cutover
+      node02_slice_consumers:
+      - mode: direct
+        consumer_symbol: execute_v3_direct_runtime_kernel_core_resident
+        consumer_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+        handoff: canonical-request
+      - mode: relay
+        consumer_symbol: execute_v3_relay_runtime_core
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
+        handoff: canonical-request
+      - mode: responses_relay
+        consumer_symbol: execute_v3_responses_relay_runtime_inner
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+        handoff: canonical-request
+      - mode: anthropic_relay
+        consumer_symbol: execute_v3_anthropic_relay_runtime_inner
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
+        handoff: canonical-request
+      - mode: public_relay_hook
+        consumer_symbol: V3HubRelayRequestHooks::run
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
+        handoff: canonical-request
+      - mode: responses_relay_websocket
+        consumer_symbol: execute_responses_relay_websocket_output
+        consumer_file: v3/crates/routecodex-v3-server/src/websocket.rs
+        handoff: canonical-request
+        negative_check: execute_responses_relay_websocket_output and its protocol_direct_handoff.request_payload inverse switch must not remain raw bypasses
+      - mode: openai_chat_direct_to_relay
+        consumer_symbol: execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+        handoff: canonical-request
+      - mode: responses_direct_to_relay
+        consumer_symbol: execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state
+        consumer_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+        handoff: canonical-request
+      later_nodes: resolve_target and plan_execution remain on current runtime owners
   edges:
   - step_id: v3-op-runner-req-01
     from_node: V3OperationRunnerCaptureClientJson
@@ -8376,6 +8525,7 @@ chains:
       consumes: [v3.request.normal_payload, v3.config.published_manifest]
       produces: [v3.request.normal_payload, v3.operation_runner.request_inverse_context, v3.operation_runner.explicit_history_pairing]
       side_channel_reads:
+      - v3.operation_runner.ingress_contract
       - v3.operation_runner.request_origin_kind
       - v3.operation_runner.request_inverse_context
       - v3.operation_runner.metadata_center_control
@@ -8491,9 +8641,9 @@ chains:
       client_entry:
         effect: RuntimeRequestGraphEntry creates originKind=client_entry before the original graph invocation; V3OperationRunnerNormalizeRequest initializes request_inverse_context and explicit_history_pairing from the original client entry payload
       retry:
-        effect: RuntimeRetryLaunch routes re-entry through RuntimeRequestGraphEntry, which creates originKind=retry before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+        effect: Future RuntimeRetryLaunch separate graph invocation creates originKind=retry and reads the existing request_inverse_context; current in-loop retry reuses canonical output without a new invocation
       internal_followup:
-        effect: RuntimeInternalFollowup routes re-entry through RuntimeRequestGraphEntry, which creates originKind=internal_followup before the next graph invocation; V3OperationRunnerNormalizeRequest reads the existing request_inverse_context and does not rebuild it
+        effect: Future RuntimeInternalFollowup separate graph invocation creates originKind=internal_followup and reads the existing request_inverse_context; no current append-and-reenter caller is bound
       payload_rule: request origin is typed control state and is never serialized into request, response, provider, or client bodies
       release: graph_invocation_return; storage none; RuntimeRequestFinalizer does not consume or release it
     request_inverse_context:

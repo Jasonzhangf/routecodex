@@ -9,11 +9,12 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_and_de
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::new()
-        .with_now_epoch_ms(now_epoch_ms)
-        .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
-        .with_provider_health(shared_state.provider_health)
-        .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
-        .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone()),
+            .with_now_epoch_ms(now_epoch_ms)
+            .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
+            .with_provider_health(shared_state.provider_health)
+            .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
+            .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
+            .with_provider_cancellation(shared_state.provider_cancellation.clone()),
         manifest,
         raw,
         hook_registry,
@@ -36,14 +37,15 @@ pub async fn execute_v3_responses_direct_runtime_kernel_with_shared_state_defaul
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         V3ResponsesDirectRuntimeCoreState::new()
-        .with_now_epoch_ms(now_epoch_ms)
-        .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
-        .with_provider_health(shared_state.provider_health)
-        .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
-        .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
-        .with_initial_plan(initial_plan)
-        .with_observability_accumulator(observability_accumulator)
-        .with_request_execution_control(request_execution_control),
+            .with_now_epoch_ms(now_epoch_ms)
+            .with_server_tool_state(shared_state.server_tool_state, server_tool_scope)
+            .with_provider_health(shared_state.provider_health)
+            .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
+            .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
+            .with_provider_cancellation(shared_state.provider_cancellation.clone())
+            .with_initial_plan(initial_plan)
+            .with_observability_accumulator(observability_accumulator)
+            .with_request_execution_control(request_execution_control),
         manifest,
         raw,
         hook_registry,
@@ -61,10 +63,9 @@ pub async fn execute_v3_responses_direct_runtime_kernel<T: ResponsesTransport>(
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
     execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(
-                V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(manifest),
-            ),
+        V3ResponsesDirectRuntimeCoreState::new().with_provider_health(
+            V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(manifest),
+        ),
         manifest,
         raw,
         hook_registry,

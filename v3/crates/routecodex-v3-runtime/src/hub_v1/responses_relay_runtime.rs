@@ -29,8 +29,8 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::{
     build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
-    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderCancellation, V3ProviderError,
+    V3ProviderHealthStore, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
     V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
@@ -174,6 +174,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         BTreeSet::new(),
         None,
         None,
+        None,
     )
     .await
 }
@@ -192,6 +193,40 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
     initial_request_local_excluded_candidates: BTreeSet<String>,
     initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
+        manifest,
+        input,
+        provider_health,
+        server_tool_state,
+        scope,
+        provider_snapshots,
+        provider_failure_event_sink,
+        route_selection_event_sink,
+        initial_selected_target,
+        initial_expanded,
+        initial_request_local_excluded_candidates,
+        initial_observability_accumulator,
+        initial_request_execution_control,
+        None,
+    ).await
+}
+
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state_and_cancellation(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    provider_health: &V3ResponsesRelayProviderHealthHandle,
+    server_tool_state: &V3ResponsesRelayServerToolState,
+    scope: V3ResponsesRelayServerToolScope,
+    provider_snapshots: V3ResponsesRelayProviderSnapshotCapture,
+    provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
+    route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    provider_cancellation: Option<V3ProviderCancellation>,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
@@ -214,6 +249,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_request_local_excluded_candidates,
         initial_observability_accumulator,
         initial_request_execution_control,
+        provider_cancellation,
     )
     .await?;
     output.provider_snapshots = Some(snapshots.into_payload(
@@ -246,6 +282,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         BTreeSet::new(),
         None,
         None,
+        None,
     )
     .await
 }
@@ -272,6 +309,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
+        None,
         None,
         None,
     )

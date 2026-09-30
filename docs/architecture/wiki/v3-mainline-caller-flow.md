@@ -3090,7 +3090,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.request
 
-Design-only DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for each request graph invocation before it starts; only normalize reads it. Retry and servertool re-entry preserve the original request_inverse_context and explicit_history_pairing until RuntimeRequestFinalizer; normalize initializes inverse context only for client_entry and never rebuilds it from an internal follow-up payload.
+Design-only full DAGpipe request graph; one source client JSON, one exit transport request, with target and execution decision before Chat Process. RuntimeRequestGraphEntry creates immutable request_origin_kind for future full graph invocations; only normalize reads it. Current in-loop candidate retry does not emit retry origin and does not rerun capture/normalize. Internal servertool append-and-reenter is not currently bound; future separate graph invocations for retry or internal follow-up must preserve the original inverse/pairing request scope.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.request.graph.json`

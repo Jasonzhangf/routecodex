@@ -306,23 +306,28 @@ not authorize a new provider call.
 
 ### Request origin typed resource
 
-Every request graph invocation receives an immutable typed control resource
+Every future full request graph invocation receives an immutable typed control resource
 `v3.operation_runner.request_origin_kind` with legal values `client_entry`, `retry`, and
 `internal_followup`, keyed by `requestId`, `invocationId`, and `originKind`. The Runtime runner
 entry (`RuntimeRequestGraphEntry` in the architecture maps) is the single producer and creates the
-origin before every request graph invocation, including each retry and servertool re-entry, without
-putting it in the request payload. `normalize_request_losslessly` is its only graph reader and
-reads this resource before it touches canonical request construction.
+origin before every future full graph invocation, including future retry and servertool re-entry,
+without putting it in the request payload. `normalize_request_losslessly` is its only graph reader
+and reads this resource before it touches canonical request construction.
 `request_origin_kind` has no MetadataCenter slot and no cross-invocation storage; its scope ends
 when the graph invocation returns, and RuntimeRequestFinalizer does not consume or release it.
 
-For `client_entry`, `normalize_request_losslessly` initializes `request_inverse_context` and
-`explicit_history_pairing` from the original client payload. For `retry` and `internal_followup`,
-RuntimeRequestGraphEntry creates the new invocation origin, and the same normalize node reads the
-existing request-scoped `request_inverse_context` and `explicit_history_pairing` slots and preserves
-them. Both request-scoped slots are released only at `RuntimeRequestFinalizer`. The request graph
-resource edges and architecture maps bind this rule explicitly; no payload-carried origin marker or
-fallback shortcut is introduced. The schema gap is closed by this typed resource binding.
+The current Node 02 encoding-pre-review slice is narrower and binds only the current single-node
+cutover: `RuntimeRequestGraphEntry` creates `originKind=client_entry` for the single request graph
+invocation that runs `client-json -> normalize_request_losslessly -> canonical-request`. For
+`client_entry`, `normalize_request_losslessly` initializes `request_inverse_context` and
+`explicit_history_pairing` from the original client payload. Future retry and internal_followup
+origins remain a full request graph contract only; current in-loop candidate retry must not create a
+new Node 02 invocation origin, and no internal_followup re-entry path is bound for Node 02 until a
+real caller supplies a typed AlreadyCanonical input and preserves the original request-scoped
+inverse/pairing resources. Both request-scoped slots are released only at
+`RuntimeRequestFinalizer`. The request graph resource edges and architecture maps bind this rule
+explicitly; no payload-carried origin marker or fallback shortcut is introduced. The schema gap is
+closed by this typed resource binding.
 
 ## Main tool-semantic fixes already merged
 
@@ -613,6 +618,148 @@ proves one capture per request-graph invocation, exact JSON-value equality at ea
 unchanged request-control/budget continuity, typed failure entry to the existing Error owner, and
 no duplicate capture or bypass. Compare the same real-entry black-box samples before and after the
 candidate. Static validation of the final three graphs does not prove these callers are wired.
+
+### Node 02 design gate: lossless request normalization
+
+The next delivery is only `normalize_request_losslessly@1`. Its executable SESE
+derived DAGPipe slice is
+`docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json`.
+Its graph is exactly `client-json -> normalize_request_losslessly ->
+canonical-request`: one source ARC, one selected node, one output ARC, and one
+graph sink. Node 01 has already run at HTTP or Responses WebSocket ingress, so
+this slice must not capture again. The Runtime entry passes the captured
+`client-json` value into the compiled slice and registers an immutable
+`request_origin_kind=client_entry` keyed by `requestId`, `invocationId`, and
+`originKind` before the run. `normalize_request_losslessly` is the only graph
+reader of that origin. The origin expires when the graph invocation returns;
+it has no MetadataCenter slot, no payload representation, and no cross-invocation
+storage to clean.
+
+Request-scoped resources have exactly one release owner. `request_inverse_context`
+and `explicit_history_pairing` are written only for `client_entry` and are
+released only by `RuntimeRequestFinalizer`. No lease `Drop`, candidate retry
+attempt cleanup, Direct-to-Relay handoff, or Server HTTP/WebSocket wrapper may
+release them as a second owner. Retry and internal follow-up attempt cleanup may
+release only attempt-scoped resources and must preserve the original request
+scope. A new external client request creates a new request scope; it never
+inherits the prior request's tool declarations or inverse context.
+
+The Operator walks every client field using the entry protocol's configured
+field operators. Its output is canonical Chat plus losslessly carried business
+extensions. Unknown business values live only in canonical extensions; typed
+request resources record the entry protocol, paths, encoding, mapped field
+provenance, tool declaration identity, and explicit history pairing. Tool
+argument bytes/JSON remain opaque.
+An unrecognized but representable field is preserved, not rejected or silently
+discarded. The response inverse projection later reads this same request
+context; it never guesses the client's tool shape from the provider model or
+from a new follow-up payload. No routing, retry, health, or execution decision
+is written to business payload or protocol metadata.
+
+Node 02 is not independently runtime-cut over while current Direct still
+constructs `C::Standardized` from original raw request payload before mode
+selection. The correct design choice is to keep that current owner and declare
+Node 02 runtime cutover blocked until callers and consumers are changed in the
+same delivery: current Direct normalization must be removed from
+`build_v3_req_04_standardized_responses_from_v3_server_03` and
+`build_v3_chat_req_04_standardized_from_v3_server_03`; Relay Req02 mappings must
+be removed from `relay_runtime_core.rs`,
+`responses_relay_runtime_inner.rs`, `anthropic_relay_runtime.rs`, and public
+`relay_request::run`; Direct-to-Relay handoff must carry the same canonical
+value and request-scoped inverse context through `executors.rs` and
+`responses_direct_server_outcome.rs`. A mode-independent legacy consumer view
+derived from canonical output is not an acceptable Node 02 design because it
+creates a second normalization owner and no real canonical ARC consumer. No
+shadow normalization, original-raw bypass, or inverse-view fallback may be used
+to claim a single-node cutover.
+
+| Current entry/event | Actual caller and input | Node 01 / Node 02 invocation | Lease rule |
+| --- | --- | --- | --- |
+| HTTP client entry | `pending_endpoint_after_responses_admission_inner` receives parsed entry-protocol JSON | once / once before protocol dispatch | canonical value and typed request context passed to the unique current owner; finalizer owns request-scope release |
+| Responses WebSocket `response.create` | `handle_responses_websocket_message_with_mode` receives framed entry-protocol JSON | once / once before mode dispatch | canonical value and typed request context passed to the unique current owner; finalizer owns request-scope release |
+| Candidate retry | existing `v3_direct_core` or `relay_runtime_core` loop reuses its prepared request | no rerun / no rerun in this delivery | same canonical value and request scope; only attempt resources change |
+| Internal servertool follow-up | no current append-and-reenter-Req04 caller is bound; response closeout can only report follow-up required | not connected in this delivery | future graph re-entry must supply typed `AlreadyCanonical` input and retain the read-only original context |
+| External tool-output follow-up | a new HTTP or WebSocket client request carries the tool receipt | once / once as a new client entry | new request scope and new current-request declaration/history identity |
+| Direct-to-Relay handoff | `executors` and Responses handoff paths currently reuse Server payload | no rerun / no rerun | replace raw handoff with the same canonical value and request scope |
+
+`retry` and `internal_followup` remain legal origins in the full request graph
+for a future separate graph invocation. Current in-loop candidate retry does
+not emit one, and an internal append-and-reenter path is not yet connected.
+When those paths are migrated, the Runtime entry must
+supply a typed `AlreadyCanonical` input contract and preserve the read-only
+original inverse context; it must never infer the input shape from JSON.
+
+All production Relay ingress paths must accept the typed canonical handoff:
+the shared `relay_runtime_core` path, Responses `responses_relay_runtime_inner`,
+Anthropic `anthropic_relay_runtime`, and the public `relay_request::run` path.
+Their old Req02 field mappings are removed when these edges are connected;
+Req04 keeps its Chat governance. Consumers that currently inspect entry-shape
+fields, including Gemini tool identity over `contents`, must instead use the
+canonical fields and typed provenance. Keeping any old Req02 mapping after
+Node 02 is connected creates a second normalization owner and fails the gate.
+This is the current blocker for claiming Node 02 runtime cutover: the static
+design and DAGPipe slice can be reviewed, but encoding must not proceed until
+the listed current callers/consumers are replaced in one cutover.
+
+The Node 02 request slice has one success sink, `canonical-request`. On an
+operator failure, `RuntimeRequestGraphEntry` returns a typed source failure as
+its error result and supplies that result to the separate Error graph's
+`source-failure` input at `error_err01_source_raised`; no second request-graph
+sink or Server error projection is created. The handoff is declared in
+`v3.operation_runner.lifecycle.manifest.yml` and checked against both graphs.
+If a configured field operator cannot express a
+client field losslessly, Node 02 must preserve it as an extension when the
+protocol permits; an actual conversion failure is reported through Error and
+never wrapped as success. No provider attempt or client response is committed
+before this result. `RuntimeRequestFinalizer` is the only request-scoped release
+owner for inverse/pairing resources.
+
+Within that one Node 02 delivery, the consumer replacement is SESE and ordered:
+`client-json -> RuntimeRequestGraphEntry(normalize_request_losslessly) ->
+canonical-request`, then the canonical ARC is consumed by every supported
+Direct, Relay, HTTP, Responses WebSocket, and Direct-to-Relay handoff path.
+No intermediate state may keep old raw normalization and canonical normalization
+side by side. The replacement order is:
+
+1. `pending_endpoint_after_responses_admission_inner` keeps its HTTP
+   `capture_client_json` call, passes the captured Value into the Node 02 slice
+   before mode dispatch, and receives the canonical ARC.
+2. `handle_responses_websocket_message_with_mode` keeps its WebSocket
+   `capture_client_json` call, passes the captured Value into the same slice
+   before mode dispatch, and receives the same canonical ARC.
+3. Direct Responses removes
+   `build_v3_req_04_standardized_responses_from_v3_server_03` from
+   `V3ResponsesDirectCodec::build_standardized`; Direct Chat removes
+   `build_v3_chat_req_04_standardized_from_v3_server_03` from
+   `V3ChatDirectCodec::build_standardized`; `execute_v3_direct_runtime_kernel_core_resident`
+   consumes the canonical ARC instead.
+4. Shared Relay removes `V3RelayProtocolCodec::req_inbound_02` from
+   `execute_v3_relay_runtime_core`; Responses Relay removes
+   `build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01` from
+   `execute_v3_responses_relay_runtime_inner`; Anthropic Relay removes
+   `run_v3_anthropic_relay_runtime_req_inbound`; public
+   `V3HubRelayRequestHooks::run` removes its raw Req02 entry. All four consume
+   the same canonical ARC and typed request scope.
+5. Direct-to-Relay handoff replaces raw handoff payloads in
+   `execute_v3_openai_chat_direct_server_outcome`,
+   `execute_responses_direct_server_outcome`, and nested
+   `protocol_direct_handoff.request_payload` with the same canonical ARC and
+   request scope.
+6. Finalizer-only cleanup and real-entry acceptance run after all replacements
+   in the same delivery.
+
+Partial replacement is `INCOMPLETE`: any surviving old Direct builder or
+Relay Req02 mapping, raw handoff bypass, shadow consumer view, or Node 03/04
+early migration makes the Node 02 delivery non-SESE and not acceptance-ready.
+
+Acceptance compares pre/post real-entry black-box samples for OpenAI Chat,
+Responses HTTP and WebSocket, Anthropic, and Gemini in their supported modes;
+it checks Direct, Relay, Direct-to-Relay, complete tool execution/output and
+follow-up, exact client response inverse shape, unknown fields, failure path,
+retry resource reuse, and cancellation cleanup. A test that only runs the new
+Operator while the old consumer still reads the original raw payload is a
+shadow test and does not qualify as Node 02 cutover. The design and caller/
+resource bindings require independent architecture PASS before product edits.
 
 After that delivery, replace exactly one node from the declared schedule per delivery. For each
 node, change only its owner and required direct typed edge, remove the superseded implementation,

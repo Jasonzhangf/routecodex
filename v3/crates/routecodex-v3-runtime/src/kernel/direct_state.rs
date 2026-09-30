@@ -67,9 +67,7 @@ impl V3ResponsesDirectServerToolState {
         self.hooks_sidecar_socket.as_deref()
     }
 
-    fn web_search_center_key(
-        scope: &V3ResponsesDirectServerToolScope,
-    ) -> V3ServerToolCenterKey {
+    fn web_search_center_key(scope: &V3ResponsesDirectServerToolScope) -> V3ServerToolCenterKey {
         V3ServerToolCenterKey {
             tool_name: V3ServerToolName::WebSearch,
             scope_key: format!(
@@ -149,6 +147,7 @@ pub struct V3ResponsesDirectRuntimeSharedState<'a> {
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    provider_cancellation: Option<V3ProviderCancellation>,
 }
 
 impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
@@ -164,6 +163,7 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
+            provider_cancellation: None,
         }
     }
 
@@ -180,6 +180,14 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
         sink: Option<V3RuntimeRouteSelectionEventSink>,
     ) -> Self {
         self.route_selection_event_sink = sink;
+        self
+    }
+
+    pub fn with_provider_cancellation(
+        mut self,
+        cancellation: Option<V3ProviderCancellation>,
+    ) -> Self {
+        self.provider_cancellation = cancellation;
         self
     }
 }
@@ -206,6 +214,7 @@ struct V3ResponsesDirectRuntimeCoreState {
     initial_plan_trace: Option<Vec<&'static str>>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    provider_cancellation: Option<V3ProviderCancellation>,
 }
 
 impl V3ResponsesDirectRuntimeCoreState {
@@ -226,6 +235,7 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
+            provider_cancellation: None,
         }
     }
 
@@ -272,6 +282,11 @@ impl V3ResponsesDirectRuntimeCoreState {
         sink: Option<V3RuntimeRouteSelectionEventSink>,
     ) -> Self {
         self.route_selection_event_sink = sink;
+        self
+    }
+
+    fn with_provider_cancellation(mut self, cancellation: Option<V3ProviderCancellation>) -> Self {
+        self.provider_cancellation = cancellation;
         self
     }
 

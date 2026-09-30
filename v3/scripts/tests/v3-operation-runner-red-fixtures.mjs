@@ -11,6 +11,7 @@ const verifyRel = 'v3/scripts/architecture/verify-v3-operation-runner-dagpipe.mj
 const verifyScript = path.join(repo, verifyRel);
 const files = [
   'docs/architecture/dagpipe/v3.operation_runner.request.graph.json',
+  'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.response.graph.json',
   'docs/architecture/dagpipe/v3.operation_runner.error.graph.json',
   'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml',
@@ -31,7 +32,9 @@ const mutations = [
     mutate(tmp) {
       const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
       const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, source.replace('execute_v3_operation_runner_request_capture_client_json(payload)', 'missing_capture_client_json(payload)'));
+      const symbol = 'execute_v3_operation_runner_request_capture_client_json(payload, ingress)';
+      if (!source.includes(symbol)) throw new Error('HTTP typed capture call missing from fixture source');
+      fs.writeFileSync(file, source.replace(symbol, 'missing_capture_client_json(payload, ingress)'));
     },
     expect: /capture_client_json must be called exactly once before Direct\/Relay dispatch/u,
   },
@@ -40,9 +43,44 @@ const mutations = [
     mutate(tmp) {
       const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/websocket.rs');
       const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, source.replace('execute_v3_operation_runner_request_capture_client_json(payload)', 'missing_capture_client_json(payload)'));
+      const symbol = 'execute_v3_operation_runner_request_capture_client_json(';
+      if (!source.includes(symbol)) throw new Error('WebSocket typed capture call missing from fixture source');
+      fs.writeFileSync(file, source.replace(symbol, 'missing_capture_client_json('));
     },
     expect: /capture_client_json must be called exactly once before Direct\/Relay dispatch/u,
+  },
+  {
+    name: 'runtime-bound-capture-http-ingress-from-body',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = /(RuntimeIngressDescriptor::http\(\s*)entry_protocol\.clone\(\),/u;
+      if (!selected.test(source)) throw new Error('selected HTTP protocol missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, '$1payload["protocol"].as_str().unwrap_or_default().to_string(),'));
+    },
+    expect: /capture_client_json must receive the selected typed ingress/u,
+  },
+  {
+    name: 'runtime-bound-capture-websocket-wrong-ingress',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/websocket.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = 'RuntimeIngressDescriptor::responses_websocket()';
+      if (!source.includes(selected)) throw new Error('selected WebSocket protocol missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, 'RuntimeIngressDescriptor::http("responses")'));
+    },
+    expect: /capture_client_json must receive the selected typed ingress/u,
+  },
+  {
+    name: 'runtime-bound-capture-http-lease-dropped',
+    mutate(tmp) {
+      const file = path.join(tmp, 'v3/crates/routecodex-v3-server/src/endpoint_handlers.rs');
+      const source = fs.readFileSync(file, 'utf8');
+      const selected = 'hold_response_body_request_lease(response, request_lease)';
+      if (!source.includes(selected)) throw new Error('HTTP response lease hold missing from fixture source');
+      fs.writeFileSync(file, source.replace(selected, 'response'));
+    },
+    expect: /HTTP response Body must retain the Runtime request lease/u,
   },
   {
     name: 'unmatched-business-value-loses-opaque-inverse',
@@ -662,6 +700,34 @@ const mutations = [
       fs.writeFileSync(file, YAML.stringify(doc));
     },
     expect: /missing normalize_request_losslessly -> plan_execution caller edge/u,
+  },
+  {
+    name: 'node02-current-consumer-binds-future-resolve-target',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      if (!chain) throw new Error('missing v3.operation_runner.dagpipe.request chain');
+      const consumer = chain.entry_contract.second_delivery_design_binding.node02_slice_consumers[0];
+      consumer.consumer_symbol = 'V3OperationRunnerResolveTarget';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 consumer direct cannot bind future node V3OperationRunnerResolveTarget/u,
+  },
+  {
+    name: 'node02-future-edge-claims-runtime-bound',
+    mutate(tmp) {
+      const rel = 'docs/architecture/v3-mainline-call-map.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const chain = doc.chains.find((item) => item.chain_id === 'v3.operation_runner.dagpipe.request');
+      if (!chain) throw new Error('missing v3.operation_runner.dagpipe.request chain');
+      const edge = chain.entry_contract.second_delivery_design_binding.future_full_graph_edges[0];
+      edge.status = 'runtime_bound';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 future full graph edge v3-op-runner-req-02 must remain binding_pending/u,
   },
   {
     name: 'missing-transform-id',
@@ -1400,6 +1466,34 @@ const mutations = [
     },
     expect: /content union parent.*shape_children references unknown source inventory path|shape_children.*forged_shadow_field|must be source-backed and consumer-bound/u,
   },
+  {
+    name: 'node02-forward-operator-missing-inverse',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const operator = doc.operator_registry.field_operators.find((entry) => entry.operator === 'routecodex.v3.field.lossless_preserve');
+      delete operator.inverse_to_entry;
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /configured forward request operator routecodex\.v3\.field\.lossless_preserve@1 must declare registered inverse_to_entry/u,
+  },
+  {
+    name: 'node02-failure-handoff-missing-error-entry',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/manifests/v3.operation_runner.lifecycle.manifest.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      doc.node02_failure_handoff.error_entry_node = 'missing_error_entry';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /Node02 typed source failure must hand off from the single-sink request slice to ErrorErr01/u,
+  },
+  {
+    name: 'node02-required-error-graph-missing',
+    mutate(tmp) {
+      fs.rmSync(path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json'));
+    },
+    expect: /Node02 required Error graph is missing/u,
+  },
 ];
 
 let failed = 0;
@@ -1426,9 +1520,8 @@ try {
   fs.rmSync(positiveTmp, { recursive: true, force: true });
 }
 
-// Positive fixture: removing deferred response and error graph files must
-// not block the Node 01 gate. The verifier should still PASS.
-const noDeferredTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-operation-runner-no-deferred-graphs-'));
+// The response graph remains deferred while Node02's Error graph is required.
+const noDeferredTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-operation-runner-no-response-graph-'));
 try {
   for (const rel of files) {
     const src = path.join(repo, rel);
@@ -1437,7 +1530,6 @@ try {
     fs.cpSync(src, dest);
   }
   fs.rmSync(path.join(noDeferredTmp, 'docs/architecture/dagpipe/v3.operation_runner.response.graph.json'));
-  fs.rmSync(path.join(noDeferredTmp, 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json'));
   const result = spawnSync(process.execPath, [verifyScript], {
     cwd: noDeferredTmp,
     env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: noDeferredTmp },
@@ -1445,9 +1537,9 @@ try {
   });
   if (result.status !== 0) {
     failed += 1;
-    console.error(`[v3-operation-runner-red] no-deferred-graphs: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
+    console.error(`[v3-operation-runner-red] no-response-graph: expected verifier PASS, got:\n${result.stdout}\n${result.stderr}`);
   } else {
-    console.log('[v3-operation-runner-red] no-deferred-graphs: PASS');
+    console.log('[v3-operation-runner-red] no-response-graph: PASS');
   }
 } finally {
   fs.rmSync(noDeferredTmp, { recursive: true, force: true });

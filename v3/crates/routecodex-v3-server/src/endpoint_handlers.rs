@@ -136,7 +136,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
         }
     };
-    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+    let ingress = routecodex_v3_runtime::operation_runner::RuntimeIngressDescriptor::http(
+        entry_protocol.clone(),
+    );
+    let captured = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload, ingress) {
         Ok(captured) => captured,
         Err(error) => {
             return error_output_response_for_server_with_project_path(
@@ -153,6 +156,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             );
         }
     };
+    let (payload, request_lease) = captured.into_parts();
+    let response = async {
     let responses_protocol_plan = if entry_protocol == "responses"
         && responses_entry_facts
             .as_ref()
@@ -1296,6 +1301,26 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             request_console_project_path.as_deref(),
         )
     }
+    }.await;
+    hold_response_body_request_lease(response, request_lease)
+}
+
+fn hold_response_body_request_lease(
+    response: Response<Body>,
+    request_lease: routecodex_v3_runtime::operation_runner::V3NormalizedRequestLease,
+) -> Response<Body> {
+    let (parts, body) = response.into_parts();
+    let stream = Box::pin(body.into_data_stream());
+    let body = Body::from_stream(futures_util::stream::unfold(
+        (stream, request_lease),
+        |(mut stream, request_lease)| async move {
+            stream
+                .next()
+                .await
+                .map(|item| (item, (stream, request_lease)))
+        },
+    ));
+    Response::from_parts(parts, body)
 }
 
 pub(crate) fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {

@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 mod operators;
 use operators::CaptureClientJsonOperator;
@@ -59,6 +59,122 @@ impl From<pipeline_runtime::ExecutionFailure> for OperationRunnerError {
 /// executes it through the shared DAGpipe Runtime.
 pub struct RuntimeRequestGraphEntry {
     graph: CompiledGraph,
+}
+
+/// Control supplied by the selected Server entry before the business JSON is read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeIngressDescriptor {
+    transport: RuntimeIngressTransport,
+    entry_protocol: String,
+    input_kind: RuntimeInputKind,
+    origin: RuntimeRequestOrigin,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeIngressTransport {
+    Http,
+    ResponsesWebSocket,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeInputKind {
+    RawEntry,
+    AlreadyCanonical,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeRequestOrigin {
+    ClientEntry,
+    Retry,
+}
+
+impl RuntimeIngressDescriptor {
+    pub fn http(entry_protocol: impl Into<String>) -> Self {
+        Self {
+            transport: RuntimeIngressTransport::Http,
+            entry_protocol: entry_protocol.into(),
+            input_kind: RuntimeInputKind::RawEntry,
+            origin: RuntimeRequestOrigin::ClientEntry,
+        }
+    }
+
+    pub fn responses_websocket() -> Self {
+        Self {
+            transport: RuntimeIngressTransport::ResponsesWebSocket,
+            entry_protocol: "openai-responses".into(),
+            input_kind: RuntimeInputKind::RawEntry,
+            origin: RuntimeRequestOrigin::ClientEntry,
+        }
+    }
+
+    fn already_canonical(&self) -> Self {
+        let mut descriptor = self.clone();
+        descriptor.input_kind = RuntimeInputKind::AlreadyCanonical;
+        descriptor.origin = RuntimeRequestOrigin::Retry;
+        descriptor
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InverseRecord {
+    entry_protocol: String,
+    source_path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PairingRecord {
+    call_id: String,
+    output_id: String,
+}
+
+#[derive(Default)]
+struct RequestSlots {
+    inverse: Option<InverseRecord>,
+    pairing: Option<PairingRecord>,
+}
+
+/// The only request-scoped control store for the Node02 capability consumer.
+pub struct V3NormalizedRequestLease {
+    ingress: RuntimeIngressDescriptor,
+    metadata_center: Arc<Mutex<RequestSlots>>,
+}
+
+impl V3NormalizedRequestLease {
+    fn new(ingress: RuntimeIngressDescriptor) -> Self {
+        Self {
+            ingress,
+            metadata_center: Arc::new(Mutex::new(RequestSlots::default())),
+        }
+    }
+}
+
+struct RuntimeRequestFinalizer;
+
+impl RuntimeRequestFinalizer {
+    fn release(lease: &mut V3NormalizedRequestLease) {
+        let mut slots = lease
+            .metadata_center
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *slots = RequestSlots::default();
+    }
+}
+
+impl Drop for V3NormalizedRequestLease {
+    fn drop(&mut self) {
+        RuntimeRequestFinalizer::release(self);
+    }
+}
+
+pub struct RuntimeCapturedRequest {
+    pub payload: Value,
+    pub lease: V3NormalizedRequestLease,
+}
+
+impl RuntimeCapturedRequest {
+    pub fn into_parts(self) -> (Value, V3NormalizedRequestLease) {
+        (self.payload, self.lease)
+    }
 }
 
 impl RuntimeRequestGraphEntry {
@@ -421,9 +537,14 @@ fn request_graph_entry() -> Result<&'static RuntimeRequestGraphEntry, OperationR
 
 pub fn execute_v3_operation_runner_request_capture_client_json(
     payload: Value,
-) -> Result<Value, OperationRunnerError> {
-    request_graph_entry()?.capture_client_json(payload)
+    ingress: RuntimeIngressDescriptor,
+) -> Result<RuntimeCapturedRequest, OperationRunnerError> {
+    let lease = V3NormalizedRequestLease::new(ingress);
+    let payload = request_graph_entry()?.capture_client_json(payload)?;
+    Ok(RuntimeCapturedRequest { payload, lease })
 }
 
+#[cfg(test)]
+mod capability_tests;
 #[cfg(test)]
 mod tests;
