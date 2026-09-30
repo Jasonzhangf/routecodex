@@ -174,6 +174,7 @@ pub fn provider_target(
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
         compatibility_profile: provider.compatibility_profile.clone(),
+        headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
             secret,

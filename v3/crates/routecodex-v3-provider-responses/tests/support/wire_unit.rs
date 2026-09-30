@@ -23,6 +23,7 @@ mod tests {
                 canonical_model_id: "canonical-model".into(),
                 wire_model: "upstream-model".into(),
                 compatibility_profile: None,
+                headers: Default::default(),
                 auth: V3ProviderAuthHandle {
                     alias: "primary".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -166,6 +167,7 @@ mod tests {
             canonical_model_id: "model".into(),
             wire_model: "model".into(),
             compatibility_profile: None,
+            headers: Default::default(),
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -1117,6 +1119,7 @@ mod tests {
             canonical_model_id: "canonical-model".into(),
             wire_model: "upstream-model".into(),
             compatibility_profile: None,
+            headers: Default::default(),
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),

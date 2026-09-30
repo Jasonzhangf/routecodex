@@ -7,7 +7,7 @@ use provider_compat_core::namespace_tools::{
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
 use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
 use serde_json::{json, Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Protocol name recognized by the shared namespace-tool flattener for Responses wire
 /// function shape (`{type:"function", name, description?, parameters?, strict?}`).
@@ -41,6 +41,7 @@ pub struct V3ResponsesProviderTarget {
     /// 配置声明的 provider 兼容契约（如 opencode-go 的
     /// `responses:deepseek-console-go`）；wire 层按契约能力分支，不按部署身份分支。
     pub compatibility_profile: Option<String>,
+    pub headers: BTreeMap<String, String>,
     pub auth: V3ProviderAuthHandle,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,

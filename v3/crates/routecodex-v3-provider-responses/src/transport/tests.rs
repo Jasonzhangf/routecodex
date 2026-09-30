@@ -234,6 +234,7 @@ fn responses_http_target() -> V3ResponsesProviderTarget {
         canonical_model_id: "glm-5.2".into(),
         wire_model: "glm-5.2".into(),
         compatibility_profile: None,
+        headers: Default::default(),
         auth: V3ProviderAuthHandle {
             alias: "key1".into(),
             secret: V3ProviderAuthSecretHandle::Environment("ORANGEAI_KEY".into()),
@@ -380,6 +381,34 @@ fn provider_request_projection_preserves_transport_headers_verbatim() {
     assert_eq!(projection["headers"]["x-api-key"], "secret-value");
     assert!(!projection.to_string().contains("[REDACTED]"));
     assert_eq!(projection["body"]["input"], "original");
+}
+
+#[test]
+fn responses_http_request_builds_provider_headers_from_target() {
+    let mut target = responses_http_target();
+    target.headers.insert(
+        "x-openai-actor-authorization".to_string(),
+        "local-image-extension".to_string(),
+    );
+    let wire = build_v3_provider_12_responses_wire_payload(
+        "req-resp-provider-headers-from-target",
+        target,
+        json!({"model":"glm-5.2","input":"hello"}),
+    )
+    .unwrap();
+    let request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap();
+    let headers = request
+        .provider_headers()
+        .iter()
+        .map(|header| (header.name().to_string(), header.value().to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        headers,
+        vec![(
+            "x-openai-actor-authorization".to_string(),
+            "local-image-extension".to_string()
+        )]
+    );
 }
 
 #[test]

@@ -447,6 +447,7 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
             v3: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
+            headers: BTreeMap::new(),
         },
     };
     let generated = generate_v2_provider_config_file(&config).expect("generate");
@@ -555,4 +556,58 @@ fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
     assert!(error
         .to_string()
         .contains("cannot combine entries with secretFile"));
+}
+
+#[test]
+fn provider_headers_parse_into_authoring_config() {
+    use std::io::Write;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "rccv3-provider-headers-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let provider_dir = tmp.join("provider").join("test-provider");
+    std::fs::create_dir_all(&provider_dir).expect("create provider dir");
+    let mut file = std::fs::File::create(provider_dir.join("config.v2.toml")).expect("file");
+    file.write_all(
+        br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "responses"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "deepseek-v4.1-flash"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+
+[provider.headers]
+x-openai-actor-authorization = "local-image-extension"
+
+[provider.models."deepseek-v4.1-flash"]
+wireName = "deepseek-v4.1-flash"
+"#,
+    )
+    .expect("write");
+
+    let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    referenced_models.insert(
+        "test-provider".to_string(),
+        BTreeSet::from(["deepseek-v4.1-flash".to_string()]),
+    );
+    let (providers, _sources) =
+        compile_provider_directory(&tmp, &referenced_models).expect("compile provider directory");
+    let authoring = providers.get("test-provider").expect("provider compiled");
+    assert_eq!(
+        authoring.headers.get("x-openai-actor-authorization").map(String::as_str),
+        Some("local-image-extension")
+    );
+    std::fs::remove_dir_all(&tmp).ok();
 }

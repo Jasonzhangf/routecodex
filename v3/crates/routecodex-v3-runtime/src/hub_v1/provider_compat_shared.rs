@@ -219,6 +219,7 @@ mod tests {
             canonical_model_id: "deepseek-v5-preview".into(),
             wire_model: "deepseek-v5-preview".into(),
             compatibility_profile: None,
+            headers: Default::default(),
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("DEEPSEEK_KEY".into()),
@@ -265,6 +266,7 @@ mod tests {
                 canonical_model_id: "deepseek-v4.1-flash".into(),
                 wire_model: "deepseek-v4.1-flash".into(),
                 compatibility_profile: None,
+                headers: Default::default(),
                 auth: V3ProviderAuthHandle {
                     alias: "key1".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("K1".into()),
@@ -293,6 +295,54 @@ mod tests {
     }
 
     #[test]
+    fn provider_headers_config_emits_actor_authorization_header() {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-inferai-direct-compat-header",
+            V3ResponsesProviderTarget {
+                provider_id: "inferai-openai".into(),
+                provider_type: "responses".into(),
+                base_url: "https://inferaiapi.com/v1".into(),
+                canonical_model_id: "deepseek-v4.1-flash".into(),
+                wire_model: "deepseek-v4.1-flash".into(),
+                compatibility_profile: None,
+                headers: [(
+                    "x-openai-actor-authorization".to_string(),
+                    "local-image-extension".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+                auth: V3ProviderAuthHandle {
+                    alias: "key1".into(),
+                    secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
+                },
+                responses_transport: V3ResponsesTransportKind::Http,
+                websocket_v2_url: None,
+                provider_request_cleanup: Default::default(),
+                request_timeout_ms: 300_000,
+                sse_first_frame_timeout_ms: None,
+                initial_concurrency_budget: 8,
+                concurrency_acquire_timeout_ms: 60_000,
+            },
+            json!({"model": "deepseek-v4.1-flash", "input": "hello"}),
+        )
+        .unwrap();
+        let request = build_v3_provider_transport_request_for_protocol(
+            V3HubProviderWireProtocol::Responses,
+            wire,
+        )
+        .unwrap();
+        let headers = request
+            .provider_headers()
+            .iter()
+            .map(|header| (header.name().to_string(), header.value().to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            headers,
+            vec![("x-openai-actor-authorization".to_string(), "local-image-extension".to_string())]
+        );
+    }
+
+    #[test]
     fn anthropic_transport_request_keeps_provider_sse_first_frame_timeout() {
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-sse-first-frame-timeout-anthropic",
@@ -303,6 +353,7 @@ mod tests {
                 canonical_model_id: "claude-sonnet-5".into(),
                 wire_model: "claude-sonnet-5".into(),
                 compatibility_profile: None,
+                headers: Default::default(),
                 auth: V3ProviderAuthHandle {
                     alias: "key1".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("A1".into()),
@@ -341,6 +392,7 @@ mod tests {
                 canonical_model_id: "gemini-2.5-flash".into(),
                 wire_model: "gemini-2.5-flash".into(),
                 compatibility_profile: None,
+                headers: Default::default(),
                 auth: V3ProviderAuthHandle {
                     alias: "key1".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("G1".into()),

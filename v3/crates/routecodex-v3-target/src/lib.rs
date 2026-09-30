@@ -39,6 +39,7 @@ pub struct V3TargetCandidate {
     pub initial_concurrency_budget: u32,
     pub concurrency_acquire_timeout_ms: u64,
     pub compatibility_profile: Option<String>,
+    pub headers: BTreeMap<String, String>,
     pub env_name: Option<String>,
     pub token_file: Option<String>,
     pub secret_file: Option<String>,
@@ -749,6 +750,7 @@ impl V3TargetInterpreter {
                     .as_ref()
                     .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
                 compatibility_profile: provider.compatibility_profile.clone(),
+                headers: provider.headers.clone(),
                 env_name: entry.env.clone(),
                 token_file: entry.token_file.clone(),
                 secret_file: entry.secret_file.clone(),
