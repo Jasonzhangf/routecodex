@@ -50,6 +50,7 @@ pub struct V3OpenAiChatRelayRuntimeInput {
 }
 pub struct V3OpenAiChatRelayRuntimeOutput {
     pub status: u16,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub client_body: V3OpenAiChatRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
@@ -293,6 +294,10 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         V3OpenAiChatRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
+    let provider_pool_exhausted = matches!(
+        &error,
+        V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
+    );
     let source = match error {
         V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -327,12 +332,17 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             error.to_string(),
         ),
     };
-    error_output(
+    let mut output = error_output(
         source,
         if request_payload_invalid { 400 } else { 500 },
         "none",
         Vec::new(),
-    )
+    );
+    if provider_pool_exhausted {
+        output.terminal_disposition =
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+    }
+    output
 }
 
 fn project_json_response(
@@ -1265,6 +1275,7 @@ fn openai_chat_provider_http_failure(
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -1343,6 +1354,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
             terminal_projection: None,
+            terminal_disposition: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         }
@@ -1516,6 +1528,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3OpenAiChatRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
@@ -1536,6 +1549,7 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3OpenAiChatRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,

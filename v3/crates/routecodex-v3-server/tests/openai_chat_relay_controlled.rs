@@ -224,20 +224,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
-    let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert!(
-        error_body["error"].get("class").is_none()
-            && error_body["error"].get("error_node").is_none()
-            && error_body["error"].get("stage").is_none()
-            && error_body["error"].get("decision").is_none(),
-        "Error06 body must not carry control-plane fields: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("type").is_none(),
-        "provider raw error body must not bypass ErrorErr06 projection: {error_body}"
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let error_body = error_response.text().await.unwrap();
+    assert_eq!(
+        error_body, r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#,
+        "complete upstream HTTP error must retain its status and body"
     );
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
@@ -259,14 +250,17 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         .send()
         .await
         .unwrap();
-    assert_eq!(sse_error_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(sse_error_response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(
         sse_error_response.headers().get("content-type").unwrap(),
-        "text/event-stream"
+        "application/json"
     );
     let sse_error_body = sse_error_response.text().await.unwrap();
-    assert!(sse_error_body.contains("network_error"), "{sse_error_body}");
-    assert!(sse_error_body.contains("network error"), "{sse_error_body}");
+    assert_eq!(
+        sse_error_body,
+        r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#,
+        "streaming request must retain the complete upstream HTTP error"
+    );
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
             .await

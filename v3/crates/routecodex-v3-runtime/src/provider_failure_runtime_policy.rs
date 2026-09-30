@@ -258,6 +258,7 @@ pub(crate) struct V3RelayProviderFailurePolicyResult {
     pub(crate) decision: V3Error05ExecutionDecision,
     pub(crate) retry_selected: Option<Box<V3Target10ConcreteProviderSelected>>,
     pub(crate) terminal_projection: Option<V3Error06ClientProjected>,
+    pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub(crate) event: V3RelayProviderFailurePolicyEvent,
 }
 
@@ -274,6 +275,8 @@ pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) trace: &'state mut Vec<&'static str>,
+    pub(crate) last_eligible_external_http:
+        &'state mut Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
 }
 
 pub(crate) struct V3RelayProviderTargetResolutionInput<'input> {
@@ -1341,6 +1344,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 state.trace.push("V3TargetLocalReselected");
                 return Ok(V3RelayProviderFailurePolicyResult {
                     terminal_projection: terminal_projection_for(&decision, matched_policy),
+                    terminal_disposition: terminal_disposition_for(&decision, state),
                     decision,
                     retry_selected: Some(Box::new(alternative)),
                     event: build_v3_relay_provider_failure_policy_event(
@@ -1377,6 +1381,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
             );
             return Ok(V3RelayProviderFailurePolicyResult {
                 terminal_projection: terminal_projection_for(&decision, matched_policy),
+                terminal_disposition: None,
                 decision,
                 retry_selected: None,
                 event: build_v3_relay_provider_failure_policy_event(
@@ -1409,6 +1414,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         );
         return Ok(V3RelayProviderFailurePolicyResult {
             terminal_projection: terminal_projection_for(&decision, matched_policy),
+            terminal_disposition: terminal_disposition_for(&decision, state),
             decision,
             retry_selected: None,
             event: build_v3_relay_provider_failure_policy_event(
@@ -1455,6 +1461,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
         .await?;
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection: terminal_projection_for(&decision, matched_policy),
+        terminal_disposition: terminal_disposition_for(&decision, state),
         decision,
         retry_selected: None,
         event: build_v3_relay_provider_failure_policy_event(
@@ -1469,6 +1476,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy(
                 wait_ms: Some(admission.minimum_delay_ms),
             },
         ),
+    })
+}
+
+fn terminal_disposition_for(
+    decision: &V3Error05ExecutionDecision,
+    state: &V3RelayProviderFailurePolicyState<'_>,
+) -> Option<routecodex_v3_error::V3ProviderTerminalDisposition> {
+    decision.clone().try_into_terminal().ok().map(|terminal| {
+        V3ErrorHandlingCenter::provider_terminal_disposition(
+            terminal,
+            state.last_eligible_external_http.clone(),
+        )
     })
 }
 
@@ -1589,6 +1608,9 @@ fn build_v3_relay_provider_error_05_decision(
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> V3Error05ExecutionDecision {
     let code = error_type.unwrap_or("provider_failure").to_string();
+    // The numeric policy status also represents synthesized request/transport
+    // failures. Only the separately captured HTTP witness proves an upstream
+    // status, so Error01 must not claim this policy number as external HTTP.
     let source = build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         source_stage,
@@ -1596,7 +1618,7 @@ fn build_v3_relay_provider_error_05_decision(
         message,
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
-            status: Some(status),
+            status: None,
             code: Some(code),
             provider_id: Some(selected.candidate.provider_id.clone()),
             upstream_request_id: None,

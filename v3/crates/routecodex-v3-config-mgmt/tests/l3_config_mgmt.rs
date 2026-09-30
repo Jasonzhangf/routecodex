@@ -181,6 +181,7 @@ fn provider_file_write_then_read_roundtrip() {
             v3: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
+            headers: Default::default(),
         },
     };
     let path = write_provider_file(&home, "test-provider", &config).expect("write provider");

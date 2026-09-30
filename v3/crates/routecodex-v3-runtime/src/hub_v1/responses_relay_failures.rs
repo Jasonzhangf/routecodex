@@ -63,6 +63,7 @@ pub(crate) fn provider_http_failure(
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         observability,
         terminal_projection: None,
+        terminal_disposition: None,
         matched_policy: None,
     }
 }
@@ -102,6 +103,7 @@ pub(crate) fn provider_runtime_failure(
             source_stage,
             observability,
             terminal_projection: Some(projected),
+            terminal_disposition: None,
             matched_policy: None,
         };
     }
@@ -142,6 +144,7 @@ pub(crate) fn provider_runtime_failure(
         source_stage: provider_runtime_failure_stage(&error),
         observability,
         terminal_projection,
+        terminal_disposition: None,
         matched_policy: None,
     }
 }
@@ -163,6 +166,7 @@ pub(crate) fn provider_semantic_failure(
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
         terminal_projection: None,
+        terminal_disposition: None,
         matched_policy,
     }
 }
@@ -181,6 +185,7 @@ pub(crate) fn provider_terminal_admission_failure(
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
         terminal_projection: None,
+        terminal_disposition: None,
         matched_policy: None,
     }
 }
@@ -204,6 +209,7 @@ pub(crate) fn provider_response_stream_relay_failure(
             source_stage: "V3ProviderRespInbound01Raw",
             observability,
             terminal_projection: None,
+            terminal_disposition: None,
             matched_policy: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
@@ -233,6 +239,7 @@ fn provider_response_codec_relay_failure(
         source_stage: "V3ProviderRespInbound01Raw",
         observability,
         terminal_projection: None,
+        terminal_disposition: None,
         matched_policy: None,
     }
 }
@@ -318,12 +325,14 @@ pub(crate) fn provider_request_relay_failure(
         source_stage,
         observability,
         terminal_projection,
+        terminal_disposition: None,
         matched_policy: None,
     })
 }
 
 pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
+    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
 ) -> V3ResponsesRelayProviderFailure {
     if failure.terminal_projection.is_none() {
         let source = routecodex_v3_error::build_v3_error_01_source_raised(
@@ -332,21 +341,27 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
             &failure.policy_error_type,
             &failure.policy_error_message,
         );
-        failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
-            V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::ProviderInstance {
-                        provider_id: failure.provider_id.clone(),
-                    },
-                    candidates_remaining: 0,
-                    source_status: Some(failure.status),
+        let terminal = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source,
+                action_scope: V3ErrorActionScope::ProviderInstance {
+                    provider_id: failure.provider_id.clone(),
                 },
-                false,
-                false,
-                None,
-            ),
+                candidates_remaining: 0,
+                source_status: Some(failure.status),
+            },
+            false,
+            false,
+            None,
+        )
+        .try_into_terminal()
+        .expect("Responses residence-budget terminal requires exhausted Error05");
+        failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
+            terminal.clone(),
+            last_eligible_external_http,
         ));
+        failure.terminal_projection =
+            Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
     }
     failure
 }
@@ -439,6 +454,7 @@ pub(crate) fn provider_response_hook_failure(
                 source_stage: "V3HubRespChatProcess03Governed",
                 observability,
                 terminal_projection: None,
+                terminal_disposition: None,
                 matched_policy: None,
             }
         }
@@ -474,6 +490,7 @@ pub(crate) fn provider_failure_output_with_observation(
     }
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: failure.terminal_disposition,
         client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -513,6 +530,7 @@ pub(crate) fn error_output(
     }
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: None,
         client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),

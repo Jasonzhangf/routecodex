@@ -41,6 +41,7 @@ async fn transient_terminal_projection_releases_action_admission() {
                 failed_candidates: &mut failed_candidates,
                 same_candidate_retries: &mut same_candidate_retries,
                 trace: &mut trace,
+                last_eligible_external_http: &mut None,
             },
         ),
     )
@@ -58,6 +59,10 @@ async fn transient_terminal_projection_releases_action_admission() {
     );
     assert!(result.retry_selected.is_none());
     assert!(result.terminal_projection.is_some());
+    assert_eq!(
+        result.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+    );
 }
 
 #[tokio::test]
@@ -139,6 +144,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -230,6 +236,13 @@ targets = [
         .iter()
         .find(|policy| policy.policy_id == "retry_same_policy")
         .expect("compiled retry policy");
+    let upstream = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+        429,
+        vec![("retry-after".to_string(), b"17".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    )
+    .expect("real upstream HTTP 429 is eligible");
+    let mut last_eligible_external_http = Some(upstream.clone());
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
@@ -242,6 +255,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut last_eligible_external_http,
         },
     )
     .await
@@ -257,4 +271,8 @@ targets = [
         "request-local compat must not consume a same-candidate retry budget"
     );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+    assert_eq!(
+        result.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+    );
 }

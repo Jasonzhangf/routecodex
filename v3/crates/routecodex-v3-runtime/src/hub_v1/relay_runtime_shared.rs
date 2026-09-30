@@ -18,13 +18,14 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    build_v3_error_01_source_raised, V3EligibleExternalHttpResponse, V3Error05ExecutionAction,
+    V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
     V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHttpFailure,
+    V3ResponsesProviderTarget,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
@@ -44,6 +45,7 @@ pub struct V3RelayProviderFailure {
     pub client_response: Value,
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     /// 从 client_response 提取错误类型（协议形状相关）。
     pub error_type_fn: fn(&Value) -> Option<String>,
     /// 从 client_response 提取错误消息（协议形状相关）。
@@ -239,6 +241,7 @@ pub async fn handle_provider_failure(
         }
         V3Error05ExecutionAction::ProjectTerminal => {
             failure.terminal_projection = result.terminal_projection;
+            failure.terminal_disposition = result.terminal_disposition;
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
@@ -274,9 +277,53 @@ pub fn provider_http_failure(
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
+}
+
+/// A status and headers alone are not a complete upstream HTTP response.
+pub fn eligible_external_http_witness(
+    response: &V3ProviderHttpFailure,
+) -> Option<V3EligibleExternalHttpResponse> {
+    if response.body_read_failure.is_some() {
+        return None;
+    }
+    V3EligibleExternalHttpResponse::new(
+        response.status,
+        response
+            .headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        response.body.clone(),
+    )
+}
+
+/// Preserve the received upstream status while recording that its body read
+/// failed. This remains a provider failure, never a complete HTTP witness.
+pub fn provider_http_body_read_failure(
+    response: &V3ProviderHttpFailure,
+    provider_id: &str,
+) -> V3RelayProviderFailure {
+    let reason = response
+        .body_read_failure
+        .as_deref()
+        .expect("body read failure helper requires a failed read");
+    let mut failure = provider_runtime_failure(
+        V3ProviderError::ResponseBody {
+            request_id: response.request_id.clone(),
+            provider_id: provider_id.to_string(),
+            reason: format!(
+                "provider HTTP {} error body read failed: {reason}",
+                response.status
+            ),
+        },
+        provider_id,
+    );
+    failure.status = response.status;
+    failure
 }
 
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
@@ -290,6 +337,7 @@ pub fn provider_request_failure(
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -309,6 +357,7 @@ pub fn provider_terminal_admission_failure(
         }),
         source_stage: "V3ProviderRespInbound01Raw",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -352,6 +401,7 @@ pub fn provider_runtime_failure(
             }),
             source_stage,
             terminal_projection: Some(projected),
+            terminal_disposition: None,
             error_type_fn: extract_error_code_style,
             error_message_fn: extract_message_code_style,
         };
@@ -385,6 +435,7 @@ pub fn provider_runtime_failure(
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -402,7 +453,13 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 
 /// Provider failure that consumed the request residence budget must still be
 /// projected through the typed Error01-06 chain before the relay loop exits.
-pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3RelayProviderFailure {
+pub fn terminalize_provider_failure(
+    mut failure: V3RelayProviderFailure,
+    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+) -> V3RelayProviderFailure {
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
@@ -411,19 +468,24 @@ pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3Re
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
     );
-    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
-        V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source,
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: Some(failure.status),
-            },
-            false,
-            false,
-            None,
-        ),
+    let terminal = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: Some(failure.status),
+        },
+        false,
+        false,
+        None,
+    )
+    .try_into_terminal()
+    .expect("provider residence-budget terminal requires exhausted Error05");
+    failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
+        terminal.clone(),
+        last_eligible_external_http,
     ));
+    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
     failure
 }
 
@@ -629,6 +691,61 @@ mod tests {
     use super::*;
     use futures_util::StreamExt;
 
+    #[test]
+    fn incomplete_provider_http_error_body_is_not_an_external_http_witness() {
+        let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
+            request_id: "req-body-read".into(),
+            provider_id: "provider-a".into(),
+            status: 429,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("connection closed while reading body".into()),
+        };
+        assert!(eligible_external_http_witness(&response).is_none());
+        let failure = provider_http_body_read_failure(&response, "provider-a");
+        assert_eq!(failure.status, 429);
+        assert!(provider_failure_message(&failure).contains("connection closed while reading body"));
+        assert!(failure.terminal_disposition.is_none());
+    }
+
+    #[test]
+    fn incomplete_http_body_keeps_prior_complete_witness() {
+        let prior = V3EligibleExternalHttpResponse::new(429, vec![], b"rate limited".to_vec())
+            .expect("complete upstream error");
+        let incomplete = V3ProviderHttpFailure {
+            request_id: "req-next".into(),
+            provider_id: "provider-b".into(),
+            status: 400,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("truncated body".into()),
+        };
+        let mut last = Some(prior.clone());
+        if let Some(witness) = eligible_external_http_witness(&incomplete) {
+            last = Some(witness);
+        }
+        assert_eq!(last, Some(prior));
+    }
+
+    #[test]
+    fn internal_transport_terminalization_keeps_typed_error_without_no_response() {
+        let failure = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal".into(),
+                provider_id: "provider-a".into(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "admission lease mismatch".into(),
+            },
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        assert_eq!(
+            terminal.terminal_projection.as_ref().map(|p| p.status),
+            Some(598)
+        );
+        assert!(terminal.terminal_disposition.is_none());
+    }
+
     fn observe_one(
         protocol: V3HubEntryProtocol,
         data: &str,
@@ -715,7 +832,7 @@ mod tests {
             },
             "provider-a",
         );
-        let projection = terminalize_provider_failure(failure)
+        let projection = terminalize_provider_failure(failure, None)
             .terminal_projection
             .expect("terminalized provider failure must carry Error06 projection");
         assert!(projection.health_action.is_none());

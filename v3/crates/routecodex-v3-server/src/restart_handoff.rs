@@ -398,6 +398,51 @@ impl V3FrontTransportBroker {
             .cloned()
     }
 
+    /// End only this accepted Front connection without writing HTTP headers.
+    /// A bound request stores its socket under the lease key instead of the
+    /// accepted connection identity.
+    pub fn abort_current_connection_without_response(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        if let Some(socket) = socket {
+            socket.abort_without_response();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn release_connection(&self, connection: V3FrontConnectionIdentity) {
+        self.front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .remove(&connection);
+        if let Some(lease) = self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .remove(&connection)
+        {
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .remove(&lease.key);
+            self.client_connections
+                .lock()
+                .expect("front broker client connection lock")
+                .remove(&lease.key);
+            self.checkpoints
+                .lock()
+                .expect("front broker checkpoint lock")
+                .remove(&lease.key);
+        }
+    }
+
     /// Bind the accepted Front connection to the complete request lease only
     /// after request admission has produced all typed scope components. The
     /// connection identity alone is never a recovery key.
@@ -589,6 +634,17 @@ impl V3FrontTransportBroker {
                 captured_at: now,
             },
         );
+        drop(checkpoints);
+        for bound_lease in self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .values_mut()
+        {
+            if bound_lease.key == old_key {
+                *bound_lease = lease.clone();
+            }
+        }
         let socket = self
             .client_sockets
             .lock()
@@ -922,6 +978,11 @@ impl V3StableFrontSocket {
         self.signal_close();
     }
 
+    fn abort_without_response(&self) {
+        self.closeout_state.abort_without_response();
+        self.signal_close();
+    }
+
     fn is_closed(&self) -> bool {
         self.closeout_state.is_closed()
     }
@@ -1038,7 +1099,7 @@ where
             hyper_service,
         )
         .with_upgrades();
-    tokio::select! {
+    let result = tokio::select! {
         _ = front_socket.closeout_state.wait_peer_disconnected() => {
             front_socket.close();
             Ok(())
@@ -1049,7 +1110,9 @@ where
             }
             result.map_err(std::io::Error::other)
         },
-    }
+    };
+    front_transport_broker.release_connection(connection_identity);
+    result
 }
 
 #[cfg(test)]

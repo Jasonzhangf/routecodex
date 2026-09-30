@@ -205,3 +205,76 @@ fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported
         );
     }
 }
+
+fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
+    let source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        code,
+        "provider failure",
+    );
+    let classified = build_v3_error_02_classified_from_v3_error_01(source);
+    let action = build_v3_error_03_target_local_action_from_v3_error_02(
+        classified,
+        V3ErrorActionScope::None,
+        0,
+    );
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 0, false, false,
+    );
+    build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
+        .try_into_terminal()
+        .expect("terminal provider failure")
+}
+
+#[test]
+fn provider_terminal_preserves_real_429_status_headers_and_raw_body() {
+    let body = br#"{"error":{"type":"rate_limit_error","message":"retry"}}"#.to_vec();
+    let witness = V3EligibleExternalHttpResponse::new(
+        429,
+        vec![("retry-after".to_string(), b"7".to_vec())],
+        body.clone(),
+    )
+    .expect("eligible HTTP error");
+    assert_eq!(
+        V3ErrorHandlingCenter::provider_terminal_disposition(
+            exhausted_provider_error_05("provider_transport_failed"),
+            Some(witness),
+        ),
+        V3ProviderTerminalDisposition::ExternalHttp(V3EligibleExternalHttpResponse {
+            status: 429,
+            headers: vec![("retry-after".to_string(), b"7".to_vec())],
+            body,
+        })
+    );
+}
+
+#[test]
+fn provider_terminal_without_real_http_response_is_no_response() {
+    assert_eq!(
+        V3ErrorHandlingCenter::provider_terminal_disposition(
+            exhausted_provider_error_05("provider_transport_failed"),
+            None,
+        ),
+        V3ProviderTerminalDisposition::NoResponse
+    );
+}
+
+#[test]
+fn upstream_http_502_is_ineligible_for_client_projection() {
+    assert!(V3EligibleExternalHttpResponse::new(502, vec![], b"bad gateway".to_vec()).is_none());
+    assert!(V3EligibleExternalHttpResponse::new(200, vec![], b"ok".to_vec()).is_none());
+}
+
+#[test]
+fn provider_terminal_keeps_raw_header_bytes_without_utf8_projection() {
+    let witness = V3EligibleExternalHttpResponse::new(
+        429,
+        vec![("x-upstream".to_string(), vec![0x61, 0xff])],
+        vec![],
+    )
+    .expect("eligible HTTP error");
+    assert_eq!(witness.headers()[0].1, vec![0x61, 0xff]);
+    assert_eq!(witness.status(), 429);
+    assert!(witness.body().is_empty());
+}

@@ -268,10 +268,8 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
     );
     let _omit_done_capture = captures_rx.recv().await.unwrap();
 
-    // 4. Provider error must enter the typed Error chain and never leak the raw
-    //    provider error body to the client.  The provider transport failure is
-    //    projected through the shared V3 error center (network_error / 502),
-    //    exactly as the relay path does; the raw 429 body is not surfaced.
+    // 4. An actual provider HTTP error retains its external status and body;
+    //    Direct must not rewrite the 429 into an internal network error.
     let error_response = client
         .post(&endpoint)
         .json(&json!({
@@ -282,19 +280,11 @@ async fn chat_entry_same_protocol_provider_runs_direct_isolated() {
         .send()
         .await
         .unwrap();
-    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
     let error_body: Value = error_response.json().await.unwrap();
-    let serialized = serde_json::to_string(&error_body).unwrap();
-    assert!(
-        !serialized.contains("raw provider secret detail"),
-        "raw provider error body must not leak to client: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("class").is_none()
-            && error_body["error"].get("error_node").is_none()
-            && error_body["error"].get("stage").is_none()
-            && error_body["error"].get("decision").is_none(),
-        "Error06 body must not carry control-plane fields: {error_body}"
+    assert_eq!(
+        error_body,
+        json!({"error":{"type":"rate_limit_error","message":"raw provider secret detail"}})
     );
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await

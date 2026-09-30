@@ -8,7 +8,7 @@ title: V3 unified error-path audit
 
 Every direct and relay failure enters the typed chain in order:
 
-`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected`
+`ErrorErr01SourceRaised -> ErrorErr02HostCaptured -> ErrorErr03RuntimeClassified -> ErrorErr04RouterPolicyApplied -> ErrorErr05ExecutionDecision -> ErrorErr06ClientProjected` for an eligible client error response. A terminal provider failure with no eligible upstream HTTP response ends at Error05 and closes only the current client connection before headers; it does not fabricate Error06 `502` or an SSE success/error event.
 
 The error chain is a control-plane side channel. It must not be copied into request or response business payloads.
 

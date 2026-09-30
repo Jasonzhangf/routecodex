@@ -899,32 +899,7 @@ pub(crate) fn error_output(
     node_trace: Vec<&'static str>,
     hook_registry: &V3HookRegistry,
 ) -> V3ResponsesDirectRuntimeOutput {
-    let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
-    let projected = V3ErrorHandlingCenter::project_terminal(decision);
-    projected_error_output(projected, node_trace)
-}
-
-/// SSE 传输错误在重试穷尽后的终端输出。与 `error_output` 的差异：调用方已
-/// 持有策略层的穷尽证明（terminal policy decision 已产生），因此允许
-/// ProviderFailure 来源直接投影；投影保留 SSE 传输错误原语义并附带可观测
-/// 性与快照。调用方必须传 0 候选剩余/无默认池的穷尽姿态。
-pub(crate) fn exhausted_sse_transport_error_output(
-    source: V3Error01SourceRaised,
-    node_trace: Vec<&'static str>,
-    hook_registry: &V3HookRegistry,
-    observability: Option<V3RuntimeObservability>,
-    provider_request_snapshot: Option<serde_json::Value>,
-    provider_response_snapshot: Option<serde_json::Value>,
-) -> V3ResponsesDirectRuntimeOutput {
-    let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
-    let projected = V3ErrorHandlingCenter::project_terminal(decision);
-    projected_error_output_with_observability_and_snapshots(
-        projected,
-        node_trace,
-        observability,
-        provider_request_snapshot,
-        provider_response_snapshot,
-    )
+    error_output_with_observability(source, node_trace, hook_registry, None)
 }
 
 pub(crate) fn error_output_with_observability(
@@ -933,16 +908,32 @@ pub(crate) fn error_output_with_observability(
     hook_registry: &V3HookRegistry,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
+    let target_exhausted = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
     let decision = hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None);
     let projected = V3ErrorHandlingCenter::project_terminal(decision);
-    projected_error_output_with_observability(projected, node_trace, observability)
+    let mut output =
+        projected_error_output_with_observability(projected, node_trace, observability);
+    if target_exhausted {
+        output.terminal_disposition = Some(V3ProviderTerminalDisposition::NoResponse);
+    }
+    output
 }
 
-fn projected_error_output(
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+pub(crate) fn target_exhausted_output_with_observability(
+    source: V3Error01SourceRaised,
+    witness: Option<V3EligibleExternalHttpResponse>,
     node_trace: Vec<&'static str>,
+    hook_registry: &V3HookRegistry,
+    observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesDirectRuntimeOutput {
-    projected_error_output_with_observability(projected, node_trace, None)
+    assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
+    let mut output =
+        error_output_with_observability(source, node_trace, hook_registry, observability);
+    output.terminal_disposition = Some(match witness {
+        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+        None => V3ProviderTerminalDisposition::NoResponse,
+    });
+    output
 }
 
 pub(crate) fn projected_error_output_with_observability(
@@ -971,6 +962,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
     }
     V3ResponsesDirectRuntimeOutput {
         observability,
+        terminal_disposition: None,
         stream_observation: None,
         provider_request_snapshot,
         provider_response_snapshot,
@@ -985,6 +977,31 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
     }
 }
 
+pub(crate) fn provider_terminal_output(
+    decision: V3Error05ExecutionDecision,
+    witness: Option<V3EligibleExternalHttpResponse>,
+    node_trace: Vec<&'static str>,
+    observability: Option<V3RuntimeObservability>,
+    provider_request_snapshot: Option<serde_json::Value>,
+    provider_response_snapshot: Option<serde_json::Value>,
+) -> V3ResponsesDirectRuntimeOutput {
+    let terminal = decision
+        .clone()
+        .try_into_terminal()
+        .expect("provider terminal output requires terminal Error05 decision");
+    let disposition = V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness);
+    let projected = V3ErrorHandlingCenter::project_terminal(decision);
+    let mut output = projected_error_output_with_observability_and_snapshots(
+        projected,
+        node_trace,
+        observability,
+        provider_request_snapshot,
+        provider_response_snapshot,
+    );
+    output.terminal_disposition = Some(disposition);
+    output
+}
+
 #[cfg(test)]
 mod target_exhaustion_disposition_tests {
     use super::*;
@@ -997,16 +1014,88 @@ mod target_exhaustion_disposition_tests {
             "selected_target_exhausted",
             "all route tiers unavailable",
         );
-        let projected = routecodex_v3_error::V3ErrorHandlingCenter::handle(
-            routecodex_v3_error::V3ErrorHandlingCenterInput {
-                source,
-                action_scope: routecodex_v3_error::V3ErrorActionScope::None,
+        let output = error_output(
+            source,
+            Vec::new(),
+            &crate::hooks::register_responses_direct_hooks(),
+        );
+        assert!(output.node_trace.contains(&"V3Error04TargetPoolExhaustion"));
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::NoResponse)
+        );
+    }
+
+    #[test]
+    fn direct_target_exhaustion_keeps_prior_real_upstream_http_response() {
+        let witness = V3EligibleExternalHttpResponse::new(
+            429,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"error":"limit"}"#.to_vec(),
+        )
+        .unwrap();
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::TargetPoolExhausted,
+            "V3Target10ConcreteProviderSelected",
+            "selected_target_exhausted",
+            "all route tiers unavailable",
+        );
+        let output = target_exhausted_output_with_observability(
+            source,
+            Some(witness.clone()),
+            Vec::new(),
+            &crate::hooks::register_responses_direct_hooks(),
+            None,
+        );
+        assert_eq!(
+            output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
+    }
+
+    #[test]
+    fn direct_provider_terminal_uses_witness_or_no_response() {
+        let decision = V3ErrorHandlingCenter::decide_provider(
+            V3ErrorHandlingCenterInput {
+                source: routecodex_v3_error::build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::ProviderFailure,
+                    "V3Transport13ResponsesHttpRequest",
+                    "provider_transport_error",
+                    "provider connection failed",
+                ),
+                action_scope: V3ErrorActionScope::None,
                 candidates_remaining: 0,
                 source_status: None,
             },
+            false,
+            false,
+            None,
         );
-        let output = projected_error_output(projected, Vec::new());
-        assert!(output.node_trace.contains(&"V3Error04TargetPoolExhaustion"));
+        assert_eq!(decision.action, V3Error05ExecutionAction::ProjectTerminal);
+        let no_response =
+            provider_terminal_output(decision.clone(), None, Vec::new(), None, None, None);
+        assert_eq!(
+            no_response.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::NoResponse)
+        );
+        let witness = V3EligibleExternalHttpResponse::new(
+            429,
+            vec![("content-type".into(), b"application/json".to_vec())],
+            br#"{"error":"limited"}"#.to_vec(),
+        )
+        .unwrap();
+        let external = provider_terminal_output(
+            decision,
+            Some(witness.clone()),
+            Vec::new(),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(
+            external.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
+        );
     }
 }
 
@@ -1048,6 +1137,7 @@ pub(crate) fn relay_handoff_output(
 ) -> V3ResponsesDirectRuntimeOutput {
     V3ResponsesDirectRuntimeOutput {
         observability: None,
+        terminal_disposition: None,
         stream_observation: None,
         provider_request_snapshot: None,
         provider_response_snapshot: None,

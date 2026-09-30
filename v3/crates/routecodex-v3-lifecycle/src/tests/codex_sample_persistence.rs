@@ -68,8 +68,8 @@ async fn spawn_sample_persistence_failure_server(
     (declaration, instance_dir, handle)
 }
 
-async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::SocketAddr) -> String {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::SocketAddr) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let body = serde_json::json!({
         "model": "test",
@@ -83,101 +83,16 @@ async fn sample_persistence_failure_http_roundtrip(listener_addr: std::net::Sock
     let mut stream = tokio::net::TcpStream::connect(listener_addr).await.unwrap();
     stream.write_all(header.as_bytes()).await.unwrap();
     stream.write_all(body.as_bytes()).await.unwrap();
-    let mut response = tokio::io::BufReader::new(stream);
-    let mut status_line = String::new();
-    tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut status_line))
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
         .await
         .unwrap()
         .unwrap();
-    let mut response_headers = String::new();
-    let mut content_length = None;
-    let mut chunked = false;
-    loop {
-        let mut header = String::new();
-        tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut header))
-            .await
-            .unwrap()
-            .unwrap();
-        if header == "\r\n" {
-            break;
-        }
-        if header.is_empty() {
-            panic!("response closed before the header terminator: {status_line}{response_headers}");
-        }
-        if let Some((name, value)) = header.split_once(':') {
-            if name.eq_ignore_ascii_case("content-length") {
-                content_length = Some(value.trim().parse::<usize>().unwrap());
-            }
-            if name.eq_ignore_ascii_case("transfer-encoding") {
-                chunked = value
-                    .split(',')
-                    .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"));
-            }
-        }
-        response_headers.push_str(&header);
-    }
-    let mut response_body = Vec::new();
-    if let Some(content_length) = content_length {
-        response_body.resize(content_length, 0);
-        tokio::time::timeout(
-            Duration::from_secs(5),
-            response.read_exact(&mut response_body),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    } else if chunked {
-        loop {
-            let mut size_line = String::new();
-            tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut size_line))
-                .await
-                .unwrap()
-                .unwrap();
-            let size = usize::from_str_radix(
-                size_line
-                    .trim_end_matches(['\r', '\n'])
-                    .split(';')
-                    .next()
-                    .unwrap(),
-                16,
-            )
-            .unwrap();
-            if size == 0 {
-                loop {
-                    let mut trailer = String::new();
-                    tokio::time::timeout(Duration::from_secs(5), response.read_line(&mut trailer))
-                        .await
-                        .unwrap()
-                        .unwrap();
-                    if trailer == "\r\n" || trailer.is_empty() {
-                        break;
-                    }
-                }
-                break;
-            }
-            let body_start = response_body.len();
-            response_body.resize(body_start + size, 0);
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                response.read_exact(&mut response_body[body_start..]),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-            let mut chunk_end = [0; 2];
-            tokio::time::timeout(Duration::from_secs(5), response.read_exact(&mut chunk_end))
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(&chunk_end, b"\r\n");
-        }
-    } else {
-        panic!("unsupported response framing: {status_line}{response_headers}");
-    }
-    format!(
-        "{status_line}{response_headers}\r\n{}",
-        String::from_utf8(response_body).unwrap()
-    )
+    assert!(
+        response.is_empty(),
+        "provider no-response must close before sending HTTP headers or body: {}",
+        String::from_utf8_lossy(&response)
+    );
 }
 
 #[tokio::test]
@@ -193,16 +108,7 @@ async fn managed_shutdown_records_sample_persistence_failure_with_hooks_cleanup_
         .port();
     let (declaration, instance_dir, handle) =
         spawn_sample_persistence_failure_server(root.path(), &home, port).await;
-    let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
-    assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
-    assert!(
-        response.contains("\r\n\r\n"),
-        "incomplete HTTP response: {response}"
-    );
-    assert!(
-        !response.contains("codex sample persistence shutdown failed"),
-        "persistence diagnostics must not replace the client error response: {response}"
-    );
+    sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
 
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");
@@ -274,16 +180,7 @@ async fn failed_exec_restart_keeps_sample_persistence_failure_and_handoff_files(
         .port();
     let (declaration, instance_dir, handle) =
         spawn_sample_persistence_failure_server(&root, &home, port).await;
-    let response = sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
-    assert!(response.starts_with("HTTP/1.1 502 "), "{response}");
-    assert!(
-        response.contains("\r\n\r\n"),
-        "incomplete HTTP response: {response}"
-    );
-    assert!(
-        !response.contains("codex sample persistence shutdown failed"),
-        "persistence diagnostics must not replace the client error response: {response}"
-    );
+    sample_persistence_failure_http_roundtrip(handle.listeners[0].addr).await;
 
     ensure_private_dir(&instance_dir).unwrap();
     let socket_path = instance_dir.join("managed-control.sock");

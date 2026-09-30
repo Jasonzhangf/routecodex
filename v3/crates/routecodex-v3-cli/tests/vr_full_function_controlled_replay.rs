@@ -132,10 +132,12 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .send()
         .await
         .unwrap();
-    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
+    assert_eq!(
+        exhausted_response.status(),
+        ReqwestStatusCode::SERVICE_UNAVAILABLE
+    );
     let exhausted_body = exhausted_response.json::<Value>().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "network_error");
-    assert_eq!(exhausted_body["error"]["message"], "network error");
+    assert_eq!(exhausted_body, json!({"error":"controlled_failure"}));
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
     let exhausted_default = next_capture(&mut failure_b.captures, "exhaust default").await;

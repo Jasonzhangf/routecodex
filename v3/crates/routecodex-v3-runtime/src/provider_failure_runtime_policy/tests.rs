@@ -842,6 +842,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
+        last_eligible_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1101,6 +1102,7 @@ async fn transport_error_switches_provider_family() {
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
+        last_eligible_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1205,6 +1207,7 @@ message_mode = "code_only"
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
+        last_eligible_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -1329,6 +1332,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -1382,6 +1386,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await

@@ -61,6 +61,7 @@ pub struct V3GeminiRelayRuntimeInput {
 
 pub struct V3GeminiRelayRuntimeOutput {
     pub status: u16,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub client_body: V3GeminiRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
@@ -378,6 +379,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3GeminiRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
@@ -396,6 +398,7 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
     ) -> V3GeminiRelayRuntimeOutput {
         V3GeminiRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3GeminiRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,
@@ -469,6 +472,10 @@ pub fn project_v3_gemini_relay_runtime_failure(
         V3GeminiRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
+    let provider_pool_exhausted = matches!(
+        &error,
+        V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. }
+    );
     let source = match error {
         V3GeminiRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
             V3ErrorSourceKind::ModelNotFound,
@@ -511,6 +518,8 @@ pub fn project_v3_gemini_relay_runtime_failure(
     );
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: provider_pool_exhausted
+            .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -805,6 +814,7 @@ fn provider_failure_output(
     trace.push("V3Error06ClientProjected");
     V3GeminiRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: failure.terminal_disposition,
         client_body: V3GeminiRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),

@@ -155,7 +155,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
     server_tool_state: &V3ResponsesRelayServerToolState,
     scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_inner(
+    Box::pin(execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -174,7 +174,7 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         BTreeSet::new(),
         None,
         None,
-    )
+    ))
     .await
 }
 
@@ -195,7 +195,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
-    let mut output = execute_v3_responses_relay_runtime_inner(
+    let mut output = Box::pin(execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         &transport,
@@ -214,7 +214,7 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_se
         initial_request_local_excluded_candidates,
         initial_observability_accumulator,
         initial_request_execution_control,
-    )
+    ))
     .await?;
     output.provider_snapshots = Some(snapshots.into_payload(
         provider_snapshots.provider_request,
@@ -231,7 +231,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
-    execute_v3_responses_relay_runtime_inner(
+    Box::pin(execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -246,7 +246,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         BTreeSet::new(),
         None,
         None,
-    )
+    ))
     .await
 }
 
@@ -259,7 +259,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
     provider_health: &V3ResponsesRelayProviderHealthHandle,
     retry_policy: V3ResponsesRelayRetryPolicy,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_inner(
+    Box::pin(execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
@@ -274,7 +274,7 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         BTreeSet::new(),
         None,
         None,
-    )
+    ))
     .await
 }
 
@@ -310,6 +310,7 @@ async fn handle_v3_responses_relay_provider_failure(
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
             trace: state.trace,
+            last_eligible_external_http: state.last_eligible_external_http,
         },
     )
     .await
@@ -345,6 +346,7 @@ async fn handle_v3_responses_relay_provider_failure(
         }
         V3Error05ExecutionAction::ProjectTerminal => {
             failure.terminal_projection = result.terminal_projection;
+            failure.terminal_disposition = result.terminal_disposition;
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
