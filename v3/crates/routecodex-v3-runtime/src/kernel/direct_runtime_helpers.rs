@@ -168,9 +168,9 @@ mod external_http_witness_tests {
             status: 429,
             headers: vec![V3ProviderResponseHeader {
                 name: "content-type".into(),
-                value: b"application/json; charset=utf-8".to_vec(),
+                value: b"text/html; charset=utf-8".to_vec(),
             }],
-            body: br#"{"error":{"message":"limit"}}"#.to_vec(),
+            body: b"<html>limit</html>".to_vec(),
             body_read_failure: None,
         };
         let error = V3ProviderError::HttpStatus {
@@ -178,7 +178,7 @@ mod external_http_witness_tests {
         };
         let witness = eligible_external_http_from_provider_error(&error).unwrap();
         assert_eq!(witness.status(), 429);
-        assert_eq!(witness.headers()[0].1, b"application/json; charset=utf-8");
+        assert_eq!(witness.headers()[0].1, b"text/html; charset=utf-8");
         assert_eq!(witness.body(), response.body);
         let upstream_502 = V3ProviderError::HttpStatus {
             response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
