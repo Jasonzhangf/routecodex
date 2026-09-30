@@ -15,6 +15,7 @@ struct V3FrontTransportRequestCycle {
     frame: Option<Vec<u8>>,
     request_started: bool,
     response_started: bool,
+    aborted_without_response: bool,
 }
 
 impl V3FrontTransportCloseoutState {
@@ -65,9 +66,22 @@ impl V3FrontTransportCloseoutState {
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if request_cycle.request_started && !request_cycle.response_started {
+        if request_cycle.request_started
+            && !request_cycle.response_started
+            && !request_cycle.aborted_without_response
+        {
             request_cycle.frame = Some(build_v3_restart_closeout_http_error());
         }
+    }
+
+    pub(crate) fn abort_without_response(&self) {
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        request_cycle.aborted_without_response = true;
+        request_cycle.frame = None;
+        self.closed.store(true, Ordering::Release);
     }
 
     pub(crate) fn close(&self) {
