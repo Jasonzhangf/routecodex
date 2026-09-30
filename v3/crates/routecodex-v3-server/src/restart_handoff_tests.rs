@@ -26,6 +26,14 @@ async fn front_http_close_probe(
                     .get::<V3FrontConnectionIdentity>()
                     .expect("Front must attach the accepted connection identity");
                 assert_eq!(actual_identity, identity);
+                if queue_restart_frame {
+                    broker
+                        .front_socket(actual_identity)
+                        .expect("Front socket before lease binding")
+                        .set_exec_closeout_frame(
+                            b"HTTP/1.1 503 Service Unavailable\r\n\r\n".to_vec(),
+                        );
+                }
                 if bind_lease {
                     broker
                         .bind_connection_lease(
@@ -35,15 +43,11 @@ async fn front_http_close_probe(
                         )
                         .expect("request lease binding");
                 }
-                if let Some(socket) = broker.front_socket(actual_identity) {
-                    if queue_restart_frame {
-                        socket.set_exec_closeout_frame(
-                            b"HTTP/1.1 503 Service Unavailable\r\n\r\n".to_vec(),
-                        );
-                    }
-                    if close_socket {
-                        socket.close();
-                    }
+                if close_socket {
+                    assert!(
+                        broker.abort_current_connection_without_response(actual_identity),
+                        "scoped abort must find the current Front identity even after lease binding"
+                    );
                 }
                 axum::http::StatusCode::TOO_MANY_REQUESTS
             }
@@ -121,6 +125,150 @@ async fn front_http_control_429_without_close_retains_normal_http_response() {
         bytes.starts_with(b"HTTP/1.1 429 Too Many Requests\r\n"),
         "real upstream-style 429 must retain HTTP status, got {bytes:?}"
     );
+}
+
+#[tokio::test]
+async fn front_http_scoped_abort_does_not_close_a_second_client() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let broker = V3FrontTransportBroker::new(4);
+    let abort_broker = broker.clone();
+    let service = axum::Router::new()
+        .route(
+            "/abort",
+            axum::routing::get(move |request: axum::http::Request<Body>| {
+                let broker = abort_broker.clone();
+                async move {
+                    let identity = *request
+                        .extensions()
+                        .get::<V3FrontConnectionIdentity>()
+                        .unwrap();
+                    assert!(broker.abort_current_connection_without_response(identity));
+                    axum::http::StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        )
+        .route(
+            "/control",
+            axum::routing::get(|| async { axum::http::StatusCode::TOO_MANY_REQUESTS }),
+        );
+    let accept_broker = broker.clone();
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, remote) = listener.accept().await.unwrap();
+            let identity = accept_broker.allocate_connection_identity();
+            let _ = serve_v3_front_http_connection(
+                stream,
+                remote,
+                identity,
+                accept_broker.clone(),
+                service.clone().into_service(),
+            )
+            .await;
+        }
+    });
+    let mut first = TcpStream::connect(address).await.unwrap();
+    first
+        .write_all(b"GET /abort HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut bytes = [0; 4096];
+    let first_len = timeout(Duration::from_secs(3), first.read(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        first_len, 0,
+        "aborted connection must have zero header bytes"
+    );
+    drop(first);
+
+    let mut second = TcpStream::connect(address).await.unwrap();
+    second
+        .write_all(b"GET /control HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let second_len = timeout(Duration::from_secs(3), second.read(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        bytes[..second_len].starts_with(b"HTTP/1.1 429 Too Many Requests\r\n"),
+        "second Front identity must retain its normal response"
+    );
+    drop(second);
+    timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn front_http_reused_connection_aborts_only_the_second_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let broker = V3FrontTransportBroker::new(4);
+    let identity = broker.allocate_connection_identity();
+    let abort_broker = broker.clone();
+    let service = axum::Router::new()
+        .route(
+            "/first",
+            axum::routing::get(|| async { axum::http::StatusCode::OK }),
+        )
+        .route(
+            "/abort",
+            axum::routing::get(move |request: axum::http::Request<Body>| {
+                let broker = abort_broker.clone();
+                async move {
+                    let current = *request
+                        .extensions()
+                        .get::<V3FrontConnectionIdentity>()
+                        .unwrap();
+                    assert_eq!(
+                        current, identity,
+                        "second request must reuse the TCP identity"
+                    );
+                    assert!(broker.abort_current_connection_without_response(current));
+                    axum::http::StatusCode::TOO_MANY_REQUESTS
+                }
+            }),
+        );
+    let server = tokio::spawn(async move {
+        let (stream, remote) = listener.accept().await.unwrap();
+        serve_v3_front_http_connection(stream, remote, identity, broker, service.into_service())
+            .await
+    });
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(b"GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    let mut bytes = [0; 4096];
+    let first_len = timeout(Duration::from_secs(3), client.read(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        bytes[..first_len].starts_with(b"HTTP/1.1 200 OK\r\n"),
+        "first request on reused socket must return normally"
+    );
+    client
+        .write_all(b"GET /abort HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let second_len = timeout(Duration::from_secs(3), client.read(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        second_len, 0,
+        "second request must end with zero HTTP header bytes"
+    );
+    drop(client);
+    let _ = timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 fn key() -> V3FrontRequestLeaseKey {
