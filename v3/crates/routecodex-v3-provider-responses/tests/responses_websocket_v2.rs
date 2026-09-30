@@ -250,6 +250,7 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
         canonical_model_id: "model".into(),
         wire_model: "model".into(),
         compatibility_profile: None,
+        headers: Default::default(),
         auth: V3ProviderAuthHandle {
             alias: "primary".into(),
             secret: V3ProviderAuthSecretHandle::Environment(env.into()),

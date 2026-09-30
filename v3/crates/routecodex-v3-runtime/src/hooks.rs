@@ -556,6 +556,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog(
             canonical_model_id: candidate.model_id.clone(),
             wire_model: candidate.wire_model.clone(),
             compatibility_profile: candidate.compatibility_profile.clone(),
+            headers: candidate.headers.clone(),
             sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
             auth: V3ProviderAuthHandle {
                 alias: candidate.auth_alias.clone(),
@@ -831,6 +832,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog(
             canonical_model_id: candidate.model_id.clone(),
             wire_model: candidate.wire_model.clone(),
             compatibility_profile: candidate.compatibility_profile.clone(),
+            headers: candidate.headers.clone(),
             sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
             auth: V3ProviderAuthHandle {
                 alias: candidate.auth_alias.clone(),

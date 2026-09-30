@@ -81,6 +81,7 @@ fn manifest() -> V3Config05ManifestPublished {
                 health: None,
                 provider_request_cleanup: Default::default(),
                 compatibility_profile: None,
+                headers: BTreeMap::new(),
                 features: BTreeMap::new(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,

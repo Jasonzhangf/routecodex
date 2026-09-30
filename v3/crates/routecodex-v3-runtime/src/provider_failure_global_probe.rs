@@ -72,6 +72,7 @@ pub fn build_v3_provider_global_probe_target(
         canonical_model_id: model.id.clone(),
         wire_model: model.wire_name.clone(),
         compatibility_profile: provider.compatibility_profile.clone(),
+        headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: auth.alias.clone(),
             secret,
