@@ -82,13 +82,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport +
     hook_registry: V3HookRegistry,
     transport: &T,
 ) -> V3ResponsesDirectRuntimeOutput {
-    execute_v3_responses_direct_runtime_kernel_core_resident(
+    Box::pin(execute_v3_responses_direct_runtime_kernel_core_resident(
         state,
         manifest,
         raw,
         hook_registry,
         transport,
-    )
+    ))
     .await
 }
 
