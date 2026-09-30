@@ -145,6 +145,62 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
     wait_ports_closed(&client, &[success_port, exhausted_port]).await;
 }
 
+#[tokio::test]
+async fn cli_replay_proves_optional_tier_success_never_touches_default_pool() {
+    let mut optional = start_controlled_upstream(ProviderMode::Success).await;
+    let mut default_failure = start_controlled_upstream(ProviderMode::Failure).await;
+    let mut other_failure = start_controlled_upstream(ProviderMode::Failure).await;
+    let optional_port = free_port();
+    let default_port = free_port();
+    let config_path = write_optional_success_config(
+        optional_port,
+        default_port,
+        &optional,
+        &default_failure,
+        &other_failure,
+    );
+
+    let client = reqwest::Client::new();
+    let mut cli = start_cli(&config_path);
+    wait_for_health(&client, &mut cli, optional_port, "vr_optional_success").await;
+    wait_for_health(&client, &mut cli, default_port, "vr_default_failure").await;
+
+    let response = client
+        .post(format!("http://127.0.0.1:{optional_port}/v1/responses"))
+        .json(&json!({
+            "model": "client-tools",
+            "input": "optional tier success",
+            "tools": [
+                {"type": "function", "name": "run", "parameters": {"type": "object"}}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), ReqwestStatusCode::OK);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({"id": "vr_success", "output_text": "ok"})
+    );
+
+    let optional_capture = next_capture(&mut optional.captures, "optional success").await;
+    assert_eq!(optional_capture.body["model"], "wire-optional");
+    assert_eq!(optional_capture.body["input"], "optional tier success");
+    assert!(optional_capture.body["tools"].is_array());
+    assert_no_route_controls(&optional_capture.body);
+    assert_no_capture(
+        &mut default_failure.captures,
+        "default tier untouched when optional tier succeeds",
+    );
+    assert_no_capture(
+        &mut other_failure.captures,
+        "other low tier upstream untouched",
+    );
+
+    drop(cli);
+    wait_ports_closed(&client, &[optional_port, default_port]).await;
+}
+
 async fn upstream_handler(State(state): State<Arc<ProviderState>>, body: String) -> Response<Body> {
     let parsed = serde_json::from_str::<Value>(&body).unwrap();
     state
@@ -191,6 +247,19 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
     }
 }
 
+fn config_root(tag: &str) -> PathBuf {
+    let root = PathBuf::from("/tmp").join(format!("rcc-vr-{tag}-{}", std::process::id()));
+    let run_dir = root.join(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .to_string(),
+    );
+    fs::create_dir_all(&run_dir).unwrap();
+    run_dir
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -206,15 +275,7 @@ fn write_config(
     failure_a: &ControlledUpstream,
     failure_b: &ControlledUpstream,
 ) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-vr-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    ));
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join("config.vr.toml");
+    let path = config_root("main").join("config.vr.toml");
     fs::write(
         &path,
         format!(
@@ -303,7 +364,99 @@ targets = [{{ kind = "provider_model", provider = "exhausted", model = "test", k
     path
 }
 
+fn write_optional_success_config(
+    optional_success_port: u16,
+    default_failure_port: u16,
+    optional: &ControlledUpstream,
+    default_failure: &ControlledUpstream,
+    other_failure: &ControlledUpstream,
+) -> PathBuf {
+    let path = config_root("opt").join("config.vr.toml");
+    fs::write(
+        &path,
+        format!(
+            r#"
+version = 3
+
+{hub_v1_declaration}
+
+[servers.vr_optional_success]
+bind = "127.0.0.1"
+port = {optional_success_port}
+routing_group = "vr_optional_success"
+endpoints = ["responses"]
+
+{optional_success_execution}
+
+[servers.vr_default_failure]
+bind = "127.0.0.1"
+port = {default_failure_port}
+routing_group = "vr_default_failure"
+endpoints = ["responses"]
+
+{default_failure_execution}
+
+[providers.optional]
+type = "responses"
+base_url = "{optional_base}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_OPTIONAL_KEY" }}] }}
+[providers.optional.models.test]
+wire_name = "wire-optional"
+capabilities = ["text", "tools"]
+
+[providers.default]
+type = "responses"
+base_url = "{default_failure_base}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_DEFAULT_KEY" }}] }}
+[providers.default.models.test]
+wire_name = "wire-default"
+capabilities = ["text", "tools"]
+
+[providers.other]
+type = "responses"
+base_url = "{other_failure_base}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "VR_EXHAUSTED_KEY" }}] }}
+[providers.other.models.test]
+wire_name = "wire-other"
+capabilities = ["text", "tools"]
+
+[route_groups.vr_optional_success.pools.tools]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client-tools"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
+targets = [{{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 1 }}]
+[route_groups.vr_optional_success.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "default", model = "test", key = "key", priority = 1 }}]
+
+[route_groups.vr_default_failure.pools.tools]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["client-tools"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
+targets = [{{ kind = "provider_model", provider = "other", model = "test", key = "key", priority = 1 }}]
+[route_groups.vr_default_failure.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "default", model = "test", key = "key", priority = 1 }}]
+"#,
+            optional_base = optional.base_url,
+            default_failure_base = default_failure.base_url,
+            other_failure_base = other_failure.base_url,
+            hub_v1_declaration = hub_v1_test_declaration(),
+            optional_success_execution = hub_v1_server_execution("vr_optional_success"),
+            default_failure_execution = hub_v1_server_execution("vr_default_failure"),
+        ),
+    )
+    .unwrap();
+    path
+}
+
 fn start_cli(config_path: &Path) -> CliProcess {
+    let temp_dir = config_path
+        .parent()
+        .expect("config path has parent")
+        .join("cli-temp");
+    fs::create_dir_all(&temp_dir).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
         .arg(config_path)
@@ -311,9 +464,9 @@ fn start_cli(config_path: &Path) -> CliProcess {
         .env("VR_OPTIONAL_KEY", "optional-secret")
         .env("VR_DEFAULT_KEY", "default-secret")
         .env("VR_EXHAUSTED_KEY", "exhausted-secret")
-        .env("TMPDIR", "build-control/temp")
-        .env("TMP", "build-control/temp")
-        .env("TEMP", "build-control/temp")
+        .env("TMPDIR", &temp_dir)
+        .env("TMP", &temp_dir)
+        .env("TEMP", &temp_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()

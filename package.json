@@ -199,7 +199,7 @@
     "test:v3-provider-adaptive-concurrency": "node scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1",
     "test:v3-p5-router-target": "node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-virtual-router -p routecodex-v3-target -- --nocapture",
     "test:v3-p5-server-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
-    "test:v3-vr-full-function-cli": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",
+    "test:v3-vr-full-function-cli": "npm --prefix v3 run test:v3-vr-full-function-cli",
     "test:v3-foundation-runtime-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime foundation --lib -- --nocapture",
     "test:v3-server-debug-error-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-workspace": "npm run verify:v3-file-size && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run verify:v3-runtime-timing-observability && node v3/scripts/run-v3-cargo-test.mjs +stable --workspace -- --nocapture",
