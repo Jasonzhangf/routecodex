@@ -22,7 +22,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
-    execute_responses_direct_server_outcome_with_cancellation(
+    Box::pin(execute_responses_direct_server_outcome_with_cancellation(
         state,
         request_headers,
         method,
@@ -38,7 +38,7 @@ pub(super) async fn execute_responses_direct_server_outcome(
         route_selection_event_sink,
         request_purpose,
         None,
-    )
+    ))
     .await
 }
 
