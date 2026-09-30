@@ -606,6 +606,34 @@ fn chat_reducer_rejects_unknown_finish_reason() {
 }
 
 #[test]
+fn chat_reducer_materializes_length_and_max_token_aliases_as_length() {
+    for finish_reason in [
+        "length",
+        "max_tokens",
+        "max_output_tokens",
+        "max-tokens",
+        "max-output-tokens",
+    ] {
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer
+            .apply_chunk(&json!({
+                "object":"chat.completion.chunk",
+                "choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":finish_reason}]
+            }))
+            .unwrap();
+
+        assert!(matches!(
+            reducer.terminal,
+            Some(V3OpenAiChatSseTerminalState::Length)
+        ));
+        assert_eq!(
+            reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+            "length"
+        );
+    }
+}
+
+#[test]
 fn chat_reducer_treats_empty_sse_finish_reason_as_nonterminal() {
     let mut reducer = V3OpenAiChatSseReducerState::default();
     reducer

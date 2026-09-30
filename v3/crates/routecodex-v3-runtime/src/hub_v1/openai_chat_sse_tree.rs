@@ -293,13 +293,19 @@ impl V3OpenAiChatSseReducerState {
             .system_fingerprint
             .or(self.system_fingerprint.take());
         let semantic = classify_v3_openai_chat_sse_chunk(chunk)?;
-        for choice in semantic.choices {
+        for mut choice in semantic.choices {
             if let Some(reason) = choice
                 .finish_reason
                 .as_deref()
                 .filter(|reason| !reason.is_empty())
             {
-                self.terminal = Some(parse_terminal_state(reason)?);
+                let normalized = match reason.to_ascii_lowercase().as_str() {
+                    "max_tokens" | "max-tokens" => "length".to_owned(),
+                    "max_output_tokens" | "max-output-tokens" => "length".to_owned(),
+                    _ => reason.to_owned(),
+                };
+                choice.finish_reason = Some(normalized.clone());
+                self.terminal = Some(parse_terminal_state(&normalized)?);
             }
             self.choices.push(choice);
         }
@@ -831,7 +837,7 @@ fn parse_terminal_state(
 ) -> Result<V3OpenAiChatSseTerminalState, V3OpenAiChatSseTreeError> {
     match finish_reason {
         "stop" => Ok(V3OpenAiChatSseTerminalState::Stop),
-        "length" => Ok(V3OpenAiChatSseTerminalState::Length),
+        "length" | "max_tokens" | "max_output_tokens" => Ok(V3OpenAiChatSseTerminalState::Length),
         "tool_calls" => Ok(V3OpenAiChatSseTerminalState::ToolCalls),
         "content_filter" => Ok(V3OpenAiChatSseTerminalState::ContentFilter),
         "function_call" => Ok(V3OpenAiChatSseTerminalState::FunctionCall),
