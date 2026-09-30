@@ -602,7 +602,11 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
     let body = response.text().await.unwrap();
     assert_eq!(status, ReqwestStatusCode::OK, "{body}");
     let added = sse_data_payload(&body, "response.output_item.added");
-    assert_eq!(added["item"]["input"].as_str(), Some(input.as_str()), "{body}");
+    assert_eq!(
+        added["item"]["input"].as_str(),
+        Some(input.as_str()),
+        "{body}"
+    );
     let completed = sse_data_payload(&body, "response.completed");
     let item = &completed["response"]["output"][0];
     assert_eq!(item["type"], "custom_tool_call", "{body}");
@@ -611,9 +615,13 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
     assert_eq!(item["input"].as_str(), Some(input.as_str()), "{body}");
     let capture = next_capture(&mut success.captures, "apply_patch SSE").await;
     assert_eq!(capture.body["stream"], true);
-    assert!(capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|entry| {
-        entry["name"] == "apply_patch"
-    })), "provider tool declaration changed: {:?}", capture.body);
+    assert!(
+        capture.body["tools"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|entry| { entry["name"] == "apply_patch" })),
+        "provider tool declaration changed: {:?}",
+        capture.body
+    );
 
     for output in [
         "patch rejected: context mismatch in /tmp/含 空格.txt\r\nold",
@@ -636,15 +644,27 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
         let body = followup.text().await.unwrap();
         assert_eq!(status, ReqwestStatusCode::OK, "{body}");
         let followup_capture = next_capture(&mut success.captures, "apply_patch followup").await;
-        assert!(followup_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
-            entry["call_id"] == "call_patch" && entry["output"] == output
-        })), "provider-bound output changed: {:?}", followup_capture.body);
-        assert!(followup_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
-            entry["type"] == "custom_tool_call"
-                && entry["name"] == "apply_patch"
-                && entry["call_id"] == "call_patch"
-                && entry["input"] == input
-        })), "provider-bound call changed: {:?}", followup_capture.body);
+        assert!(
+            followup_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|entry| {
+                    entry["call_id"] == "call_patch" && entry["output"] == output
+                })),
+            "provider-bound output changed: {:?}",
+            followup_capture.body
+        );
+        assert!(
+            followup_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|entry| {
+                    entry["type"] == "custom_tool_call"
+                        && entry["name"] == "apply_patch"
+                        && entry["call_id"] == "call_patch"
+                        && entry["input"] == input
+                })),
+            "provider-bound call changed: {:?}",
+            followup_capture.body
+        );
     }
 
     drop(cli);
