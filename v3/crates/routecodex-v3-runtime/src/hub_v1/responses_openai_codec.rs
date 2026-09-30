@@ -24,6 +24,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     let mut messages = Vec::new();
     let mut pending_tool_message_index: Option<usize> = None;
     let mut pending_tool_call_ids: Vec<String> = Vec::new();
+    let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
     let mut turn_assistant_tail_index: Option<usize> = None;
     if let Some(instructions) = root
         .get("instructions")
@@ -79,7 +80,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     message,
                     turn_assistant_tail_index,
                 )?;
@@ -93,7 +94,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     build_v3_openai_chat_assistant_output_text_message(item),
                     turn_assistant_tail_index,
                 )?;
@@ -104,7 +105,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     append_v3_openai_chat_message_preserving_tool_adjacency(
                         &mut messages,
                         &mut pending_tool_message_index,
-                        &pending_tool_call_ids,
+                        &mut pending_tool_adjacent_deferred_messages,
                         message,
                         turn_assistant_tail_index,
                     )?;
@@ -130,6 +131,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     build_v3_openai_chat_tool_result_message(item)?,
                 )?;
                 turn_assistant_tail_index = None;
@@ -139,6 +141,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     item,
                     input_index,
                     V3OpenAiChatHostedToolHistoryKind::WebSearch,
@@ -183,6 +186,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     tool_result,
                 )?;
             }
@@ -217,7 +221,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     json!({"role": "user", "content": content}),
                     turn_assistant_tail_index,
                 )?;
@@ -237,6 +241,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             }
         }
     }
+    messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
     }
@@ -391,7 +396,7 @@ fn project_responses_reasoning_to_chat_fields(
 fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
-    pending_tool_call_ids: &[String],
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     message: Value,
     turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
@@ -405,12 +410,8 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
             merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
             return Ok(());
         }
-        if v3_openai_chat_message_has_visible_payload(&message) {
-            return Err(format!(
-                "OpenAI Chat provider encoding cannot place {role} message before pending tool results: {}",
-                pending_tool_call_ids.join(",")
-            ));
-        }
+        pending_tool_adjacent_deferred_messages.push(message);
+        return Ok(());
     } else if let Some(tail_index) = turn_assistant_tail_index {
         let role = message
             .get("role")
@@ -469,6 +470,7 @@ fn append_v3_openai_chat_tool_result_message(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     message: Value,
 ) -> Result<(), String> {
     let call_id = message
@@ -486,6 +488,7 @@ fn append_v3_openai_chat_tool_result_message(
             pending_tool_call_ids.remove(position);
             if pending_tool_call_ids.is_empty() {
                 *pending_tool_message_index = None;
+                messages.extend(std::mem::take(pending_tool_adjacent_deferred_messages));
             }
             return Ok(());
         }
@@ -933,6 +936,7 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     item: &Map<String, Value>,
     input_index: usize,
     kind: V3OpenAiChatHostedToolHistoryKind,
@@ -954,6 +958,7 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
         messages,
         pending_tool_message_index,
         pending_tool_call_ids,
+        pending_tool_adjacent_deferred_messages,
         tool_result,
     )
 }

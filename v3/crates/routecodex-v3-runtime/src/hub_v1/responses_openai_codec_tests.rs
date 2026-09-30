@@ -672,3 +672,38 @@ fn responses_unknown_input_item_type_still_fails_fast() {
         "unexpected error: {error}"
     );
 }
+
+#[test]
+fn responses_system_message_between_pending_tool_call_and_result_defers_to_preserve_tool_adjacency()
+{
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "name": "dummy_tool",
+            "call_id": "call_01repro400",
+            "arguments": "{}"
+        }, {
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": "system after pending tool call"}]
+        }, {
+            "type": "function_call_output",
+            "call_id": "call_01repro400",
+            "output": "tool output"
+        }]
+    }))
+    .expect("system message after a pending tool call must defer instead of rejecting");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 3, "{request}");
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(messages[0]["tool_calls"][0]["id"], json!("call_01repro400"));
+    assert_eq!(messages[1]["role"], json!("tool"));
+    assert_eq!(messages[1]["tool_call_id"], json!("call_01repro400"));
+    assert_eq!(messages[2]["role"], json!("system"));
+    assert_eq!(
+        messages[2]["content"],
+        json!("system after pending tool call")
+    );
+}
