@@ -652,6 +652,11 @@ fn compile_providers(
                 "provider {id} sse_first_frame_timeout_ms must be non-zero"
             )));
         }
+        if provider.sse_first_frame_timeout_ms.unwrap_or(0) > provider.request_timeout_ms {
+            return Err(validation(format!(
+                "provider {id} sse_first_frame_timeout_ms must not exceed request_timeout_ms"
+            )));
+        }
         let auth = compile_auth(&id, provider.auth)?;
         let provider_type = provider.provider_type;
         let mut models = compile_models(&id, provider.models)?;

@@ -15,8 +15,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// provider per-request 总超时默认值（毫秒）：300s。
-pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 300_000;
+/// provider per-request 总超时默认值（毫秒）：60s。
+pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
 pub(crate) fn compile_provider_directory(
     config_dir: &Path,
@@ -427,7 +427,7 @@ pub struct V2ProviderConfig {
     pub models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
     pub v3: Option<V2ProviderV3Config>,
-    /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
+    /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     pub timeout: Option<u64>,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。

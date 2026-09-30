@@ -236,7 +236,7 @@ apiKey = "test-key"
     std::fs::remove_dir_all(&tmp_sse).ok();
 
     // (2b) 缺省字段端到点：无 timeout 时，V2→V3 fallback 必须等于
-    //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（300_000），不能为 0/默认
+    //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（60_000），不能为 0/默认
     //      隐藏 bug。
     let tmp_default = std::env::temp_dir().join(format!(
         "rccv3-timeout-default-{}-{}",
@@ -276,7 +276,7 @@ apiKey = "test-key"
         .expect("provider compiled");
     assert_eq!(
         authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
-        "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
+        "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (60_000)"
     );
     std::fs::remove_dir_all(&tmp_default).ok();
 
