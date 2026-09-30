@@ -232,7 +232,7 @@ fn provider_terminal_preserves_real_429_status_headers_and_raw_body() {
     let body = br#"{"error":{"type":"rate_limit_error","message":"retry"}}"#.to_vec();
     let witness = V3EligibleExternalHttpResponse::new(
         429,
-        vec![("retry-after".to_string(), "7".to_string())],
+        vec![("retry-after".to_string(), b"7".to_vec())],
         body.clone(),
     )
     .expect("eligible HTTP error");
@@ -243,7 +243,7 @@ fn provider_terminal_preserves_real_429_status_headers_and_raw_body() {
         ),
         V3ProviderTerminalDisposition::ExternalHttp(V3EligibleExternalHttpResponse {
             status: 429,
-            headers: vec![("retry-after".to_string(), "7".to_string())],
+            headers: vec![("retry-after".to_string(), b"7".to_vec())],
             body,
         })
     );
@@ -264,4 +264,15 @@ fn provider_terminal_without_real_http_response_is_no_response() {
 fn upstream_http_502_is_ineligible_for_client_projection() {
     assert!(V3EligibleExternalHttpResponse::new(502, vec![], b"bad gateway".to_vec()).is_none());
     assert!(V3EligibleExternalHttpResponse::new(200, vec![], b"ok".to_vec()).is_none());
+}
+
+#[test]
+fn provider_terminal_keeps_raw_header_bytes_without_utf8_projection() {
+    let witness = V3EligibleExternalHttpResponse::new(
+        429,
+        vec![("x-upstream".to_string(), vec![0x61, 0xff])],
+        vec![],
+    )
+    .expect("eligible HTTP error");
+    assert_eq!(witness.headers[0].1, vec![0x61, 0xff]);
 }

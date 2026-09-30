@@ -575,12 +575,12 @@ impl V3Error05TerminalDecision {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3EligibleExternalHttpResponse {
     pub status: u16,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(String, Vec<u8>)>,
     pub body: Vec<u8>,
 }
 
 impl V3EligibleExternalHttpResponse {
-    pub fn new(status: u16, headers: Vec<(String, String)>, body: Vec<u8>) -> Option<Self> {
+    pub fn new(status: u16, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Option<Self> {
         ((400..=599).contains(&status) && status != 502).then_some(Self {
             status,
             headers,
