@@ -3,6 +3,7 @@ use super::*;
 pub(super) enum V3ResponsesDirectServerOutcome {
     DirectFrame(V3Server16HttpFrame),
     RelayOutput(V3ResponsesRelayRuntimeOutput),
+    ProviderTerminal(routecodex_v3_error::V3ProviderTerminalDisposition),
 }
 
 pub(super) async fn execute_responses_direct_server_outcome(
@@ -334,6 +335,9 @@ pub(super) async fn execute_responses_direct_server_outcome(
                     merge_v3_direct_handoff_provider_failure_events(&mut output, relay_events);
                     V3ResponsesDirectServerOutcome::RelayOutput(output)
                 }
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                    V3ResponsesDirectServerOutcome::ProviderTerminal(disposition)
+                }
             };
         }
         return V3ResponsesDirectServerOutcome::RelayOutput(relay_output);
@@ -351,6 +355,9 @@ pub(super) async fn execute_responses_direct_server_outcome(
                 requested_stream,
             ),
         );
+    }
+    if let Some(disposition) = output.terminal_disposition.take() {
+        return V3ResponsesDirectServerOutcome::ProviderTerminal(disposition);
     }
     let scope = match state
         .debug

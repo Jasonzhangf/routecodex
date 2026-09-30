@@ -208,6 +208,9 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                    send_responses_websocket_provider_terminal(socket, disposition).await
+                }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
@@ -228,6 +231,9 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             )
             .await;
             match outcome {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                    send_responses_websocket_provider_terminal(socket, disposition).await
+                }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
@@ -366,6 +372,9 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         )
         .await;
         return match outcome {
+            V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition)
+            }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                 prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &relay_trace);
                 merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
@@ -537,6 +546,9 @@ pub(crate) async fn send_responses_relay_websocket_output(
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
+    if let Some(disposition) = output.terminal_disposition.clone() {
+        return send_responses_websocket_provider_terminal(socket, disposition).await;
+    }
     if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {
         let message = match output.client_body {
             V3ResponsesRelayClientBody::Json(value) => value
@@ -557,6 +569,32 @@ pub(crate) async fn send_responses_relay_websocket_output(
         }
         V3ResponsesRelayClientBody::Sse(stream) => {
             send_responses_relay_websocket_sse_stream(socket, stream).await
+        }
+    }
+}
+
+pub(crate) async fn send_responses_websocket_provider_terminal(
+    socket: &mut WebSocket,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+) -> Result<(), ()> {
+    match disposition {
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
+            let body: Value = match serde_json::from_slice(witness.body()) {
+                Ok(body) => body,
+                Err(_) => Value::String(
+                    std::str::from_utf8(witness.body())
+                        .map_err(|_| ())?
+                        .to_string(),
+                ),
+            };
+            let error = body.get("error").cloned().unwrap_or(body);
+            let event = json!({
+                "type": "error",
+                "status": witness.status(),
+                "error": error,
+            });
+            send_responses_websocket_json(socket, &event).await
         }
     }
 }

@@ -498,6 +498,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
         return execute_v3_openai_chat_direct_server_outcome(
             &state,
+            front_connection_identity,
             method,
             path.clone(),
             request_id.clone(),
@@ -539,6 +540,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Ok(output) => output,
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
+        if let Some(disposition) = output.terminal_disposition.clone() {
+            return provider_terminal_response(&state, front_connection_identity, disposition);
+        }
         if output.error_chain.is_some() {
             if let Some(response) = emit_relay_error_chain_if_any(
                 &state,
@@ -639,6 +643,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Ok(output) => output,
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
+        if let Some(disposition) = output.terminal_disposition.clone() {
+            return provider_terminal_response(&state, front_connection_identity, disposition);
+        }
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
@@ -746,6 +753,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Ok(output) => output,
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
+        if let Some(disposition) = output.terminal_disposition.clone() {
+            return provider_terminal_response(&state, front_connection_identity, disposition);
+        }
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
             &trace_scope,
@@ -949,6 +959,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 },
             }
         };
+        if let Some(disposition) = output.terminal_disposition.take() {
+            return provider_terminal_response(&state, front_connection_identity, disposition);
+        }
         if output.protocol_direct_handoff.is_some() {
             if let Some(response) = capture_v3_responses_relay_provider_snapshots(
                 &state,
@@ -979,6 +992,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             )
             .await;
             match outcome {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        disposition,
+                    );
+                }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                     prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &handoff.node_trace);
                     merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
@@ -1050,6 +1070,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     );
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
+                    if let Some(disposition) = relay_output.terminal_disposition.take() {
+                        return provider_terminal_response(
+                            &state,
+                            front_connection_identity,
+                            disposition,
+                        );
+                    }
                     prepend_v3_protocol_plan_trace_to_responses_relay_output(
                         &mut relay_output,
                         &handoff.node_trace,
@@ -1123,6 +1150,9 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         )
         .await;
         match outcome {
+            V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
+                provider_terminal_response(&state, front_connection_identity, disposition)
+            }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                 // Recovered provider attempts are observability events, not a terminal
                 // client error. Only status/Error06 truth creates error.json.
@@ -1222,6 +1252,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 )
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
+                if let Some(disposition) = output.terminal_disposition.clone() {
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        disposition,
+                    );
+                }
                 finalize_v3_responses_relay_server_output(
                     &state,
                     &trace_scope,

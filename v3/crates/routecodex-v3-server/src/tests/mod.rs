@@ -800,6 +800,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
             })),
         }),
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     assert!(capture_v3_responses_relay_provider_snapshots(
@@ -863,6 +864,7 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     let mut snapshots = Some(routecodex_v3_runtime::V3RelayProviderSnapshots {
         provider_request: None,
@@ -906,6 +908,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        terminal_disposition: None,
     };
 
     assert!(capture_v3_anthropic_relay_response(
@@ -966,6 +969,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: None,
         protocol_relay_handoff: None,
+        terminal_disposition: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1013,6 +1017,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: None,
         protocol_relay_handoff: None,
+        terminal_disposition: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1051,6 +1056,7 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: Some(V3RuntimeStreamObservation::default()),
         protocol_relay_handoff: None,
+        terminal_disposition: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1183,6 +1189,7 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     merge_v3_direct_handoff_provider_failure_events(&mut output, vec![direct_event]);
@@ -2625,22 +2632,23 @@ fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error()
 }
 
 #[test]
-fn openai_chat_relay_terminal_error_keeps_http_error_projection() {
+fn openai_chat_relay_internal_error_keeps_http_error_projection() {
     let output = routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutput {
-        status: 502,
+        status: 598,
         client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(json!({
-            "error": {"code": "provider_pool_exhausted", "message": "provider unavailable"}
+            "error": {"code": "internal_request_error", "message": "internal request failed"}
         })),
         node_trace: vec!["V3Error06ClientProjected"],
         error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
-        error_class: Some("provider_failure"),
-        error_detail: Some("provider unavailable".to_string()),
+        error_class: Some("internal_failure"),
+        error_detail: Some("internal request failed".to_string()),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status().as_u16(), 598);
     assert_eq!(response.headers()["content-type"], "application/json");
 }
 
@@ -3438,6 +3446,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3461,6 +3470,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3826,6 +3836,7 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     let response =
@@ -3854,6 +3865,7 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     let response = responses_relay_output_response(output, None, None, true);
@@ -3867,74 +3879,40 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
 }
 
 #[tokio::test]
-async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
-    let output = V3ResponsesRelayRuntimeOutput {
-        status: 502,
-        client_body: V3ResponsesRelayClientBody::Json(json!({
-            "error": {
-                "code": "network_error",
-                "message": "network error"
-            }
-        })),
-        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
-        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
-        observability: None,
-        stream_observation: None,
-        finalized_response: None,
-        provider_snapshots: None,
-        protocol_direct_handoff: None,
-    };
-
-    let response = responses_relay_output_response(output, None, None, true);
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = to_bytes(response.into_body(), usize::MAX).await;
-    assert!(body.is_err(), "pool exhaustion must fail the SSE transport");
-}
-
-#[test]
-fn responses_stream_network_error_without_error04_projects_sse_body() {
-    let frame = V3Server16HttpFrame {
-        status: 502,
-        content_type: "application/json".to_string(),
-        body: V3Server16Body::Json(json!({
-            "error": {"code": "network_error", "message": "network error"}
-        })),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "V3Error06ClientProjected",
-        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        error_body: None,
-        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        observability: None,
-        stream_observation: None,
-    };
-
-    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-    assert!(!v3_is_sse_target_pool_exhaustion_parts(
-        projected.status,
-        &projected.node_trace,
-        &projected.error_chain,
-        projected
-            .error_body
-            .as_ref()
-            .unwrap_or_else(|| match &projected.body {
-                V3Server16Body::Json(body) => body,
-                _ => panic!("projected network error must retain JSON error body"),
-            }),
+async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_end_headers() {
+    let log_file = std::env::temp_dir().join(format!(
+        "rcc-provider-terminal-server-{}.log",
+        std::process::id()
     ));
-    assert_eq!(projected.status, 502);
-    assert_eq!(projected.content_type, "text/event-stream");
-    match projected.body {
-        V3Server16Body::Bytes(bytes) => {
-            assert!(!bytes.is_empty());
-            let text = std::str::from_utf8(&bytes).expect("SSE error body must be UTF-8");
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("network_error"), "{text}");
-            assert!(text.contains("network error"), "{text}");
-            assert!(text.contains("data: [DONE]"), "{text}");
-        }
-        other => panic!("network error must project SSE bytes, got {other:?}"),
-    }
+    let state = test_v3_listener_state(&log_file, 5555);
+    let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
+    let witness = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+        429,
+        vec![
+            ("content-type".to_string(), b"application/json".to_vec()),
+            ("retry-after".to_string(), b"17".to_vec()),
+            ("connection".to_string(), b"keep-alive, x-hop".to_vec()),
+            ("x-hop".to_string(), b"discard".to_vec()),
+            ("content-length".to_string(), b"999".to_vec()),
+        ],
+        raw_body.clone(),
+    )
+    .unwrap();
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+    );
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()["retry-after"], "17");
+    assert_eq!(response.headers()["content-type"], "application/json");
+    assert!(!response.headers().contains_key("connection"));
+    assert!(!response.headers().contains_key("x-hop"));
+    assert!(!response.headers().contains_key("content-length"));
+    assert_eq!(
+        to_bytes(response.into_body(), usize::MAX).await.unwrap(),
+        raw_body
+    );
 }
 
 #[test]
@@ -4086,6 +4064,7 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        terminal_disposition: None,
     };
 
     let response = anthropic_relay_output_response(output, false);

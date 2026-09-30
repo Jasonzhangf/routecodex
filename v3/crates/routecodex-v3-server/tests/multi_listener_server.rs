@@ -1120,6 +1120,59 @@ async fn start_controlled_responses_relay_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+#[derive(Clone)]
+struct ControlledTerminalState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    status: StatusCode,
+}
+
+async fn controlled_terminal_upstream(
+    State(state): State<Arc<ControlledTerminalState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    Response::builder()
+        .status(state.status)
+        .header("content-type", "application/json")
+        .header("retry-after", "17")
+        .body(Body::from(
+            r#"{"error":{"type":"rate_limit_error","message":"slow down","param":"upstream"}}"#,
+        ))
+        .unwrap()
+}
+
+async fn start_controlled_terminal_upstream(
+    status: StatusCode,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_terminal_upstream))
+        .with_state(Arc::new(ControlledTerminalState {
+            captures: captures_tx,
+            status,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
 async fn controlled_anthropic_wire_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -2503,7 +2556,7 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and_sse() {
+async fn responses_relay_provider_503_preserves_external_error_body() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -2528,30 +2581,10 @@ async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and
         .send()
         .await
         .unwrap();
-    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(json_response.headers()["content-type"], "application/json");
     let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(
-        json_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
-
-    let sse_response = client
-        .post(&endpoint)
-        .header("accept", "text/event-stream")
-        .json(&json!({
-            "model":"client-test",
-            "input":"relay failure sse",
-            "stream":true
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(sse_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(sse_response.headers()["content-type"], "text/event-stream");
-    let sse_body = sse_response.text().await.unwrap();
-    assert!(sse_body.contains("network_error"), "{sse_body}");
-    assert!(sse_body.contains("network error"), "{sse_body}");
+    assert_eq!(json_body, json!({"error":"controlled_unavailable"}));
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -3790,7 +3823,7 @@ async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send()
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback(
+async fn responses_inbound_websocket_transport_failure_closes_without_fabricated_event(
 ) {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_websocket_url = {
@@ -3828,17 +3861,112 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         .unwrap();
     let message = timeout(Duration::from_secs(30), socket.next())
         .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(event["type"], "error");
-    assert_eq!(event["error"]["code"], "runtime_error");
-    assert!(event["error"]["message"].as_str().unwrap_or_default().len() > 8);
+        .expect("provider no-response must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "provider no-response must not synthesize an error or completion event"
+    );
 
     std::env::remove_var("V3_P6_TEST_KEY");
     let _ = socket.close(None).await;
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_preserves_eligible_provider_429_error_fields() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream(StatusCode::TOO_MANY_REQUESTS).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 429"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let event: Value = serde_json::from_str(
+        timeout(Duration::from_secs(30), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .to_text()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(event["type"], "error");
+    assert_eq!(event["status"], 429);
+    assert_eq!(event["error"]["type"], "rate_limit_error");
+    assert_eq!(event["error"]["message"], "slow down");
+    assert_eq!(event["error"]["param"], "upstream");
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_event() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 502"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("upstream 502 must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "upstream 502 must not become a fabricated WebSocket event"
+    );
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
@@ -4242,7 +4370,7 @@ async fn responses_direct_provider_request_dry_run_does_not_send_to_any_provider
 }
 
 #[tokio::test]
-async fn responses_direct_last_default_projects_after_provider_failure() {
+async fn responses_direct_preserves_last_real_provider_http_error() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -4255,15 +4383,15 @@ async fn responses_direct_last_default_projects_after_provider_failure() {
 
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"test","input":"last default should fail on third attempt"}))
+        .json(&json!({"model":"test","input":"preserve provider HTTP error"}))
         .send()
         .await
         .unwrap();
     let status = response.status();
     let body: Value = response.json().await.unwrap();
 
-    assert_eq!(status, 502);
-    assert_eq!(body["error"]["code"], "network_error");
+    assert_eq!(status, 503);
+    assert_eq!(body["error"], "controlled_unavailable");
     assert!(body["error"].get("external_error").is_none());
     assert!(body["error"].get("internal_code").is_none());
     let capture = captures.recv().await.unwrap();
@@ -4272,7 +4400,7 @@ async fn responses_direct_last_default_projects_after_provider_failure() {
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "last default must project after the provider failure without same-candidate retries"
+        "provider HTTP error must not trigger a same-candidate retry"
     );
     let logs: Value = client
         .get(format!(
@@ -4293,7 +4421,7 @@ async fn responses_direct_last_default_projects_after_provider_failure() {
 }
 
 #[tokio::test]
-async fn p6_all_provider_failures_project_terminal_error_chain() {
+async fn p6_all_transport_failures_close_without_http_response() {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_a = {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -4324,21 +4452,10 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello"}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 502);
-    let body: Value = response.json().await.unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+        .await;
     assert!(
-        body["error"].get("target_exhausted").is_none()
-            && body["error"].get("candidates_remaining").is_none()
-            && body["error"].get("decision").is_none()
-            && body["error"].get("external_error").is_none(),
-        "Error06 body must not carry control-plane fields: {}",
-        body["error"]
+        response.is_err(),
+        "no upstream HTTP response must not fabricate a status"
     );
     std::env::remove_var("V3_P6_EXHAUST_FIRST_KEY");
     std::env::remove_var("V3_P6_EXHAUST_SECOND_KEY");
@@ -4346,7 +4463,7 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 }
 
 #[tokio::test]
-async fn p6_all_provider_failures_project_network_error_for_client_sse() {
+async fn p6_provider_503_preserves_real_status_and_body_for_streaming_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -4364,11 +4481,9 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
     let status = response.status();
     let content_type = response.headers()["content-type"].clone();
     let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    assert_eq!(content_type, "text/event-stream");
-    assert!(response_body.contains("response.failed"), "{response_body}");
-    assert!(response_body.contains("network_error"), "{response_body}");
-    assert!(response_body.contains("network error"), "{response_body}");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{response_body}");
+    assert_eq!(content_type, "application/json");
+    assert_eq!(response_body, r#"{"error":"controlled_unavailable"}"#);
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -4376,7 +4491,7 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
 }
 
 #[tokio::test]
-async fn anthropic_messages_provider_failure_projects_network_error_to_real_client() {
+async fn anthropic_messages_provider_failure_preserves_real_external_http_error() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -4408,12 +4523,9 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     let status = response.status();
     let content_type = response.headers()["content-type"].clone();
     let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    assert_eq!(content_type, "text/event-stream");
-    assert!(response_body.contains("error"), "{response_body}");
-    assert!(response_body.contains("network_error"), "{response_body}");
-    assert!(response_body.contains("network error"), "{response_body}");
-    assert!(!response_body.contains("controlled_unavailable"));
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{response_body}");
+    assert_eq!(content_type, "application/json");
+    assert_eq!(response_body, r#"{"error":"controlled_unavailable"}"#);
 
     // Error projection is checked for both transports with fresh provider
     // health. The streaming failure cools this sole provider, so another
@@ -4445,13 +4557,10 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     .await
     .expect("fresh JSON request must receive a terminal provider error")
     .unwrap();
-    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(json_response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(json_response.headers()["content-type"], "application/json");
     let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(
-        json_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+    assert_eq!(json_body, json!({"error":"controlled_unavailable"}));
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     json_handle.shutdown().await;
