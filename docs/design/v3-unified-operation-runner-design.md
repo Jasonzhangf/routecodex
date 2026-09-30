@@ -70,6 +70,33 @@ The current `anthropic_relay_runtime_integration` expectation for a base64 image
 projection boundary when that node is cut over; it cannot serve as evidence that inbound media
 normalization is lossless.
 
+### Historical image placeholder ownership
+
+The design keeps the existing historical-image behavior, but places it at the Chat Process request
+governance boundary rather than in lossless inbound normalization. `normalize_request_losslessly`
+must preserve image fields and protocol provenance while creating canonical Chat; the later
+`govern_chat_request` operation owns the history-aware placeholder transform as part of request
+history governance. This is a deliberate, separately tested Chat Process behavior, not permission
+for Inbound, Outbound, or arbitrary Compat code to rewrite media.
+
+For Responses, OpenAI Chat, Anthropic, and Gemini request shapes with a current user carrier, the
+transform replaces images in earlier history turns with the stable `[Image]` text representation
+while retaining the current user turn's images for routing and multimodal inference. For the
+messages/input shapes, if no newer user carrier follows the last user carrier, images in the
+trailing historical tool outputs are also represented by `[Image]`. It preserves message and item
+order, the surrounding text, and tool identity; it does not read or mutate tool inverse provenance,
+remove the message, or rewrite image data in the current user turn. Tests must cover each source
+protocol, historical and current-turn images, applicable tool-only replay shapes, stable output
+across different image bytes, and the full request path through provider projection.
+
+The production baseline currently invokes historical cleanup from ReqInbound02 and has a distinct
+selected-target compatibility projection in Provider Compat. Those are implementation locations,
+not the target design owner. At the corresponding node cutovers, the historical transform moves to
+Chat Process and the old inbound invocation is removed so one owner applies it exactly once. The
+selected-target non-multimodal projection remains a separate target-capability behavior and must
+not be conflated with history cleanup. The full-image continuation-save helper is not part of this
+graph: local continuation is bypassed, and only remote continuation is in scope.
+
 ## Fixed graphs
 
 The design validates three DAGpipe SESE graphs:
@@ -120,7 +147,7 @@ mapping truth.
 | normalize_request_losslessly | `routecodex-v3-runtime` (Inbound/Chat Process lossless boundary) | client-json | canonical-request | request_origin_kind read; request_inverse_context and explicit_history_pairing written only for client_entry, read/preserved for retry/internal_followup | canonical-request produced | typed source failure to ErrorErr01 | inverse context owned by this node; Config has no mapping defaults |
 | resolve_target | `routecodex-v3-runtime` (Virtual Router) | canonical-request | selected-target | hub.resolved_target written | selected-target produced | typed source failure to ErrorErr01 | target identity is typed resource, not payload |
 | plan_execution | `routecodex-v3-runtime` (Target Interpreter) | canonical-request, selected-target | execution-plan | execution_mode written | execution-plan produced | typed source failure to ErrorErr01 | mode is typed control resource; Config cannot select mode |
-| govern_chat_request | `routecodex-v3-runtime` (Chat Process Req04) | execution-plan | governed-request | tool_thinking_turn_context written | governed-request produced | typed source failure to ErrorErr01 | tool declaration domains separated; no payload control truth |
+| govern_chat_request | `routecodex-v3-runtime` (Chat Process Req04) | execution-plan | governed-request | tool_thinking_turn_context written; explicit_history_pairing read | governed-request produced | typed source failure to ErrorErr01 | tool declaration domains separated; applies the declared historical-image placeholder policy exactly once while preserving current-turn images; no payload control truth |
 | project_standard_provider_request | `routecodex-v3-runtime` (Outbound) | governed-request | standard-provider-request | request_inverse_context and explicit_history_pairing read; attempt_projection_context and attempt_declaration_map written | standard-provider-request produced | typed source failure to ErrorErr01 | projection runs through registered field operators and typed config; tables are baseline only |
 | adjust_provider_private_request | `routecodex-v3-runtime` (Compat) | standard-provider-request | compatible-provider-request | provider_wire_payload read/write | compatible-provider-request produced | typed source failure to ErrorErr01 | compat is registered operator@version, not description |
 | encode_provider_wire | `routecodex-v3-runtime` (Provider wire codec) | compatible-provider-request | provider-wire | provider_wire_payload read | provider-wire produced | typed source failure to ErrorErr01 | codec has no retry loop |
@@ -326,7 +353,7 @@ fallback shortcut is introduced. The schema gap is closed by this typed resource
 
 ## Main tool-semantic fixes already merged
 
-The design is based on the current `main` HEAD `6a3829360` and the following tool/semantic fixes:
+The design is based on `origin/main` at `7f6266d6f4d95e535e123202512fa39b064ac3ad` and the following tool/semantic fixes:
 
 - Codex integer tool argument normalization is owned at Resp03 and OpenAI codec helpers:
   `v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs`,
@@ -455,6 +482,15 @@ internal payload. Argument and output values remain opaque business payload. `Re
 reads the inverse context and produces `attempt_declaration_map` for the provider tools actually
 emitted for this attempt, using the current declaration domain only; it never
 overwrites historical call identity with the current declaration shape.
+
+For Responses array items, `request.input[].type` is the discriminator on each actual input item;
+there is no object-level `request.input.type` path. The inbound field profile records the exact
+array-item source path, applicable discriminator predicates, and selected semantic branch in the
+same request's typed `request_inverse_context`. The paired response uses that provenance to restore
+the client's original function/custom tool kind, namespace, name, and encoding. It does not infer
+the return shape from a process-wide rule or from whichever provider happened to answer. A typed
+discriminator chooses the branch for that one request; it does not authorize rejecting unknown
+business values, dropping them, or severing the paired inverse path.
 
 `RespInbound02` writes `response_provenance` for the successful attempt and reads only that
 attempt's `attempt_declaration_map` and `attempt_projection_context` when response identity needs
