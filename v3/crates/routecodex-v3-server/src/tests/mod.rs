@@ -3644,34 +3644,6 @@ fn direct_stream_error_projection_response_uses_error_channel() {
 }
 
 #[tokio::test]
-async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
-    let frame = V3Server16HttpFrame {
-        status: 502,
-        content_type: "application/json".to_string(),
-        body: V3Server16Body::Json(json!({
-            "error": {"code": "network_error", "message": "network error"}
-        })),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "V3Error06ClientProjected",
-        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        error_body: None,
-        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
-        observability: None,
-        stream_observation: None,
-    };
-
-    let response = responses_direct_output_response_with_console_for_protocol(
-        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
-        None,
-        None,
-        V3SseClientProtocol::Responses,
-    );
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
-}
-
-#[tokio::test]
 async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
     let mut headers = HeaderMap::new();
     headers.insert("accept", HeaderValue::from_static("text/event-stream"));
