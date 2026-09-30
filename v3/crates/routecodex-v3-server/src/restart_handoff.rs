@@ -634,6 +634,17 @@ impl V3FrontTransportBroker {
                 captured_at: now,
             },
         );
+        drop(checkpoints);
+        for bound_lease in self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .values_mut()
+        {
+            if bound_lease.key == old_key {
+                *bound_lease = lease.clone();
+            }
+        }
         let socket = self
             .client_sockets
             .lock()

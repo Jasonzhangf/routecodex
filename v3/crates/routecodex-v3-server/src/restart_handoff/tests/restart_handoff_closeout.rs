@@ -120,18 +120,25 @@ async fn peer_eof_closes_front_socket_and_write_worker() {
     });
 
     let client = tokio::net::TcpStream::connect(address).await.unwrap();
+    let socket = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if let Some(socket) = broker.front_socket(connection_identity) {
+                break socket;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted front socket must be registered before peer EOF");
     drop(client);
     tokio::time::timeout(Duration::from_secs(1), accept)
         .await
         .expect("peer EOF must terminate the front connection")
         .unwrap();
 
-    let socket = broker
-        .front_sockets
-        .lock()
-        .expect("front socket registry lock")
-        .get(&connection_identity)
-        .cloned()
-        .expect("accepted front socket must remain inspectable");
+    assert!(
+        broker.front_socket(connection_identity).is_none(),
+        "completed connection must release its socket registry entry"
+    );
     assert!(socket.is_closed(), "peer EOF must close the write worker");
 }

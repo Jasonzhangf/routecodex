@@ -97,6 +97,70 @@ async fn front_http_bound_identity_close_before_handler_return_has_zero_header_b
 }
 
 #[tokio::test]
+async fn front_http_reattached_identity_aborts_without_headers_and_releases_new_key() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let broker = V3FrontTransportBroker::new(4);
+    let identity = broker.allocate_connection_identity();
+    let handler_broker = broker.clone();
+    let service = axum::Router::new().route(
+        "/probe",
+        axum::routing::get(move |request: axum::http::Request<Body>| {
+            let broker = handler_broker.clone();
+            async move {
+                let current = *request
+                    .extensions()
+                    .get::<V3FrontConnectionIdentity>()
+                    .unwrap();
+                let now = Instant::now();
+                broker
+                    .bind_connection_lease(current, lease(now), now)
+                    .unwrap();
+                let checkpoint = broker.freeze(now).pop().unwrap();
+                let restored = broker.reattach(&checkpoint, now + Duration::from_millis(1));
+                assert_eq!(broker.connection_lease(current), Some(restored.key.clone()));
+                assert!(broker.abort_current_connection_without_response(current));
+                axum::http::StatusCode::TOO_MANY_REQUESTS
+            }
+        }),
+    );
+    let server_broker = broker.clone();
+    let server = tokio::spawn(async move {
+        let (stream, remote) = listener.accept().await.unwrap();
+        serve_v3_front_http_connection(
+            stream,
+            remote,
+            identity,
+            server_broker,
+            service.into_service(),
+        )
+        .await
+    });
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(b"GET /probe HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut bytes = [0; 4096];
+    let received = timeout(Duration::from_secs(3), client.read(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        received, 0,
+        "reattached request must send zero header bytes"
+    );
+    let _ = timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut restored_key = key();
+    restored_key.generation += 1;
+    assert!(broker.connection_lease(identity).is_none());
+    assert!(broker.client_socket(&restored_key).is_none());
+}
+
+#[tokio::test]
 async fn front_http_no_response_cannot_emit_pending_restart_503_closeout() {
     let (bytes, _, _) = front_http_close_probe(false, true, true).await;
     assert!(
