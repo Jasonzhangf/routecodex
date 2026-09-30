@@ -49,6 +49,7 @@ struct ProviderCapture {
 #[derive(Debug, Clone)]
 enum ProviderMode {
     Success,
+    CustomToolCall { input: String },
     Failure { label: &'static str },
 }
 
@@ -95,7 +96,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     let mut failure_b =
         start_controlled_upstream(ProviderMode::Failure { label: "failure-b" }).await;
     let ports = H2Ports::allocate();
-    let config_path = write_h2_config(&ports, &success, &failure_a, &failure_b);
+    let config_path = write_h2_config(&ports, &success, &failure_a, &failure_b, "");
 
     let client = reqwest::Client::new();
     let mut cli = start_cli_server(&config_path, ports.all());
@@ -401,6 +402,53 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
+#[tokio::test]
+async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
+    // This is freeform text, even though it parses as JSON and names a field
+    // used by the legacy apply_patch wrapper.
+    let input = r#"{ "patch": "keep \u4e2d exactly", "input": "literal" }"#.to_string();
+    let mut success = start_controlled_upstream(ProviderMode::CustomToolCall {
+        input: input.clone(),
+    })
+    .await;
+    let failure_a = start_controlled_upstream(ProviderMode::Failure { label: "failure-a" }).await;
+    let failure_b = start_controlled_upstream(ProviderMode::Failure { label: "failure-b" }).await;
+    let ports = H2Ports::allocate();
+    let config_path = write_h2_config(
+        &ports,
+        &success,
+        &failure_a,
+        &failure_b,
+        "responses = { process = \"chat\", streaming = \"client\" }",
+    );
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config_path, ports.all());
+    wait_for_health(&client, &mut cli, ports.success, "h2_success").await;
+
+    let response = client
+        .post(format!("http://127.0.0.1:{}/v1/responses", ports.success))
+        .json(&json!({"model":"client-test", "input":"make a patch", "stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, ReqwestStatusCode::OK, "{body}");
+    let added = sse_data_payload(&body, "response.output_item.added");
+    assert_eq!(added["item"]["input"].as_str(), Some(input.as_str()), "{body}");
+    let completed = sse_data_payload(&body, "response.completed");
+    let item = &completed["response"]["output"][0];
+    assert_eq!(item["type"], "custom_tool_call", "{body}");
+    assert_eq!(item["name"], "apply_patch", "{body}");
+    assert_eq!(item["call_id"], "call_patch", "{body}");
+    assert_eq!(item["input"].as_str(), Some(input.as_str()), "{body}");
+    let capture = next_capture(&mut success.captures, "apply_patch SSE").await;
+    assert_eq!(capture.body["stream"], true);
+
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
 async fn controlled_responses_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -423,6 +471,24 @@ async fn controlled_responses_upstream(
         .unwrap();
 
     match &state.mode {
+        ProviderMode::CustomToolCall { input } => {
+            let item = json!({
+                "type": "custom_tool_call", "id": "item_patch", "call_id": "call_patch",
+                "name": "apply_patch", "input": input
+            });
+            let added = json!({"type":"response.output_item.added", "output_index":0, "item":item});
+            let completed = json!({
+                "type":"response.completed",
+                "response":{"id":"resp_patch", "status":"completed", "output":[item]}
+            });
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(format!(
+                    "event: response.output_item.added\ndata: {added}\n\nevent: response.completed\ndata: {completed}\n\ndata: [DONE]\n\n"
+                )))
+                .unwrap()
+        }
         ProviderMode::Success if parsed.get("stream").and_then(Value::as_bool) == Some(true) => {
             Response::builder()
                 .status(StatusCode::OK)
@@ -523,6 +589,7 @@ fn write_h2_config(
     success: &ControlledUpstream,
     failure_a: &ControlledUpstream,
     failure_b: &ControlledUpstream,
+    success_responses_config: &str,
 ) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-h2-{}",
@@ -580,6 +647,7 @@ endpoints = ["responses"]
 
 [providers.success]
 type = "responses"
+{success_responses_config}
 base_url = "{success_base}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "success", env = "ROUTECODEX_V3_H2_SUCCESS_KEY" }}] }}
@@ -684,6 +752,7 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
             reselect_port = ports.reselect,
             exhausted_port = ports.exhausted,
             success_base = success.base_url,
+            success_responses_config = success_responses_config,
             failure_a_base = failure_a.base_url,
             failure_b_base = failure_b.base_url,
             hub_v1_declaration = hub_v1_test_declaration(),
