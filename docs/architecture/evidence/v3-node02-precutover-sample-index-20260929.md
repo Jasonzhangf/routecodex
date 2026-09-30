@@ -30,6 +30,12 @@
 - 现有 server harness 可复用的公开边界用例在 `v3/crates/routecodex-v3-server/tests/multi_listener_server.rs`：`openai_chat_http_entry_completes_responses_tool_round_trip`、`p6_responses_endpoint_uses_runtime_provider_path_and_projects_json`、`responses_inbound_websocket_projects_json_completed_event_and_enters_runtime`、`responses_direct_last_default_projects_after_provider_failure`。这些是测试入口，仍须核对其 fixture 是否覆盖本节点的未知字段、null、原始工具形状和四协议映射。
 - Node02 新实现接线前后应在相同真实入口和 mode，用相同客户端 JSON 对比原请求、canonical Value、typed inverse refs、provider-bound request、原始 provider result、客户端响应、工具执行回执和 follow-up；明确记录运行 binary/候选 SHA、session/request ID 与 terminal release。单个 HTTP 200 或 `requires_action` 不等于工具可用。
 
+## 2026-09-29 GCM 只读工具执行基线
+
+- 从本 worktree 新建 `codex exec --profile gcm --sandbox read-only -m gpt-5.5` 会话 `01a0efb7-737e-7233-88b7-60dfb0d2d990`。CLI 显示实际 `exec_command` 执行 `/bin/zsh -lc pwd`，退出成功，输出本 worktree 绝对路径；worker 最终答复 `tool_called=yes`。
+- 同样新建 `-m gpt-5.6-luna` 会话 `01a0efb9-6e59-73c3-9967-3ccff5dc35d7`。CLI 显示同一命令执行成功和相同路径，worker 最终答复 `tool_called=yes`。两个 worker 均未改文件。
+- 这两项只证明旧版 4444 下客户端确实收到并执行了一次工具调用。CLI 输出没有绑定 Provider 请求/响应形状、同一 call ID 的 follow-up，也没有候选 binary 哈希。近时段 gpt-5.6-luna sample 中存在无工具声明的失败请求，但尚未证明它与上述成功调用属于同一 request；不得混用作为完整往返证据。
+
 ## 后续动作
 
 Node02 能力门禁和独立设计 review PASS 后，使用上述样本定位首个语义偏移，并创建最小可重放新样本补齐 gpt-5.6、OpenAI Chat、Anthropic、Gemini、失败/取消/断连路径。新旧比较只绑定同一个请求的动态 metadata，禁止按模型名或硬编码工具类型反推客户端形状。
