@@ -962,15 +962,33 @@ async fn controlled_responses_relay_tool_upstream(
         .and_then(Value::as_array)
         .is_some_and(|items| {
             items.iter().any(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
             })
         });
+    let wants_apply_patch = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "apply_patch"));
     let response = if has_tool_output {
         json!({
             "id":"resp_body_metadata_completed",
             "status":"completed",
             "output_text":"RCCV3_BODY_METADATA_TURN2_OK",
             "output":[{"type":"output_text","text":"RCCV3_BODY_METADATA_TURN2_OK"}]
+        })
+    } else if wants_apply_patch {
+        json!({
+            "id":"resp_apply_patch_requires_action",
+            "status":"requires_action",
+            "output":[{
+                "type":"function_call",
+                "call_id":"call_apply_patch_parity",
+                "name":"apply_patch",
+                "arguments":"{\"patch\":\"*** Begin Patch\\n*** Update File: example.txt\\n@@\\n-old\\n+new\\n*** End Patch\"}"
+            }]
         })
     } else {
         json!({
@@ -2281,6 +2299,69 @@ async fn responses_relay_full_history_tool_pair_without_client_scope_reaches_pro
     assert_eq!(capture.x_session_id, None);
     assert_eq!(capture.x_conversation_id, None);
     assert_eq!(capture.x_codex_turn_metadata, None);
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-apply-patch-parity");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let tools = json!([{"type":"custom","name":"apply_patch","format":{"type":"text"}}]);
+
+    for output in [
+        "apply_patch verification failed: Failed to find expected lines in /tmp/rcc-apply-patch-probe/multi.txt:\r\nalpha\r\nbeta",
+        "Success. Updated /tmp/rcc-apply-patch-probe/multi.txt\r\n",
+    ] {
+        let first = client.post(&endpoint).json(&json!({
+            "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
+        })).send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body: Value = first.json().await.unwrap();
+        let call = &first_body["output"][0];
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["name"], "apply_patch");
+        assert_eq!(call["call_id"], "call_apply_patch_parity");
+        assert!(call["input"].as_str().unwrap().contains("*** Begin Patch"));
+        let first_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first_capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["name"] == "apply_patch"
+        })), "provider tool declaration changed: {:?}", first_capture.body);
+
+        let second = client.post(&endpoint).json(&json!({
+            "model":"client-test", "input":[
+                {"role":"user","content":"edit example.txt"},
+                call,
+                {"type":"custom_tool_call_output","call_id":"call_apply_patch_parity","output":output}
+            ], "tools":tools, "stream":false
+        })).send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_body: Value = second.json().await.unwrap();
+        assert_eq!(second_body["status"], "completed");
+        let second_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(second_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["call_id"] == "call_apply_patch_parity" && item["output"] == output
+        })), "provider-bound output changed: {:?}", second_capture.body);
+    }
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

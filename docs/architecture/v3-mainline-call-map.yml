@@ -4610,7 +4610,7 @@ chains:
       side_channel_writes: []
 - chain_id: v3.hub_relay.tool_servertool_multiturn_parity
   owner_feature_id: v3.relay_tool_servertool_multiturn_parity_closeout
-  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool governance, Req04 apply_patch feedback normalization, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
+  summary: Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool pairing and apply_patch feedback preservation, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
   manifest: docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml
   edges:
   - step_id: v3-relay-tool-parity-01

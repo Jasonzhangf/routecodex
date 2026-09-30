@@ -456,9 +456,6 @@ fn govern_tool_outputs_at_req04(
                     call_id: call_id.to_owned(),
                 });
             }
-            if *expected_kind == V3HubRelayExpectedToolOutputKind::ApplyPatch {
-                normalize_apply_patch_tool_output_item_at_req04(item);
-            }
         } else {
             return Err(V3HubRelayRequestError::OrphanToolOutput {
                 index,
@@ -513,9 +510,6 @@ fn govern_chat_tool_outputs_at_req04(
                 index,
                 call_id: call_id.to_owned(),
             });
-        }
-        if expected_kind == V3HubRelayExpectedToolOutputKind::ApplyPatch {
-            normalize_apply_patch_tool_output_item_at_req04(message);
         }
     }
     Ok(output_count)
@@ -622,73 +616,6 @@ fn read_tool_call_name_at_req04(item: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-}
-
-fn normalize_apply_patch_tool_output_item_at_req04(item: &mut Value) {
-    let Some(row) = item.as_object_mut() else {
-        return;
-    };
-    for key in ["output", "content"] {
-        let Some(Value::String(raw)) = row.get_mut(key) else {
-            continue;
-        };
-        let normalized = normalize_apply_patch_output_text_at_req04(raw);
-        if normalized != *raw {
-            *raw = normalized;
-        }
-    }
-}
-
-fn normalize_apply_patch_output_text_at_req04(raw: &str) -> String {
-    const APPLY_PATCH_ERROR_TEXT: &str = "APPLY_PATCH_ERROR: apply_patch did not apply. Retry with apply_patch only. Send one raw patch string in canonical *** Begin Patch / *** End Patch grammar. Use workspace-relative paths inside patch headers (for example *** Update File: src/main.ts or *** Add File: tmp/example.txt). Do not use absolute paths. Do not switch to exec_command or shell writes.";
-    const APPLY_PATCH_RESULT_TEXT: &str = "APPLY_PATCH_RESULT: apply_patch applied. Continue future apply_patch calls with one raw patch string and workspace-relative paths inside patch headers. Keep using apply_patch for line edits instead of switching tools.";
-
-    let text = raw.replace("\r\n", "\n").replace('\r', "\n");
-    let trimmed = text.trim();
-    if trimmed.starts_with("APPLY_PATCH_ERROR:") {
-        return APPLY_PATCH_ERROR_TEXT.to_string();
-    }
-
-    if let Ok(Value::Object(row)) = trimmed.parse::<Value>() {
-        let status = row
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_ascii_uppercase();
-        if row.get("ok").and_then(Value::as_bool) == Some(true)
-            || status == "APPLY_PATCH_APPLIED"
-            || status == "APPLY_PATCH_RESULT"
-        {
-            return APPLY_PATCH_RESULT_TEXT.to_string();
-        }
-        if row.get("ok").and_then(Value::as_bool) == Some(false)
-            || status == "APPLY_PATCH_FAILED"
-            || status == "APPLY_PATCH_ERROR"
-        {
-            return APPLY_PATCH_ERROR_TEXT.to_string();
-        }
-    }
-
-    let lowered = text.to_ascii_lowercase();
-    if lowered.trim() == "aborted" {
-        return APPLY_PATCH_ERROR_TEXT.to_string();
-    }
-    if matches!(lowered.trim(), "done" | "done!") {
-        return APPLY_PATCH_RESULT_TEXT.to_string();
-    }
-    if !(lowered.contains("apply_patch") || lowered.contains("patch")) {
-        return raw.to_string();
-    }
-    if lowered.contains("verification failed")
-        || lowered.contains("invalid patch")
-        || lowered.contains("missing")
-        || lowered.contains("failed")
-        || lowered.contains("error")
-    {
-        return APPLY_PATCH_ERROR_TEXT.to_string();
-    }
-    raw.to_string()
 }
 
 fn run_servertool_profile(

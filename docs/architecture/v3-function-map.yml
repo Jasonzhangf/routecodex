@@ -3020,6 +3020,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
   - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
   - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs
@@ -3036,22 +3037,22 @@ features:
   - v3-relay-tool-parity-06
   entry_symbols:
   - govern_tool_outputs_at_req04
-  - normalize_apply_patch_output_text_at_req04
   - V3HubRelayToolKind
   - project_v3_apply_patch_freeform_calls_at_resp03
   - response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit
   - apply_patch_response_is_projected_to_freeform_custom_tool_before_commit
-  - apply_patch_tool_output_error_is_normalized_and_kept_as_next_turn_tool_output
+  - apply_patch_tool_output_error_is_preserved_without_continuation_state
   - apply_patch_legacy_function_call_accepts_custom_output_after_client_projection
   - responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order
   - json_two_turn_restores_tool_call_pairs_output_and_preserves_tools
-  - json_two_turn_apply_patch_uses_freeform_projection_and_error_feedback
+  - responses_relay_apply_patch_feedback_preserves_client_output_two_turns
   - wrong_tool_output_id_fails_before_provider_send_and_keeps_saved_context
   - verify-v3-relay-tool-servertool-multiturn-parity-closeout
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_relay_field_parity_integration.rs
   - scripts/architecture/verify-v3-relay-tool-servertool-multiturn-parity.mjs
   - scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs

@@ -1827,7 +1827,7 @@ flowchart TD
 
 ## v3.hub_relay.tool_servertool_multiturn_parity
 
-Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool governance, Req04 apply_patch feedback normalization, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
+Controlled Hub Relay tool/servertool multiturn parity over Rust Chat Process current-turn tool pairing and apply_patch feedback preservation, response tool harvest, Resp03 apply_patch freeform client projection, SSE ordering, and single response exit.
 
 Owner feature: `v3.relay_tool_servertool_multiturn_parity_closeout`
 Manifest: `docs/architecture/manifests/v3.hub_relay.tool_servertool_multiturn_parity.mainline.yml`

@@ -266,7 +266,7 @@ fn apply_patch_response_is_projected_to_freeform_custom_tool_before_client_proje
 }
 
 #[test]
-fn apply_patch_tool_output_error_is_normalized_without_continuation_state() {
+fn apply_patch_tool_output_error_is_preserved_without_continuation_state() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let outcome = hooks
         .run(
@@ -285,7 +285,7 @@ fn apply_patch_tool_output_error_is_normalized_without_continuation_state() {
                 "input":[{
                     "type":"custom_tool_call_output",
                     "call_id":"call_apply_patch_freeform",
-                    "output":"apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt"
+                    "output":"apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt\r\nexpected line"
                 }]
             })),
             &V3HubServertoolRequestProfile::disabled(),
@@ -293,10 +293,7 @@ fn apply_patch_tool_output_error_is_normalized_without_continuation_state() {
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
     let output = chat_tool_output_content(outcome.payload(), "call_apply_patch_freeform").unwrap();
-    assert!(output.starts_with("APPLY_PATCH_ERROR: apply_patch did not apply"));
-    assert!(output.contains("Retry with apply_patch only"));
-    assert!(output.contains("workspace-relative"));
-    assert!(!output.contains("/tmp/codex-patch-test"));
+    assert_eq!(output, "apply_patch verification failed: invalid patch for /tmp/codex-patch-test/new.txt\r\nexpected line");
 }
 
 #[test]
@@ -323,10 +320,9 @@ fn apply_patch_legacy_function_call_accepts_custom_output_after_client_projectio
         )
         .unwrap();
     assert_eq!(outcome.tool_output_count(), 1);
-    assert!(
-        chat_tool_output_content(outcome.payload(), "call_apply_patch_legacy")
-            .unwrap()
-            .starts_with("APPLY_PATCH_ERROR:")
+    assert_eq!(
+        chat_tool_output_content(outcome.payload(), "call_apply_patch_legacy").unwrap(),
+        "aborted"
     );
 }
 
