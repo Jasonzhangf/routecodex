@@ -216,8 +216,8 @@ const cases = [
   {
     name: 'shared relay Error01 builder call removed',
     file: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
-    marker: 'let code = error_type.unwrap_or("provider_failure").to_string();\n    let source = build_v3_error_01_source_raised_external(',
-    mutation: 'let code = error_type.unwrap_or("provider_failure").to_string();\n    let source = removed_v3_error_01_source_raised_external(',
+    marker: '    let source = build_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
+    mutation: '    let source = removed_v3_error_01_source_raised_external(\n        V3ErrorSourceKind::ProviderFailure,\n        source_stage,\n        code.clone(),',
     diagnostic: /missing build_v3_error_01_source_raised_external\(/,
   },
 ];

@@ -283,7 +283,6 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,
     );
-
     assert_eq!(
         output.terminal_disposition,
         Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
@@ -333,7 +332,6 @@ fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
         "goaichat",
         None,
     );
-
     assert_eq!(failure.status, 429);
     assert_eq!(failure.policy_error_type, "provider_runtime_error");
 }
