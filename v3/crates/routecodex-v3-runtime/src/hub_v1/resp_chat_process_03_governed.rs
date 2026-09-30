@@ -4488,13 +4488,10 @@ fn project_v3_apply_patch_freeform_output_item_at_resp03(row: &mut Map<String, V
         return false;
     }
     if item_type == "custom_tool_call" {
-        if let Some(Value::String(input)) = row.get_mut("input") {
-            let normalized = normalize_v3_apply_patch_freeform_input_for_client(input);
-            if normalized != *input {
-                *input = normalized;
-                return true;
-            }
-        }
+        // The input of a native custom tool call is already freeform client
+        // input. A JSON-looking patch is still native input, not a wrapper.
+        // Tool-thinking extraction owns explicit wrappers; this projection
+        // owns only legacy function calls.
         return false;
     }
 
