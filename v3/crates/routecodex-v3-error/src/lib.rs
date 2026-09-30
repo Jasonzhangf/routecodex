@@ -574,9 +574,9 @@ impl V3Error05TerminalDecision {
 /// request owner. The original body bytes are kept outside diagnostic JSON.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3EligibleExternalHttpResponse {
-    pub status: u16,
-    pub headers: Vec<(String, Vec<u8>)>,
-    pub body: Vec<u8>,
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+    body: Vec<u8>,
 }
 
 impl V3EligibleExternalHttpResponse {
@@ -586,6 +586,18 @@ impl V3EligibleExternalHttpResponse {
             headers,
             body,
         })
+    }
+
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+
+    pub fn headers(&self) -> &[(String, Vec<u8>)] {
+        &self.headers
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
     }
 }
 

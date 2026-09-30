@@ -274,5 +274,7 @@ fn provider_terminal_keeps_raw_header_bytes_without_utf8_projection() {
         vec![],
     )
     .expect("eligible HTTP error");
-    assert_eq!(witness.headers[0].1, vec![0x61, 0xff]);
+    assert_eq!(witness.headers()[0].1, vec![0x61, 0xff]);
+    assert_eq!(witness.status(), 429);
+    assert!(witness.body().is_empty());
 }
