@@ -42,6 +42,7 @@
 - 同一源码的 `codex-rs/tools/src/tool_spec.rs::create_tools_json_for_responses_lite` 将 `Function`/`Freeform` 合并到 `functions` namespace，保留其嵌套 `function`/`custom` 工具；其他类型仍按自身类型输出。`codex-rs/core/tests/suite/responses_lite.rs::responses_lite_uses_input_items_for_instructions_and_tools` 断言 `additional_tools` 中的 `functions.exec` 和 `functions.wait`，且该数组没有顶层 `function`/`custom` 项。
 - 本轮本机 `~/.codex/gcm-models.json` 快照中，gpt-5.6-luna 为 `use_responses_lite=true`、`tool_mode=code_mode_only`；gpt-5.5 为 `use_responses_lite=false`。本机源码 HEAD 与实际安装的 Codex CLI v0.156.1 没有建立构建哈希绑定，故此处源码只解释已观察到的两种入口形状，不能代替当前 CLI 的逐请求原始样本。
 - Node02 必须从**当前原始请求中实际出现的声明路径和嵌套工具身份**建立 request-scoped 逆映射；`additional_tools.tools=[]` 仅说明该请求没有在此声明工具，不能由模型名补造声明，也不能把另一个请求的工具表复用过来。
+- 未接线的 `dagpipe-node02-runtime-gcm-20260929` 草稿中，`normalize_request_losslessly.rs::registered_field_consumers` 把 Responses 声明路径写成顶层 `additional_tools`，与上述真实 `input[0].additional_tools.tools` 路径不符；同文件还从业务字段猜 `EntryProtocol`、将 `entry_protocol` 写入 canonical payload，并把 `input`/工具数组复制进 extension。它不是可接线候选；产品实现须以已审 typed ingress 和唯一 raw-path consumer 重新构造，不能从该草稿直接接线或以其绿测代替逆向 provenance。
 
 ## 后续动作
 
