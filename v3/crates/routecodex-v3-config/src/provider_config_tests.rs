@@ -606,7 +606,10 @@ wireName = "deepseek-v4.1-flash"
         compile_provider_directory(&tmp, &referenced_models).expect("compile provider directory");
     let authoring = providers.get("test-provider").expect("provider compiled");
     assert_eq!(
-        authoring.headers.get("x-openai-actor-authorization").map(String::as_str),
+        authoring
+            .headers
+            .get("x-openai-actor-authorization")
+            .map(String::as_str),
         Some("local-image-extension")
     );
     std::fs::remove_dir_all(&tmp).ok();
