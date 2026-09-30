@@ -143,6 +143,7 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
 
     drop(cli);
     wait_ports_closed(&client, &[success_port, exhausted_port]).await;
+    remove_owned_temp_dir(&config_path);
 }
 
 #[tokio::test]
@@ -199,6 +200,7 @@ async fn cli_replay_proves_optional_tier_success_never_touches_default_pool() {
 
     drop(cli);
     wait_ports_closed(&client, &[optional_port, default_port]).await;
+    remove_owned_temp_dir(&config_path);
 }
 
 async fn upstream_handler(State(state): State<Arc<ProviderState>>, body: String) -> Response<Body> {
@@ -258,6 +260,19 @@ fn config_root(tag: &str) -> PathBuf {
     );
     fs::create_dir_all(&run_dir).unwrap();
     run_dir
+}
+
+fn remove_owned_temp_dir(config_path: &Path) {
+    if let Some(root) = config_path.parent().and_then(Path::parent) {
+        if root.parent() == Some(Path::new("/tmp"))
+            && root
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with("rcc-vr-"))
+                .unwrap_or(false)
+        {
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
 }
 
 fn free_port() -> u16 {
