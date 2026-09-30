@@ -1,9 +1,10 @@
 # V3 unified operation runner design
 
-> Design-only contract. This document does not claim that `rccv3` already runs these DAGpipe
-> graphs, publishes the new manifest fields, or binds the listed operators at runtime. The
-> existing Hub v1 typed skeleton and maps remain the current source contract until a
-> runtime candidate replaces them with this runner.
+> Contract for the complete target graphs. In the current production baseline, only the
+> `capture_client_json` SESE slice is compiled and run by the DAGpipe Runtime entry. The complete
+> request, response, and error graphs, their later Operators, and field-profile execution are not
+> claimed as runtime cutovers. Existing Hub v1 owners and maps remain the execution truth for every
+> operation after capture until its own node delivery.
 
 ## Scope
 
@@ -133,10 +134,9 @@ response, or error source. `dagpipe graph validate` proves static topology only.
 ## Node ownership matrix
 
 Every node in the three design graphs has one owner, one typed input/output ARC pair, and one
-resource family. Caller/callee symbol binding is deliberately `pending`: this document is the
-architecture contract for a future runtime candidate and does not claim existing Rust symbols
-already implement these nodes. The runtime tables and existing H1 owners remain the current
-production baseline until that candidate binds the symbols; they are not the design's field
+resource family. Caller/callee binding is `runtime_bound` only for `capture_client_json` and its
+listed Server callers; all later node bindings remain pending. The runtime tables and existing H1
+owners remain the production baseline for those later nodes; they are not the design's field
 mapping truth.
 
 ### Request graph `v3.operation_runner.request@1`
@@ -456,8 +456,10 @@ ownership, missing registrations, or invalid graph/configuration fail at compile
 business request is admitted. Actual provider/transport failures enter the Error chain; local
 projection/wire failures never mutate provider health.
 
-Protocol profiles may reference only registered operators and typed parameters. They cannot
-configure traversal order, node branching, private exits, or a second field-semantic truth.
+Protocol profiles may reference only source-inventory paths, registered operators, and typed
+parameters. A profile cannot authorize a new source field by declaring its own path or shape child.
+Profiles cannot configure traversal order, node branching, private exits, or a second
+field-semantic truth.
 
 An object branch is declared only when the source protocol type permits the
 container itself to be an object. The pinned OpenAI SDK types used here declare
@@ -532,14 +534,15 @@ supported; no local continuation is introduced.
 
 | Node family | Current production caller/callee | Current runtime implementation | Design owner | Physical ablation | Verification evidence |
 | --- | --- | --- | --- | --- | --- |
-| Request capture/normalize | HTTP: `pending_endpoint_after_responses_admission_inner`; WebSocket: `handle_responses_websocket_message_with_mode`; Direct then uses `V3Server03HttpRequestRaw`/`C::build_standardized`, while Relay builds protocol-specific Req01/Req02 | existing Server ingress plus distinct Direct and Relay request owners, not this graph | `routecodex-v3-runtime` fixed runner | replace only duplicated raw-capture behavior at the node-1 cutover; remove mode-specific normalization at node 2's cutover | design graph + ingress/consumer binding table; runtime replay after implementation |
+| Request capture/normalize | HTTP: `pending_endpoint_after_responses_admission_inner`; WebSocket: `handle_responses_websocket_message_with_mode`; Direct then uses `V3Server03HttpRequestRaw`/`C::build_standardized`, while Relay builds protocol-specific Req01/Req02 | `capture_client_json` is compiled/run through the DAGpipe slice before dispatch; Direct and Relay normalization remain in their existing owners | `routecodex-v3-runtime` fixed runner | capture node is bound; remove mode-specific normalization only at node 2's later cutover | design graph + ingress/consumer binding table; same-entry tool and payload black-box replay |
 | Target/execution/request projection | `execute_v3_direct_runtime_kernel_core` and `execute_v3_relay_runtime_core` | current Direct/Relay loops | `routecodex-v3-runtime` | remove old decision-after-ChatProcess order | design graph + this matrix |
 | Response normalize/govern/project | old Direct/Relay response loops | current codecs and hooks | `routecodex-v3-runtime` | remove second response exit | design graph + this matrix |
 | Error | existing `error.mainline.yml` callers | ErrorErr01-06 chain | `error.pipeline_contract` / `error.client_projection` | none; retain chain | `error.mainline.yml` + error graph |
 
-The graph binding is `binding_pending` until a runtime candidate registers the operators and runs
-the canonical graph or its declared deterministic per-node SESE slice through the DAGpipe SDK.
-This document does not claim the production Server, Direct, or Relay loop has been replaced.
+The `capture_client_json` slice is `runtime_bound`; all other graph-node bindings are
+`binding_pending` until their own runtime candidates register and run them through the DAGpipe SDK.
+This does not claim that the production Server, Direct, or Relay execution loops after capture have
+been replaced by the complete request, response, or error graph.
 
 ## Runner foundation and per-node delivery
 
@@ -551,13 +554,12 @@ all three graphs or all legacy execution loops to switch at once.
 
 ### Node 01 gate scope boundary
 
-The static verifier (`verify-v3-operation-runner-dagpipe`) enforces a mandatory gate only for the
-request graph and its `capture_client_json` SESE slice. The response and error graphs are deferred
-design targets: when present, the verifier still checks their topology, operators, schema refs,
-chain IDs, and error-node typed resources to catch design regressions; when absent, their absence
-never blocks the Node 01 gate. This matches the per-node delivery contract: the first node delivers
-only `capture_client_json` from the canonical request graph and does not require the response or
-error graphs to be compiled, loaded, or switched at runtime before it ships.
+The static verifier (`verify-v3-operation-runner-dagpipe`) checks the declared request topology and
+the `capture_client_json` SESE slice contract. It also checks response and error graph declarations
+when present; their absence never blocks this node. These are static design checks only. Runtime
+compile/run acceptance and real ingress wiring apply to the `capture_client_json` slice; no later
+request node or complete response/error graph must be compiled, loaded, or switched for this
+node's delivery.
 
 ### Deterministic first-node SESE slice
 
@@ -648,7 +650,13 @@ modes, Responses WebSocket Direct and Relay, and OpenAI Chat/Responses Direct-to
 proves one capture per request-graph invocation, exact JSON-value equality at each existing owner,
 unchanged request-control/budget continuity, typed failure entry to the existing Error owner, and
 no duplicate capture or bypass. Compare the same real-entry black-box samples before and after the
-candidate. Static validation of the final three graphs does not prove these callers are wired.
+candidate. Also run complete GCM client-tool round trips on `gpt-5.5` and `gpt-5.6-luna` for
+`exec_command`, `apply_patch`, and one read-only MCP tool. Each case must show the client tool
+declaration, matching provider call and client projection, actual tool execution/result, the
+follow-up request carrying that result, and a completed response. For `apply_patch`, use a
+disposable worktree-local file and verify its cleanup. `requires_action`, an HTTP 200, or a
+projected tool call without the result and follow-up request is incomplete evidence. Static
+validation of the three graphs does not prove these runtime callers or tool round trips are wired.
 
 After that delivery, replace exactly one node from the declared schedule per delivery. For each
 node, change only its owner and required direct typed edge, remove the superseded implementation,
@@ -666,9 +674,9 @@ independently.
 ## Evidence boundary
 
 - Graph topology: `dagpipe graph validate` only proves static DAG shape.
-- Operator admission: project `pipeline_runtime::compile()` must resolve exact name/version and
-  typed schema/effect; not claimed by this design.
-- Runtime behavior: production Server/Direct/Relay loops remain the current execution truth; the new
-  graph binding is `binding_pending`.
+- Operator admission: `capture_client_json@1` is compiled and run through the derived slice;
+  later Operators still require their own project `pipeline_runtime::compile()` evidence.
+- Runtime behavior: Server dispatch and existing Direct/Relay loops remain execution truth after
+  capture; the complete request, response, and error graph bindings remain pending.
 - Field coverage: semantic matrix statuses remain unchanged; partial/declared rows are not relabeled
   as covered.

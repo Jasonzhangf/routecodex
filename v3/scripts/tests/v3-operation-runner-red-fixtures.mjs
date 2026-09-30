@@ -1279,6 +1279,21 @@ const mutations = [
     expect: /responses:input_fields:request\.input\[\]\.call_id must declare typed_discriminator_cases with discriminator_path request\.input\[\]\.type/u,
   },
   {
+    name: 'protocol-profile-cannot-authorize-uninventoried-field',
+    mutate(tmp) {
+      const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
+      const file = path.join(tmp, rel);
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const row = doc.path_consumers.find(
+        (item) => item.protocol === 'responses' && item.path === 'request.max_output_tokens',
+      );
+      if (!row) throw new Error('missing Responses max_output_tokens profile row');
+      row.path = 'request.uninventoried_field';
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /unknown path_consumer binding responses:request_fields:request\.uninventoried_field has no matrix source row/u,
+  },
+  {
     name: 'inbound-binding-source-outside-protocol-inventory',
     mutate(tmp) {
       const rel = 'docs/architecture/manifests/v3.operation_runner.field_profiles.v1.yml';
