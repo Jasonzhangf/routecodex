@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn resp03_native_apply_patch_input_that_looks_like_json_is_preserved() {
+    let native_input = r#"{"input":"*** Begin Patch\\n*** End Patch","other":"\\u4e2d"}"#;
+    let mut item = json!({
+        "type": "custom_tool_call",
+        "call_id": "call_native_json",
+        "name": "apply_patch",
+        "input": native_input
+    });
+    let before = item.clone();
+
+    let changed = project_v3_apply_patch_freeform_output_item_at_resp03(
+        item.as_object_mut().expect("tool item object"),
+    );
+
+    assert!(!changed, "native freeform input must not be unwrapped");
+    assert_eq!(item, before, "native input bytes must reach the client");
+}
+
+#[test]
 fn resp03_dry_run_audit_separates_request_and_response_contracts() {
     let request = json!({"tools": [{"description": "reason goal_alignment_confidence"}]});
     let provider_request = json!({"tools": [{"description": "reason goal_alignment_confidence"}]});
