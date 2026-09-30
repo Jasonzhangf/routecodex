@@ -855,31 +855,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_length_finish_reason_is_not_materialized_as_success() {
+    async fn provider_length_finish_reason_materializes_partial_success() {
         let observation = V3RuntimeStreamObservation::default();
         let provider = Box::pin(stream::iter(vec![Ok(
             b"data: {\"id\":\"chatcmpl_length\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"chat-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_length\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".to_vec(),
         )]));
 
-        let error = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+        let response = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
             provider,
             &observation,
         )
         .await
-        .expect_err("a provider length terminal must remain an incomplete attempt");
+        .expect("a provider length terminal is a valid partial completion");
 
-        assert!(
-            matches!(
-                error,
-                V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                    status: 200,
-                    ref code,
-                    ref message,
-                } if code == "provider_response_incomplete_length"
-                    && message.contains("provider response ended before completion: length")
-            ),
-            "unexpected error: {error}"
-        );
+        assert_eq!(response["choices"][0]["message"]["content"], "partial");
+        assert_eq!(response["choices"][0]["finish_reason"], "length");
+    }
+
+    #[tokio::test]
+    async fn provider_max_token_aliases_materialize_partial_success() {
+        let observation = V3RuntimeStreamObservation::default();
+        for finish_reason in ["max_tokens", "max_output_tokens"] {
+            let provider = Box::pin(stream::iter(vec![Ok(
+                format!(
+                    "data: {{\"id\":\"chatcmpl_max_tokens\",\"object\":\"chat.completion.chunk\",\"created\":7,\"model\":\"chat-model\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"partial\"}},\"finish_reason\":\"{finish_reason}\"}}]}}\n\n"
+                )
+                .into_bytes(),
+            )]));
+
+            let response = build_v3_hub_resp_inbound_02_from_openai_chat_provider_stream_events(
+                provider,
+                &observation,
+            )
+            .await
+            .expect("a provider max token alias terminal is a valid partial completion");
+
+            assert_eq!(response["choices"][0]["message"]["content"], "partial");
+            assert_eq!(response["choices"][0]["finish_reason"], "length");
+        }
     }
 
     #[tokio::test]

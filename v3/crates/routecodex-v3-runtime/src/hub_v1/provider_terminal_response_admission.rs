@@ -47,7 +47,10 @@ fn openai_chat_incomplete_reason(payload: &Value) -> Option<&str> {
         .iter()
         .find_map(
             |choice| match choice.get("finish_reason").and_then(Value::as_str) {
-                Some("length") => Some("length"),
+                // Chat output-cap terminals, including gateway aliases such as
+                // max_tokens, are valid partial output. They must not enter the
+                // provider failure/cooldown path.
+                Some("length" | "max_tokens" | "max_output_tokens") => None,
                 Some("content_filter") => Some("content_filter"),
                 _ => None,
             },
@@ -105,11 +108,6 @@ mod tests {
             ),
             (
                 V3HubProviderWireProtocol::OpenAiChat,
-                json!({"choices": [{"finish_reason": "length"}]}),
-                "length",
-            ),
-            (
-                V3HubProviderWireProtocol::OpenAiChat,
                 json!({"choices": [{"finish_reason": "content_filter"}]}),
                 "content_filter",
             ),
@@ -157,6 +155,10 @@ mod tests {
             (
                 V3HubProviderWireProtocol::OpenAiChat,
                 json!({"choices": [{"finish_reason": "tool_calls"}]}),
+            ),
+            (
+                V3HubProviderWireProtocol::OpenAiChat,
+                json!({"choices": [{"finish_reason": "max_tokens"}]}),
             ),
             (
                 V3HubProviderWireProtocol::Anthropic,
