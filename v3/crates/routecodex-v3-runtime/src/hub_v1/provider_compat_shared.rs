@@ -338,7 +338,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             headers,
-            vec![("x-openai-actor-authorization".to_string(), "local-image-extension".to_string())]
+            vec![(
+                "x-openai-actor-authorization".to_string(),
+                "local-image-extension".to_string()
+            )]
         );
     }
 
