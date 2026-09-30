@@ -1067,6 +1067,25 @@ for (const protocol of ['responses', 'openai_chat', 'anthropic', 'gemini']) {
   }
 }
 
+// Inbound field bindings must name paths from the protocol source inventory.
+// Outbound bindings intentionally read canonical Chat paths, so they are not
+// checked against client/provider wire inventories.
+for (const row of allRows) {
+  const protocol = normalizedProtocol(row?.protocol);
+  const inventoryPaths = new Set(
+    Object.values(sourceInventory?.[protocol] ?? {}).flatMap((paths) => Array.isArray(paths) ? paths : []),
+  );
+  for (const direction of ['client_request_to_chat', 'provider_response_to_chat']) {
+    const binding = row?.params?.direction_bindings?.[direction];
+    if (!binding?.source) continue;
+    if (!inventoryPaths.has(binding.source)) {
+      failures.push(
+        `${fieldProfilesRel}: ${row?.protocol ?? ''}:${row?.section ?? ''}:${row?.path ?? ''} direction_binding ${direction} source ${binding.source} is not in protocol source inventory`,
+      );
+    }
+  }
+}
+
 for (const row of allShapeRows) {
   if (row?.structure_only !== true || row?.union_shape !== true) continue;
   const parentProtocol = normalizedProtocol(row.protocol);
