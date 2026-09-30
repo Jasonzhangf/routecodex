@@ -580,21 +580,30 @@ pub(crate) async fn send_responses_websocket_provider_terminal(
     match disposition {
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
-            let body: Value = match serde_json::from_slice(witness.body()) {
-                Ok(body) => body,
-                Err(_) => Value::String(
-                    std::str::from_utf8(witness.body())
-                        .map_err(|_| ())?
-                        .to_string(),
-                ),
-            };
+            let (body, body_encoding): (Value, Option<&str>) =
+                match serde_json::from_slice(witness.body()) {
+                    Ok(body) => (body, None),
+                    Err(_) => match std::str::from_utf8(witness.body()) {
+                        Ok(body) => (Value::String(body.to_string()), None),
+                        Err(_) => (json!(witness.body()), Some("bytes")),
+                    },
+                };
             let error = body.get("error").cloned().unwrap_or_else(|| body.clone());
-            let event = json!({
+            let provider_headers = witness
+                .headers()
+                .iter()
+                .map(|(name, value)| json!({"name": name, "value": value}))
+                .collect::<Vec<_>>();
+            let mut event = json!({
                 "type": "error",
                 "status": witness.status(),
                 "error": error,
                 "provider_body": body,
+                "provider_headers": provider_headers,
             });
+            if let Some(encoding) = body_encoding {
+                event["provider_body_encoding"] = Value::String(encoding.to_string());
+            }
             send_responses_websocket_json(socket, &event).await
         }
     }
