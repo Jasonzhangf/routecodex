@@ -3897,8 +3897,17 @@ async fn responses_inbound_websocket_transport_failure_closes_without_fabricated
 #[tokio::test]
 async fn responses_inbound_websocket_preserves_eligible_provider_429_error_fields() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (provider_base_url, mut captures, shutdown) =
-        start_controlled_terminal_upstream(StatusCode::TOO_MANY_REQUESTS).await;
+    let upstream_body = json!({
+        "error": {"type":"rate_limit_error","message":"slow down","param":"upstream"},
+        "request_id": "provider-request-429",
+        "rate_limit": {"retry_after_seconds": 17}
+    });
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        serde_json::to_vec(&upstream_body).unwrap(),
+    )
+    .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
     let handle = spawn_v3_server_aggregate(responses_relay_manifest(
         free_port(),
@@ -3936,6 +3945,7 @@ async fn responses_inbound_websocket_preserves_eligible_provider_429_error_field
     assert_eq!(event["error"]["type"], "rate_limit_error");
     assert_eq!(event["error"]["message"], "slow down");
     assert_eq!(event["error"]["param"], "upstream");
+    assert_eq!(event["provider_body"], upstream_body);
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
     let _ = socket.close(None).await;

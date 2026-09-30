@@ -588,11 +588,12 @@ pub(crate) async fn send_responses_websocket_provider_terminal(
                         .to_string(),
                 ),
             };
-            let error = body.get("error").cloned().unwrap_or(body);
+            let error = body.get("error").cloned().unwrap_or_else(|| body.clone());
             let event = json!({
                 "type": "error",
                 "status": witness.status(),
                 "error": error,
+                "provider_body": body,
             });
             send_responses_websocket_json(socket, &event).await
         }
