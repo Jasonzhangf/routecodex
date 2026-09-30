@@ -13,6 +13,7 @@ fn target() -> V3ResponsesProviderTarget {
         canonical_model_id: "provider-model-id".to_string(),
         wire_model: "provider-wire-model".to_string(),
         compatibility_profile: None,
+        headers: Default::default(),
         auth: V3ProviderAuthHandle {
             alias: "primary".to_string(),
             secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),

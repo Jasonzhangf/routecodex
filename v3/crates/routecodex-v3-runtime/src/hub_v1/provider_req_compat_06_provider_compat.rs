@@ -395,6 +395,7 @@ mod tests {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
+            headers: Default::default(),
             env_name: Some("TEST_KEY".to_string()),
             token_file: None,
             secret_file: None,

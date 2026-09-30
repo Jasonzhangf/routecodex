@@ -466,7 +466,10 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 target.auth,
                 stream_intent,
                 body,
-                Vec::new(),
+                target.headers
+                    .iter()
+                    .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+                    .collect(),
                 Some(Duration::from_millis(request_timeout_ms)),
                 concurrency_acquire_timeout_ms,
                 sse_first_frame_timeout_ms,

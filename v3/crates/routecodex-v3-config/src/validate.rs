@@ -704,6 +704,7 @@ fn compile_providers(
                 health,
                 provider_request_cleanup,
                 compatibility_profile,
+                headers: provider.headers,
                 features: provider.features,
                 request_timeout_ms: provider.request_timeout_ms,
                 sse_first_frame_timeout_ms: Some(

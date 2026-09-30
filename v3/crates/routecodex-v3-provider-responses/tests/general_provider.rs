@@ -142,6 +142,7 @@ fn target_with_auth(
         canonical_model_id: wire_model.to_string(),
         wire_model: wire_model.to_string(),
         compatibility_profile: None,
+        headers: Default::default(),
         auth: V3ProviderAuthHandle {
             alias: auth_alias.to_string(),
             secret,

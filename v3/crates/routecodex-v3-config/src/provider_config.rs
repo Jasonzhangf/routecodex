@@ -120,6 +120,7 @@ pub(crate) fn compile_provider_directory(
                     .timeout
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
                 sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+                headers: provider.headers,
             },
         );
         provider_sources.push(V3ProviderDirectorySource {
@@ -433,6 +434,8 @@ pub struct V2ProviderConfig {
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
     #[serde(default, alias = "sse_first_frame_timeout_ms")]
     pub sse_first_frame_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
