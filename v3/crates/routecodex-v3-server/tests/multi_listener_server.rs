@@ -947,6 +947,38 @@ data: [DONE]
     }
 }
 
+async fn controlled_structured_function_call_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(
+            r#"event: response.created
+data: {"type":"response.created","response":{"id":"resp_structured","status":"in_progress"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_structured","type":"function_call","call_id":"call_structured","name":"exec_command","arguments":null}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_structured","type":"function_call","call_id":"call_structured","name":"exec_command","arguments":{"cmd":"pwd"}}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_structured","status":"completed","output":[{"id":"fc_structured","type":"function_call","call_id":"call_structured","name":"exec_command","arguments":{"cmd":"pwd"}}]}}
+
+data: [DONE]
+
+"#,
+        ))
+        .unwrap()
+}
+
 async fn controlled_responses_relay_tool_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -1088,6 +1120,34 @@ async fn start_controlled_responses_relay_upstream() -> (
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_responses_relay_upstream))
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn start_controlled_structured_function_call_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(controlled_structured_function_call_upstream),
+        )
         .with_state(Arc::new(ProviderState {
             captures: captures_tx,
         }));
@@ -2415,6 +2475,80 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(second_capture.body["model"], "wire-test");
     assert_eq!(second_capture.body["stream"], true);
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_structured_function_call_arguments_reach_client_as_string() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_structured_function_call_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-structured-function");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "input": "run pwd",
+            "stream": true,
+            "tools": [{"type":"function","name":"exec_command","parameters":{"type":"object"}}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    let events = body
+        .split("\n\n")
+        .filter_map(|frame| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .collect::<Vec<_>>();
+    let completed = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("client must receive a terminal response");
+    assert_eq!(
+        completed["response"]["output"].as_array().map(Vec::len),
+        Some(1)
+    );
+    let terminal_item = &completed["response"]["output"][0];
+    assert_eq!(terminal_item["id"], "fc_structured");
+    assert_eq!(terminal_item["type"], "function_call");
+    assert_eq!(terminal_item["call_id"], "call_structured");
+    assert_eq!(terminal_item["name"], "exec_command");
+    assert_eq!(terminal_item["arguments"], r#"{"cmd":"pwd"}"#);
+    let done = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        done.len(),
+        1,
+        "client must receive one complete function call item"
+    );
+    assert_eq!(done[0]["item"]["id"], "fc_structured");
+    assert_eq!(done[0]["item"]["type"], "function_call");
+    assert_eq!(done[0]["item"]["call_id"], "call_structured");
+    assert_eq!(done[0]["item"]["name"], "exec_command");
+    assert_eq!(done[0]["item"]["arguments"], r#"{"cmd":"pwd"}"#);
+    assert_eq!(body.matches("data: [DONE]").count(), 1);
+    let capture = captures.recv().await.unwrap();
+    assert_eq!(capture.body["model"], "wire-test");
+    assert_eq!(capture.body["stream"], true);
+    assert!(
+        captures.try_recv().is_err(),
+        "one client request must send once"
+    );
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

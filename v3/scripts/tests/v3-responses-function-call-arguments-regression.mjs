@@ -1,56 +1,35 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const repo = resolve(import.meta.dirname, '../..', '..');
-const codecPath = resolve(
-  repo,
-  'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
+const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const result = spawnSync(
+  process.execPath,
+  [
+    'scripts/run-v3-cargo-test.mjs',
+    '-p',
+    'routecodex-v3-server',
+    '--test',
+    'multi_listener_server',
+    'responses_relay_structured_function_call_arguments_reach_client_as_string',
+    '--',
+    '--exact',
+    '--nocapture',
+  ],
+  {
+    cwd: v3Root,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      CARGO_NET_OFFLINE: 'true',
+    },
+  },
 );
-const source = readFileSync(codecPath, 'utf8');
-const failures = [];
 
-const requiredMarkers = [
-  [
-    'provider response codec owns the normalization',
-    'normalize_v3_responses_function_call_arguments_for_event',
-  ],
-  [
-    'scalar JSON values are serialized at the provider boundary',
-    'else if !arguments.is_string()',
-  ],
-  [
-    'partial null arguments remain an empty string',
-    'partial_function_call && arguments.is_null()',
-  ],
-  [
-    'scalar regression test remains present',
-    'responses_function_call_scalar_arguments_are_projected_as_json_string',
-  ],
-  [
-    'classifier regression test remains present',
-    'responses_classifier_normalizes_raw_structured_function_call_arguments',
-  ],
-  [
-    'terminal missing arguments stays strict',
-    'responses_terminal_function_call_missing_arguments_still_fails',
-  ],
-];
-
-for (const [label, marker] of requiredMarkers) {
-  if (!source.includes(marker)) failures.push(`${label}: missing ${marker}`);
+if (result.error) {
+  console.error(`[test:v3-responses-function-call-arguments-regression] FAIL: ${result.error.message}`);
+  process.exit(70);
 }
 
-const scalarBranch = source.indexOf('else if !arguments.is_string()');
-const strictTest = source.indexOf('responses_terminal_function_call_missing_arguments_still_fails');
-if (scalarBranch === -1 || strictTest === -1 || scalarBranch > strictTest) {
-  failures.push('normalization branch/test ordering is not anchored in the codec owner');
-}
-
-if (failures.length) {
-  console.error('[test:v3-responses-function-call-arguments-regression] FAIL');
-  for (const failure of failures) console.error(`- ${failure}`);
-  process.exit(1);
-}
-
-console.log('[test:v3-responses-function-call-arguments-regression] PASS');
+process.exit(result.status ?? 1);

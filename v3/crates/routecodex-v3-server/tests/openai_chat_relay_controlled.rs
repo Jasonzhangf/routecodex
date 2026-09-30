@@ -30,6 +30,47 @@ struct ProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
 }
 
+#[derive(Clone)]
+struct ContentFilterProviderState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    primary: bool,
+}
+
+async fn content_filter_upstream(
+    State(state): State<Arc<ContentFilterProviderState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture {
+            authorization: headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            body,
+        })
+        .unwrap();
+    let frames = if state.primary {
+        concat!(
+            "data: {\"id\":\"chatcmpl-primary\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"primary-partial-must-not-commit\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl-primary\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n",
+            "data: [DONE]\n\n"
+        )
+    } else {
+        concat!(
+            "data: {\"id\":\"chatcmpl-secondary\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"secondary-success\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl-secondary\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        )
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(frames))
+        .unwrap()
+}
+
 async fn controlled_openai_chat_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -319,6 +360,93 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
 }
 
+#[tokio::test]
+async fn chat_content_filter_reselects_without_committing_primary_partial() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_OPENAI_CHAT_CONTROLLED_KEY", "controlled-secret");
+    let mut upstream_shutdowns = Vec::new();
+    let mut upstream_tasks = Vec::new();
+    let mut captures = Vec::new();
+    let mut ports = Vec::new();
+    for primary in [true, false] {
+        let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        ports.push(upstream.local_addr().unwrap().port());
+        let (capture_tx, capture_rx) = mpsc::unbounded_channel();
+        captures.push(capture_rx);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        upstream_shutdowns.push(shutdown_tx);
+        let app = Router::new()
+            .route("/v1/chat/completions", post(content_filter_upstream))
+            .with_state(Arc::new(ContentFilterProviderState {
+                captures: capture_tx,
+                primary,
+            }));
+        upstream_tasks.push(tokio::spawn(async move {
+            axum::serve(upstream, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        }));
+    }
+
+    let handle =
+        spawn_v3_server_aggregate(content_filter_manifest(free_port(), ports[0], ports[1]))
+            .await
+            .unwrap();
+    let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .json(&json!({
+            "model":"chat-client-alias",
+            "messages":[{"role":"user","content":"content filter fallback"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("secondary-success"), "{body}");
+    assert!(body.contains(r#""finish_reason":"stop""#), "{body}");
+    assert!(!body.contains("primary-partial-must-not-commit"), "{body}");
+    assert!(!body.contains("content_filter"), "{body}");
+    assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
+    for (index, capture_rx) in captures.iter_mut().enumerate() {
+        let capture = tokio::time::timeout(Duration::from_secs(2), capture_rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("upstream {index} received no request; body: {body}"))
+            .unwrap();
+        assert_eq!(
+            capture.authorization.as_deref(),
+            Some("Bearer controlled-secret")
+        );
+        assert_eq!(capture.body["stream"], true);
+        assert_eq!(
+            capture.body["messages"][0]["content"],
+            "content filter fallback"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), capture_rx.recv())
+                .await
+                .is_err(),
+            "each upstream must receive exactly one request"
+        );
+    }
+    handle.shutdown().await;
+    for shutdown in upstream_shutdowns {
+        shutdown.send(()).unwrap();
+    }
+    for task in upstream_tasks {
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
+}
+
 fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -334,9 +462,7 @@ fn manifest(
     // This controlled test owns the openai_chat Relay server-entry coverage.
     // The shared hub_v1 fixture now defaults openai_chat to Direct, so this test
     // re-pins its own explicit Relay binding (same pattern as responses_relay_manifest).
-    let direct_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
-    let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
-    let hub_v1_declaration = hub_v1_test_declaration().replace(direct_binding, relay_binding);
+    let hub_v1_declaration = openai_chat_relay_declaration();
     let source = format!(
         r#"
 version = 3
@@ -373,4 +499,63 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wi
         server_execution = hub_v1_server_execution("controlled"),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn content_filter_manifest(
+    server_port: u16,
+    primary_port: u16,
+    secondary_port: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = openai_chat_relay_declaration();
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.controlled]
+bind = "127.0.0.1"
+port = {server_port}
+routing_group = "controlled"
+endpoints = ["openai_chat"]
+{server_execution}
+[providers.primary]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{primary_port}/v1"
+default_model = "primary-wire-model"
+auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI_CHAT_CONTROLLED_KEY" }}] }}
+[providers.primary.models.primary-wire-model]
+wire_name = "primary-wire-model"
+supports_streaming = true
+capabilities = ["text"]
+[providers.secondary]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{secondary_port}/v1"
+default_model = "secondary-wire-model"
+auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_OPENAI_CHAT_CONTROLLED_KEY" }}] }}
+[providers.secondary.models.secondary-wire-model]
+wire_name = "secondary-wire-model"
+supports_streaming = true
+capabilities = ["text"]
+[route_groups.controlled.pools.chat_client]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-client-alias"] }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "primary-wire-model", key = "controlled", priority = 2 }},
+  {{ kind = "provider_model", provider = "secondary", model = "secondary-wire-model", key = "controlled", priority = 1 }}
+]
+[route_groups.controlled.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "primary-wire-model", key = "controlled", priority = 2 }},
+  {{ kind = "provider_model", provider = "secondary", model = "secondary-wire-model", key = "controlled", priority = 1 }}
+]
+"#,
+        server_execution = hub_v1_server_execution("controlled"),
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn openai_chat_relay_declaration() -> String {
+    let direct_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
+    hub_v1_test_declaration().replace(direct_binding, relay_binding)
 }
