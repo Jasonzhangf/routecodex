@@ -5773,6 +5773,7 @@ features:
   - v3.operation_runner.dagpipe_manifest
   - v3.operation_runner.operator_registry
   - v3.operation_runner.execution_mode
+  - v3.operation_runner.ingress_contract
   - v3.operation_runner.request_origin_kind
   - v3.operation_runner.request_inverse_context
   - v3.operation_runner.attempt_projection_context
@@ -5788,6 +5789,7 @@ features:
   - v3.error.execution_decision
   - v3.operation_runner.metadata_center_control
   - v3.operation_runner.field_profile_manifest
+  - v3.config.published_manifest
   mainline_bindings:
   - v3-op-runner-req-01
   - v3-op-runner-req-02

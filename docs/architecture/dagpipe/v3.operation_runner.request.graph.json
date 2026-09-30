@@ -29,8 +29,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload", "v3.config.published_manifest", "v3.operation_runner.ingress_contract", "v3.operation_runner.request_origin_kind", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
-        "writes": ["v3.request.normal_payload", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"]
+        "reads": ["v3.config.published_manifest", "v3.operation_runner.ingress_contract", "v3.operation_runner.request_origin_kind", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
+        "writes": ["v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"]
       }
     },
     {
@@ -43,7 +43,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload"],
+        "reads": [],
         "writes": ["v3.hub.resolved_target"]
       }
     },
@@ -85,7 +85,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.request.normal_payload", "v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
+        "reads": ["v3.operation_runner.execution_mode", "v3.operation_runner.request_inverse_context", "v3.operation_runner.explicit_history_pairing"],
         "writes": ["v3.request.provider_semantic", "v3.operation_runner.attempt_projection_context", "v3.operation_runner.attempt_declaration_map"]
       }
     },
