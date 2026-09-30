@@ -1,6 +1,127 @@
 use super::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::time::timeout;
 #[path = "restart_handoff/tests/restart_handoff_closeout.rs"]
 mod closeout;
+
+async fn front_http_close_probe(
+    bind_lease: bool,
+    queue_restart_frame: bool,
+    close_socket: bool,
+) -> (Vec<u8>, V3FrontTransportBroker, V3FrontConnectionIdentity) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let broker = V3FrontTransportBroker::new(4);
+    let identity = broker.allocate_connection_identity();
+    let observer = broker.clone();
+    let handler_broker = broker.clone();
+    let service = axum::Router::new().route(
+        "/probe",
+        axum::routing::get(move |request: axum::http::Request<Body>| {
+            let broker = handler_broker.clone();
+            async move {
+                let actual_identity = *request
+                    .extensions()
+                    .get::<V3FrontConnectionIdentity>()
+                    .expect("Front must attach the accepted connection identity");
+                assert_eq!(actual_identity, identity);
+                if bind_lease {
+                    broker
+                        .bind_connection_lease(
+                            actual_identity,
+                            lease(Instant::now()),
+                            Instant::now(),
+                        )
+                        .expect("request lease binding");
+                }
+                if let Some(socket) = broker.front_socket(actual_identity) {
+                    if queue_restart_frame {
+                        socket.set_exec_closeout_frame(
+                            b"HTTP/1.1 503 Service Unavailable\r\n\r\n".to_vec(),
+                        );
+                    }
+                    if close_socket {
+                        socket.close();
+                    }
+                }
+                axum::http::StatusCode::TOO_MANY_REQUESTS
+            }
+        }),
+    );
+    let server = tokio::spawn(async move {
+        let (stream, remote) = listener.accept().await.unwrap();
+        serve_v3_front_http_connection(stream, remote, identity, broker, service.into_service())
+            .await
+    });
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(b"GET /probe HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut bytes = vec![0; 4096];
+    let received = timeout(Duration::from_secs(3), client.read(&mut bytes))
+        .await
+        .expect("client must observe EOF or an HTTP response, not a hanging connection")
+        .expect("client read");
+    bytes.truncate(received);
+    drop(client);
+    let result = timeout(Duration::from_secs(3), server)
+        .await
+        .expect("Front connection task must finalize")
+        .expect("Front connection join");
+    let _ = result;
+    (bytes, observer, identity)
+}
+
+#[tokio::test]
+async fn front_http_unbound_identity_close_before_handler_return_has_zero_header_bytes() {
+    let (bytes, _, _) = front_http_close_probe(false, false, true).await;
+    assert!(
+        bytes.is_empty(),
+        "no-response must be EOF with zero headers, got {bytes:?}"
+    );
+}
+
+#[tokio::test]
+async fn front_http_bound_identity_close_before_handler_return_has_zero_header_bytes() {
+    let (bytes, _, _) = front_http_close_probe(true, false, true).await;
+    assert!(
+        bytes.is_empty(),
+        "bound request must be EOF with zero headers, got {bytes:?}"
+    );
+}
+
+#[tokio::test]
+async fn front_http_no_response_cannot_emit_pending_restart_503_closeout() {
+    let (bytes, _, _) = front_http_close_probe(false, true, true).await;
+    assert!(
+        bytes.is_empty(),
+        "no-response must suppress restart closeout, got {bytes:?}"
+    );
+}
+
+#[tokio::test]
+async fn front_http_no_response_finalizer_releases_identity_registry_entry() {
+    let (bytes, broker, identity) = front_http_close_probe(false, false, true).await;
+    assert!(
+        bytes.is_empty(),
+        "no-response must have zero response bytes"
+    );
+    assert!(
+        broker.front_socket(identity).is_none(),
+        "Front connection task completion must release the identity socket entry"
+    );
+}
+
+#[tokio::test]
+async fn front_http_control_429_without_close_retains_normal_http_response() {
+    let (bytes, _, _) = front_http_close_probe(false, false, false).await;
+    assert!(
+        bytes.starts_with(b"HTTP/1.1 429 Too Many Requests\r\n"),
+        "real upstream-style 429 must retain HTTP status, got {bytes:?}"
+    );
+}
 
 fn key() -> V3FrontRequestLeaseKey {
     V3FrontRequestLeaseKey {
