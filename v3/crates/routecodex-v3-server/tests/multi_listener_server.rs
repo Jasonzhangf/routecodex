@@ -1124,6 +1124,8 @@ async fn start_controlled_responses_relay_upstream() -> (
 struct ControlledTerminalState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
     status: StatusCode,
+    content_type: &'static str,
+    response_body: Vec<u8>,
 }
 
 async fn controlled_terminal_upstream(
@@ -1137,16 +1139,32 @@ async fn controlled_terminal_upstream(
         .unwrap();
     Response::builder()
         .status(state.status)
-        .header("content-type", "application/json")
+        .header("content-type", state.content_type)
         .header("retry-after", "17")
-        .body(Body::from(
-            r#"{"error":{"type":"rate_limit_error","message":"slow down","param":"upstream"}}"#,
-        ))
+        .body(Body::from(state.response_body.clone()))
         .unwrap()
 }
 
 async fn start_controlled_terminal_upstream(
     status: StatusCode,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_terminal_upstream_with_body(
+        status,
+        "application/json",
+        br#"{"error":{"type":"rate_limit_error","message":"slow down","param":"upstream"}}"#
+            .to_vec(),
+    )
+    .await
+}
+
+async fn start_controlled_terminal_upstream_with_body(
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: Vec<u8>,
 ) -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -1161,6 +1179,8 @@ async fn start_controlled_terminal_upstream(
         .with_state(Arc::new(ControlledTerminalState {
             captures: captures_tx,
             status,
+            content_type,
+            response_body,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -3823,8 +3843,7 @@ async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send()
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_transport_failure_closes_without_fabricated_event(
-) {
+async fn responses_inbound_websocket_transport_failure_closes_without_fabricated_event() {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_websocket_url = {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -3961,6 +3980,55 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
             Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
         ),
         "upstream 502 must not become a fabricated WebSocket event"
+    );
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_unrepresentable_binary_error_closes_without_fabrication() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/octet-stream",
+        vec![0xff, 0xfe],
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws binary error"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("binary upstream error must terminate the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "unrepresentable upstream error must not become a fabricated JSON event"
     );
     assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
 
