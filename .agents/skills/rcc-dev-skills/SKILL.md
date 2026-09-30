@@ -26,8 +26,8 @@ rg -n "feature_id: ${rcc_task_feature}" \
 4. Read mapped source, generated review surface, current run notes, project `MEMORY.md`, and relevant history.
 5. For defects, capture one request id and find first semantic divergence. Keep one active hypothesis.
 6. Record red evidence: focused failing test, saved failing shape, or controlled replay.
-7. Patch only mapped owner. Run positive and negative tests.
-8. Run feature `required_gates`, then project architecture gate:
+7. Patch only mapped owner. For feature development or bug repair, add or update real public-entry black-box behavior tests. A controlled external peer or upstream is acceptable as long as the test enters through a real public entry (HTTP, WebSocket, or CLI); source-string checks, private unit-only tests, or mocks that do not reach the public entry do not satisfy this step. Each such test carries a stable test ID and records the exact command that executes it.
+8. Run positive and negative tests, then run feature `required_gates`, including the public-entry black-box tests by their recorded commands, then project architecture gate:
 
 ```bash
 npm run verify:v3-architecture-ci
@@ -45,6 +45,14 @@ in `.appsdk/skills/appsdk-project-governance/SKILL.md`. For the issue DAG,
 per-restart Codex sample audit, and master residual-resource closeout, read
 [`references/60-defect-lifecycle.md`](references/60-defect-lifecycle.md).
 Repeated regressions require a regression test in the mapped required gate.
+
+For any corresponding AppSDK bug record to close, including a functional work
+item with such a record, the stable public-entry black-box test IDs and their
+execution commands must be written into that record with
+`appsdk bug comment <id> -m <test IDs and commands>`, then read back with
+`appsdk bug show <id> --json` and confirmed before close. A record without that
+read-back confirmation stays open. Close it with `appsdk bug close` only after
+that confirmation exists and all other applicable delivery conditions pass.
 
 ## Review Gate
 

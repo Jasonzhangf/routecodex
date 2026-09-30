@@ -563,7 +563,7 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                         b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"primary-partial-must-not-commit\"},\"finish_reason\":null}]}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
-                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".to_vec(),
+                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
                 ]
