@@ -588,12 +588,13 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
         "responses = { process = \"chat\", streaming = \"client\" }",
     );
     let client = reqwest::Client::new();
+    let tools = json!([{"type":"custom","name":"apply_patch","format":{"type":"text"}}]);
     let mut cli = start_cli_server(&config_path, ports.all());
     wait_for_health(&client, &mut cli, ports.success, "h2_success").await;
 
     let response = client
         .post(format!("http://127.0.0.1:{}/v1/responses", ports.success))
-        .json(&json!({"model":"client-test", "input":"make a patch", "stream":true}))
+        .json(&json!({"model":"client-test", "input":"make a patch", "tools":tools, "stream":true}))
         .send()
         .await
         .unwrap();
@@ -610,6 +611,41 @@ async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
     assert_eq!(item["input"].as_str(), Some(input.as_str()), "{body}");
     let capture = next_capture(&mut success.captures, "apply_patch SSE").await;
     assert_eq!(capture.body["stream"], true);
+    assert!(capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|entry| {
+        entry["name"] == "apply_patch"
+    })), "provider tool declaration changed: {:?}", capture.body);
+
+    for output in [
+        "patch rejected: context mismatch in /tmp/含 空格.txt\r\nold",
+        "Success. Updated /tmp/含 空格.txt\r\n",
+    ] {
+        let followup = client
+            .post(format!("http://127.0.0.1:{}/v1/responses", ports.success))
+            .json(&json!({
+                "model":"client-test", "stream":false, "tools":tools,
+                "input":[
+                    {"role":"user","content":"make a patch"},
+                    item,
+                    {"type":"custom_tool_call_output","call_id":"call_patch","output":output}
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = followup.status();
+        let body = followup.text().await.unwrap();
+        assert_eq!(status, ReqwestStatusCode::OK, "{body}");
+        let followup_capture = next_capture(&mut success.captures, "apply_patch followup").await;
+        assert!(followup_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
+            entry["call_id"] == "call_patch" && entry["output"] == output
+        })), "provider-bound output changed: {:?}", followup_capture.body);
+        assert!(followup_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
+            entry["type"] == "custom_tool_call"
+                && entry["name"] == "apply_patch"
+                && entry["call_id"] == "call_patch"
+                && entry["input"] == input
+        })), "provider-bound call changed: {:?}", followup_capture.body);
+    }
 
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
@@ -638,6 +674,15 @@ async fn controlled_responses_upstream(
 
     match &state.mode {
         ProviderMode::CustomToolCall { input } => {
+            if parsed["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
+                entry["type"] == "custom_tool_call_output" && entry["call_id"] == "call_patch"
+            })) {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"resp_patch_followup","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}"#))
+                    .unwrap();
+            }
             let item = json!({
                 "type": "custom_tool_call", "id": "item_patch", "call_id": "call_patch",
                 "name": "apply_patch", "input": input
