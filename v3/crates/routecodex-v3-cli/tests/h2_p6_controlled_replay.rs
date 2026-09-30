@@ -128,7 +128,7 @@ async fn bug_705d624_real_http_429_retains_status_and_error_in_json_and_sse() {
 async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselection_succeeds() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
-    let no_response = start_no_response_upstream().await;
+    let mut no_response = start_no_response_upstream().await;
     let ports = H2Ports::allocate();
     let config = write_h2_config(&ports, &success, &rate, &no_response);
     let client = reqwest::Client::new();
@@ -150,6 +150,7 @@ async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselect
     assert!(body.contains("rate_limit_error"), "{body}");
     assert!(!body.contains("network_error"), "{body}");
     next_capture(&mut rate.captures, "429 before transport failure").await;
+    next_capture(&mut no_response.captures, "transport after 429").await;
 
     let success_response = client
         .post(format!("http://127.0.0.1:{}/v1/responses", ports.reselect))
@@ -169,8 +170,8 @@ async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselect
 #[tokio::test]
 async fn bug_705d624_all_provider_no_response_closes_front_without_http_headers() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
-    let no_response_a = start_no_response_upstream().await;
-    let no_response_b = start_no_response_upstream().await;
+    let mut no_response_a = start_no_response_upstream().await;
+    let mut no_response_b = start_no_response_upstream().await;
     let ports = H2Ports::allocate();
     let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b);
     let client = reqwest::Client::new();
@@ -180,6 +181,8 @@ async fn bug_705d624_all_provider_no_response_closes_front_without_http_headers(
     for stream in [false, true] {
         assert_no_front_http_headers(ports.exhausted, stream).await;
     }
+    next_capture(&mut no_response_a.captures, "first no-response transport").await;
+    next_capture(&mut no_response_b.captures, "second no-response transport").await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -644,7 +647,7 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
 async fn start_no_response_upstream() -> ControlledUpstream {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let (_captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
     tokio::spawn(async move {
         loop {
@@ -652,6 +655,11 @@ async fn start_no_response_upstream() -> ControlledUpstream {
                 _ = &mut shutdown_rx => break,
                 accepted = listener.accept() => {
                     let (socket, _) = accepted.unwrap();
+                    captures_tx.send(ProviderCapture {
+                        authorization: None,
+                        accept: None,
+                        body: json!({"transport_connected": true}),
+                    }).unwrap();
                     drop(socket);
                 }
             }
