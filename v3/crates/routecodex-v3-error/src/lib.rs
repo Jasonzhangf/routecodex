@@ -570,6 +570,33 @@ impl V3Error05TerminalDecision {
     }
 }
 
+/// A real upstream HTTP error retained across provider attempts by the
+/// request owner. The original body bytes are kept outside diagnostic JSON.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3EligibleExternalHttpResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl V3EligibleExternalHttpResponse {
+    pub fn new(status: u16, headers: Vec<(String, String)>, body: Vec<u8>) -> Option<Self> {
+        ((400..=599).contains(&status) && status != 502).then_some(Self {
+            status,
+            headers,
+            body,
+        })
+    }
+}
+
+/// The provider failure terminal is either a real compatible upstream HTTP
+/// error or no HTTP response at all. Neither branch fabricates a proxy 502.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3ProviderTerminalDisposition {
+    ExternalHttp(V3EligibleExternalHttpResponse),
+    NoResponse,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct V3Error06ClientProjected {
     pub status: u16,
@@ -993,6 +1020,26 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
+    pub fn provider_terminal_disposition(
+        terminal: V3Error05TerminalDecision,
+        witness: Option<V3EligibleExternalHttpResponse>,
+    ) -> V3ProviderTerminalDisposition {
+        debug_assert_eq!(
+            terminal
+                .execution()
+                .exhaustion
+                .local_action
+                .classified
+                .source
+                .source_kind,
+            V3ErrorSourceKind::ProviderFailure,
+        );
+        match witness {
+            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+            None => V3ProviderTerminalDisposition::NoResponse,
+        }
+    }
+
     pub fn project_terminal_decision(
         terminal: V3Error05TerminalDecision,
     ) -> V3Error06ClientProjected {
