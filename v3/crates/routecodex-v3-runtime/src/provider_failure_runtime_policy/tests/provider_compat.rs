@@ -64,6 +64,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
+        last_eligible_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -140,6 +141,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -237,6 +239,7 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -305,6 +308,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -376,6 +380,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await

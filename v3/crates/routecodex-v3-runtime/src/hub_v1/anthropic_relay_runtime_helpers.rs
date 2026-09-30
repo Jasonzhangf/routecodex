@@ -12,6 +12,7 @@ impl V3AnthropicRelayClientBody {
 
 #[derive(Debug)]
 pub struct V3AnthropicRelayRuntimeOutput {
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub status: u16,
     pub client_response: Value,
     pub client_body: V3AnthropicRelayClientBody,
@@ -133,6 +134,7 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         V3AnthropicRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
+    let provider_pool_exhausted = matches!(&error, V3AnthropicRelayRuntimeError::ProviderPoolExhausted { .. });
     let internal_status = match &error {
         V3AnthropicRelayRuntimeError::ExecutionControlRequest(_) => Some(598),
         V3AnthropicRelayRuntimeError::ExecutionControlResponse(_) => Some(599),
@@ -188,12 +190,16 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
             error.to_string(),
         ),
     };
-    error_output(
+    let mut output = error_output(
         source,
         internal_status.unwrap_or(if request_payload_invalid { 400 } else { 500 }),
         "none",
         trace,
-    )
+    );
+    if provider_pool_exhausted {
+        output.terminal_disposition = Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+    }
+    output
 }
 
 fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3RelayProviderFailure {
@@ -202,6 +208,7 @@ fn provider_http_failure(status: u16, body: &[u8], _provider_id: &str) -> V3Rela
         client_response: project_v3_responses_error_as_anthropic_error(body),
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -217,6 +224,7 @@ fn provider_request_failure(
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -237,6 +245,7 @@ fn provider_terminal_admission_failure(
         }),
         source_stage: "V3ProviderRespInbound01Raw",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -277,6 +286,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
             }),
             source_stage,
             terminal_projection: Some(projected),
+            terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         };
@@ -306,6 +316,7 @@ fn provider_runtime_failure(error: V3ProviderError, provider_id: &str) -> V3Rela
         client_response: json!({"type":"error","error":{"type":error_type,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
+        terminal_disposition: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -321,6 +332,7 @@ fn provider_failure_output(
     trace.push("V3Error06ClientProjected");
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: failure.terminal_disposition,
         client_response: projected.body,
         client_body: V3AnthropicRelayClientBody::Json,
         node_trace: trace,
@@ -341,6 +353,7 @@ fn error_output(
     let (projected, trace) = crate::hub_v1::error_output(source, status, provider_id, trace);
     V3AnthropicRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: None,
         client_response: projected.body,
         client_body: V3AnthropicRelayClientBody::Json,
         node_trace: trace,

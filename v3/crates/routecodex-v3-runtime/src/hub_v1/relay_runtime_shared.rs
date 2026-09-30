@@ -44,6 +44,7 @@ pub struct V3RelayProviderFailure {
     pub client_response: Value,
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     /// 从 client_response 提取错误类型（协议形状相关）。
     pub error_type_fn: fn(&Value) -> Option<String>,
     /// 从 client_response 提取错误消息（协议形状相关）。
@@ -238,6 +239,7 @@ pub async fn handle_provider_failure(
         }
         V3Error05ExecutionAction::ProjectTerminal => {
             failure.terminal_projection = result.terminal_projection;
+            failure.terminal_disposition = result.terminal_disposition;
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
@@ -273,6 +275,7 @@ pub fn provider_http_failure(
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -289,6 +292,7 @@ pub fn provider_request_failure(
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -308,6 +312,7 @@ pub fn provider_terminal_admission_failure(
         }),
         source_stage: "V3ProviderRespInbound01Raw",
         terminal_projection: None,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -351,6 +356,9 @@ pub fn provider_runtime_failure(
             }),
             source_stage,
             terminal_projection: Some(projected),
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
             error_type_fn: extract_error_code_style,
             error_message_fn: extract_message_code_style,
         };
@@ -384,6 +392,7 @@ pub fn provider_runtime_failure(
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
+        terminal_disposition: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -401,7 +410,10 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 
 /// Provider failure that consumed the request residence budget must still be
 /// projected through the typed Error01-06 chain before the relay loop exits.
-pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3RelayProviderFailure {
+pub fn terminalize_provider_failure(
+    mut failure: V3RelayProviderFailure,
+    last_eligible_external_http: Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
+) -> V3RelayProviderFailure {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
@@ -410,19 +422,24 @@ pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3Re
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
     );
-    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
-        V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source,
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: Some(failure.status),
-            },
-            false,
-            false,
-            None,
-        ),
+    let terminal = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::None,
+            candidates_remaining: 0,
+            source_status: Some(failure.status),
+        },
+        false,
+        false,
+        None,
+    )
+    .try_into_terminal()
+    .expect("provider residence-budget terminal requires exhausted Error05");
+    failure.terminal_disposition = Some(V3ErrorHandlingCenter::provider_terminal_disposition(
+        terminal.clone(),
+        last_eligible_external_http,
     ));
+    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal_decision(terminal));
     failure
 }
 
@@ -714,7 +731,7 @@ mod tests {
             },
             "provider-a",
         );
-        let projection = terminalize_provider_failure(failure)
+        let projection = terminalize_provider_failure(failure, None)
             .terminal_projection
             .expect("terminalized provider failure must carry Error06 projection");
         assert!(projection.health_action.is_none());

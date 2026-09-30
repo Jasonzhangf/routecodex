@@ -229,7 +229,13 @@ fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_con
 }
 
 #[test]
-fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
+fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
+    let upstream = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+        429,
+        vec![("retry-after".to_string(), b"17".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    )
+    .expect("real upstream 429 remains eligible");
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {
@@ -268,6 +274,9 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
             provider_id: "controlled".to_string(),
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream.clone()),
+            ),
             observability: None,
             matched_policy: None,
         },
@@ -276,8 +285,8 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
 
     assert_eq!(
-        output.status, 502,
-        "Error06 terminal exhaustion uses the declared public network error"
+        output.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,

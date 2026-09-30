@@ -60,6 +60,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await
@@ -122,6 +123,7 @@ async fn unmatched_transient_reselect_keeps_returned_recovery_witness_admissible
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_eligible_external_http: &mut None,
         },
     )
     .await

@@ -212,6 +212,7 @@ pub fn project_v3_responses_relay_runtime_failure(
             });
             return V3ResponsesRelayRuntimeOutput {
                 status: projected.status,
+                terminal_disposition: None,
                 client_body: V3ResponsesRelayClientBody::Json(projected.body),
                 node_trace: vec!["V3Error06ClientProjected"],
                 error_chain: Some(vec![
@@ -236,7 +237,10 @@ pub fn project_v3_responses_relay_runtime_failure(
                 "V3Target10ConcreteProviderSelected",
                 &attempted_candidates,
             );
-            error_output(source, 502, "none", Vec::new(), observability, 0)
+            let mut output = error_output(source, 502, "none", Vec::new(), observability, 0);
+            output.terminal_disposition =
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+            output
         }
         V3ResponsesRelayRuntimeError::Target(message) => {
             let source = build_v3_error_01_source_raised(

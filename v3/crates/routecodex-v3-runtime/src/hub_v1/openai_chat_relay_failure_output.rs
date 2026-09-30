@@ -12,6 +12,7 @@ pub(super) fn provider_failure_output(
     trace.push("V3Error06ClientProjected");
     V3OpenAiChatRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: failure.terminal_disposition,
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -34,6 +35,7 @@ pub(super) fn error_output(
     let error_detail = projected.error_detail.clone();
     V3OpenAiChatRelayRuntimeOutput {
         status: projected.status,
+        terminal_disposition: None,
         client_body: V3OpenAiChatRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),

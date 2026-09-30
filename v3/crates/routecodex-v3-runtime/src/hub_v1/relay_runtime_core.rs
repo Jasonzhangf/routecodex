@@ -617,6 +617,7 @@ where
     let mut provider_action_permit: Option<V3ProviderActionPermit> = None;
     let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> = None;
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
+    let mut last_eligible_external_http = None;
     let request_execution_control = match initial_request_execution_control {
         Some(control) => control,
         None => V3RequestExecutionControl::from_manifest(manifest, server_id).map_err(|error| {
@@ -678,9 +679,15 @@ where
                 V3RelayProviderAdmittedTargetResolution::Exhausted {
                     attempted_candidates,
                 } => {
-                    return Err(V3RelayCoreError::ProviderPoolExhausted {
-                        attempted_candidates,
-                    });
+                    let failure = C::request_failure_builder(
+                        "V3Target10ConcreteProviderSelected",
+                        "selected_target_exhausted",
+                        format!("selected target exhausted after {attempted_candidates:?}"),
+                    );
+                    return Ok(C::assemble_failure_output(
+                        terminalize_provider_failure(failure, last_eligible_external_http.clone()),
+                        trace,
+                    ));
                 }
             }
         };
@@ -724,6 +731,7 @@ where
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
+                        last_eligible_external_http: &mut last_eligible_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -757,6 +765,7 @@ where
                         failed_candidates: &mut failed_candidates,
                         same_candidate_retries: &mut same_candidate_retries,
                         trace: &mut trace,
+                        last_eligible_external_http: &mut last_eligible_external_http,
                     },
                     &mut retry_selected,
                     &mut pending_provider_action_recovery,
@@ -906,6 +915,17 @@ where
                 }) {
                 Ok(raw) => raw,
                 Err(V3ProviderError::HttpStatus { response }) => {
+                    if let Some(witness) = routecodex_v3_error::V3EligibleExternalHttpResponse::new(
+                        response.status,
+                        response
+                            .headers
+                            .iter()
+                            .map(|header| (header.name.clone(), header.value.clone()))
+                            .collect(),
+                        response.body.clone(),
+                    ) {
+                        last_eligible_external_http = Some(witness);
+                    }
                     let failure = C::provider_http_failure(
                         response.status,
                         &response.body,
@@ -921,6 +941,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
+                            last_eligible_external_http: &mut last_eligible_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -944,6 +965,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
+                            last_eligible_external_http: &mut last_eligible_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -982,6 +1004,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
+                                last_eligible_external_http: &mut last_eligible_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -993,7 +1016,10 @@ where
                         }
                         if attempt_budget.residence_deadline() <= std::time::Instant::now() {
                             return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure),
+                                terminalize_provider_failure(
+                                    failure,
+                                    last_eligible_external_http.clone(),
+                                ),
                                 trace,
                             ));
                         }
@@ -1018,6 +1044,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
+                            last_eligible_external_http: &mut last_eligible_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -1069,6 +1096,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
+                                last_eligible_external_http: &mut last_eligible_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1183,6 +1211,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
+                                last_eligible_external_http: &mut last_eligible_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1196,7 +1225,10 @@ where
                             || attempt_budget.residence_deadline() <= std::time::Instant::now()
                         {
                             return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure),
+                                terminalize_provider_failure(
+                                    failure,
+                                    last_eligible_external_http.clone(),
+                                ),
                                 trace,
                             ));
                         }
@@ -1261,6 +1293,7 @@ where
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 trace: &mut trace,
+                                last_eligible_external_http: &mut last_eligible_external_http,
                             },
                             &mut retry_selected,
                             &mut pending_provider_action_recovery,
@@ -1377,6 +1410,7 @@ where
                             failed_candidates: &mut failed_candidates,
                             same_candidate_retries: &mut same_candidate_retries,
                             trace: &mut trace,
+                            last_eligible_external_http: &mut last_eligible_external_http,
                         },
                         &mut retry_selected,
                         &mut pending_provider_action_recovery,
@@ -1390,7 +1424,10 @@ where
                         attempt_budget.residence_deadline() <= std::time::Instant::now();
                     if deadline_expired {
                         return Ok(C::assemble_failure_output(
-                            terminalize_provider_failure(failure),
+                            terminalize_provider_failure(
+                                failure,
+                                last_eligible_external_http.clone(),
+                            ),
                             trace,
                         ));
                     }

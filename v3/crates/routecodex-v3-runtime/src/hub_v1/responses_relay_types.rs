@@ -25,6 +25,7 @@ pub struct V3ResponsesRelayRuntimeInput {
 
 pub struct V3ResponsesRelayRuntimeOutput {
     pub status: u16,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub client_body: V3ResponsesRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
@@ -247,6 +248,7 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) source_stage: &'static str,
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
+    pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 
@@ -266,6 +268,8 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
+    pub(crate) last_eligible_external_http:
+        &'state mut Option<routecodex_v3_error::V3EligibleExternalHttpResponse>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
