@@ -133,11 +133,11 @@ const cases = [
     diagnostic: /missing Some\("failed"\)/,
   },
   {
-    name: 'apply_patch request feedback normalization removed',
+    name: 'apply_patch request feedback normalization reintroduced',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'fn normalize_apply_patch_output_text_at_req04',
-    mutation: 'normalize_apply_patch_output_removed_at_req04',
-    diagnostic: /normalize_apply_patch_output_text_at_req04/,
+    marker: 'fn govern_tool_outputs_at_req04(',
+    mutation: 'const APPLY_PATCH_ERROR_TEXT: &str = "proxy advice";\nfn govern_tool_outputs_at_req04(',
+    diagnostic: /APPLY_PATCH_ERROR_TEXT/,
   },
   {
     name: 'protocol transport matrix removed',

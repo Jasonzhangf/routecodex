@@ -96,12 +96,12 @@ for (const script of requiredScripts) {
 
 requireAll(text.request, files.request, [
   'govern_tool_outputs_at_req04',
-  'fn normalize_apply_patch_output_text_at_req04',
   'OrphanToolOutput { index: usize, call_id: String }',
   'ToolOutputKindMismatch',
   'SideChannelLeaked',
   'current_payload_start',
 ]);
+forbid(text.request, files.request, /normalize_apply_patch_tool_output_item_at_req04|normalize_apply_patch_output_text_at_req04|APPLY_PATCH_ERROR_TEXT|APPLY_PATCH_RESULT_TEXT/, 'proxy-authored apply_patch executor feedback');
 forbid(
   text.request,
   files.request,
@@ -240,7 +240,7 @@ if (runFromNormalizedStart < 0 || req04Start < 0 || !(runFromNormalizedStart < r
 requireAll(text.tests, files.tests, [
   'protocol_transport_matrix_uses_one_chat_process_governance_path',
   'apply_patch_response_is_projected_to_freeform_custom_tool_before_client_projection',
-  'apply_patch_tool_output_error_is_normalized_without_continuation_state',
+  'apply_patch_tool_output_error_is_preserved_without_continuation_state',
   'apply_patch_legacy_function_call_accepts_custom_output_after_client_projection',
   'request_governance_rejects_orphan_output_wrong_kind_and_missing_call_id',
   'response_governance_classifies_function_custom_servertool_and_internal_tools_before_commit',

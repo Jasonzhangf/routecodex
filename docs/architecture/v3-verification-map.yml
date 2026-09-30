@@ -2066,7 +2066,7 @@ features:
   required_unit:
   - protocol transport matrix covers Responses Anthropic OpenAI Chat and Gemini entries over JSON and SSE
   - request governance matches function custom servertool apply_patch MCP and native tool outputs only to current-turn tool calls
-  - Req04 normalizes paired apply_patch execution failures to deterministic APPLY_PATCH_ERROR feedback and keeps the tool output in the next provider request
+  - Req04 preserves paired apply_patch execution output exactly, including failure details and line endings, in the next provider request
   - Req04 accepts legacy function_call apply_patch contexts when the client returns custom_tool_call_output after freeform projection
   - orphan tool output missing call_id and wrong custom/function output kind fail fast inside Req04
   - client-supplied history remains byte-stable while current-turn tool output governance remains active
@@ -2075,10 +2075,12 @@ features:
   - JSON and SSE use one response exit and SSE arbitrary chunks preserve delta order terminal tool order DONE/finish reason parity
   - provider/client payloads reject RouteCodex control metadata_center debug/resource leakage
   - Responses Relay JSON two-turn provider request preserves tools and pairs the client-supplied function_call with current function_call_output
-  - Responses Relay JSON two-turn apply_patch returns freeform custom_tool_call to client and sends normalized APPLY_PATCH_ERROR feedback to provider
+  - Responses Relay JSON two-turn apply_patch returns freeform custom_tool_call to client and sends the exact paired failure or success output to provider
+  - public HTTP /v1/responses two-turn apply_patch preserves client failure and success output including CRLF and absolute-path diagnostics
   - wrong Responses Relay call_id fails before provider send
   required_gates:
   - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_apply_patch_feedback_preserves_client_output_two_turns -- --exact
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --test responses_relay_field_parity_integration -- --test-threads=1 --nocapture
   - npm run verify:v3-relay-tool-servertool-multiturn-parity-closeout
   - npm run test:v3-relay-tool-servertool-multiturn-parity-closeout-red-fixtures
