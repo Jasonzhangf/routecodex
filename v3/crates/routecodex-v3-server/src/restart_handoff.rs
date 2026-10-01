@@ -417,6 +417,26 @@ impl V3FrontTransportBroker {
         }
     }
 
+    /// Claim the client-visible boundary for the streaming no-response terminal.
+    ///
+    /// Called before the terminal response is returned, so a concurrent restart
+    /// replacement defers instead of closing the socket and dropping a response head
+    /// that Hyper has not even enqueued yet. Returns `false` when a restart closeout
+    /// already committed; its `503` stays the client-visible boundary then.
+    pub fn claim_current_connection_transport_break(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => socket.suppress_restart_closeout_frame(),
+            None => false,
+        }
+    }
+
     /// Settle the streaming no-response terminal that owns its own client boundary.
     ///
     /// Suppresses a restart closeout that has not committed, waits up to `head_wait` for

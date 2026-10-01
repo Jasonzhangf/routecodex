@@ -440,6 +440,15 @@ pub(crate) fn provider_terminal_response(
                 // the same request, instead of reading a header-less close as a
                 // normal end of stream. No client payload and no fabricated upstream
                 // status is sent; the typed Error chain keeps the real cause.
+                if let Some(connection) = connection {
+                    // Claim the boundary before Hyper can enqueue the response head, so
+                    // a concurrent restart replacement defers instead of closing the
+                    // socket and dropping that head. A closeout that already committed
+                    // keeps its `503` as the client-visible boundary.
+                    state
+                        .front_transport_broker
+                        .claim_current_connection_transport_break(connection);
+                }
                 return v3_sse_transport_disconnect_response(state, connection);
             }
             let connection = connection.expect("accepted Front connection identity");

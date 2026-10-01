@@ -135,6 +135,10 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
         let socket = V3StableFrontSocket::spawn(write_half);
         socket.mark_request_started();
         assert!(socket.suppress_restart_closeout_frame());
+        // Hyper enqueued the SSE head (poll_write) before the streaming terminal's
+        // body future reached its settle call. The closeout must still defer on the
+        // suppressed boundary and keep the queued head writable.
+        socket.closeout_state.mark_response_started();
         socket.close_for_exec_replacement();
         assert!(
             !socket.is_closed(),
