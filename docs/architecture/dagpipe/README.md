@@ -14,4 +14,6 @@
 
 `pending` 模块不会被静态图校验冒充为 PASS；命令会逐项打印 PENDING。图文件出现后必须在 `modules.json` 登记，否则治理命令失败。模块先后由请求、响应、错误的依赖及真实证据决定，不对所有模块一次性改造。额外校验不能拒绝原本可兼容传递的请求或拦截可兼容响应。Node01 的实现与证据见 `../../design/v3-unified-operation-runner-design.md` 和 `npm run verify:v3-operation-runner-dagpipe`。
 
+本目录只承载代理流水线的三个对象源图，`modules.json` 与 `npm run verify:v3-dagpipe-governance` 固定要求且只要求 `request`/`response`/`error` 三张图，并拒绝本目录内的任何未登记 `.graph.json`。**非代理流水线的功能图不得放入本目录**：控制面功能的项目图放在 `../dags/`，仍由同一个 `dagpipe graph validate` 治理校验，不新增第二套治理骨架，也不登记进 `modules.json`。`docs/architecture/dags/` 由 `npm run verify:v3-dagpipe-feature-graphs` 治理：该 gate 枚举目录内全部 `*.graph.json`，逐张执行 `dagpipe graph validate`，任一失败即失败，目录为空同样失败。当前受治理的三张图为 `../dags/v3.admin_provider_onboarding.graph.json`、`../dags/v3.admin_provider_patrol.graph.json`、`../dags/v3.admin_provider_patrol_plan.graph.json`。
+
 执行 V3 DAGPipe 治理 CI 的环境须安装 `dagpipe` CLI；缺少 CLI 时治理命令显式失败。CLI 安装本身不代表图通过，更不代表 SDK 或 runtime 接线。

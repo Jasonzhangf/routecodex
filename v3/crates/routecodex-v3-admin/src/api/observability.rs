@@ -1,153 +1,62 @@
 // feature_id: v3.webui_request_observability
 // Aggregates per-listener persisted JSONL projections for the single WebUI.
+//
+// This module keeps the shared record/store core: the typed query projection and
+// its row helpers, the record list and record detail handlers, and their unit
+// tests. The cooldown passthrough, the whitelisted artifact drill-down and the
+// SSE live tail live in the `observability` submodules. Every route they serve
+// is still declared in the single route table below, which `api/mod.rs` merges
+// behind the router-wide admin token layer.
 
+mod artifacts;
+mod cooldown;
+mod stream;
+
+use self::artifacts::{
+    artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
+};
+use self::cooldown::{cooldown_pool, remove_cooldown};
+use self::stream::stream;
 use crate::AppState;
-use axum::extract::{RawQuery, State};
+use axum::extract::{Path as AxumPath, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+
+/// The six typed Error chain nodes, in canonical order. The detail endpoint
+/// always reports all six; nodes the store did not observe are `not_reached`.
+const V3_OBS_ERROR_CHAIN_NODES: [&str; 6] = [
+    "V3Error01SourceRaised",
+    "V3Error02Classified",
+    "V3Error03TargetLocalAction",
+    "V3Error04TargetExhaustionDecision",
+    "V3Error05ExecutionDecision",
+    "V3Error06ClientProjected",
+];
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
     axum::Router::new()
         .route("/api/observability/records", axum::routing::get(records))
         .route(
+            "/api/observability/records/:request_key",
+            axum::routing::get(record_detail),
+        )
+        .route(
+            "/api/observability/artifacts",
+            axum::routing::get(artifacts),
+        )
+        .route(
+            "/api/observability/artifacts/content",
+            axum::routing::get(artifact_content),
+        )
+        .route("/api/observability/stream", axum::routing::get(stream))
+        .route(
             "/api/observability/cooldown-pool",
             axum::routing::get(cooldown_pool).post(remove_cooldown),
         )
-}
-
-async fn cooldown_pool(State(state): axum::extract::State<AppState>) -> Response {
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
-    };
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    let mut listeners = Vec::new();
-    for port in ports {
-        let url = format!("http://127.0.0.1:{port}/_routecodex/health/cooldown-pool");
-        let response = match client.get(&url).send().await {
-            Ok(response) => response,
-            Err(error) => return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener {port} unavailable: {error}") })),
-            )
-                .into_response(),
-        };
-        let status = response.status();
-        let body = match response.json::<Value>().await {
-            Ok(body) => body,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({ "error": format!("cooldown listener {port} invalid response: {error}") })),
-                )
-                    .into_response()
-            }
-        };
-        if !status.is_success() {
-            return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
-        }
-        listeners.push(body);
-    }
-    Json(json!({ "listeners": listeners })).into_response()
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct RemoveCooldownRequest {
-    port: u16,
-    provider_id: String,
-    #[serde(default)]
-    auth_alias: Option<String>,
-    #[serde(default)]
-    model_id: Option<String>,
-    kind: String,
-}
-
-async fn remove_cooldown(
-    State(state): axum::extract::State<AppState>,
-    Json(request): Json<RemoveCooldownRequest>,
-) -> Response {
-    if request.provider_id.trim().is_empty()
-        || !matches!(request.kind.as_str(), "session" | "auth_key" | "probe")
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "invalid cooldown removal request" })),
-        )
-            .into_response();
-    }
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
-    };
-    if !ports.contains(&request.port) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": format!("port {} is not configured", request.port) })),
-        )
-            .into_response();
-    }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    let url = format!(
-        "http://127.0.0.1:{}/_routecodex/health/cooldown-pool",
-        request.port
-    );
-    let response = match client.post(url).json(&request).send().await {
-        Ok(response) => response,
-        Err(error) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener {} unavailable: {error}", request.port) })),
-            )
-                .into_response()
-        }
-    };
-    let status = response.status();
-    let body = match response.json::<Value>().await {
-        Ok(body) => body,
-        Err(error) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener response invalid: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    if !status.is_success() {
-        return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
-    }
-    Json(body).into_response()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -821,6 +730,57 @@ fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, Stri
     ))
 }
 
+/// Read every persisted observability row across the configured listeners.
+///
+/// A store file that does not exist is "no traffic recorded yet" and is skipped;
+/// a store file that exists but cannot be read or decoded is an explicit failure
+/// and never becomes an empty result.
+fn read_observability_rows(state: &AppState) -> Result<Vec<SourceRow>, (StatusCode, Value)> {
+    let ports = configured_ports(state)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
+    let mut rows = Vec::new();
+    for port in ports {
+        let path = observability_store_path(state, port).map_err(|error| {
+            (
+                StatusCode::BAD_GATEWAY,
+                json!({ "error": format!("observability store path {port} unavailable: {error}") }),
+            )
+        })?;
+        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
+            Ok(values) => values,
+            Err(error) => {
+                if path.exists() {
+                    return Err((
+                        StatusCode::BAD_GATEWAY,
+                        json!({ "error": format!("observability store {port} unavailable: {error}") }),
+                    ));
+                }
+                continue;
+            }
+        };
+        for value in values {
+            let row = serde_json::from_value::<SourceRow>(value).map_err(|error| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    json!({
+                        "error": format!("decode observability store {port} row failed: {error}")
+                    }),
+                )
+            })?;
+            rows.push(row);
+        }
+    }
+    Ok(rows)
+}
+
+fn query_params(raw_query: &RawQuery) -> HashMap<String, String> {
+    raw_query
+        .0
+        .as_deref()
+        .map(parse_query_params)
+        .unwrap_or_default()
+}
+
 async fn records(
     axum::extract::State(state): axum::extract::State<AppState>,
     raw_query: RawQuery,
@@ -839,56 +799,10 @@ async fn records(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
     };
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
+    let rows = match read_observability_rows(&state) {
+        Ok(rows) => rows,
+        Err((status, body)) => return (status, Json(body)).into_response(),
     };
-    let mut rows = Vec::new();
-    for port in ports {
-        let path = match observability_store_path(&state, port) {
-            Ok(path) => path,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({
-                        "error": format!("observability store path {port} unavailable: {error}")
-                    })),
-                )
-                    .into_response();
-            }
-        };
-        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
-            Ok(values) => values,
-            Err(error) => {
-                if path.exists() {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": format!("observability store {port} unavailable: {error}")
-                        })),
-                    )
-                        .into_response();
-                }
-                continue;
-            }
-        };
-        for value in values {
-            match serde_json::from_value::<SourceRow>(value) {
-                Ok(row) => rows.push(row),
-                Err(error) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": format!("decode observability store {port} row failed: {error}")
-                        })),
-                    )
-                        .into_response();
-                }
-            }
-        }
-    }
     let rows = project_query_rows(rows);
     let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
@@ -920,11 +834,20 @@ async fn records(
     let total = filtered.len() as u64;
     let offset = ((query.page - 1) * query.page_size) as usize;
     let end = (offset + query.page_size as usize).min(filtered.len());
-    let page_rows: &[QueryRow] = if offset < filtered.len() {
-        &filtered[offset..end]
+    let mut page_rows: Vec<QueryRow> = if offset < filtered.len() {
+        filtered[offset..end].to_vec()
     } else {
-        &[]
+        Vec::new()
     };
+    // Same read-time resolution as the detail endpoint: the listener records
+    // `raw_artifact_ref` before the asynchronous sample writer has created the
+    // directory, so a listed row re-checks the filesystem instead of reporting
+    // a permanent null for a request that really did capture artifacts.
+    for row in page_rows.iter_mut() {
+        if row.raw_artifact_ref.is_none() {
+            row.raw_artifact_ref = resolve_v3_obs_row_artifact_ref(row);
+        }
+    }
     let mut stats = json!({
         "count":0u64,
         "success_count":0u64,
@@ -1054,6 +977,13 @@ async fn records(
             &mut facets,
             "response_types",
             row.meta.get("response_status").and_then(Value::as_str),
+        );
+        // Entry protocol facet: the UI protocol filter must be populated from the
+        // same field the `entry_protocol` query parameter filters on.
+        facet_add(
+            &mut facets,
+            "entry_protocols",
+            row.meta.get("entry_protocol").and_then(Value::as_str),
         );
         if row.result.as_deref() == Some("error") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
@@ -1186,6 +1116,157 @@ async fn records(
         timeseries,
     })
     .into_response()
+}
+
+/// Per-request detail: the current row, every provider attempt row, the typed
+/// Error01..Error06 chain, the typed health action, and the debug artifact list.
+async fn record_detail(
+    State(state): State<AppState>,
+    AxumPath(request_key): AxumPath<String>,
+) -> Response {
+    let rows = match read_observability_rows(&state) {
+        Ok(rows) => rows,
+        Err((status, body)) => return (status, Json(body)).into_response(),
+    };
+    let mut matching: Vec<SourceRow> = rows
+        .into_iter()
+        .filter(|row| row.request_key == request_key)
+        .collect();
+    if matching.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "request_not_found" })),
+        )
+            .into_response();
+    }
+    matching.sort_by_key(|row| row.updated_epoch_ms);
+    let port = matching[0].scope.port;
+    let request_id = matching
+        .iter()
+        .rev()
+        .find_map(|row| row.meta.get("request_id").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string();
+    let attempts: Vec<QueryRow> = matching
+        .iter()
+        .filter(|row| is_provider_attempt_failure(row))
+        .cloned()
+        .map(to_attempt_query_row)
+        .collect();
+    let mut row = matching
+        .iter()
+        .rev()
+        .find(|row| !is_provider_attempt_failure(row))
+        .cloned()
+        .map(to_query_row)
+        .unwrap_or_else(|| {
+            to_attempt_query_row(
+                matching
+                    .last()
+                    .cloned()
+                    .expect("matching rows are non-empty"),
+            )
+        });
+    let observed_error = row
+        .meta
+        .get("observed_error")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let error_chain = build_v3_obs_error_chain(observed_error.as_ref());
+    let health_action = observed_error
+        .as_ref()
+        .and_then(|value| value.get("health_action"))
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let observed_error_source = observed_error
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let sample_dir = if request_id.is_empty() {
+        None
+    } else {
+        match resolve_v3_obs_sample_dir(port, &request_id) {
+            Ok(dir) => dir,
+            Err(error) => {
+                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+            }
+        }
+    };
+    let artifacts = match sample_dir.as_deref() {
+        Some(dir) => list_v3_obs_artifacts(dir),
+        None => Vec::new(),
+    };
+    // The listener writes `raw_artifact_ref` when it records the row, but the
+    // debug sample writer persists asynchronously, so that write can lose the
+    // race with the files on disk. The filesystem is the truth here: resolve at
+    // read time, and keep `None` when no directory exists rather than
+    // fabricating a path.
+    if row.raw_artifact_ref.is_none() {
+        row.raw_artifact_ref = sample_dir.as_ref().map(|dir| dir.display().to_string());
+    }
+    Json(json!({
+        "row": row,
+        "attempts": attempts,
+        "error_chain": error_chain,
+        "health_action": health_action,
+        "artifacts": artifacts,
+        "observed_error_source": observed_error_source,
+    }))
+    .into_response()
+}
+
+/// Project the stored typed chain onto the fixed six-node contract. All six
+/// nodes are always reported in canonical order; a node the store did not
+/// observe is `not_reached` with a null code. Nothing is invented for a node
+/// that was not observed, and no node is omitted.
+fn build_v3_obs_error_chain(observed_error: Option<&Value>) -> Vec<Value> {
+    let stored = observed_error
+        .and_then(|value| value.get("chain"))
+        .and_then(Value::as_array);
+    V3_OBS_ERROR_CHAIN_NODES
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let entry = stored.and_then(|chain| {
+                chain
+                    .iter()
+                    .find(|entry| entry.get("node").and_then(Value::as_str) == Some(*node))
+            });
+            let state = match entry {
+                Some(_) if index == 0 => "raised",
+                Some(_) => "observed",
+                None => "not_reached",
+            };
+            let code = entry
+                .and_then(|entry| entry.get("code"))
+                .filter(|value| !value.is_null())
+                .cloned()
+                .unwrap_or(Value::Null);
+            json!({ "node": node, "state": state, "code": code })
+        })
+        .collect()
+}
+
+/// Read-time artifact reference for one listed row.
+///
+/// `raw_artifact_ref` is recorded by the listener, but the debug sample writer
+/// persists asynchronously, so that value can be `None` for a request whose
+/// artifacts exist a moment later. Re-resolving against the filesystem keeps the
+/// list consistent with the detail endpoint. A missing directory stays `None`;
+/// no path is invented. A resolution failure (no `HOME`, unreadable root) is
+/// reported as "no artifact reference", never as an error, because the list is
+/// a catalog view and one unavailable samples root must not fail it.
+fn resolve_v3_obs_row_artifact_ref(row: &QueryRow) -> Option<String> {
+    let request_id = row.meta.get("request_id").and_then(Value::as_str)?;
+    if request_id.trim().is_empty() {
+        return None;
+    }
+    resolve_v3_obs_sample_dir(row.scope.port, request_id)
+        .ok()
+        .flatten()
+        .map(|dir| dir.display().to_string())
 }
 
 fn parse_query_params(raw: &str) -> std::collections::HashMap<String, String> {

@@ -531,6 +531,10 @@ fn build_v3_direct_provider_failure_observation(
             .internal_error
             .as_ref()
             .map(|internal| internal.internal_code.to_string()),
+        upstream_request_id: source
+            .external_error
+            .as_ref()
+            .and_then(|external| external.upstream_request_id.clone()),
         message: source.message.clone(),
         failure_count: health_record.failure_count,
         health_state: health_record.state.clone(),

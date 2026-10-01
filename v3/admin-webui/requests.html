@@ -6,6 +6,62 @@
 <title>RouteCodex — Requests</title>
 <link rel="stylesheet" href="/vendor/ambient.css">
 <link rel="stylesheet" href="/styles.css">
+<style>
+  /* Page-scoped: live-mode toggle, row copy, cooldown panel, error-detail modal. */
+  .live-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .live-toggle input { accent-color: var(--accent); }
+  .live-state { font-size: 12px; color: var(--muted); }
+  .live-state.on { color: var(--accent); }
+  .live-state.err { color: var(--danger); }
+  .row-copy { padding: 1px 6px; font-size: 11px; }
+  .adv-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+  .cooldown-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+  }
+  .cooldown-card {
+    border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .cooldown-card h4 { margin: 0 0 6px; font-size: 13px; }
+  .cooldown-remaining { font-variant-numeric: tabular-nums; color: var(--amb-emit-amber, #d9a441); }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, hsl(var(--amb-light-hue) 30% 4%), transparent 35%);
+    z-index: 70;
+  }
+  .modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(880px, 94vw);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 22px 22px;
+    overflow: hidden;
+    z-index: 80;
+  }
+  .modal[hidden], .modal-backdrop[hidden] { display: none; }
+  .modal-head { display: flex; align-items: center; gap: 12px; }
+  .modal-head h2 { flex: 1; margin: 0; font-size: 16px; }
+  .modal-body { overflow-y: auto; margin-top: 12px; flex: 1 1 auto; min-height: 0; }
+  .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .detail-section { margin-top: 14px; }
+  .detail-section > h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .artifact-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .artifact-row .spacer { flex: 1; }
+</style>
 </head>
 <body class="ambient">
 <aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
@@ -39,6 +95,12 @@
       </div>
     </div>
 
+    <div class="section">
+      <h2>Provider cooldown</h2>
+      <p class="help">Current provider health/cooldown, read from <span class="mono">GET /api/observability/cooldown-pool</span>. This is the only source of current cooldown truth; per-request <span class="mono">health_action</span> fields are immutable attempt-time history.</p>
+      <div class="panel amb-surface amb-elevation-1" id="cooldown-panel"><div class="loading">loading…</div></div>
+    </div>
+
     <!-- Layer 1: Port tabs (hidden port-filter select kept for compatibility/tests, synced by the tab bar) -->
     <div class="visually-hidden-select" aria-hidden="true">
       <select id="port-filter"><option value="all">all ports</option></select>
@@ -50,10 +112,13 @@
         <button type="button" data-mode="time" aria-pressed="true">By time</button>
         <button type="button" data-mode="code" aria-pressed="false">By status code</button>
       </div>
-      <span class="page-info muted" id="page-info">—</span>
+      <label class="live-toggle" title="Tail new rows over the SSE stream; polling resumes when unchecked">
+        <input type="checkbox" id="live-mode"> Live
+      </label>
+      <span class="live-state" id="live-state">polling</span>
       <span class="spacer"></span>
-      <button class="btn amb-button amb-button-cap" id="export-csv-top" type="button" disabled>Export CSV</button>
-      <button class="btn amb-button amb-button-cap" id="copy-tsv-top" type="button" disabled>Copy to clipboard</button>
+      <button class="btn amb-button amb-button-cap" id="export-csv-top" type="button" disabled title="Export every row matching the current filter">Export CSV (filter)</button>
+      <button class="btn amb-button amb-button-cap" id="copy-tsv-top" type="button" disabled title="Copy every row matching the current filter">Copy to clipboard (filter)</button>
     </div>
 
     <div class="requests-grid">
@@ -82,6 +147,12 @@
             <label>Route<input id="route-filter" type="search" placeholder="route"></label>
             <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
             <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
+            <label>From (absolute)<input id="time-from" type="datetime-local" aria-label="Absolute range start"></label>
+            <label>To (absolute)<input id="time-to" type="datetime-local" aria-label="Absolute range end"></label>
+            <div class="adv-actions">
+              <button class="btn" id="time-clear" type="button">Clear absolute range</button>
+              <span class="muted" id="time-hint">An absolute range overrides the Range selector and is sent as time_from_ms / time_to_ms.</span>
+            </div>
             <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
             <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
           </div>
@@ -91,7 +162,7 @@
       <div>
         <div class="pagination">
           <button class="btn amb-button amb-button-cap" id="page-prev" type="button">&#8592; Prev</button>
-          <span id="page-info" class="page-info">page — of — · — records</span>
+          <span id="page-info" class="page-info" aria-live="polite">page — of — · — records</span>
           <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
           <button class="btn amb-button amb-button-cap" id="page-next" type="button">Next &#8594;</button>
         </div>
@@ -107,7 +178,7 @@
             <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
           </nav>
           <div class="panel table-panel amb-surface amb-elevation-1" id="requests-panel"><div class="loading">loading…</div></div>
-          <p class="help">Status-code mode: grouping and exclusion apply to the currently loaded page; within each group, items sort by time descending. The export columns include request_id and error_detail.</p>
+          <p class="help">Status-code mode: grouping and exclusion apply to the currently loaded page; within each group, items sort by time descending. The export columns include request_id and error_detail. Row click opens the request detail modal (error chain, health action, live cooldown, artifacts).</p>
         </div>
       </div>
     </div>
@@ -122,18 +193,13 @@
   </main>
 </div>
 
-<div class="drawer-backdrop" id="drawer-backdrop"></div>
-<div class="drawer amb-surface amb-elevation-2" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-  <div class="drawer-head">
-    <button class="btn" id="drawer-back" type="button" aria-label="Back to list">&#859; Back</button>
-    <button class="btn close icon-btn" id="drawer-close" type="button" aria-label="Close details">&#10005;</button>
+<div class="modal-backdrop" id="detail-backdrop" hidden></div>
+<div class="modal amb-surface amb-elevation-2" id="error-detail-modal" role="dialog" aria-modal="true" aria-labelledby="error-detail-title" hidden>
+  <div class="modal-head">
+    <h2 id="error-detail-title">Request detail</h2>
+    <button class="btn close icon-btn" id="error-detail-close" type="button" aria-label="Close request detail">&#10005;</button>
   </div>
-  <h2 id="drawer-title">Details</h2>
-  <div id="drawer-body"></div>
-  <div class="actions">
-    <div style="flex:1"></div>
-    <button class="btn" id="drawer-cancel" type="button">Cancel</button>
-  </div>
+  <div id="error-detail-body" class="modal-body"><div class="loading">loading…</div></div>
 </div>
 
 <script type="module" src="/app/views/usage.js"></script>

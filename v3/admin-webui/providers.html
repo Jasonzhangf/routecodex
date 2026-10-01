@@ -13,6 +13,7 @@
 <div class="shell">
   <div class="topbar">
     <div class="spacer"></div>
+    <button class="btn amb-button amb-button-cap amb-light-tl" id="add-provider-btn" type="button">Add provider</button>
     <button class="btn amb-button amb-button-cap" id="refresh-btn" type="button">Refresh</button>
     <button class="btn primary amb-button amb-button-cap amb-light-tl" id="reload-btn" type="button">Reload</button>
   </div>
@@ -21,14 +22,61 @@
     <div id="page-sub" class="sub">Provider inventory, health and route references</div>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
     <div class="cards" id="summary-cards"></div>
+
+    <div class="section">
+      <h2>Providers</h2>
+      <div class="panel amb-surface amb-elevation-1" id="providers-panel"><div class="loading">loading…</div></div>
+    </div>
+
+    <div class="section" id="wizard-panel" hidden>
+      <h2>Add provider</h2>
+      <div class="panel amb-surface amb-elevation-1">
+        <div class="wizard-steps" id="wizard-steps"></div>
+        <div id="wizard-summary"></div>
+        <div id="wizard-body"></div>
+        <div class="actions" id="wizard-actions"></div>
+      </div>
+    </div>
+
+    <div class="section" id="probe-panel" hidden>
+      <h2>Probe ladder</h2>
+      <div class="panel amb-surface amb-elevation-1">
+        <div class="hint" id="probe-target">select a provider row or use the wizard probe step</div>
+        <div id="probe-host"></div>
+      </div>
+    </div>
+
     <div class="layout">
-      <div class="section">
-        <h2>Providers</h2>
-        <div class="panel amb-surface amb-elevation-1" id="providers-panel"><div class="loading">loading…</div></div>
+      <div class="section" id="patrol-panel">
+        <h2>Patrol</h2>
+        <div class="panel amb-surface amb-elevation-1">
+          <div class="row">
+            <span class="name">Provider</span>
+            <select id="patrol-provider" aria-label="Patrol provider"></select>
+          </div>
+          <div id="patrol-plan"><div class="loading">loading…</div></div>
+          <div class="hint" id="patrol-status"></div>
+          <h3>Result history</h3>
+          <div id="patrol-history"><div class="loading">loading…</div></div>
+        </div>
       </div>
       <div class="section">
         <h2>Health mix</h2>
         <div class="panel amb-surface amb-elevation-1" id="health-donut"></div>
+      </div>
+    </div>
+
+    <div class="section" id="import-panel">
+      <h2>Bulk import</h2>
+      <div class="panel amb-surface amb-elevation-1">
+        <p class="hint">Paste one or more provider documents separated by a line containing only <code>---</code>. Preview runs a dry run; Import reports per-item results and a retryable failure set.</p>
+        <textarea id="import-text" class="mono" rows="8" spellcheck="false" aria-label="Provider documents"></textarea>
+        <div class="actions">
+          <button class="btn" id="import-preview-btn" type="button">Preview (dry run)</button>
+          <button class="btn primary" id="import-run-btn" type="button">Import</button>
+        </div>
+        <div class="hint" id="import-summary"></div>
+        <div id="import-results"></div>
       </div>
     </div>
   </main>

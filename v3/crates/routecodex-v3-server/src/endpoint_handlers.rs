@@ -975,6 +975,34 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         };
         if let Some(disposition) = output.terminal_disposition.take() {
+            // A provider terminal disposition returns the provider's own HTTP
+            // response verbatim, so this path never reaches the relay closeout
+            // below. The chain and status are still real typed facts: persist
+            // the error evidence and project the chain first, otherwise a
+            // request that really failed keeps an observability row whose every
+            // Error node reads "not_reached" and leaves no artifact on disk.
+            if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_id,
+                &console_payload,
+                &output,
+            ) {
+                return response;
+            }
+            if let Some(response) = project_v3_responses_relay_error_chain(
+                &state,
+                &trace_scope,
+                &entry_protocol,
+                &path,
+                &request_id,
+                snapshot_session_id.as_deref(),
+                request_console_project_path.as_deref(),
+                &output,
+            ) {
+                return response;
+            }
             return provider_terminal_response(
                 &state,
                 front_connection_identity,
@@ -1092,6 +1120,32 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
                     if let Some(disposition) = relay_output.terminal_disposition.take() {
+                        // Same entry, same defect as the branch below: a
+                        // provider terminal disposition bypasses the relay
+                        // closeout, so the real typed chain and the on-disk
+                        // evidence have to be recorded here as well.
+                        if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            &console_payload,
+                            &relay_output,
+                        ) {
+                            return response;
+                        }
+                        if let Some(response) = project_v3_responses_relay_error_chain(
+                            &state,
+                            &trace_scope,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            snapshot_session_id.as_deref(),
+                            request_console_project_path.as_deref(),
+                            &relay_output,
+                        ) {
+                            return response;
+                        }
                         return provider_terminal_response(
                             &state,
                             front_connection_identity,
@@ -1280,6 +1334,32 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
                 if let Some(disposition) = output.terminal_disposition.clone() {
+                    // Third and last Responses terminal-disposition site: same
+                    // entry, same defect, so the real typed chain and the
+                    // on-disk evidence are recorded before the provider's own
+                    // response is returned verbatim.
+                    if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &raw_request_payload,
+                        &output,
+                    ) {
+                        return response;
+                    }
+                    if let Some(response) = project_v3_responses_relay_error_chain(
+                        &state,
+                        &trace_scope,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        snapshot_session_id.as_deref(),
+                        request_console_project_path.as_deref(),
+                        &output,
+                    ) {
+                        return response;
+                    }
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
@@ -1363,92 +1443,16 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     }
 }
 
-pub(crate) fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
-    headers
-        .get("x-routecodex-dry-run")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
-}
-
-fn resolve_v3_dry_run_target_label(state: &V3ListenerState) -> String {
-    state
-        .manifest
-        .providers
-        .values()
-        .find_map(|provider| {
-            let auth_alias = provider.auth.entries.first()?.alias.as_str();
-            let model = provider.models.values().next()?;
-            Some(format!(
-                "{}[{}].{}",
-                provider.id, auth_alias, model.wire_name
-            ))
-        })
-        .unwrap_or_else(|| "-".to_string())
-}
-
-pub(crate) fn merge_v3_protocol_plan_trace(
-    mut plan_trace: Vec<&'static str>,
-    runtime_trace: Vec<&'static str>,
-) -> Vec<&'static str> {
-    plan_trace.extend(runtime_trace);
-    plan_trace
-}
-
-pub(crate) fn prepend_v3_protocol_plan_trace_to_foundation_output(
-    output: &mut V3FoundationRuntimeOutput,
-    plan_trace: &[&'static str],
-) {
-    let merged = merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
-    output.node_trace = merged.clone();
-    if let Some(dry_run) = output
-        .body
-        .get_mut("dry_run")
-        .and_then(Value::as_object_mut)
-    {
-        dry_run.insert("node_ids".to_string(), json!(merged));
-    }
-}
-
-pub(crate) fn prepend_v3_protocol_plan_trace_to_responses_relay_output(
-    output: &mut V3ResponsesRelayRuntimeOutput,
-    plan_trace: &[&'static str],
-) {
-    output.node_trace =
-        merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
-}
-
-pub(crate) fn prepend_v3_relay_handoff_trace_to_direct_frame(
-    frame: &mut V3Server16HttpFrame,
-    relay_trace: &[&'static str],
-) {
-    frame.node_trace = merge_v3_protocol_plan_trace(relay_trace.to_vec(), frame.node_trace.clone());
-}
-
-pub(crate) fn merge_v3_direct_handoff_provider_failure_events(
-    output: &mut V3ResponsesRelayRuntimeOutput,
-    direct_events: Vec<V3RuntimeProviderFailureObservation>,
-) {
-    if direct_events.is_empty() {
-        return;
-    }
-    let observability = output.observability.get_or_insert_with(Default::default);
-    let mut merged = direct_events;
-    merged.append(&mut observability.provider_failure_events);
-    observability.provider_failure_events = merged;
-}
-
-pub(crate) fn merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-    frame: &mut V3Server16HttpFrame,
-    relay_events: Vec<V3RuntimeProviderFailureObservation>,
-) {
-    if relay_events.is_empty() {
-        return;
-    }
-    let observability = frame.observability.get_or_insert_with(Default::default);
-    let mut merged = relay_events;
-    merged.append(&mut observability.provider_failure_events);
-    observability.provider_failure_events = merged;
-}
+#[path = "endpoint_trace.rs"]
+mod endpoint_trace;
+use endpoint_trace::resolve_v3_dry_run_target_label;
+pub(crate) use endpoint_trace::{
+    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    prepend_v3_protocol_plan_trace_to_foundation_output,
+    prepend_v3_protocol_plan_trace_to_responses_relay_output,
+    prepend_v3_relay_handoff_trace_to_direct_frame,
+};
 
 #[path = "request_identity.rs"]
 mod request_identity;

@@ -6,6 +6,7 @@ mod health;
 pub mod key_health;
 pub mod probe;
 mod probe_backoff;
+mod provider_auth;
 mod provider_cooldown_probe;
 pub mod raw_response;
 mod shared;
@@ -44,7 +45,7 @@ pub use transport::{
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
-    build_v3_transport_13_responses_request_from_v3_provider_12,
+    build_v3_transport_13_responses_request_from_v3_provider_12, discover_v3_provider_models,
     is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
     V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,

@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 78 functional paths, 472 caller edges.
+Generated view: 84 functional paths, 489 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -36,6 +36,7 @@ flowchart TD
   module_v3_virtual_router["v3-virtual-router"]
   module_v3_scripts["v3/scripts"]
   module_pending -->|19 edges / 4 paths| module_pending
+  module_routecodex_v3_admin -->|17 edges / 6 paths| module_routecodex_v3_admin
   module_routecodex_v3_admin -->|1 edges / 1 paths| module_v3_debug
   module_routecodex_v3_hooks -->|6 edges / 1 paths| module_routecodex_v3_hooks
   module_routecodex_v3_route_classifier -->|3 edges / 2 paths| module_routecodex_v3_route_classifier
@@ -85,6 +86,7 @@ flowchart TD
 | From module | To module | Edges | Functional paths |
 | --- | --- | ---: | --- |
 | pending | pending | 19 | `v3.operation_runner.dagpipe.error`<br/>`v3.operation_runner.dagpipe.request`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.responses_chat_sse_typed_tree` |
+| routecodex-v3-admin | routecodex-v3-admin | 17 | `v3.admin.control_plane_admission`<br/>`v3.admin.environment_projection`<br/>`v3.admin.provider_authoring_write`<br/>`v3.admin.provider_candidate_probe`<br/>`v3.admin.provider_patrol_plan_authoring`<br/>`v3.admin.provider_patrol_run` |
 | routecodex-v3-admin | v3-debug | 1 | `v3.server.internal_observability_projection` |
 | routecodex-v3-hooks | routecodex-v3-hooks | 6 | `v3.rcc_internal_hooks_sidecar` |
 | routecodex-v3-route-classifier | routecodex-v3-route-classifier | 3 | `v3.route_policy.condition_evaluation`<br/>`vr.current_turn_typed_route_facts` |
@@ -3174,3 +3176,151 @@ flowchart TD
 | `v3-op-runner-err-03` | `ErrorErr03RuntimeClassified` → `ErrorErr04RouterPolicyApplied` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-err-04` | `ErrorErr04RouterPolicyApplied` → `ErrorErr05ExecutionDecision` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
 | `v3-op-runner-err-05` | `ErrorErr05ExecutionDecision` → `ErrorErr06ClientProjected` | binding_pending | pending<br/><small>pending</small> | pending<br/><small>pending</small> | `v3.unified_operation_runner_design` |
+
+## v3.admin.control_plane_admission
+
+The admin control plane provisions its local trust token at process start, mounts the admission middleware on the served router, and admits or rejects one request against that token before any handler runs.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_78_v3_admin_control_plane_admission_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_78_v3_admin_control_plane_admission_0["routecodex-v3-admin<br/>AppState::new<br/><small>routecodex-v3-admin/src/lib.rs</small>"]
+    c_78_v3_admin_control_plane_admission_1["routecodex-v3-admin<br/>AdminToken::load_or_create<br/><small>routecodex-v3-admin/src/auth.rs</small>"]
+    c_78_v3_admin_control_plane_admission_2["routecodex-v3-admin<br/>build_router<br/><small>routecodex-v3-admin/src/api/mod.rs</small>"]
+    c_78_v3_admin_control_plane_admission_3["routecodex-v3-admin<br/>require_admin<br/><small>routecodex-v3-admin/src/auth.rs</small>"]
+    c_78_v3_admin_control_plane_admission_4["routecodex-v3-admin<br/>reject<br/><small>routecodex-v3-admin/src/auth.rs</small>"]
+  end
+  c_78_v3_admin_control_plane_admission_0 -->|v3-admin-admission-01<br/>V3AdminControlTokenProvisioned → V3AdminRouterMounted| c_78_v3_admin_control_plane_admission_1
+  c_78_v3_admin_control_plane_admission_2 -->|v3-admin-admission-02<br/>V3AdminRouterMounted → V3AdminRequestAdmitted| c_78_v3_admin_control_plane_admission_3
+  c_78_v3_admin_control_plane_admission_3 -->|v3-admin-admission-03<br/>V3AdminRequestAdmitted → V3AdminAdmissionDecision| c_78_v3_admin_control_plane_admission_4
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-admission-01` | `V3AdminControlTokenProvisioned` → `V3AdminRouterMounted` | anchored | AppState::new<br/><small>routecodex-v3-admin/src/lib.rs</small> | AdminToken::load_or_create<br/><small>routecodex-v3-admin/src/auth.rs</small> | `v3.config_management` |
+| `v3-admin-admission-02` | `V3AdminRouterMounted` → `V3AdminRequestAdmitted` | anchored | build_router<br/><small>routecodex-v3-admin/src/api/mod.rs</small> | require_admin<br/><small>routecodex-v3-admin/src/auth.rs</small> | `v3.config_management` |
+| `v3-admin-admission-03` | `V3AdminRequestAdmitted` → `V3AdminAdmissionDecision` | anchored | require_admin<br/><small>routecodex-v3-admin/src/auth.rs</small> | reject<br/><small>routecodex-v3-admin/src/auth.rs</small> | `v3.config_management` |
+
+## v3.admin.environment_projection
+
+A doctor request builds the derived admin environment projection from the served config, the installed binary, and a live listener probe; the projection is read-only and never becomes runtime truth.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_79_v3_admin_environment_projection_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_79_v3_admin_environment_projection_0["routecodex-v3-admin<br/>doctor<br/><small>routecodex-v3-admin/src/api/deploy.rs</small>"]
+    c_79_v3_admin_environment_projection_1["routecodex-v3-admin<br/>build_doctor<br/><small>routecodex-v3-admin/src/api/deploy.rs</small>"]
+    c_79_v3_admin_environment_projection_2["routecodex-v3-admin<br/>build_environment<br/><small>routecodex-v3-admin/src/api/deploy.rs</small>"]
+    c_79_v3_admin_environment_projection_3["routecodex-v3-admin<br/>probe_listeners<br/><small>routecodex-v3-admin/src/api/deploy.rs</small>"]
+  end
+  c_79_v3_admin_environment_projection_0 -->|v3-admin-environment-01<br/>V3AdminDoctorRequest → V3AdminDoctorReport| c_79_v3_admin_environment_projection_1
+  c_79_v3_admin_environment_projection_1 -->|v3-admin-environment-02<br/>V3AdminDoctorReport → V3AdminEnvironmentSnapshot| c_79_v3_admin_environment_projection_2
+  c_79_v3_admin_environment_projection_2 -->|v3-admin-environment-03<br/>V3AdminEnvironmentSnapshot → V3AdminListenerHealth| c_79_v3_admin_environment_projection_3
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-environment-01` | `V3AdminDoctorRequest` → `V3AdminDoctorReport` | anchored | doctor<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | build_doctor<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | `v3.config_management` |
+| `v3-admin-environment-02` | `V3AdminDoctorReport` → `V3AdminEnvironmentSnapshot` | anchored | build_doctor<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | build_environment<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | `v3.config_management` |
+| `v3-admin-environment-03` | `V3AdminEnvironmentSnapshot` → `V3AdminListenerHealth` | anchored | build_environment<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | probe_listeners<br/><small>routecodex-v3-admin/src/api/deploy.rs</small> | `v3.config_management` |
+
+## v3.admin.provider_candidate_probe
+
+An unsaved provider candidate is spawned into an SSE probe run that executes one typed stage and projects redacted probe evidence; the candidate itself is never persisted by this path.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_80_v3_admin_provider_candidate_probe_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_80_v3_admin_provider_candidate_probe_0["routecodex-v3-admin<br/>probe_candidate<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+    c_80_v3_admin_provider_candidate_probe_1["routecodex-v3-admin<br/>start_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+    c_80_v3_admin_provider_candidate_probe_2["routecodex-v3-admin<br/>run_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+    c_80_v3_admin_provider_candidate_probe_3["routecodex-v3-admin<br/>execute_stage<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+  end
+  c_80_v3_admin_provider_candidate_probe_0 -->|v3-admin-probe-01<br/>V3AdminProbeCandidate → V3AdminProbeStream| c_80_v3_admin_provider_candidate_probe_1
+  c_80_v3_admin_provider_candidate_probe_1 -->|v3-admin-probe-02<br/>V3AdminProbeStream → V3AdminProbeRun| c_80_v3_admin_provider_candidate_probe_2
+  c_80_v3_admin_provider_candidate_probe_2 -->|v3-admin-probe-03<br/>V3AdminProbeRun → V3AdminProbeEvidence| c_80_v3_admin_provider_candidate_probe_3
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-probe-01` | `V3AdminProbeCandidate` → `V3AdminProbeStream` | anchored | probe_candidate<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | start_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
+| `v3-admin-probe-02` | `V3AdminProbeStream` → `V3AdminProbeRun` | anchored | start_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | run_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
+| `v3-admin-probe-03` | `V3AdminProbeRun` → `V3AdminProbeEvidence` | anchored | run_probe<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | execute_stage<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
+
+## v3.admin.provider_authoring_write
+
+A provider create request identifies the candidate and writes it through the config-core authoring path with backup and revision; the admin never fabricates the provider directory file itself.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_81_v3_admin_provider_authoring_write_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_81_v3_admin_provider_authoring_write_0["routecodex-v3-admin<br/>create_provider<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small>"]
+    c_81_v3_admin_provider_authoring_write_1["routecodex-v3-admin<br/>candidate_id<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small>"]
+    c_81_v3_admin_provider_authoring_write_2["routecodex-v3-admin<br/>write_provider<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small>"]
+  end
+  c_81_v3_admin_provider_authoring_write_0 -->|v3-admin-authoring-01<br/>V3AdminProviderCandidateRequest → V3AdminProviderCandidateIdentified| c_81_v3_admin_provider_authoring_write_1
+  c_81_v3_admin_provider_authoring_write_0 -->|v3-admin-authoring-02<br/>V3AdminProviderCandidateIdentified → V3AdminProviderDirectoryAuthoring| c_81_v3_admin_provider_authoring_write_2
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-authoring-01` | `V3AdminProviderCandidateRequest` → `V3AdminProviderCandidateIdentified` | anchored | create_provider<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small> | candidate_id<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small> | `v3.config_management` |
+| `v3-admin-authoring-02` | `V3AdminProviderCandidateIdentified` → `V3AdminProviderDirectoryAuthoring` | anchored | create_provider<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small> | write_provider<br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small> | `v3.config_management` |
+
+## v3.admin.provider_patrol_plan_authoring
+
+An operator patrol plan is validated and atomically stored; an invalid plan leaves the persisted plan file untouched.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_82_v3_admin_provider_patrol_plan_authoring_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_82_v3_admin_provider_patrol_plan_authoring_0["routecodex-v3-admin<br/>put_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+    c_82_v3_admin_provider_patrol_plan_authoring_1["routecodex-v3-admin<br/>PatrolRuntime::set_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+    c_82_v3_admin_provider_patrol_plan_authoring_2["routecodex-v3-admin<br/>validate_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+  end
+  c_82_v3_admin_provider_patrol_plan_authoring_0 -->|v3-admin-patrol-plan-01<br/>V3AdminPatrolPlanRequest → V3AdminPatrolPlanStored| c_82_v3_admin_provider_patrol_plan_authoring_1
+  c_82_v3_admin_provider_patrol_plan_authoring_1 -->|v3-admin-patrol-plan-02<br/>V3AdminPatrolPlanStored → V3AdminPatrolPlanValidated| c_82_v3_admin_provider_patrol_plan_authoring_2
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-patrol-plan-01` | `V3AdminPatrolPlanRequest` → `V3AdminPatrolPlanStored` | anchored | put_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | PatrolRuntime::set_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | `v3.config_management` |
+| `v3-admin-patrol-plan-02` | `V3AdminPatrolPlanStored` → `V3AdminPatrolPlanValidated` | anchored | PatrolRuntime::set_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | validate_plan<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | `v3.config_management` |
+
+## v3.admin.provider_patrol_run
+
+The advisory patrol tick loop selects due plans, runs each plan through the shared probe stage implementation, and appends diagnostic results without mutating runtime provider health.
+
+Owner feature: `v3.config_management`
+
+```mermaid
+flowchart TD
+  subgraph c_83_v3_admin_provider_patrol_run_m_routecodex_v3_admin["routecodex-v3-admin"]
+    c_83_v3_admin_provider_patrol_run_0["routecodex-v3-admin<br/>spawn_patrol_loop<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+    c_83_v3_admin_provider_patrol_run_1["routecodex-v3-admin<br/>PatrolRuntime::run_due<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+    c_83_v3_admin_provider_patrol_run_2["routecodex-v3-admin<br/>PatrolRuntime::run<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small>"]
+    c_83_v3_admin_provider_patrol_run_3["routecodex-v3-admin<br/>execute_stages<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+    c_83_v3_admin_provider_patrol_run_4["routecodex-v3-admin<br/>execute_stage<br/><small>routecodex-v3-admin/src/provider_probe.rs</small>"]
+  end
+  c_83_v3_admin_provider_patrol_run_0 -->|v3-admin-patrol-run-01<br/>V3AdminPatrolLoop → V3AdminPatrolDueBatch| c_83_v3_admin_provider_patrol_run_1
+  c_83_v3_admin_provider_patrol_run_1 -->|v3-admin-patrol-run-02<br/>V3AdminPatrolDueBatch → V3AdminPatrolResult| c_83_v3_admin_provider_patrol_run_2
+  c_83_v3_admin_provider_patrol_run_2 -->|v3-admin-patrol-run-03<br/>V3AdminPatrolResult → V3AdminPatrolStageEvidence| c_83_v3_admin_provider_patrol_run_3
+  c_83_v3_admin_provider_patrol_run_3 -->|v3-admin-patrol-run-04<br/>V3AdminPatrolStageEvidence → V3AdminPatrolStageReport| c_83_v3_admin_provider_patrol_run_4
+```
+
+| Step | Node edge | Status | Caller | Callee | Owner |
+| --- | --- | --- | --- | --- | --- |
+| `v3-admin-patrol-run-01` | `V3AdminPatrolLoop` → `V3AdminPatrolDueBatch` | anchored | spawn_patrol_loop<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | PatrolRuntime::run_due<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | `v3.config_management` |
+| `v3-admin-patrol-run-02` | `V3AdminPatrolDueBatch` → `V3AdminPatrolResult` | anchored | PatrolRuntime::run_due<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | PatrolRuntime::run<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | `v3.config_management` |
+| `v3-admin-patrol-run-03` | `V3AdminPatrolResult` → `V3AdminPatrolStageEvidence` | anchored | PatrolRuntime::run<br/><small>routecodex-v3-admin/src/provider_patrol.rs</small> | execute_stages<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |
+| `v3-admin-patrol-run-04` | `V3AdminPatrolStageEvidence` → `V3AdminPatrolStageReport` | anchored | execute_stages<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | execute_stage<br/><small>routecodex-v3-admin/src/provider_probe.rs</small> | `v3.config_management` |

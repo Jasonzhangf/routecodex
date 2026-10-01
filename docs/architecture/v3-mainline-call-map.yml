@@ -8744,3 +8744,271 @@ chains:
     terminal_client_error:
       consumers: [ErrorErr06ClientProjected, RuntimeClientCommit, RuntimeRequestFinalizer]
       effect: Error06 stages the terminal projection; Runtime alone submits it through Server/SSE
+
+- chain_id: v3.admin.control_plane_admission
+  owner_feature_id: v3.config_management
+  summary: The admin control plane provisions its local trust token at process start, mounts the admission middleware on the served router, and admits or rejects one request against that token before any handler runs.
+  edges:
+  - step_id: v3-admin-admission-01
+    from_node: V3AdminControlTokenProvisioned
+    to_node: V3AdminRouterMounted
+    caller_symbol: AppState::new
+    caller_file: v3/crates/routecodex-v3-admin/src/lib.rs
+    callee_symbol: AdminToken::load_or_create
+    callee_file: v3/crates/routecodex-v3-admin/src/auth.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: []
+      produces: [v3.admin.control_token]
+      side_channel_reads: []
+      side_channel_writes: [v3.admin.control_token]
+  - step_id: v3-admin-admission-02
+    from_node: V3AdminRouterMounted
+    to_node: V3AdminRequestAdmitted
+    caller_symbol: build_router
+    caller_file: v3/crates/routecodex-v3-admin/src/api/mod.rs
+    callee_symbol: require_admin
+    callee_file: v3/crates/routecodex-v3-admin/src/auth.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.control_token]
+      produces: []
+      side_channel_reads: [v3.admin.control_token]
+      side_channel_writes: []
+  - step_id: v3-admin-admission-03
+    from_node: V3AdminRequestAdmitted
+    to_node: V3AdminAdmissionDecision
+    caller_symbol: require_admin
+    caller_file: v3/crates/routecodex-v3-admin/src/auth.rs
+    callee_symbol: reject
+    callee_file: v3/crates/routecodex-v3-admin/src/auth.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.control_token]
+      produces: []
+      side_channel_reads: [v3.admin.control_token]
+      side_channel_writes: []
+
+- chain_id: v3.admin.environment_projection
+  owner_feature_id: v3.config_management
+  summary: A doctor request builds the derived admin environment projection from the served config, the installed binary, and a live listener probe; the projection is read-only and never becomes runtime truth.
+  edges:
+  - step_id: v3-admin-environment-01
+    from_node: V3AdminDoctorRequest
+    to_node: V3AdminDoctorReport
+    caller_symbol: doctor
+    caller_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    callee_symbol: build_doctor
+    callee_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.environment]
+      produces: []
+      side_channel_reads: [v3.admin.environment]
+      side_channel_writes: []
+  - step_id: v3-admin-environment-02
+    from_node: V3AdminDoctorReport
+    to_node: V3AdminEnvironmentSnapshot
+    caller_symbol: build_doctor
+    caller_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    callee_symbol: build_environment
+    callee_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: []
+      produces: [v3.admin.environment]
+      side_channel_reads: []
+      side_channel_writes: [v3.admin.environment]
+  - step_id: v3-admin-environment-03
+    from_node: V3AdminEnvironmentSnapshot
+    to_node: V3AdminListenerHealth
+    caller_symbol: build_environment
+    caller_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    callee_symbol: probe_listeners
+    callee_file: v3/crates/routecodex-v3-admin/src/api/deploy.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.environment]
+      produces: []
+      side_channel_reads: [v3.admin.environment]
+      side_channel_writes: []
+
+- chain_id: v3.admin.provider_candidate_probe
+  owner_feature_id: v3.config_management
+  summary: An unsaved provider candidate is spawned into an SSE probe run that executes one typed stage and projects redacted probe evidence; the candidate itself is never persisted by this path.
+  edges:
+  - step_id: v3-admin-probe-01
+    from_node: V3AdminProbeCandidate
+    to_node: V3AdminProbeStream
+    caller_symbol: probe_candidate
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    callee_symbol: start_probe
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_candidate]
+      produces: []
+      side_channel_reads: [v3.admin.provider_candidate]
+      side_channel_writes: []
+  - step_id: v3-admin-probe-02
+    from_node: V3AdminProbeStream
+    to_node: V3AdminProbeRun
+    caller_symbol: start_probe
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    callee_symbol: run_probe
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: []
+      produces: [v3.admin.provider_probe_result]
+      side_channel_reads: []
+      side_channel_writes: [v3.admin.provider_probe_result]
+  - step_id: v3-admin-probe-03
+    from_node: V3AdminProbeRun
+    to_node: V3AdminProbeEvidence
+    caller_symbol: run_probe
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    callee_symbol: execute_stage
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_probe_result]
+      produces: []
+      side_channel_reads: [v3.admin.provider_probe_result]
+      side_channel_writes: []
+
+- chain_id: v3.admin.provider_authoring_write
+  owner_feature_id: v3.config_management
+  summary: A provider create request identifies the candidate and writes it through the config-core authoring path with backup and revision; the admin never fabricates the provider directory file itself.
+  edges:
+  - step_id: v3-admin-authoring-01
+    from_node: V3AdminProviderCandidateRequest
+    to_node: V3AdminProviderCandidateIdentified
+    caller_symbol: create_provider
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+    callee_symbol: candidate_id
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_candidate]
+      produces: []
+      side_channel_reads: [v3.admin.provider_candidate]
+      side_channel_writes: []
+  - step_id: v3-admin-authoring-02
+    from_node: V3AdminProviderCandidateIdentified
+    to_node: V3AdminProviderDirectoryAuthoring
+    caller_symbol: create_provider
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+    callee_symbol: write_provider
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_candidate]
+      produces: [v3.provider.directory_authoring]
+      side_channel_reads: [v3.admin.provider_candidate]
+      side_channel_writes: [v3.provider.directory_authoring]
+
+- chain_id: v3.admin.provider_patrol_plan_authoring
+  owner_feature_id: v3.config_management
+  summary: An operator patrol plan is validated and atomically stored; an invalid plan leaves the persisted plan file untouched.
+  edges:
+  - step_id: v3-admin-patrol-plan-01
+    from_node: V3AdminPatrolPlanRequest
+    to_node: V3AdminPatrolPlanStored
+    caller_symbol: put_plan
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    callee_symbol: PatrolRuntime::set_plan
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: []
+      produces: [v3.admin.provider_patrol_plan]
+      side_channel_reads: []
+      side_channel_writes: [v3.admin.provider_patrol_plan]
+  - step_id: v3-admin-patrol-plan-02
+    from_node: V3AdminPatrolPlanStored
+    to_node: V3AdminPatrolPlanValidated
+    caller_symbol: PatrolRuntime::set_plan
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    callee_symbol: validate_plan
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_patrol_plan]
+      produces: []
+      side_channel_reads: [v3.admin.provider_patrol_plan]
+      side_channel_writes: []
+
+- chain_id: v3.admin.provider_patrol_run
+  owner_feature_id: v3.config_management
+  summary: The advisory patrol tick loop selects due plans, runs each plan through the shared probe stage implementation, and appends diagnostic results without mutating runtime provider health.
+  edges:
+  - step_id: v3-admin-patrol-run-01
+    from_node: V3AdminPatrolLoop
+    to_node: V3AdminPatrolDueBatch
+    caller_symbol: spawn_patrol_loop
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    callee_symbol: PatrolRuntime::run_due
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_patrol_plan]
+      produces: []
+      side_channel_reads: [v3.admin.provider_patrol_plan]
+      side_channel_writes: []
+  - step_id: v3-admin-patrol-run-02
+    from_node: V3AdminPatrolDueBatch
+    to_node: V3AdminPatrolResult
+    caller_symbol: PatrolRuntime::run_due
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    callee_symbol: PatrolRuntime::run
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_patrol_plan]
+      produces: [v3.admin.provider_patrol]
+      side_channel_reads: [v3.admin.provider_patrol_plan]
+      side_channel_writes: [v3.admin.provider_patrol]
+  - step_id: v3-admin-patrol-run-03
+    from_node: V3AdminPatrolResult
+    to_node: V3AdminPatrolStageEvidence
+    caller_symbol: PatrolRuntime::run
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+    callee_symbol: execute_stages
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_patrol]
+      produces: [v3.admin.provider_probe_result]
+      side_channel_reads: [v3.admin.provider_patrol]
+      side_channel_writes: [v3.admin.provider_probe_result]
+  - step_id: v3-admin-patrol-run-04
+    from_node: V3AdminPatrolStageEvidence
+    to_node: V3AdminPatrolStageReport
+    caller_symbol: execute_stages
+    caller_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    callee_symbol: execute_stage
+    callee_file: v3/crates/routecodex-v3-admin/src/provider_probe.rs
+    status: anchored
+    owner_feature_id: v3.config_management
+    resource_flow:
+      consumes: [v3.admin.provider_probe_result]
+      produces: []
+      side_channel_reads: [v3.admin.provider_probe_result]
+      side_channel_writes: []

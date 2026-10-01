@@ -5397,42 +5397,164 @@ features:
   - git diff --check
   migration_target: rust
   runtime_status: source_controlled_runtime_pending_live_replay
+
+- feature_id: v3.config_management
+  status: active
+  change_risk: high
+  owner_kind: rust_project_v3_config_core_authoring
+  owner_scope: 'RCC V3 Config Management: Config Core authoring, provider directory files, user routing file, revision ledger, and the candidate-level compile entry the admin onboarding API calls'
+  owner_crates:
+  - routecodex-v3-config-mgmt
+  - routecodex-v3-config
+  owner_files:
+  - v3/crates/routecodex-v3-config-mgmt/src/lib.rs
+  - v3/crates/routecodex-v3-config-mgmt/src/store.rs
+  - v3/crates/routecodex-v3-config-mgmt/src/provider.rs
+  - v3/crates/routecodex-v3-config-mgmt/src/route.rs
+  - v3/crates/routecodex-v3-config/src/provider_directory.rs
+  resource_bindings:
+  - v3.provider.directory_authoring
+  - v3.user_config.file_source
+  - v3.config.file_source
+  - v3.config.authoring_parsed
+  - v3.config.published_manifest
+  - v3.user_config.routing_selection_parsed
+  entry_symbols:
+  - read_provider_file
+  - write_provider_file
+  - list_provider_ids
+  - commit_user_routing_with_backup
+  - apply_user_route_group_view
+  - new_default_pool_view
+  - parse_v3_user_config_02_routing
+  - compile_v3_config_05_manifest
+  allowed_paths:
+  - v3/crates/routecodex-v3-config-mgmt/src
+  - v3/crates/routecodex-v3-config/src/provider_directory.rs
+  forbidden_paths:
+  - request.normal_payload
+  - response.client_payload
+  - provider.wire_payload
+  - protocol.metadata
+  required_gates:
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config-mgmt
+  - npm run verify:v3-resource-map
+  - npm run verify:function-map-compile-gate
+  - git diff --check
+  runtime_status: source_controlled_runtime_pending_live_replay
+
 - feature_id: v3.admin_observability_aggregation
   status: source_controlled_runtime_pending_live_replay
   owner_crate: routecodex-v3-admin
   owner_files:
+  - v3/crates/routecodex-v3-admin/src/lib.rs
+  - v3/crates/routecodex-v3-admin/src/main.rs
+  - v3/crates/routecodex-v3-admin/src/metrics.rs
+  - v3/crates/routecodex-v3-admin/src/auth.rs
+  - v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/src/provider_probe.rs
+  - v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+  - v3/crates/routecodex-v3-admin/src/api/mod.rs
+  - v3/crates/routecodex-v3-admin/src/api/dashboard.rs
+  - v3/crates/routecodex-v3-admin/src/api/deploy.rs
   - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/providers.rs
+  - v3/crates/routecodex-v3-admin/src/api/reload.rs
+  - v3/crates/routecodex-v3-admin/src/api/routes.rs
   - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_api.rs
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_deploy.rs
+  - v3/admin-webui/index.html
+  - v3/admin-webui/providers.html
   - v3/admin-webui/requests.html
-  - v3/admin-webui/vendor/ambient.css
-  - v3/admin-webui/app/core.js
-  - v3/admin-webui/app/shell.js
-  - v3/admin-webui/app/charts.js
-  - v3/admin-webui/app/drawer.js
-  - v3/admin-webui/app/views/dashboard.js
-  - v3/admin-webui/app/views/usage.js
-  - v3/admin-webui/app/views/providers.js
-  - v3/admin-webui/app/views/routes.js
-  resource_bindings:
-  - v3.observability.webui_store
-  entry_symbols:
-  - records
-  - v3_webui_observability_read_raw_rows
-  - build_timeseries
-  allowed_paths:
-  - v3/crates/routecodex-v3-admin/src/api/observability.rs
-  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
-  - v3/admin-webui/requests.html
+  - v3/admin-webui/routes.html
+  - v3/admin-webui/deploy.html
   - v3/admin-webui/styles.css
   - v3/admin-webui/vendor/ambient.css
   - v3/admin-webui/app/core.js
   - v3/admin-webui/app/shell.js
   - v3/admin-webui/app/charts.js
   - v3/admin-webui/app/drawer.js
+  - v3/admin-webui/app/form.js
+  - v3/admin-webui/app/probe.js
   - v3/admin-webui/app/views/dashboard.js
+  - v3/admin-webui/app/views/deploy.js
   - v3/admin-webui/app/views/usage.js
   - v3/admin-webui/app/views/providers.js
   - v3/admin-webui/app/views/routes.js
+  - v3/admin-webui/requests-filter-smoke.mjs
+  - v3/admin-webui/requests-usage-layout-smoke.mjs
+  - v3/admin-webui/routes-reload-smoke.mjs
+  - v3/admin-webui/providers-onboarding-smoke.mjs
+  - v3/admin-webui/deploy-page-smoke.mjs
+  resource_bindings:
+  - v3.observability.webui_store
+  - v3.admin.environment
+  - v3.admin.provider_patrol
+  - v3.admin.control_token
+  - v3.admin.provider_candidate
+  - v3.admin.provider_probe_result
+  - v3.admin.provider_patrol_plan
+  entry_symbols:
+  - require_admin
+  - AdminToken::load_or_create
+  - admin_session
+  - build_environment
+  - environment
+  - build_doctor
+  - doctor
+  - restart_runtime
+  - run_lifecycle_restart
+  - resolve_lifecycle_executable
+  - validate_provider
+  - create_provider
+  - update_provider
+  - delete_provider
+  - discover_models
+  - import_providers
+  - bind_provider_to_route
+  - probe_candidate
+  - probe_existing
+  - start_probe
+  - run_probe
+  - put_plan
+  - get_plan
+  - delete_plan
+  - get_results
+  - patrol_status
+  - run_now
+  - run_due
+  - spawn_patrol_loop
+  - records
+  - v3_webui_observability_read_raw_rows
+  - build_timeseries
+  allowed_paths:
+  - v3/crates/routecodex-v3-admin/src/lib.rs
+  - v3/crates/routecodex-v3-admin/src/main.rs
+  - v3/crates/routecodex-v3-admin/src/metrics.rs
+  - v3/crates/routecodex-v3-admin/src/auth.rs
+  - v3/crates/routecodex-v3-admin/src/provider_onboarding.rs
+  - v3/crates/routecodex-v3-admin/src/provider_probe.rs
+  - v3/crates/routecodex-v3-admin/src/provider_patrol.rs
+  - v3/crates/routecodex-v3-admin/src/api/mod.rs
+  - v3/crates/routecodex-v3-admin/src/api/dashboard.rs
+  - v3/crates/routecodex-v3-admin/src/api/deploy.rs
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/providers.rs
+  - v3/crates/routecodex-v3-admin/src/api/reload.rs
+  - v3/crates/routecodex-v3-admin/src/api/routes.rs
+  - v3/crates/routecodex-v3-admin/src/api/timeseries.rs
+  - v3/crates/routecodex-v3-admin/tests
+  - v3/crates/routecodex-v3-admin/Cargo.toml
+  - v3/admin-webui
+  cross_feature_extensions:
+  - path: v3/crates/routecodex-v3-config-mgmt/src/provider.rs
+    owner_feature_id: v3.config_management
+    reason: Adds the candidate-level validation entry (validate a provider that no route references) that the admin onboarding API calls. The file stays owned by v3.config_management; this feature only extends it and never owns the provider write path.
+  - path: v3/crates/routecodex-v3-provider-responses/src/transport.rs
+    owner_feature_id: v3.provider_global_subscription_probe
+    reason: Hosts the authenticated upstream model-discovery call so the admin never resolves a credential itself. The file stays owned by v3.provider_global_subscription_probe; this feature only adds the discovery entry point and re-exports it.
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -5441,6 +5563,15 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
   - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:function-map-compile-gate
+  - npm run verify:webui-smoke
+  - npm run verify:v3-dagpipe-governance
+  - npm run verify:v3-dagpipe-feature-graphs
+  - npm run verify:v3-contract-map-owner
+  - dagpipe graph validate docs/architecture/dags/v3.admin_provider_onboarding.graph.json
+  - dagpipe graph validate docs/architecture/dags/v3.admin_provider_patrol.graph.json
+  - dagpipe graph validate docs/architecture/dags/v3.admin_provider_patrol_plan.graph.json
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay
 
@@ -5678,7 +5809,6 @@ features:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
-  - v3/crates/routecodex-v3-admin/src
   - docs/architecture
   forbidden_paths:
   - request.normal_payload
@@ -5693,6 +5823,7 @@ features:
   - config publishes path/policy but does not own runtime append execution
   - npm run verify:v3-execution-control-payload-architecture
   - git diff --check
+  ownership_note: The admin reader surface (v3/crates/routecodex-v3-admin/**) is owned by v3.admin_observability_aggregation; this feature owns the store, its writer, and the server-side row struct only.
 
 - feature_id: v3.memory_raw_capture
   status: active

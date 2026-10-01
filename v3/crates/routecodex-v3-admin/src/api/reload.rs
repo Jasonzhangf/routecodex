@@ -1,6 +1,8 @@
 // feature_id: v3.admin_reload
 // Reload API：修订历史查询与 reload 触发。
-// reload = 配置校验通过后触发全局受管 restart（exec 重启，所有 listener 聚合）。
+// reload = 配置校验通过后触发全局受管 restart（exec 重启，所有 listener 聚合），
+// 且必须显式带上被服务的 config 路径（`rccv3 restart -c <config>`）；
+// 不带 `-c` 只会重启默认配置实例，属于错误的生命周期目标。
 // 失败保持旧配置：commit 阶段已保证"校验失败不落盘 + 写前备份 + 修订记录"，
 // 本端点只负责把已提交的新配置加载到 runtime，并返回明确结果。
 use crate::AppState;
@@ -52,20 +54,39 @@ async fn reload(
         .validate(&authoring)
         .map_err(|error| (axum::http::StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    let output = tokio::task::spawn_blocking(|| Command::new("routecodex").arg("restart").output())
-        .await
-        .map_err(|error| {
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("reload task failed: {error}"),
-            )
-        })?
-        .map_err(|error| {
-            (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to invoke `routecodex restart`: {error}"),
-            )
-        })?;
+    let Some(executable) = crate::api::deploy::resolve_lifecycle_executable() else {
+        return Err((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "managed lifecycle CLI `rccv3` was not found next to the running executable or on PATH; reload did not restart any runtime"
+                .to_string(),
+        ));
+    };
+    let config_path = state.config_path.clone();
+    let command_line = format!(
+        "{} restart -c {}",
+        executable.display(),
+        config_path.display()
+    );
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(&executable)
+            .arg("restart")
+            .arg("-c")
+            .arg(&config_path)
+            .output()
+    })
+    .await
+    .map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("reload task failed: {error}"),
+        )
+    })?
+    .map_err(|error| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to invoke `{command_line}`: {error}"),
+        )
+    })?;
 
     if output.status.success() {
         state
@@ -87,7 +108,7 @@ async fn reload(
             })?;
         Ok(Json(ReloadResult {
             ok: true,
-            detail: "config committed and runtime restarted with new snapshot".to_string(),
+            detail: format!("config committed and runtime restarted for {command_line}"),
             stdout_tail: tail_of(&output.stdout),
             stderr_tail: tail_of(&output.stderr),
         }))
@@ -95,7 +116,7 @@ async fn reload(
         Err((
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             format!(
-                "`routecodex restart` failed (exit {:?}): {}",
+                "`{command_line}` failed (exit {:?}): {}",
                 output.status.code(),
                 tail_of(&output.stderr).unwrap_or_default()
             ),

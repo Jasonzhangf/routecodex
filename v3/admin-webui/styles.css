@@ -1113,6 +1113,193 @@ main.routes-page > label[for="server-selector"] {
   color: var(--label);
 }
 
+/* ---------- shared admin components (provider onboarding / deploy / observability) ---------- */
+
+.badge.pass { color: var(--accent); }
+.badge.fail { color: var(--danger); }
+
+.mono {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.kv {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.06));
+}
+
+.kv:last-child { border-bottom: none; }
+
+.kv-key {
+  flex: 0 0 168px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kv-value {
+  flex: 1 1 auto;
+  color: var(--label);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.status-bar-text { flex: 1 1 auto; }
+
+.status-bar-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  opacity: 0.7;
+}
+
+.status-bar-close:hover { opacity: 1; }
+
+/* form fields (`.ff` is namespaced: `.field` is already the read-only label/value pair) */
+
+.ff { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+
+.ff-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ff-label .req { color: var(--danger); margin-left: 4px; }
+
+.ff-hint { font-size: 11px; color: var(--muted); }
+
+.ff-error { font-size: 12px; color: var(--danger); }
+
+.ff-error:empty { display: none; }
+
+.ff input,
+.ff select,
+.ff textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--label);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 4px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ff input[aria-invalid="true"],
+.ff select[aria-invalid="true"],
+.ff textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.ff .ff-row { display: flex; gap: 8px; align-items: center; }
+
+.error-summary {
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.error-summary ul { margin: 6px 0 0; padding-left: 18px; }
+
+.error-summary button.link {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* wizard */
+
+.wizard-steps {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.wizard-step {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  color: var(--muted);
+}
+
+.wizard-step.active { color: var(--label); border-color: var(--accent); }
+
+.wizard-step.done { color: var(--accent); }
+
+/* streaming probe terminal */
+
+.terminal {
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-line { display: block; }
+
+.terminal-line.stage { color: var(--label); }
+
+.terminal-line.ok { color: var(--accent); }
+
+.terminal-line.fail { color: var(--danger); }
+
+.terminal-line.dim { color: var(--muted); }
+
+.terminal-line.evidence { color: var(--muted); padding-left: 12px; }
+
+/* error chain timeline */
+
+.timeline { display: flex; flex-direction: column; }
+
+.timeline-node {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 10px;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid var(--line, rgba(255, 255, 255, 0.12));
+  font-size: 13px;
+}
+
+.timeline-node.raised { border-left-color: var(--danger); }
+
+.timeline-node.observed { border-left-color: var(--amb-emit-amber, #d9a441); }
+
+.timeline-node.cleared { border-left-color: var(--accent); }
+
+.timeline-node .node-id { color: var(--muted); font-size: 12px; }
+
 /* ---------- reduced motion ---------- */
 
 @media (prefers-reduced-motion: reduce) {

@@ -502,7 +502,18 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "admin_webui requires a canonical config path",
                 )
             })?;
-            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(config_path))
+            // The in-process admin listener is the shipping entry for the admin
+            // surface: `[admin_webui] enabled = true` is part of the base config, and
+            // the managed lifecycle spawns this aggregate directly instead of the
+            // standalone `rccv3-admin` binary. The scheduled 定时巡检 tick loop
+            // therefore has to start here — it is the only producer of scheduled
+            // patrol runs in the default topology. `spawn_background` is idempotent
+            // per process, so a second admin surface in the same process cannot add a
+            // second scheduler over the same plan file. Advisory only: it never
+            // blocks or fails listener startup, and it is dropped with the runtime.
+            let admin_state = Arc::new(routecodex_v3_admin::AppState::new(config_path));
+            admin_state.spawn_background();
+            routecodex_v3_admin::router((*admin_state).clone())
         } else {
             let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
                 std::io::Error::new(
@@ -1019,6 +1030,10 @@ async fn pending_endpoint(
                         ));
                     }
                 };
+            // Capture the typed Error06 side-channel truth before the projection
+            // is consumed by the Server16 frame builder. Forwarded verbatim.
+            let error06_error_class = projected.error_class;
+            let error06_health_action = projected.health_action.clone();
             let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
@@ -1038,6 +1053,12 @@ async fn pending_endpoint(
                     },
                     project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
                         .as_deref(),
+                    error06_exposed: true,
+                    error_class: Some(error06_error_class),
+                    health_action: error06_health_action.as_ref(),
+                    // V3Error06ClientProjected does not carry the Error01
+                    // external link, so this lane records "not exposed".
+                    upstream_request_id: None,
                 },
             ) {
                 return response;
@@ -1105,9 +1126,20 @@ struct V3ErrorProjectionConsoleInput<'input> {
     error_chain: &'input [&'static str],
     body: Option<&'input Value>,
     project_path: Option<&'input str>,
+    /// `true` when this lane holds the typed `V3Error06ClientProjected`. Lanes
+    /// that only carry the chain record an explicit "not exposed" marker.
+    error06_exposed: bool,
+    /// `V3Error06ClientProjected.error_class`, forwarded verbatim.
+    error_class: Option<&'input str>,
+    /// `V3Error06ClientProjected.health_action`, forwarded verbatim.
+    health_action: Option<&'input routecodex_v3_error::V3ErrorActionPlan>,
+    /// `V3Error01SourceRaised.external_error.upstream_request_id`, when exposed.
+    upstream_request_id: Option<&'input str>,
 }
 
 /// relay 分支共享：error_chain 存在时做 console 投影（4 个 relay 分支同构样板收敛）。
+/// The relay lanes expose only the chain, so they record the honest
+/// "Error06 typed truth not exposed on this lane" marker.
 fn emit_relay_error_chain_if_any(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
@@ -1133,6 +1165,10 @@ fn emit_relay_error_chain_if_any(
             error_chain,
             body,
             project_path: request_console_project_path,
+            error06_exposed: false,
+            error_class: None,
+            health_action: None,
+            upstream_request_id: None,
         },
     )
 }
@@ -1176,6 +1212,13 @@ fn record_and_emit_v3_error_projection(
         input.session_id,
         input.status,
         input.body,
+        webui_observability::V3ObsErrorProjection {
+            exposed: input.error06_exposed,
+            error_class: input.error_class,
+            error_chain: input.error_chain,
+            health_action: input.health_action,
+            upstream_request_id: input.upstream_request_id,
+        },
     ) {
         let line = format_v3_console_timed_content(
             "[webui-observability]",

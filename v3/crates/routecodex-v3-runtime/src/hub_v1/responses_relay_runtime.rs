@@ -400,6 +400,9 @@ fn build_v3_runtime_provider_failure_observation_from_policy_event(
         external_error_code: event.error_type.clone(),
         external_error_status: Some(event.status),
         internal_code: None,
+        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
+        // id: record an honest unknown rather than a synthesised value.
+        upstream_request_id: None,
         message: event.message.clone(),
         failure_count: event.health_record.failure_count,
         health_state: event.health_record.state.clone(),

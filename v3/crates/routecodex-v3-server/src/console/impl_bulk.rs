@@ -1,4 +1,7 @@
-use crate::webui_observability::V3ObsEventType;
+use crate::webui_observability::{
+    v3_obs_error_projection_for_direct_frame, v3_obs_lane_holds_typed_error06,
+    V3ObsErrorProjection, V3ObsEventType,
+};
 use crate::*;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -798,8 +801,23 @@ pub(crate) fn emit_v3_observability_console_lines(
                 emit_v3_webui_projection_failure(context, &error);
             }
         }
-        if terminal_event == V3ObsEventType::Failed {
-            if let Err(error) = record_v3_webui_error_for_context(context, status, None) {
+        // Terminal carrier projection. The explicit "Error06 typed truth not
+        // exposed here" marker is honest only on a lane that genuinely cannot
+        // carry the typed `V3Error06ClientProjected` — the relay lane (plan §9.4
+        // boundary A). The direct lane owns its typed truth and records the real
+        // chain in `emit_v3_direct_frame_console_lines`, so writing the marker
+        // here would replace a real chain and source with an absence. Even if a
+        // marker did land, `merge_v3_obs_error_truth` ranks it below real typed
+        // truth, so a later marker can never clear a recorded chain.
+        if terminal_event == V3ObsEventType::Failed
+            && !v3_obs_lane_holds_typed_error06(observability)
+        {
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                status,
+                None,
+                V3ObsErrorProjection::default(),
+            ) {
                 emit_v3_webui_projection_failure(context, &error);
             }
         }
@@ -846,6 +864,26 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
     let observability = observability?;
+    // The direct lane ran the typed Error path in-process, so a non-SSE error
+    // frame already holds real typed truth in `frame.error_chain`: record it here
+    // as the terminal Error06 observation, before the shared emitter runs, which
+    // in turn skips its absence marker for this lane. A frame with no chain
+    // records the honest absence marker instead. A relay-stamped observability is
+    // left alone: the relay lane owns its own honest marker (plan §9.4 boundary A).
+    if !is_sse
+        && v3_obs_lane_holds_typed_error06(&observability)
+        && v3_webui_terminal_event_for_response(frame.status, &observability)
+            == V3ObsEventType::Failed
+    {
+        if let Err(error) = record_v3_webui_error_for_context(
+            context,
+            frame.status,
+            None,
+            v3_obs_error_projection_for_direct_frame(&frame.error_chain),
+        ) {
+            emit_v3_webui_projection_failure(context, &error);
+        }
+    }
     emit_v3_observability_console_lines(
         context,
         frame.status,
@@ -1154,9 +1192,19 @@ pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
         &projected.chain,
         Some(&projected.body),
     );
-    if let Err(error) =
-        record_v3_webui_error_for_context(context, projected.status, Some(&projected.body))
-    {
+    if let Err(error) = record_v3_webui_error_for_context(
+        context,
+        projected.status,
+        Some(&projected.body),
+        // Forward the typed Error06 truth this lane already holds verbatim.
+        V3ObsErrorProjection {
+            exposed: true,
+            error_class: Some(projected.error_class),
+            error_chain: &projected.chain,
+            health_action: projected.health_action.as_ref(),
+            upstream_request_id: None,
+        },
+    ) {
         emit_v3_webui_projection_failure(context, &error);
     }
 }

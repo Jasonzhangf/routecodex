@@ -136,8 +136,8 @@ resources:
     owner_crate: routecodex-v3-config
     owner_node: V3UserConfig01FileSource
     identity: [configPath]
-    allowed_writers: [V3UserConfigStore, V3UserConfigStore::load_snapshot_with_source_identity]
-    allowed_readers: [parse_v3_user_config_02_routing, load_v3_config_snapshot_from_path]
+    allowed_writers: [V3UserConfigStore, V3UserConfigStore::load_snapshot_with_source_identity, apply_user_route_group_view, bind_provider_to_route]
+    allowed_readers: [parse_v3_user_config_02_routing, load_v3_config_snapshot_from_path, build_environment, doctor, bind_provider_to_route]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-runtime, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-provider-responses, routecodex-v3-error, routecodex-v3-debug, routecodex-v3-cli]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1375,7 +1375,7 @@ resources:
     owner_node: V3Lifecycle07GracefullyStopped
     identity: [instanceId, state, updatedAtEpochMs, detail]
     allowed_writers: [write_status]
-    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live]
+    allowed_readers: [V3ManagedLifecycle::status, V3ManagedLifecycle::stop, V3ManagedLifecycle::restart, query_live, build_environment, doctor, environment, restart_runtime]
     forbidden_writers: [routecodex-v3-cli, routecodex-v3-server, routecodex-v3-runtime]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -2320,6 +2320,10 @@ resources:
       current_row_never_dropped: true
       record_limit_bytes: internal_observability_max_record_bytes
       control_state_in_payload: forbidden
+      observed_control_facts_allowed_as_history: true
+      observed_control_facts_contract: immutable_snapshot_of_what_the_runtime_decided_at_attempt_time
+      observed_control_facts_may_drive_current_control_state: false
+      current_control_state_source: v3.provider.key_health_state
     allowed_writers: [v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention]
     allowed_readers: [v3_webui_observability_read_rows, v3_webui_observability_read_raw_rows]
     forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
@@ -2328,6 +2332,187 @@ resources:
     may_enter_metadata_center: false
     binding_status: source_controlled
     required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.environment
+    resource_kind: derived_control_projection
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: build_environment
+    identity: [configPath, adminWebuiBind, adminWebuiPort]
+    semantic_contract:
+      format: typed_json_projection
+      schema_version: 1
+      append_only: false
+      derived_only: true
+      sources: [v3.config.manifest, v3.lifecycle.instance, v3.build.assembled_binary]
+      control_state_in_payload: forbidden
+      mutation: none
+    allowed_writers: [build_environment]
+    allowed_readers: [build_environment, environment, doctor, admin_session]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.provider_patrol
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: run_due
+    identity: [configPath, providerId, runEpochMs]
+    semantic_contract:
+      format: jsonl_envelope
+      schema_version: 1
+      append_only: true
+      file: <config_dir>/state/provider-patrol.jsonl
+      retention_policy: retain_recent_patrol_results_per_provider
+      compaction: deterministic_atomic_replace_before_append
+      control_state_in_payload: forbidden
+      advisory_only: true
+      may_mutate_runtime_provider_health: false
+    allowed_writers: [run_now, run_due, PatrolRuntime::run]
+    allowed_readers: [get_results, patrol_status]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.provider_patrol_plan
+    resource_kind: operator_declared_schedule
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: put_plan
+    identity: [configPath, providerId]
+    semantic_contract:
+      format: json_object_keyed_by_provider_id
+      schema_version: 1
+      append_only: false
+      file: <config_dir>/state/provider-patrol-plans.json
+      atomic_replace: tmp_plus_rename
+      advisory_only: true
+      may_mutate_runtime_provider_health: false
+      control_state_in_payload: forbidden
+    allowed_writers: [put_plan, delete_plan]
+    allowed_readers: [get_plan, patrol_status, run_now, PatrolRuntime::run_due, put_plan, delete_plan]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.control_token
+    resource_kind: local_trust_credential
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: require_admin
+    identity: [configDir, adminTokenPath]
+    semantic_contract:
+      format: file_0600_hex_secret
+      schema_version: 1
+      append_only: false
+      file: <config_dir>/state/admin-token
+      provisioning: load_or_create_at_admin_start
+      browser_acquisition: same_origin_GET_api_admin_session_only
+      admission_predicate: loopback_host_and_loopback_origin_and_header_on_mutating_methods
+      fail_closed_without_token: true
+      control_state_in_payload: forbidden
+      secret_in_logs: forbidden
+      secret_in_admin_response_body: forbidden_except_session_endpoint
+      threat_boundary_note: The 0600 file mode is defence in depth, not the trust boundary. The enforced boundary is loopback reachability plus the browser same-origin policy (no CORS layer is registered). Any local process can read the token from GET /api/admin/session; a remote page cannot, because a rebound Host is rejected and a cross-origin read is blocked by SOP.
+    allowed_writers: [AdminToken::load_or_create]
+    allowed_readers: [require_admin, admin_session]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata, debug.log]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.provider_candidate
+    resource_kind: staged_authoring_candidate
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: validate_provider
+    identity: [configPath, providerId, candidateDigest]
+    semantic_contract:
+      format: typed_in_memory_candidate
+      schema_version: 1
+      append_only: false
+      persisted_in_config_dir: false
+      materializes_temp_authoring_tree: true
+      temp_tree_location: std::env::temp_dir
+      temp_tree_removed_after_validation: true
+      never_written_to_provider_directory_before_validation_passes: true
+      rejected_candidate_leaves_no_provider_file: true
+      control_state_in_payload: forbidden
+      note: The candidate itself is never persisted. To reuse the real compile path, validation may materialize a throwaway authoring tree under the OS temp dir and removes it afterwards; that temp tree is not this resource and is not the provider directory.
+    allowed_writers: [validate_provider, create_provider, update_provider, discover_models]
+    allowed_readers: [validate_provider, create_provider, update_provider, discover_models, probe_candidate, probe_existing, import_providers]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.admin.provider_probe_result
+    resource_kind: diagnostic_evidence
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: run_probe
+    identity: [providerId, stage, probeRunId]
+    semantic_contract:
+      format: typed_json_evidence
+      schema_version: 1
+      append_only: false
+      advisory_only: true
+      may_mutate_runtime_provider_health: false
+      secrets_redacted: true
+      control_state_in_payload: forbidden
+    allowed_writers: [run_probe, start_probe, probe_candidate, probe_existing, run_now, run_due]
+    allowed_readers: [run_probe, probe_candidate, probe_existing, get_results, patrol_status, PatrolRuntime::run]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin, npm run verify:v3-resource-map]
+
+  - resource_id: v3.provider.directory_authoring
+    resource_kind: authoring_file_store
+    lifecycle: v3.config.authoring
+    owner_feature_id: v3.config_management
+    owner_crate: routecodex-v3-config-mgmt
+    owner_node: write_provider_file
+    identity: [configDir, providerId]
+    semantic_contract:
+      format: v2_compat_toml
+      schema_version: 1
+      append_only: false
+      atomic_replace: tmp_plus_rename
+      backup_before_replace: true
+      revision_entry_required: true
+      unread_unless_referenced_by_route: true
+      control_state_in_payload: forbidden
+    allowed_writers: [write_provider_file, create_provider, update_provider, delete_provider]
+    allowed_readers: [read_provider_file, list_provider_ids, validate_provider, probe_candidate, probe_existing, run_probe, delete_provider, import_providers, bind_provider_to_route, run_now, PatrolRuntime::run_due]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [cargo test -p routecodex-v3-config-mgmt, npm run verify:v3-resource-map]
 
   - resource_id: v3.build.assembled_binary
     resource_kind: assembled_release_candidate

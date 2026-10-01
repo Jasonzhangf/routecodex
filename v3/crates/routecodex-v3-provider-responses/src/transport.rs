@@ -2,6 +2,7 @@ use crate::adaptive_concurrency::{
     V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
     V3AdaptiveConcurrencyProbeResult,
 };
+use crate::provider_auth::{discovery_models_url, extract_discovered_models, resolve_secret};
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
 use crate::shared::{
     collect_response_headers, content_type, send_http_await, validated_sse_stream,
@@ -12,8 +13,7 @@ use crate::transport_admission::{
 };
 use crate::transport_handoff::V3ProviderTransportAttemptState;
 use crate::wire::{
-    V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
-    V3ResponsesStreamIntent,
+    V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ResponsesStreamIntent,
 };
 use crate::{
     V3ProviderError, V3ProviderHttpFailure, V3ProviderInternalTransportLane,
@@ -1425,91 +1425,83 @@ async fn read_response_body_bytes(
     Ok(bytes.to_vec())
 }
 
-async fn resolve_secret(
-    request_id: &str,
+/// 上游模型发现（WebUI onboarding）使用的合成 request id；只出现在错误变体里。
+pub(crate) const DISCOVERY_REQUEST_ID: &str = "admin-discover";
+const DISCOVERY_TIMEOUT_SECS: u64 = 15;
+
+/// 上游模型发现：按 provider 协议发一次带真实凭据的 GET，只返回模型名列表。
+///
+/// 凭据在本模块内解析（`resolve_secret`），明文 secret 既不出现在返回值，也不进入错误
+/// 变体或日志；URL 不使用 query 参数承载 secret。HTTP 只在 transport surface 实现，
+/// generic provider 的其他模块不得直接使用 reqwest。
+/// 失败一律返回 typed `V3ProviderError`，绝不返回猜测或空列表。
+pub async fn discover_v3_provider_models(
     provider_id: &str,
+    provider_type: &str,
+    base_url: &str,
     auth: &V3ProviderAuthHandle,
-) -> Result<String, V3ProviderError> {
-    let secret = match &auth.secret {
-        V3ProviderAuthSecretHandle::Environment(name) => {
-            std::env::var(name).map_err(|_| V3ProviderError::MissingAuthSecret {
-                request_id: request_id.to_string(),
-                provider_id: provider_id.to_string(),
-                auth_alias: auth.alias.clone(),
-            })?
-        }
-        V3ProviderAuthSecretHandle::TokenFile(path) => tokio::fs::read_to_string(path)
-            .await
-            .map_err(|error| V3ProviderError::AuthSecretRead {
-                request_id: request_id.to_string(),
-                provider_id: provider_id.to_string(),
-                auth_alias: auth.alias.clone(),
-                reason: error.to_string(),
-            })?,
-        V3ProviderAuthSecretHandle::SecretFile { path, key } => {
-            let content = tokio::fs::read_to_string(path).await.map_err(|error| {
-                V3ProviderError::AuthSecretRead {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                    auth_alias: auth.alias.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
-            // 解析归 config 层（编译期已校验 key 存在），运行时只取值。
-            routecodex_v3_config::resolve_v3_secret_file_key(&content, key).map_err(|reason| {
-                V3ProviderError::AuthSecretRead {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                    auth_alias: auth.alias.clone(),
-                    reason,
-                }
-            })?
-        }
-        V3ProviderAuthSecretHandle::ApiKey(value) => expand_env_vars(value),
-    };
-    let secret = secret.trim().to_string();
-    if secret.is_empty() {
-        return Err(V3ProviderError::MissingAuthSecret {
-            request_id: request_id.to_string(),
+) -> Result<Vec<String>, V3ProviderError> {
+    let url = discovery_models_url(provider_id, provider_type, base_url)?;
+    let secret = resolve_secret(DISCOVERY_REQUEST_ID, provider_id, auth).await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(DISCOVERY_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| V3ProviderError::InternalTransport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
             provider_id: provider_id.to_string(),
-            auth_alias: auth.alias.clone(),
+            lane: crate::V3ProviderInternalTransportLane::Request,
+            reason: format!("model discovery client build failed: {error}"),
+        })?;
+    let mut request = client
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json");
+    request = match provider_type {
+        "anthropic" => request
+            .header("x-api-key", secret.as_str())
+            .header("anthropic-version", "2023-06-01"),
+        "gemini" => request.header("x-goog-api-key", secret.as_str()),
+        _ => request.bearer_auth(secret.as_str()),
+    };
+    let response = request
+        .send()
+        .await
+        .map_err(|error| V3ProviderError::Transport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} failed: {error}"),
+        })?;
+    let status = response.status().as_u16();
+    if !(200..=299).contains(&status) {
+        // provider 错误 body 可能回显凭据，因此只暴露 status，不暴露 body。
+        return Err(V3ProviderError::Transport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} returned HTTP {status}"),
         });
     }
-    Ok(secret)
-}
-
-fn expand_env_vars(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut result = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            let mut j = i + 2;
-            while j < bytes.len() && bytes[j] != b'}' {
-                j += 1;
-            }
-            if j < bytes.len() {
-                let inner = &input[i + 2..j];
-                let (var_name, default_val) = if let Some(dash_pos) = inner.find(":-") {
-                    (&inner[..dash_pos], Some(&inner[dash_pos + 2..]))
-                } else {
-                    (inner, None)
-                };
-                let env_val = std::env::var(var_name).ok().unwrap_or_default();
-                let replacement = if env_val.is_empty() {
-                    default_val.unwrap_or("")
-                } else {
-                    &env_val
-                };
-                result.push_str(replacement);
-                i = j + 1;
-                continue;
-            }
-        }
-        result.push(bytes[i] as char);
-        i += 1;
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} body read failed: {error}"),
+        })?;
+    let decoded: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|error| V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} body is not JSON: {error}"),
+        })?;
+    let models = extract_discovered_models(provider_id, provider_type, &url, &decoded)?;
+    if models.is_empty() {
+        return Err(V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} returned an empty model list"),
+        });
     }
-    result
+    Ok(models)
 }
 
 #[cfg(test)]

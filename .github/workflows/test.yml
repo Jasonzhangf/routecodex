@@ -137,6 +137,9 @@ jobs:
       - name: V3 DAGPipe graph governance
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: npm run verify:v3-dagpipe-governance
+      - name: V3 non-proxy feature DAG graph governance
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: npm run verify:v3-dagpipe-feature-graphs
       - name: V3 route-classifier semantic gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}
         run: npm run test:route-classifier-semantics

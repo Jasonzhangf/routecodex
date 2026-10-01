@@ -1,5 +1,8 @@
 use super::*;
-use crate::webui_observability::V3WebuiObservability;
+use crate::webui_observability::{
+    build_v3_obs_request_key, record_v3_observability_event, V3ObsErrorProjection, V3ObsErrorTruth,
+    V3ObsEventType, V3ObsRequestMeta, V3ObsScope, V3WebuiObservability,
+};
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
@@ -1123,6 +1126,7 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         external_error_code: None,
         external_error_status: None,
         internal_code: None,
+        upstream_request_id: None,
         message: "upstream failed once".to_string(),
         failure_count: 1,
         health_state: "healthy".to_string(),
@@ -2327,6 +2331,7 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         external_error_code: Some("TRANSPORT_ERROR".to_string()),
         external_error_status: None,
         internal_code: None,
+        upstream_request_id: None,
         message: "provider response event codec failed".to_string(),
         failure_count: 3,
         health_state: "cooldown".to_string(),
@@ -2583,7 +2588,8 @@ fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error()
     );
 
     let body = json!({"error":{"code":"provider_pool_exhausted","message":"exhausted"}});
-    record_v3_webui_error_for_context(&context, 502, Some(&body)).unwrap();
+    record_v3_webui_error_for_context(&context, 502, Some(&body), V3ObsErrorProjection::default())
+        .unwrap();
     let row = state
         .webui_observability
         .rows()
@@ -2826,6 +2832,12 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
     );
     let mut failure = test_direct_observability(Vec::new());
     failure.response_status = Some("failed".to_string());
+    // This case exercises the relay-terminal projection, so the fixture carries
+    // the lane stamp the shared relay observability builder writes. The
+    // "typed truth not exposed" marker is owned by lanes that cannot carry the
+    // typed Error06 projection (the relay lane); a direct lane records the real
+    // chain from its frame instead.
+    failure.execution_mode = "relay".to_string();
     emit_v3_observability_console_lines(
         &failure_context,
         502,
@@ -2841,6 +2853,116 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         .expect("terminal nonstream failure row");
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.event_type, "request.failed");
+}
+
+/// The direct lane holds real typed truth: its non-SSE error frame carries the
+/// Error chain the runtime projected, so the WebUI row must record that chain and
+/// `error06_projection` — never the `error06_projection_not_exposed` absence
+/// marker, whose empty chain would read as "there was no error chain". A direct
+/// frame with no chain has nothing to expose and records the honest marker.
+#[test]
+fn direct_frame_records_real_typed_error_truth_instead_of_the_absence_marker() {
+    let log_file = test_v3_console_log_file("direct-frame-typed-error-truth");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+
+    let typed_context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-typed-error",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let typed_frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec(),
+        error_body: Some(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: Some(test_direct_observability(Vec::new())),
+        stream_observation: None,
+    };
+    assert!(
+        emit_v3_direct_frame_console_lines(&typed_context, &typed_frame, Instant::now()).is_none()
+    );
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get("4444:req-direct-typed-error")
+        .expect("the direct lane must record a terminal row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("the direct lane must record the typed error it holds");
+    assert_eq!(
+        observed.source, "error06_projection",
+        "the direct lane holds typed truth, so the absence marker must not be recorded"
+    );
+    assert_eq!(
+        observed.chain.len(),
+        6,
+        "the real six-node Error chain must be recorded verbatim: {:?}",
+        observed.chain
+    );
+    assert_eq!(observed.chain[0].node, "V3Error01SourceRaised");
+    assert_eq!(observed.chain[5].node, "V3Error06ClientProjected");
+    assert_eq!(observed.chain[5].code.as_deref(), Some("502"));
+    drop(rows);
+
+    // A direct frame that carries no chain has no typed truth to expose, so the
+    // absence marker stays the honest answer.
+    let bare_context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-bare-error",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let bare_frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: Some(test_direct_observability(Vec::new())),
+        stream_observation: None,
+    };
+    assert!(
+        emit_v3_direct_frame_console_lines(&bare_context, &bare_frame, Instant::now()).is_none()
+    );
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get("4444:req-direct-bare-error")
+        .expect("the direct lane must still terminate a chainless error frame");
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("a chainless direct error still records an explicit marker");
+    assert_eq!(observed.source, "error06_projection_not_exposed");
+    assert!(
+        observed.chain.is_empty(),
+        "no chain exists on this frame, so none may be fabricated"
+    );
+    let _ = std::fs::remove_file(&log_file);
 }
 
 #[test]
@@ -3397,15 +3519,15 @@ async fn front_io_sse_error_is_explicit_599_without_keepalive() {
     assert!(text.contains("\"status\":599"), "{text}");
 }
 
+/// The predicate reads the client status only. A recovered (2xx) provider attempt
+/// never creates terminal client error truth, and a terminal failure status always
+/// does — whether or not the output also carried an Error chain, since a chain is
+/// not what makes the client failure terminal.
 #[test]
 fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
-    assert!(!v3_output_has_terminal_client_error(200, None));
-    assert!(!v3_output_has_terminal_client_error(200, Some(&[])));
-    assert!(v3_output_has_terminal_client_error(502, None));
-    assert!(!v3_output_has_terminal_client_error(
-        200,
-        Some(&["V3Error06ClientProjected"]),
-    ));
+    assert!(!v3_output_has_terminal_client_error(200));
+    assert!(v3_output_has_terminal_client_error(502));
+    assert!(v3_output_has_terminal_client_error(503));
 }
 
 #[test]
@@ -3774,6 +3896,10 @@ fn error_projection_appends_human_console_failure_line() {
                 }
             })),
             project_path: None,
+            error06_exposed: true,
+            error_class: Some("runtime_failure"),
+            health_action: None,
+            upstream_request_id: None,
         },
     );
 
@@ -3785,6 +3911,26 @@ fn error_projection_appends_human_console_failure_line() {
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.meta.provider_status, Some(500));
     assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("typed Error06 truth must be projected into the row");
+    assert_eq!(observed.source, "error06_projection");
+    assert_eq!(observed.error_class.as_deref(), Some("runtime_failure"));
+    assert_eq!(
+        observed.chain.len(),
+        6,
+        "the typed Error01..Error06 chain must be recorded per node"
+    );
+    assert_eq!(observed.chain[0].node, "V3Error01SourceRaised");
+    assert_eq!(observed.chain[5].node, "V3Error06ClientProjected");
+    assert_eq!(observed.chain[5].code.as_deref(), Some("500"));
+    assert_eq!(
+        observed.chain[1].code.as_deref(),
+        Some("runtime_failure"),
+        "the classified node carries the error class it produced"
+    );
     let log = std::fs::read_to_string(&log_file).unwrap();
     let plain_log = strip_test_ansi(&log);
     assert!(
@@ -3794,6 +3940,104 @@ fn error_projection_appends_human_console_failure_line() {
         "human console log must include the visible failed line, not only JSON debug events: {log}"
     );
     let _ = std::fs::remove_file(&log_file);
+}
+
+/// `raw_artifact_ref` is a real reference, not a convention: the store assigns
+/// it from the single debug layout owner only after the sample directory exists,
+/// and leaves it `None` when the directory is absent or belongs to another
+/// request. Nothing is fabricated from the request id alone.
+#[tokio::test]
+async fn provider_attempt_failure_records_raw_artifact_ref_only_when_the_sample_dir_exists() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "v3-obs-raw-artifact-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let _home = TestHomeGuard::set(&home);
+
+    let observability = V3WebuiObservability::new();
+    let scope = V3ObsScope {
+        port: 4444,
+        workdir: None,
+        session: None,
+    };
+    let attempt = |request_id: &str| {
+        let meta = V3ObsRequestMeta {
+            request_id: request_id.to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_protocol: Some("responses".to_string()),
+            provider_status: Some(502),
+            error_category: Some("provider_http_502".to_string()),
+            observed_error: Some(V3ObsErrorTruth {
+                source: "provider_attempt_failure".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        record_v3_observability_event(
+            &observability,
+            V3ObsEventType::ProviderAttemptFailed,
+            &build_v3_obs_request_key(4444, request_id),
+            scope.clone(),
+            meta,
+            &routecodex_v3_runtime::V3RuntimeObservability::default(),
+        )
+        .unwrap()
+    };
+
+    let absent_key = build_v3_obs_request_key(4444, "req-artifact-absent");
+    let present_key = build_v3_obs_request_key(4444, "req-artifact-present");
+    attempt("req-artifact-absent");
+    attempt("req-artifact-present");
+
+    let rows = observability.rows().unwrap();
+    assert_eq!(
+        rows.get(&absent_key).unwrap().raw_artifact_ref,
+        None,
+        "an absent sample directory must not yield a fabricated reference"
+    );
+    assert_eq!(rows.get(&present_key).unwrap().raw_artifact_ref, None);
+
+    // Capture the real sample directory for exactly one of the two requests.
+    let dir = home
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join("4444")
+        .join("req-artifact-present");
+    std::fs::create_dir_all(&dir).unwrap();
+    attempt("req-artifact-present");
+
+    let rows = observability.rows().unwrap();
+    assert_eq!(
+        rows.get(&present_key).unwrap().raw_artifact_ref.as_deref(),
+        Some(dir.display().to_string().as_str()),
+        "an existing sample directory must resolve to its real path"
+    );
+    assert_eq!(
+        rows.get(&absent_key).unwrap().raw_artifact_ref,
+        None,
+        "another request's sample directory must not resolve"
+    );
+    assert_eq!(
+        rows.get(&present_key)
+            .unwrap()
+            .meta
+            .observed_error
+            .as_ref()
+            .and_then(|truth| truth.attempt_index),
+        Some(1),
+        "attempt_index is the row attempt counter at the failing attempt"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[tokio::test]
