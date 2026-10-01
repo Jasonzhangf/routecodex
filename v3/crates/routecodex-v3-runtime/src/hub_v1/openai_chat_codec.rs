@@ -306,6 +306,17 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
 
 /// Responses 语义 usage -> OpenAI Chat wire usage 唯一归一化入口（JSON 响应与
 /// SSE 终帧共用；禁止在投影层各自复制一份转换）。
+///
+/// 输入侧两种语义必须择一，不能同时套用（见 `V3RuntimeUsageSummary` 字段契约）：
+/// - OpenAI/Responses 语义：`input_tokens` 已含缓存，`input_tokens_details.cached_tokens`
+///   只是它的子计数；`prompt_tokens` 直接取 `input_tokens`。
+/// - Anthropic 语义：`input_tokens` 只记未命中缓存的增量，`cache_read_input_tokens` /
+///   `cache_creation_input_tokens` 独立计数；OpenAI Chat 的 `prompt_tokens` 是完整
+///   输入，必须把读/写缓存加回，并把读缓存投影为子计数。
+///
+/// 客户端 usage 识别（dsh `parseChunkUsage`）从 `prompt_tokens_details.cached_tokens`
+/// 读取命中缓存，并用 `prompt_tokens - cached_tokens` 反推未命中增量；丢掉子计数
+/// 会把全部输入计成未命中，并把缓存读计为 0。
 pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Value> {
     let usage = usage.as_object()?;
     let input_tokens = usage
@@ -316,11 +327,52 @@ pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Valu
         .get("output_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    Some(serde_json::json!({
-        "prompt_tokens": input_tokens,
-        "completion_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens
-    }))
+    let cached_subcount = usage
+        .get("input_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+        .and_then(Value::as_u64);
+    let cache_read = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
+    let cache_creation = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64);
+    let (prompt_tokens, cached_tokens) = match cached_subcount {
+        Some(cached) => (input_tokens, Some(cached)),
+        None => match cache_read {
+            Some(read) => (
+                input_tokens
+                    .saturating_add(read)
+                    .saturating_add(cache_creation.unwrap_or(0)),
+                Some(read),
+            ),
+            None => (input_tokens, None),
+        },
+    };
+    let mut projected = serde_json::Map::new();
+    projected.insert("prompt_tokens".to_string(), Value::from(prompt_tokens));
+    projected.insert("completion_tokens".to_string(), Value::from(output_tokens));
+    projected.insert(
+        "total_tokens".to_string(),
+        Value::from(prompt_tokens.saturating_add(output_tokens)),
+    );
+    if let Some(cached) = cached_tokens {
+        projected.insert(
+            "prompt_tokens_details".to_string(),
+            serde_json::json!({"cached_tokens": cached}),
+        );
+    }
+    if let Some(reasoning) = usage
+        .get("output_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("reasoning_tokens"))
+        .and_then(Value::as_u64)
+    {
+        projected.insert(
+            "completion_tokens_details".to_string(),
+            serde_json::json!({"reasoning_tokens": reasoning}),
+        );
+    }
+    Some(Value::Object(projected))
 }
 
 /// Incremental Anthropic wire-event to OpenAI Chat client transducer.
@@ -337,6 +389,8 @@ pub(crate) struct V3OpenAiChatAnthropicSseTransducer {
     terminal_finish_reason: Option<String>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
     local_web_search: bool,
 }
 
@@ -399,10 +453,17 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .get("model")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        self.input_tokens = message
-            .get("usage")
-            .and_then(Value::as_object)
+        let usage = message.get("usage").and_then(Value::as_object);
+        self.input_tokens = usage
             .and_then(|usage| usage.get("input_tokens"))
+            .and_then(Value::as_u64);
+        // Anthropic 语义：input_tokens 只记未命中增量，缓存读/写是独立计数，
+        // 必须在同一 transducer 内累计后交给唯一 Chat wire 投影入口。
+        self.cache_read_input_tokens = usage
+            .and_then(|usage| usage.get("cache_read_input_tokens"))
+            .and_then(Value::as_u64);
+        self.cache_creation_input_tokens = usage
+            .and_then(|usage| usage.get("cache_creation_input_tokens"))
             .and_then(Value::as_u64);
         Ok(vec![self.chunk(json!({"role":"assistant"}), None, false)])
     }
@@ -547,6 +608,15 @@ impl V3OpenAiChatAnthropicSseTransducer {
             if let Some(output) = usage.get("output_tokens").and_then(Value::as_u64) {
                 self.output_tokens = Some(output);
             }
+            if let Some(read) = usage.get("cache_read_input_tokens").and_then(Value::as_u64) {
+                self.cache_read_input_tokens = Some(read);
+            }
+            if let Some(creation) = usage
+                .get("cache_creation_input_tokens")
+                .and_then(Value::as_u64)
+            {
+                self.cache_creation_input_tokens = Some(creation);
+            }
         }
         Ok(Vec::new())
     }
@@ -562,7 +632,9 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .clone()
             .unwrap_or_else(|| "stop".to_string());
         let mut output = vec![self.chunk(json!({}), Some(&finish_reason), false)];
-        if self.input_tokens.is_some() || self.output_tokens.is_some() {
+        // 唯一判据：canonical_usage() 同时决定终帧是否携带 usage 与携带什么内容，
+        // 避免门禁条件与投影条件分叉（仅缓存字段出现时也必须一致）。
+        if self.canonical_usage().is_some() {
             output.push(self.chunk(json!({}), None, true));
         }
         Ok(output)
@@ -604,20 +676,40 @@ impl V3OpenAiChatAnthropicSseTransducer {
             );
         }
         if choices_empty {
-            if self.input_tokens.is_some() || self.output_tokens.is_some() {
-                let prompt_tokens = self.input_tokens.unwrap_or(0);
-                let completion_tokens = self.output_tokens.unwrap_or(0);
-                chunk.insert(
-                    "usage".to_string(),
-                    json!({
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": prompt_tokens + completion_tokens
-                    }),
-                );
+            if let Some(usage) = self.canonical_usage() {
+                chunk.insert("usage".to_string(), usage);
             }
         }
         Value::Object(chunk)
+    }
+
+    /// 累计的 Anthropic usage 归一化为 canonical Responses 语义 usage，再交给唯一
+    /// Chat wire 投影入口；禁止在本 transducer 内复制缓存/子计数换算。
+    fn canonical_usage(&self) -> Option<Value> {
+        if self.input_tokens.is_none()
+            && self.output_tokens.is_none()
+            && self.cache_read_input_tokens.is_none()
+            && self.cache_creation_input_tokens.is_none()
+        {
+            return None;
+        }
+        let mut usage = Map::new();
+        if let Some(value) = self.input_tokens {
+            usage.insert("input_tokens".to_string(), Value::from(value));
+        }
+        if let Some(value) = self.output_tokens {
+            usage.insert("output_tokens".to_string(), Value::from(value));
+        }
+        if let Some(value) = self.cache_read_input_tokens {
+            usage.insert("cache_read_input_tokens".to_string(), Value::from(value));
+        }
+        if let Some(value) = self.cache_creation_input_tokens {
+            usage.insert(
+                "cache_creation_input_tokens".to_string(),
+                Value::from(value),
+            );
+        }
+        project_v3_chat_usage_from_canonical(&Value::Object(usage))
     }
 }
 
