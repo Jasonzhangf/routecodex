@@ -261,38 +261,17 @@ fn provider_terminal_without_real_http_response_is_no_response() {
 }
 
 #[test]
-fn received_http_semantic_failure_projects_error06_instead_of_aborting_front() {
-    let evidence = V3ReceivedHttpSemanticFailure::new(200).expect("received upstream HTTP 200");
-    assert_eq!(evidence.status(), 200);
+fn exhausted_semantic_failure_never_projects_an_error_to_the_client() {
+    // A provider that returned HTTP 2xx but whose payload cannot be represented
+    // is a provider-attempt failure: it reselects a candidate while attempts
+    // remain, and on exhaustion it terminates the client boundary without a
+    // fabricated error. The client never receives the provider-derived Error06.
     assert_eq!(
-        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
-            Some(V3ProviderTerminalDisposition::NoResponse),
-            Some(evidence),
-        ),
-        None,
-    );
-    assert_eq!(
-        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
-            Some(V3ProviderTerminalDisposition::NoResponse),
+        V3ErrorHandlingCenter::provider_terminal_disposition(
+            exhausted_provider_error_05("provider_response_semantic_failure"),
             None,
         ),
-        Some(V3ProviderTerminalDisposition::NoResponse),
-    );
-    assert!(V3ReceivedHttpSemanticFailure::new(502).is_none());
-}
-
-#[test]
-fn received_http_semantic_failure_preserves_prior_external_http_error() {
-    let external = V3EligibleExternalHttpResponse::new(429, vec![], b"rate limited".to_vec())
-        .expect("real upstream HTTP error");
-    assert_eq!(
-        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
-            Some(V3ProviderTerminalDisposition::ExternalHttp(
-                external.clone()
-            )),
-            V3ReceivedHttpSemanticFailure::new(200),
-        ),
-        Some(V3ProviderTerminalDisposition::ExternalHttp(external)),
+        V3ProviderTerminalDisposition::NoResponse
     );
 }
 

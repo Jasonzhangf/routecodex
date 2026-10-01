@@ -2511,7 +2511,8 @@ fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_dsml_control_frame_is_not_client_output_text() {
+async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_without_error_to_client(
+) {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
         StatusCode::OK,
@@ -2529,7 +2530,7 @@ async fn responses_relay_anthropic_dsml_control_frame_is_not_client_output_text(
     );
     manifest.debug.log_console = true;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let response = reqwest::Client::builder()
+    let send_result = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .unwrap()
@@ -2537,11 +2538,7 @@ async fn responses_relay_anthropic_dsml_control_frame_is_not_client_output_text(
         .header("accept", "text/event-stream")
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let body = response.text().await.unwrap();
-    eprintln!("controlled DSML replay status={status} body={body}");
+        .await;
     let capture = timeout(Duration::from_secs(15), captures.recv())
         .await
         .expect("Anthropic mock must receive provider request")
@@ -2550,16 +2547,13 @@ async fn responses_relay_anthropic_dsml_control_frame_is_not_client_output_text(
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(capture.body["model"], "wire-test");
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
-    assert!(body.contains("event: response.failed"), "{body}");
-    assert!(body.contains("data: [DONE]"), "{body}");
+    // The provider-attempt failure is isolated from the client: exhaustion must
+    // terminate the client transport with zero HTTP status instead of projecting
+    // a provider-derived Error06/502 or leaking the malformed control text.
     assert!(
-        !body.contains("<thinking>"),
-        "control frame leaked into client SSE: {body}"
-    );
-    assert!(
-        !body.contains("DSML"),
-        "control frame leaked into client SSE: {body}"
+        send_result.is_err(),
+        "exhausted malformed provider response must break the client transport with no HTTP \
+         status; received {send_result:?}"
     );
 }
 

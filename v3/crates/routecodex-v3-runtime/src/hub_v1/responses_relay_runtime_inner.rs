@@ -198,7 +198,6 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         observability: None,
                         terminal_projection: None,
                         terminal_disposition: None,
-                        received_http_semantic_failure: None,
                         matched_policy: None,
                     };
                     return Ok(provider_failure_output(
@@ -821,9 +820,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ) {
                         Ok(value) => value,
                         Err(error) if is_v3_responses_provider_response_failure(&error) => {
-                            let failure = provider_response_hook_failure_with_status(
+                            let failure = provider_response_hook_failure(
                                 error,
-                                Some(provider_status),
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
@@ -996,15 +994,13 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let provider_value = match provider_value_result {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure = handle_error_before_resp03!(
-                            provider_response_stream_relay_failure_with_status(
+                        let failure =
+                            handle_error_before_resp03!(provider_response_stream_relay_failure(
                                 error,
-                                Some(provider_status),
                                 &input.request_id,
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
-                            )
-                        );
+                            ));
                         let residence_deadline_error = failure.policy_error_message.contains(
                             "provider SSE attempt exceeded the request residence deadline",
                         );
@@ -1183,9 +1179,8 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ) {
                         Ok(value) => value,
                         Err(error) if is_v3_responses_provider_response_failure(&error) => {
-                            let failure = provider_response_hook_failure_with_status(
+                            let failure = provider_response_hook_failure(
                                 error,
-                                Some(provider_status),
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );

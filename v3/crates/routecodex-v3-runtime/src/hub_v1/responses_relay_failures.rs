@@ -64,7 +64,6 @@ pub(crate) fn provider_http_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
-        received_http_semantic_failure: None,
         matched_policy: None,
     }
 }
@@ -105,7 +104,6 @@ pub(crate) fn provider_runtime_failure(
             observability,
             terminal_projection: Some(projected),
             terminal_disposition: None,
-            received_http_semantic_failure: None,
             matched_policy: None,
         };
     }
@@ -147,7 +145,6 @@ pub(crate) fn provider_runtime_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
-        received_http_semantic_failure: None,
         matched_policy: None,
     }
 }
@@ -170,7 +167,6 @@ pub(crate) fn provider_semantic_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
-        received_http_semantic_failure: None,
         matched_policy,
     }
 }
@@ -190,29 +186,12 @@ pub(crate) fn provider_terminal_admission_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
-        received_http_semantic_failure: None,
         matched_policy: None,
     }
 }
 
 pub(crate) fn provider_response_stream_relay_failure(
     error: V3ResponsesRelayRuntimeError,
-    request_id: &str,
-    provider_id: &str,
-    observability: Option<V3RuntimeObservability>,
-) -> Result<V3ResponsesRelayProviderFailure, V3ResponsesRelayRuntimeError> {
-    provider_response_stream_relay_failure_with_status(
-        error,
-        None,
-        request_id,
-        provider_id,
-        observability,
-    )
-}
-
-pub(crate) fn provider_response_stream_relay_failure_with_status(
-    error: V3ResponsesRelayRuntimeError,
-    provider_status: Option<u16>,
     request_id: &str,
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
@@ -231,24 +210,13 @@ pub(crate) fn provider_response_stream_relay_failure_with_status(
             observability,
             terminal_projection: None,
             terminal_disposition: None,
-            received_http_semantic_failure: None,
             matched_policy: None,
         },
         V3ResponsesRelayRuntimeError::ProviderJson(reason) => {
-            provider_response_codec_relay_failure(
-                reason.to_string(),
-                provider_status,
-                provider_id,
-                observability,
-            )
+            provider_response_codec_relay_failure(reason.to_string(), provider_id, observability)
         }
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(reason) => {
-            provider_response_codec_relay_failure(
-                reason,
-                provider_status,
-                provider_id,
-                observability,
-            )
+            provider_response_codec_relay_failure(reason, provider_id, observability)
         }
         other => provider_runtime_failure(
             provider_response_stream_failure(other, request_id, provider_id)?,
@@ -260,7 +228,6 @@ pub(crate) fn provider_response_stream_relay_failure_with_status(
 
 fn provider_response_codec_relay_failure(
     reason: String,
-    provider_status: Option<u16>,
     provider_id: &str,
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayProviderFailure {
@@ -273,8 +240,6 @@ fn provider_response_codec_relay_failure(
         observability,
         terminal_projection: None,
         terminal_disposition: None,
-        received_http_semantic_failure: provider_status
-            .and_then(routecodex_v3_error::V3ReceivedHttpSemanticFailure::new),
         matched_policy: None,
     }
 }
@@ -361,7 +326,6 @@ pub(crate) fn provider_request_relay_failure(
         observability,
         terminal_projection,
         terminal_disposition: None,
-        received_http_semantic_failure: None,
         matched_policy: None,
     })
 }
@@ -491,26 +455,10 @@ pub(crate) fn provider_response_hook_failure(
                 observability,
                 terminal_projection: None,
                 terminal_disposition: None,
-                received_http_semantic_failure: None,
                 matched_policy: None,
             }
         }
     }
-}
-
-pub(crate) fn provider_response_hook_failure_with_status(
-    error: V3ResponsesRelayRuntimeError,
-    provider_status: Option<u16>,
-    provider_id: &str,
-    observability: Option<V3RuntimeObservability>,
-) -> V3ResponsesRelayProviderFailure {
-    let is_provider_transport_error = matches!(error, V3ResponsesRelayRuntimeError::Provider(_));
-    let mut failure = provider_response_hook_failure(error, provider_id, observability);
-    if !is_provider_transport_error {
-        failure.received_http_semantic_failure =
-            provider_status.and_then(routecodex_v3_error::V3ReceivedHttpSemanticFailure::new);
-    }
-    failure
 }
 
 pub(crate) fn provider_failure_output(
@@ -542,11 +490,7 @@ pub(crate) fn provider_failure_output_with_observation(
     }
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
-        terminal_disposition:
-            V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
-                failure.terminal_disposition,
-                failure.received_http_semantic_failure,
-            ),
+        terminal_disposition: failure.terminal_disposition,
         client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -603,12 +547,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exhausted_received_http_200_codec_failure_projects_error06() {
-        let mut failure = provider_response_hook_failure_with_status(
+    fn exhausted_received_http_200_codec_failure_never_projects_error06_to_client() {
+        let mut failure = provider_response_hook_failure(
             V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
                 "invalid Anthropic response meaning".to_string(),
             ),
-            Some(200),
             "provider-1",
             None,
         );
@@ -619,9 +562,13 @@ mod tests {
             Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
         );
         let output = provider_failure_output(failure, vec!["V3ProviderRespInbound01Raw"], 0);
-        assert_eq!(output.status, 502);
-        assert!(output.terminal_disposition.is_none());
-        assert!(output.error_chain.is_some());
+        // The provider-derived Error06 body must never become the client response;
+        // the exhausted terminal keeps the typed no-response disposition so the
+        // Server terminates the client boundary instead.
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
     }
 
     #[test]

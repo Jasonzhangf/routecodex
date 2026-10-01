@@ -609,24 +609,6 @@ pub enum V3ProviderTerminalDisposition {
     NoResponse,
 }
 
-/// A provider returned a successful HTTP response, but its content could not
-/// be represented as the declared protocol. The Error06 projection remains
-/// the client response after route exhaustion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct V3ReceivedHttpSemanticFailure {
-    status: u16,
-}
-
-impl V3ReceivedHttpSemanticFailure {
-    pub fn new(status: u16) -> Option<Self> {
-        (200..=299).contains(&status).then_some(Self { status })
-    }
-
-    pub fn status(self) -> u16 {
-        self.status
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct V3Error06ClientProjected {
     pub status: u16,
@@ -1050,16 +1032,6 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
-    pub fn disposition_after_received_http_semantic_failure(
-        disposition: Option<V3ProviderTerminalDisposition>,
-        evidence: Option<V3ReceivedHttpSemanticFailure>,
-    ) -> Option<V3ProviderTerminalDisposition> {
-        match (disposition, evidence) {
-            (Some(V3ProviderTerminalDisposition::NoResponse), Some(_)) => None,
-            (disposition, _) => disposition,
-        }
-    }
-
     pub fn provider_terminal_disposition(
         terminal: V3Error05TerminalDecision,
         witness: Option<V3EligibleExternalHttpResponse>,
