@@ -1120,6 +1120,7 @@ pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
     "metadata_center",
     "metadataCenter",
     "__metadataCenter",
+    "_debug",
     "debug_snapshot",
     "debugSnapshot",
     "provider_protocol",

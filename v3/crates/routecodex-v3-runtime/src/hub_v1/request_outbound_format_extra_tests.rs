@@ -286,6 +286,21 @@ fn outbound_projection_rejects_control_fields_with_precise_path() {
 }
 
 #[test]
+fn outbound_projection_preserves_tool_search_output_underscore_schema_names() {
+    let content = "[{\"type\":\"namespace\",\"name\":\"mcp\",\"tools\":[{\"type\":\"function\",\"name\":\"_patch_page\",\"parameters\":{\"$defs\":{\"_ReplaceBlock\":{\"type\":\"object\"}},\"properties\":{\"replace_block\":{\"$ref\":\"#/$defs/_ReplaceBlock\"}}}}]}]";
+    let payload = json!({"model":"gpt-test","messages":[{"role":"tool","tool_call_id":"call_search","content":content}]});
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("tool-search JSON Schema underscore names are business data");
+    let outbound_content = request["messages"][0]["content"]
+        .as_str()
+        .expect("tool output remains stringified");
+    assert!(
+        outbound_content.contains("_ReplaceBlock"),
+        "{outbound_content}"
+    );
+}
+
+#[test]
 fn openai_chat_wire_consumes_registered_codex_client_metadata_as_local_context() {
     let payload = json!({
         "model": "gpt-test",

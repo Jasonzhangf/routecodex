@@ -615,11 +615,49 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect_err("private debug fields must fail before provider tool-result JSON stringification");
+    .expect_err("control fields must fail before provider tool-result JSON stringification");
     assert!(
-        error.contains("private debug field") && error.contains("_debug"),
+        error.contains("side-channel field") && error.contains("_debug"),
         "unexpected error: {error}"
     );
+}
+
+#[test]
+fn responses_tool_search_output_preserves_private_named_json_schema_definitions() {
+    let tools = json!([{
+        "type": "namespace",
+        "name": "mcp__codex_apps__chatgpt_space",
+        "tools": [{
+            "type": "function",
+            "name": "_patch_page",
+            "parameters": {
+                "type": "object",
+                "$defs": {
+                    "_PatchPageChange": {
+                        "type": "object",
+                        "properties": {"block_id": {"type": "string"}}
+                    }
+                },
+                "properties": {
+                    "changes": {"items": {"$ref": "#/$defs/_PatchPageChange"}}
+                }
+            }
+        }]
+    }]);
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {"type": "tool_search_call", "call_id": "call_search", "arguments": {}},
+            {"type": "tool_search_output", "call_id": "call_search", "tools": tools}
+        ]
+    }))
+    .expect("tool search output JSON Schema names are business data, not proxy control fields");
+
+    let serialized = request["messages"][1]["content"]
+        .as_str()
+        .expect("tool search output is preserved in tool content");
+    let normalized_tools: Value = serde_json::from_str(serialized).expect("tool list JSON");
+    assert_eq!(normalized_tools, tools);
 }
 
 #[test]

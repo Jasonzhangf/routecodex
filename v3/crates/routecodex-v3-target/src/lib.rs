@@ -327,7 +327,6 @@ impl V3TargetInterpreter {
     ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
         let mut unavailable = Vec::new();
         let mut eligible = Vec::new();
-        let mut near_limit_eligible = Vec::new();
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -379,11 +378,14 @@ impl V3TargetInterpreter {
                 {
                     continue;
                 }
-                if near_limit {
-                    near_limit_eligible.push((index, candidate, projection));
-                } else {
-                    eligible.push((index, candidate, projection));
-                }
+                eligible.push((
+                    index,
+                    candidate,
+                    projection,
+                    route_tier_rank,
+                    scheduled_priority,
+                    near_limit,
+                ));
             } else {
                 unavailable.push(format_candidate_scheduling_unavailable(
                     candidate,
@@ -391,12 +393,16 @@ impl V3TargetInterpreter {
                 ));
             }
         }
-        if eligible.is_empty() {
-            eligible = near_limit_eligible;
-        }
-        let Some(max_priority) = eligible
+        let candidate_count = eligible.len().max(1);
+        // A route pool can encode its configured tiers as target priority.
+        // Plan tier index orders separate pools; scheduled priority orders the
+        // tiers inside one pool. Near-limit is only a same-tier demotion, so it
+        // cannot hand selection to a lower pool or a lower in-pool tier.
+        let Some(max_route_tier_scope) = eligible
             .iter()
-            .map(|(_, _, projection)| projection.effective_priority)
+            .map(|(_, _, _, route_tier_rank, scheduled_priority, _)| {
+                (*route_tier_rank, *scheduled_priority)
+            })
             .max()
         else {
             return Err(V3TargetExhaustion {
@@ -404,29 +410,48 @@ impl V3TargetInterpreter {
                 attempted_candidates: unavailable,
             });
         };
-        // Cooldown, request-local exclusion, capability mismatch, and context
-        // rejection are not transport candidates.  The request-local attempt
-        // ceiling must therefore follow the eligible set, not the expanded
-        // declaration set.
-        let candidate_count = eligible.len().max(1);
-        let mut tier = eligible
+        let highest_route_tier_has_normal = eligible.iter().any(
+            |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
+                (*route_tier_rank, *scheduled_priority) == max_route_tier_scope && !*near_limit
+            },
+        );
+        let mut candidates = eligible
             .into_iter()
-            .filter(|(_, _, projection)| projection.effective_priority == max_priority)
+            .filter(
+                |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
+                    (*route_tier_rank, *scheduled_priority) == max_route_tier_scope
+                        && (!highest_route_tier_has_normal || !*near_limit)
+                },
+            )
+            .collect::<Vec<_>>();
+        let Some(max_priority) = candidates
+            .iter()
+            .map(|(_, _, projection, _, _, _)| projection.effective_priority)
+            .max()
+        else {
+            return Err(V3TargetExhaustion {
+                route: Box::new(expanded.route),
+                attempted_candidates: unavailable,
+            });
+        };
+        let mut tier = candidates
+            .drain(..)
+            .filter(|(_, _, projection, _, _, _)| projection.effective_priority == max_priority)
             .collect::<Vec<_>>();
         let total_weight = tier
             .iter()
-            .map(|(_, _, projection)| projection.effective_weight_milli)
+            .map(|(_, _, projection, _, _, _)| projection.effective_weight_milli)
             .sum::<u64>();
         let mut point = deterministic_sample % total_weight.max(1);
         let mut chosen = 0;
-        for (tier_index, (_, _, projection)) in tier.iter().enumerate() {
+        for (tier_index, (_, _, projection, _, _, _)) in tier.iter().enumerate() {
             if point < projection.effective_weight_milli {
                 chosen = tier_index;
                 break;
             }
             point = point.saturating_sub(projection.effective_weight_milli);
         }
-        let (index, candidate, _) = tier.swap_remove(chosen);
+        let (index, candidate, _, _, _, _) = tier.swap_remove(chosen);
         let mut route = expanded.route;
         if let Some(pool_id) = route
             .target_plan

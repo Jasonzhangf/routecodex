@@ -1,8 +1,8 @@
 use crate::transport::{
     build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    V3ProviderRequestHeader, V3Transport13ResponsesRequest,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12, V3ProviderRequestHeader,
+    V3Transport13ResponsesRequest,
 };
 use crate::wire::{
     build_v3_provider_12_responses_wire_payload, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
@@ -123,8 +123,9 @@ mod tests {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
         };
-        let request = build_v3_provider_global_probe_request(target, "probe-provider-header".into())
-            .expect("probe request builds");
+        let request =
+            build_v3_provider_global_probe_request(target, "probe-provider-header".into())
+                .expect("probe request builds");
         assert!(
             request
                 .provider_headers()
