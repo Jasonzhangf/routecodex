@@ -632,7 +632,9 @@ impl V3OpenAiChatAnthropicSseTransducer {
             .clone()
             .unwrap_or_else(|| "stop".to_string());
         let mut output = vec![self.chunk(json!({}), Some(&finish_reason), false)];
-        if self.input_tokens.is_some() || self.output_tokens.is_some() {
+        // 唯一判据：canonical_usage() 同时决定终帧是否携带 usage 与携带什么内容，
+        // 避免门禁条件与投影条件分叉（仅缓存字段出现时也必须一致）。
+        if self.canonical_usage().is_some() {
             output.push(self.chunk(json!({}), None, true));
         }
         Ok(output)

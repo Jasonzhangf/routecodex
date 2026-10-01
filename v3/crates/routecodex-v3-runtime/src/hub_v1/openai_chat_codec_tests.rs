@@ -629,3 +629,43 @@ fn anthropic_transducer_folds_cache_read_into_chat_prompt_tokens() {
     assert_eq!(usage["completion_tokens"], json!(10));
     assert_eq!(usage["total_tokens"], json!(179));
 }
+
+#[test]
+fn anthropic_transducer_emits_cache_only_usage_terminal_chunk() {
+    // 终帧门禁与投影共用 canonical_usage()：仅有缓存字段时也必须携带 usage，
+    // 否则缓存命中信息会在唯一可承载它的终帧上静默丢失。
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_cache_only",
+                "model": "MiniMax-M3",
+                "role": "assistant",
+                "content": [],
+                "usage": {"cache_read_input_tokens": 64}
+            }
+        }))
+        .expect("message_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        }))
+        .expect("content_block_start");
+    transducer
+        .push_event(json!({"type": "content_block_stop", "index": 0}))
+        .expect("content_block_stop");
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .expect("message_stop");
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("cache-only anthropic terminal must still carry usage");
+    assert_eq!(usage["prompt_tokens"], json!(64));
+    assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], json!(64));
+    assert_eq!(usage["completion_tokens"], json!(0));
+    assert_eq!(usage["total_tokens"], json!(64));
+}

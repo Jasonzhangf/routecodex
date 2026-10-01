@@ -6,9 +6,9 @@
 - L28-L47 `chat-ssot`：chat process 字段落盘真源。
 - L49-L88 `responses-outbound`：Responses 到其他协议的请求侧映射矩阵。
 - L90-L129 `to-responses`：其他协议到 Responses 的请求/响应侧映射矩阵。
-- L109-L117 `response-path`：provider response → client protocol 的兼容结论。
-- L119-L132 `usage-matrix`：Chat client wire 的 usage 输入语义与投影契约。
-- L134-L155 `known-gaps`：当前确认缺口、非目标与真实样本覆盖边界。
+- L110-L118 `response-path`：provider response → client protocol 的兼容结论。
+- L120-L133 `usage-matrix`：Chat client wire 的 usage 输入语义与投影契约。
+- L135-L157 `known-gaps`：当前确认缺口、非目标与真实样本覆盖边界。
 
 ## 目标
 
