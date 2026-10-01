@@ -39,10 +39,15 @@ fn persistent_connection_second_request_gets_preheader_restart_terminal() {
 }
 
 #[test]
-fn deferred_restart_closeout_is_committed_when_the_sse_head_never_reached_the_client() {
+fn deferred_restart_closeout_commits_when_the_enqueued_head_never_reached_the_client() {
     let state = V3FrontTransportCloseoutState::new();
     state.mark_request_started();
     assert!(state.suppress_restart_closeout_frame());
+    // Hyper enqueued the SSE response head, but the write worker has not flushed it
+    // yet. Deferring on the enqueue instead of the write would let the biased close
+    // signal drop the queued head and leave the client with zero bytes.
+    state.mark_response_started();
+    assert!(!state.transport_wrote());
     assert!(
         !state.close_for_exec_replacement(),
         "a suppressed streaming terminal must defer the restart closeout"
@@ -53,7 +58,7 @@ fn deferred_restart_closeout_is_committed_when_the_sse_head_never_reached_the_cl
     );
     assert!(
         state.commit_deferred_restart_closeout(),
-        "the deferred closeout must be committed when the head never reached the client"
+        "the pending restart 503 must be committed when the head never reached the client"
     );
     assert!(state.is_closed());
     let frame = state
@@ -65,15 +70,37 @@ fn deferred_restart_closeout_is_committed_when_the_sse_head_never_reached_the_cl
 }
 
 #[test]
-fn deferred_restart_closeout_is_dropped_when_the_sse_head_reached_the_client() {
+fn deferred_restart_closeout_is_dropped_once_the_transport_wrote_the_response() {
     let state = V3FrontTransportCloseoutState::new();
     state.mark_request_started();
     assert!(state.suppress_restart_closeout_frame());
     assert!(!state.close_for_exec_replacement());
     state.mark_response_started();
+    state.mark_transport_wrote();
     assert!(
         !state.commit_deferred_restart_closeout(),
-        "the SSE transport break is the client boundary once the head was written"
+        "response bytes that reached the client keep the SSE transport break as the boundary"
+    );
+    assert!(!state.is_closed());
+    assert!(state.take_frame().is_none());
+}
+
+#[test]
+fn deferred_restart_closeout_stays_pending_until_the_transport_reports_the_write() {
+    let state = V3FrontTransportCloseoutState::new();
+    state.mark_request_started();
+    assert!(state.suppress_restart_closeout_frame());
+    state.mark_response_started();
+    assert!(!state.close_for_exec_replacement());
+    assert!(
+        !state.is_closed(),
+        "the queued SSE head must stay writable while the transport has not written"
+    );
+    // The write worker flushes the queued head, so the SSE break owns the boundary.
+    state.mark_transport_wrote();
+    assert!(
+        !state.commit_deferred_restart_closeout(),
+        "a written head keeps the SSE transport break as the client boundary"
     );
     assert!(!state.is_closed());
     assert!(state.take_frame().is_none());
@@ -122,10 +149,10 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
             )
             .await
             .expect("the deferred transport must still accept the SSE boundary frame");
-        socket.closeout_state.mark_response_started();
+        socket.wait_transport_wrote().await;
         assert!(
             !socket.commit_deferred_restart_closeout(),
-            "a delivered SSE head must keep the transport break as the client boundary"
+            "response bytes that reached the client must keep the transport break as the boundary"
         );
         socket
     });

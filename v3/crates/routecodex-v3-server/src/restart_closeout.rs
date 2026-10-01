@@ -68,18 +68,19 @@ impl V3FrontTransportCloseoutState {
     /// Close this connection for an exec replacement.
     ///
     /// Returns `false` when the closeout is deferred because a streaming terminal
-    /// already owns the client-visible boundary and its response head has not reached
-    /// the client yet. Closing there would drop the head and turn the SSE transport
-    /// break back into the silent zero-byte close it replaces. The deferred closeout
-    /// stays owned by the request cycle: the streaming terminal drains it when its
-    /// body fails and the head never reached the client, so the client always
-    /// observes either the SSE transport break or the restart `503` frame.
+    /// already owns the client-visible boundary and its response bytes have not
+    /// reached the client yet. Closing there signals the biased write-worker close,
+    /// which can drop the queued SSE head and turn the transport break back into the
+    /// silent zero-byte close it replaces, so the restart `503` stays pending without
+    /// signalling. The streaming terminal settles that boundary once the transport
+    /// reports the write, so the client always observes either the SSE transport break
+    /// or the restart `503` frame.
     pub(crate) fn close_for_exec_replacement(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if request_cycle.terminal_frame_suppressed && !request_cycle.response_started {
+        if request_cycle.terminal_frame_suppressed && !self.transport_wrote() {
             request_cycle.frame = Some(build_v3_restart_closeout_http_error());
             return false;
         }
@@ -91,24 +92,28 @@ impl V3FrontTransportCloseoutState {
     }
 
     /// Commit the deferred restart closeout when the streaming terminal's body failed
-    /// and its response head never reached the client.
+    /// and its response bytes never reached the client.
     ///
     /// Called from the streaming terminal right before its body fails, so a restart
     /// replacement that raced the transport break still delivers its `503` frame
     /// instead of leaving the client with zero response bytes. Returns `true` when the
-    /// closeout must be signalled; the head already reached the client makes the SSE
-    /// transport break the client boundary and drops the deferred frame.
+    /// closeout must be signalled; response bytes that did reach the client make the
+    /// SSE transport break the client boundary and drop the deferred frame.
     pub(crate) fn commit_deferred_restart_closeout(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if request_cycle.response_started || request_cycle.frame.is_none() {
+        if self.transport_wrote() || request_cycle.frame.is_none() {
             request_cycle.frame = None;
             return false;
         }
         self.closed.store(true, Ordering::Release);
         true
+    }
+
+    pub(crate) fn transport_wrote(&self) -> bool {
+        self.transport_wrote.load(Ordering::Acquire)
     }
 
     pub(crate) fn abort_without_response(&self) {
