@@ -311,7 +311,12 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
         };
         if let Some(disposition) = relay_output.terminal_disposition.take() {
-            return provider_terminal_response(state, front_connection_identity, disposition);
+            return provider_terminal_response(
+                state,
+                front_connection_identity,
+                disposition,
+                v3_entry_request_wants_sse(request_headers, &console_payload),
+            );
         }
         let mut trace = relay_trace;
         trace.extend(relay_output.node_trace);
@@ -363,7 +368,12 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         );
     }
     if let Some(disposition) = output.terminal_disposition {
-        return provider_terminal_response(state, front_connection_identity, disposition);
+        return provider_terminal_response(
+            state,
+            front_connection_identity,
+            disposition,
+            v3_entry_request_wants_sse(request_headers, &console_payload),
+        );
     }
     let mut frame = build_v3_server_16_http_frame_from_v3_resp_15(
         output.client_payload,

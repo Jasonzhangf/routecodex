@@ -3874,6 +3874,7 @@ async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_e
         &state,
         None,
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        false,
     );
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()["retry-after"], "17");
@@ -3884,6 +3885,30 @@ async fn provider_terminal_http_response_preserves_real_status_body_and_end_to_e
     assert_eq!(
         to_bytes(response.into_body(), usize::MAX).await.unwrap(),
         raw_body
+    );
+}
+
+#[tokio::test]
+async fn provider_terminal_no_response_breaks_streaming_client_transport() {
+    let log_file = std::env::temp_dir().join(format!(
+        "rcc-provider-terminal-sse-break-{}.log",
+        std::process::id()
+    ));
+    let state = test_v3_listener_state(&log_file, 5555);
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        true,
+    );
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming no-response must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
     );
 }
 

@@ -417,6 +417,53 @@ impl V3FrontTransportBroker {
         }
     }
 
+    /// Claim the client-visible boundary for the streaming no-response terminal.
+    ///
+    /// Called before the terminal response is returned, so a concurrent restart
+    /// replacement defers instead of closing the socket and dropping a response head
+    /// that Hyper has not even enqueued yet. Returns `false` when a restart closeout
+    /// already committed; its `503` stays the client-visible boundary then.
+    pub fn claim_current_connection_transport_break(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => socket.suppress_restart_closeout_frame(),
+            None => false,
+        }
+    }
+
+    /// Settle the streaming no-response terminal that owns its own client boundary.
+    ///
+    /// Suppresses a restart closeout that has not committed, waits up to `head_wait` for
+    /// this response head to reach the client, and then commits the restart closeout a
+    /// concurrent exec replacement deferred. Committing it keeps the restart `503`
+    /// observable when the head never reached the client, instead of leaving the client
+    /// with zero response bytes. Returns whether the restart closeout stayed the
+    /// client-visible boundary.
+    pub async fn settle_current_connection_transport_break(
+        &self,
+        connection: V3FrontConnectionIdentity,
+        head_wait: Duration,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => {
+                socket.suppress_restart_closeout_frame();
+                let _ = tokio::time::timeout(head_wait, socket.wait_transport_wrote()).await;
+                socket.commit_deferred_restart_closeout()
+            }
+            None => false,
+        }
+    }
+
     fn release_connection(&self, connection: V3FrontConnectionIdentity) {
         self.front_sockets
             .lock()
@@ -944,6 +991,7 @@ impl V3StableFrontSocket {
                             worker_closeout_state.close();
                             break;
                         }
+                        worker_closeout_state.mark_transport_wrote();
                     }
                 }
             }
@@ -965,8 +1013,9 @@ impl V3StableFrontSocket {
     }
 
     fn close_for_exec_replacement(&self) {
-        self.closeout_state.close_for_exec_replacement();
-        self.signal_close();
+        if self.closeout_state.close_for_exec_replacement() {
+            self.signal_close();
+        }
     }
 
     fn signal_close(&self) {
@@ -981,6 +1030,26 @@ impl V3StableFrontSocket {
     fn abort_without_response(&self) {
         self.closeout_state.abort_without_response();
         self.signal_close();
+    }
+
+    fn suppress_restart_closeout_frame(&self) -> bool {
+        self.closeout_state.suppress_restart_closeout_frame()
+    }
+
+    /// Commit a restart closeout that was deferred because a streaming terminal had
+    /// not written its response head yet. Signalling the closeout lets the write
+    /// worker deliver the `503` frame instead of leaving the client with zero bytes.
+    fn commit_deferred_restart_closeout(&self) -> bool {
+        if self.closeout_state.commit_deferred_restart_closeout() {
+            self.signal_close();
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn wait_transport_wrote(&self) {
+        self.closeout_state.wait_transport_wrote().await;
     }
 
     fn is_closed(&self) -> bool {
