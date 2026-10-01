@@ -1420,7 +1420,7 @@ async fn read_response_body_bytes(
     .map_err(|error| V3ProviderError::ResponseBody {
         request_id: request_id.to_string(),
         provider_id: provider_id.to_string(),
-        reason: error.to_string(),
+        reason: crate::shared::format_v3_provider_transport_error(&error),
     })?;
     Ok(bytes.to_vec())
 }

@@ -198,7 +198,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     //    provider 回传的窗口。
     // 2. DeepSeek/opencode 目标额外把 reasoning 重写为统一
     //    `content:[{type:"reasoning_text",text}]` 形态（否则上游 400
-    //    `reasoning_text must be passed back`）；该重写只在已证明需要的模型上
+    //    `reasoning_text must be passed back`）；该重写只在已证明需要的协议契约上
     //    执行，避免未经证实的其他非 gpt responses provider 被改写 reasoning 形态。
     if !is_v3_gpt_family_model(&target.canonical_model_id) {
         let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
@@ -223,6 +223,13 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
+    // 独立的 provider 私契约：DeepSeek 官方 Responses（`responses:deepseek-official`）
+    // 在 thinking 模式下要求工具续接请求回传历史 reasoning 明文，否则上游 400
+    // `The reasoning_text in the thinking mode must be passed back to the API.`。
+    // 该契约按 provider 声明的 profile 门控，不能挂在 `is_v3_gpt_family_model`
+    // 分支上：路由路径的 canonical/requested 模型是客户端模型（gpt 家族），而
+    // wire_model 才是 deepseek-flash，挂错分支会让契约在真实路由上失效。
+    ensure_v3_official_deepseek_reasoning_text(&mut body, &target);
     Ok(V3Provider12ResponsesWirePayload {
         request_id,
         target,
@@ -273,6 +280,67 @@ fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
     if let Some(Value::String(cipher)) = map.get("encrypted_content") {
         if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
             map.remove("encrypted_content");
+        }
+    }
+}
+
+/// DeepSeek 官方 Responses（provider 声明 profile `responses:deepseek-official`）
+/// 的 reasoning 回传契约，唯一 owner。
+///
+/// 上游在 thinking 模式下要求工具续接请求把历史 reasoning 明文带回，否则 400
+/// `The reasoning_text in the thinking mode must be passed back to the API.`
+/// （实测：HTTP 400 invalid_request_error）。官方端点接受 `summary` 与 `content`
+/// 并存，因此这里只补全明文表示，不删除 `summary`/`text`/`reasoning_content`；
+/// 已有明文 content 时保持字节不变；无任何明文时使用既有确定性占位符（上游接受
+/// 占位符，缺 `reasoning_text` 才 400）。密文对官方端点无效，统一剥离。
+///
+/// 门控只看 provider 声明的 profile：路由路径的 canonical/requested 模型是
+/// 客户端模型（gpt 家族），provider 实际模型在 `wire_model`，按模型命名判定
+/// 会让该契约在真实路由上失效。
+fn ensure_v3_official_deepseek_reasoning_text(
+    body: &mut Value,
+    target: &V3ResponsesProviderTarget,
+) {
+    if target.compatibility_profile.as_deref() != Some("responses:deepseek-official") {
+        return;
+    }
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        obj.remove("encrypted_content");
+        // 明文可用性由每个 content part 的真实 `text` 判定，而不是“至少一个
+        // part 有文本”：`[{"type":"reasoning_text","text":""}]` 和缺 `text`
+        // 的 part 都会被上游拒绝（实测缺 `text` 400 missing field `text`），
+        // 只要出现一个不可回传 part 就重建为单条可用 `reasoning_text`。
+        let content_has_only_usable_text = obj
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                !items.is_empty()
+                    && items.iter().all(|item| {
+                        item.get("text")
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| !text.is_empty())
+                    })
+            });
+        if !content_has_only_usable_text {
+            let plain = join_v3_reasoning_plain_text(obj);
+            let text = if plain.is_empty() {
+                "[thinking redacted]".to_string()
+            } else {
+                plain
+            };
+            obj.insert(
+                "content".to_string(),
+                json!([{"type": "reasoning_text", "text": text}]),
+            );
         }
     }
 }
@@ -1120,6 +1188,9 @@ pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
     "metadata_center",
     "metadataCenter",
     "__metadataCenter",
+    // `_debug` 是 runtime 出站控制键集合（`is_provider_outbound_control_key`）
+    // 里唯一的单下划线键，必须在进入 provider tool-call arguments/result 字符串
+    // 之前就被拦下；这里是精确匹配，不会影响客户端任意 schema 键（如 `_ReplaceBlock`）。
     "_debug",
     "debug_snapshot",
     "debugSnapshot",

@@ -5,7 +5,7 @@
 - Owner feature: `v3.virtual_router_target_interpreter`.
 - Owner function: `V3TargetInterpreter::select_available` in `v3/crates/routecodex-v3-target/src/lib.rs`.
 - Route order from `V3Router07OpaqueTargetHitOnce -> V3Target09CandidateSetExpanded` is the selection truth among compatible candidates.
-- Only genuine `web_search/search` and `multimodal/vision` model capability checks may produce capability mismatch. Separately, Target10 must skip ordinary candidates whose `max_context_tokens` is below `request_input_tokens` before availability/transport; explicit direct pins and the default-pool floor remain last-resort eligible with a typed overflow reason.
+- Only genuine `web_search/search` and `multimodal/vision` model capability checks may produce capability mismatch. Separately, an omitted `max_context_tokens` compiles to the documented `200000`-token default, and Target10 must skip ordinary candidates whose `max_context_tokens` is below `request_input_tokens` before availability/transport; explicit direct pins and the default-pool floor remain last-resort eligible with a typed overflow reason.
 - After context and capability admission, Provider availability/health and request-local provider-failure exclusion are the switch inputs at this edge. No provider-specific branch is allowed.
 
 ## Lifecycle test

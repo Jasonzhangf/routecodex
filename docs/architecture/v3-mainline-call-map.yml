@@ -1332,7 +1332,7 @@ chains:
       side_channel_writes:
       - v3.target.concrete_provider
     semantic_contract:
-      - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport.
+      - Target10 performs context admission from the typed requestInputTokens carried by Target09 and each candidate max_context_tokens before availability or provider transport; an omitted max_context_tokens compiles to the documented 200000-token default.
       - context_window_exceeded is emitted in Target10 selection evidence; no request or response payload is rewritten.
       - Target10 applies the captured server-scoped provider priority schedule only after health availability projection and only within the selected route pool.
   - step_id: v3-rd-09

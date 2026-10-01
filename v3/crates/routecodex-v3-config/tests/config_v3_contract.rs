@@ -374,6 +374,21 @@ fn parses_full_config_v3_without_interpreting_targets() {
 }
 
 #[test]
+fn model_context_window_defaults_to_200k_when_omitted() {
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(FULL_CONFIG).unwrap()).unwrap();
+
+    assert_eq!(
+        manifest.providers["asxs"].models["gpt-5.5"].max_context_tokens,
+        Some(200_000)
+    );
+    assert_eq!(
+        manifest.providers["cc"].models["gpt-5.5"].max_context_tokens,
+        Some(200_000)
+    );
+}
+
+#[test]
 fn explicit_codex_samples_authorization_survives_config_v3_parse_and_compile() {
     let source = FULL_CONFIG.replace("[debug]\n", "[debug]\ncodex_samples = true\n");
     let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap())

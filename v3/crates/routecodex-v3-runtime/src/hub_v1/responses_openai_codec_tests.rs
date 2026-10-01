@@ -612,10 +612,26 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
         "input": [{
             "type": "web_search_call",
             "status": "failed",
+            "action": {"type": "search", "query": "RouteCodex", "routeHint": "nested-control"}
+        }]
+    }))
+    .expect_err("nested typed control fields must fail before tool-result stringification");
+    assert!(
+        error.contains("side-channel field") && error.contains("routeHint"),
+        "unexpected error: {error}"
+    );
+
+    // `_debug` 是 runtime 出站控制键集合里的精确键：它必须在进入 provider
+    // tool-call arguments/result 字符串之前被拦下（不能只靠下游 outbound 剥离）。
+    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "web_search_call",
+            "status": "failed",
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect_err("control fields must fail before provider tool-result JSON stringification");
+    .expect_err("typed `_debug` control key must fail before tool-result stringification");
     assert!(
         error.contains("side-channel field") && error.contains("_debug"),
         "unexpected error: {error}"
@@ -658,6 +674,59 @@ fn responses_tool_search_output_preserves_private_named_json_schema_definitions(
         .expect("tool search output is preserved in tool content");
     let normalized_tools: Value = serde_json::from_str(serialized).expect("tool list JSON");
     assert_eq!(normalized_tools, tools);
+}
+
+#[test]
+fn responses_tool_search_output_keeps_client_schema_keys_with_leading_underscore() {
+    // 线上样本：客户端 `tool_search_output` 携带 ChatGPT Space 工具目录，其中一个
+    // 工具的 JSON Schema `$defs` 名是 `_ReplaceBlock`。它属于客户端数据，不是
+    // RouteCodex 控制键；inbound canonicalization 必须原样保留，不能 400。
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "tool_search_call",
+            "call_id": "call_tool_search_1",
+            "execution": "client",
+            "status": "completed",
+            "arguments": {"query": "chatgpt space page edit", "limit": 8}
+        }, {
+            "type": "tool_search_output",
+            "id": "tso_1",
+            "call_id": "call_tool_search_1",
+            "status": "completed",
+            "execution": "client",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__codex_apps__chatgpt_space",
+                "tools": [{
+                    "type": "function",
+                    "name": "apply_page_changes",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "changes": {"type": "array", "items": {"$ref": "#/$defs/_ReplaceBlock"}}
+                        },
+                        "$defs": {
+                            "_ReplaceBlock": {
+                                "type": "object",
+                                "properties": {"block_id": {"type": "string"}},
+                                "required": ["block_id"]
+                            }
+                        }
+                    }
+                }]
+            }]
+        }, {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}]
+        }]
+    }))
+    .expect("client tool catalog underscore keys must pass inbound canonicalization");
+    let serialized = canonical.to_string();
+    assert!(
+        serialized.contains("_ReplaceBlock"),
+        "client schema definition must survive canonicalization: {serialized}"
+    );
 }
 
 #[test]

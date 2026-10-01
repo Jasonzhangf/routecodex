@@ -961,7 +961,8 @@ features:
     model/provider may genuinely lack: web_search/search and multimodal/vision.'
   - After genuine web_search/search and multimodal/vision capability validation, Target10
     preserves configured candidate order among candidates within their declared context
-    window; a candidate whose max_context_tokens is below request_input_tokens is marked
+    window; an omitted max_context_tokens compiles to the documented 200000-token default,
+    and a candidate whose max_context_tokens is below request_input_tokens is marked
     context_window_exceeded and skipped before availability/transport. A candidate at 90
     percent through 100 percent remains eligible, is demoted only below normal candidates
     in the same route tier, and still outranks every lower route tier. Explicit direct pins

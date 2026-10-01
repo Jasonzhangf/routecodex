@@ -1130,7 +1130,7 @@ fn compile_models(
                 supports_thinking: model.supports_thinking,
                 thinking: model.thinking,
                 max_tokens: model.max_tokens,
-                max_context_tokens: model.max_context_tokens,
+                max_context_tokens: model.max_context_tokens.or(Some(200_000)),
                 context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 features: model.features,
             },
