@@ -235,9 +235,10 @@ async fn assert_no_front_http_headers(port: u16, stream: bool) {
 }
 
 /// A streaming client must observe an aborted transfer instead of a normal end of
-/// stream: the response head is written, the SSE body breaks, and the transfer never
-/// terminates with a valid final chunk. That is the transport failure a client
-/// retries, so provider exhaustion does not end the session.
+/// stream: the response head and one SSE comment frame reach the transport, the body
+/// keeps chunked framing, and the transfer never terminates with the final chunk. That
+/// incomplete chunked body is the transport failure a client retries, so provider
+/// exhaustion does not end the session.
 async fn assert_front_sse_transport_break(port: u16) {
     let response = read_front_response(port, true).await;
     let text = String::from_utf8_lossy(&response).into_owned();
@@ -249,6 +250,11 @@ async fn assert_front_sse_transport_break(port: u16) {
         text.to_ascii_lowercase()
             .contains("content-type: text/event-stream"),
         "streaming no-response must keep the SSE boundary: {text:?}"
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("transfer-encoding: chunked"),
+        "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
     );
     assert!(
         text.contains(": routecodex provider transport break"),
@@ -266,8 +272,11 @@ async fn read_front_response(port: u16, stream: bool) -> Vec<u8> {
     )
     .unwrap();
     let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    // Keep the HTTP/1.1 default persistent connection so the response framing, not the
+    // connection close, carries the transfer boundary: a close-delimited EOF would
+    // otherwise be indistinguishable from an aborted transfer.
     let request = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
         payload.len(), payload
     );
     socket.write_all(request.as_bytes()).await.unwrap();

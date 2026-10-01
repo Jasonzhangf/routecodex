@@ -38,6 +38,56 @@ fn persistent_connection_second_request_gets_preheader_restart_terminal() {
     assert!(text.contains("server_restart_in_progress"));
 }
 
+#[test]
+fn suppressed_streaming_terminal_does_not_queue_restart_closeout_frame() {
+    let state = V3FrontTransportCloseoutState::new();
+    state.mark_request_started();
+    state.set_frame(b"HTTP/1.1 503 Service Unavailable\r\n\r\n".to_vec());
+    state.suppress_restart_closeout_frame();
+    state.close_for_exec_replacement();
+    assert!(
+        state.take_frame().is_none(),
+        "a streaming transport break must not also emit the restart closeout frame"
+    );
+}
+
+#[tokio::test]
+async fn front_socket_suppressed_closeout_writes_no_restart_frame() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let accept = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (_, write_half) = stream.into_split();
+        let socket = V3StableFrontSocket::spawn(write_half);
+        socket.mark_request_started();
+        socket.suppress_restart_closeout_frame();
+        socket.close_for_exec_replacement();
+        socket
+    });
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    let mut buffer = [0u8; 64];
+    let received = match tokio::time::timeout(
+        Duration::from_millis(300),
+        tokio::io::AsyncReadExt::read(&mut client, &mut buffer),
+    )
+    .await
+    {
+        Ok(Ok(count)) => count,
+        Ok(Err(_)) | Err(_) => 0,
+    };
+    assert_eq!(
+        received, 0,
+        "a suppressed streaming terminal must not write the restart closeout frame"
+    );
+    let socket = accept.await.unwrap();
+    assert!(
+        socket.closeout_state.take_frame().is_none(),
+        "the suppressed restart frame must not stay queued for a later write"
+    );
+}
+
 #[tokio::test]
 async fn front_socket_writes_restart_terminal_after_request_acceptance() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))

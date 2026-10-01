@@ -417,6 +417,49 @@ impl V3FrontTransportBroker {
         }
     }
 
+    /// Suppress the pending restart closeout frame for the current Front connection.
+    ///
+    /// The streaming no-response terminal keeps the connection open to write the SSE
+    /// transport break, so a concurrent restart replacement must not also queue the
+    /// `503` closeout frame on this connection. The connection stays open; Hyper still
+    /// writes the response head before the body fails.
+    pub fn suppress_current_connection_restart_closeout(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        if let Some(socket) = socket {
+            socket.suppress_restart_closeout_frame();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Wait until the current Front connection wrote response bytes to its client socket.
+    ///
+    /// Returns `false` when the connection is no longer registered, so a terminal can
+    /// still finish instead of waiting on a transport that cannot report progress.
+    pub async fn wait_current_connection_transport_wrote(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => {
+                socket.wait_transport_wrote().await;
+                true
+            }
+            None => false,
+        }
+    }
+
     fn release_connection(&self, connection: V3FrontConnectionIdentity) {
         self.front_sockets
             .lock()
@@ -944,6 +987,7 @@ impl V3StableFrontSocket {
                             worker_closeout_state.close();
                             break;
                         }
+                        worker_closeout_state.mark_transport_wrote();
                     }
                 }
             }
@@ -981,6 +1025,14 @@ impl V3StableFrontSocket {
     fn abort_without_response(&self) {
         self.closeout_state.abort_without_response();
         self.signal_close();
+    }
+
+    fn suppress_restart_closeout_frame(&self) {
+        self.closeout_state.suppress_restart_closeout_frame();
+    }
+
+    async fn wait_transport_wrote(&self) {
+        self.closeout_state.wait_transport_wrote().await;
     }
 
     fn is_closed(&self) -> bool {

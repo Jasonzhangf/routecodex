@@ -440,7 +440,15 @@ pub(crate) fn provider_terminal_response(
                 // the same request, instead of reading a header-less close as a
                 // normal end of stream. No client payload and no fabricated upstream
                 // status is sent; the typed Error chain keeps the real cause.
-                return v3_sse_transport_disconnect_response();
+                if let Some(connection) = connection {
+                    assert!(
+                        state
+                            .front_transport_broker
+                            .suppress_current_connection_restart_closeout(connection),
+                        "streaming no-response must suppress the restart closeout frame"
+                    );
+                }
+                return v3_sse_transport_disconnect_response(state, connection);
             }
             let connection = connection.expect("accepted Front connection identity");
             assert!(
@@ -458,21 +466,32 @@ pub(crate) fn provider_terminal_response(
 /// Break the client SSE transport for a provider terminal that has no client payload.
 ///
 /// The client observes an aborted transfer: the response head plus one SSE comment
-/// frame are flushed, then the body fails, so the transfer never terminates with a
-/// valid final chunk. A client that retries a transport failure keeps the session
-/// alive across provider exhaustion and recovers when a provider becomes eligible
-/// again.
+/// frame reach the transport, then the body fails, so the transfer never terminates
+/// with a valid final chunk. A client that retries a transport failure keeps the
+/// session alive across provider exhaustion and recovers when a provider becomes
+/// eligible again.
 ///
-/// The body stays pending between the comment frame and the failure. Hyper writes a
-/// body only while it can make progress, so an immediately failing stream aborts the
-/// connection before the response head reaches the client, which is exactly the
-/// silent close this terminal must not produce.
-fn v3_sse_transport_disconnect_response() -> Response<Body> {
+/// The failure is gated on the Front transport reporting that it wrote response bytes.
+/// Hyper writes a body only while it can make progress, so an immediately failing
+/// stream aborts the connection before the response head reaches the client, which is
+/// exactly the silent close this terminal must not produce. The bounded wait keeps the
+/// terminal finite when the transport can no longer report progress.
+fn v3_sse_transport_disconnect_response(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+) -> Response<Body> {
+    let broker = state.front_transport_broker.clone();
     let body = stream::once(async {
         Ok::<Vec<u8>, io::Error>(b": routecodex provider transport break\n\n".to_vec())
     })
-    .chain(stream::once(async {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    .chain(stream::once(async move {
+        if let Some(connection) = connection {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(2),
+                broker.wait_current_connection_transport_wrote(connection),
+            )
+            .await;
+        }
         Err(io::Error::other(
             "provider pool exhausted; SSE transport unavailable",
         ))
