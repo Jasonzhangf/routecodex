@@ -412,3 +412,60 @@ supportsThinking = true
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn deepseek_official_directory_provider_defaults_to_official_responses_compat_profile() {
+    // DeepSeek 官方 Responses 的 reasoning 回传契约必须由 provider 配置声明承载，
+    // 不能按 provider id/模型名在 wire 层猜：目录 provider 未显式声明
+    // compatibilityProfile 时解析到 responses:deepseek-official。
+    let root = temp_root("deepseek-official-default-profile");
+    let token = write_token(&root, "deepseek-official");
+    let path = root
+        .join("provider")
+        .join("deepseek_official")
+        .join("config.v2.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "deepseek_official"
+
+[provider]
+id = "deepseek_official"
+enabled = true
+type = "responses"
+baseURL = "https://api.deepseek.invalid"
+defaultModel = "deepseek-flash"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key1", tokenFile = "{}" }}]
+
+[provider.models."deepseek-flash"]
+wireName = "deepseek-flash"
+capabilities = ["text", "reasoning", "thinking", "tools"]
+supportsStreaming = true
+supportsThinking = true
+"#,
+            token.display()
+        ),
+    )
+    .unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        directory_root_config("deepseek_official", "deepseek-flash"),
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .unwrap();
+    let provider = &snapshot.manifest.providers["deepseek_official"];
+    assert_eq!(
+        provider.compatibility_profile.as_deref(),
+        Some("responses:deepseek-official")
+    );
+    fs::remove_dir_all(root).unwrap();
+}

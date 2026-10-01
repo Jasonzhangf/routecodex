@@ -918,6 +918,11 @@ impl V3OpenAiChatHostedToolHistoryKind {
 fn ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(
     item: &Map<String, Value>,
 ) -> Result<(), String> {
+    // 唯一的控制字段守卫是 typed side-channel key 检测（
+    // `V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS`），它只匹配 RouteCodex 自己写入的
+    // 控制键。tool_search_output 携带客户端工具目录，其中的 JSON Schema
+    // `$defs` 名可以是任意合法标识符（实测 `_ReplaceBlock`）；按 `_` 前缀扫描
+    // 会把客户端数据判成私有调试字段并拒绝整个请求，属于代理新增的越界校验。
     let event = Value::Object(item.clone());
     if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
         return Err(format!(

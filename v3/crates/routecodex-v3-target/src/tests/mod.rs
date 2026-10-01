@@ -1858,6 +1858,84 @@ targets = [
 }
 
 #[test]
+fn context_admission_uses_200k_default_for_unconfigured_candidates() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.implicit]
+type = "responses"
+base_url = "http://implicit.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "IMPLICIT_KEY" }] }
+[providers.implicit.models.m]
+capabilities = ["text"]
+[providers.long]
+type = "responses"
+base_url = "http://long.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LONG_KEY" }] }
+[providers.long.models.m]
+capabilities = ["text"]
+max_context_tokens = 300000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "implicit", model = "m", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "long", model = "m", key = "key", priority = 2 }
+]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    assert_eq!(
+        manifest.providers["implicit"].models["m"].max_context_tokens,
+        Some(200_000)
+    );
+
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 200_001,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+
+    assert_eq!(selected.candidate.provider_id, "long");
+    assert!(selected
+        .unavailable_candidates
+        .iter()
+        .any(|entry| entry
+            == "implicit:key:m:context_window_exceeded(input_tokens=200001,max_context_tokens=200000)"));
+}
+
+#[test]
 fn context_near_limit_preserves_higher_route_tier_over_lower_normal_candidate() {
     let source = r#"
 version = 3

@@ -143,6 +143,180 @@ mod tests {
     }
 
     #[test]
+    fn official_deepseek_reasoning_history_gains_reasoning_text_and_keeps_summary() {
+        // 线上缺陷：DeepSeek 官方 Responses 在 thinking 模式下，会话以工具输出结尾时
+        // 必须回传历史 reasoning 明文；客户端历史只有 summary 时上游 400
+        // `The reasoning_text in the thinking mode must be passed back to the API.`。
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": "rsn_foreign"},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"},
+                {"type": "reasoning", "id": "rs_2",
+                 "content": [{"type": "reasoning_text", "text": "already plain"}]},
+                {"type": "reasoning", "id": "rs_3", "summary": [], "encrypted_content": null}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-official-reasoning",
+            official.clone(),
+            body.clone(),
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().expect("input array");
+        assert_eq!(
+            input[0]["content"],
+            json!([{"type": "reasoning_text", "text": "run ls"}]),
+            "summary-only reasoning must gain reasoning_text"
+        );
+        assert_eq!(
+            input[0]["summary"],
+            json!([{"type": "summary_text", "text": "run ls"}]),
+            "official endpoint accepts summary alongside content; it must be preserved"
+        );
+        assert!(
+            input[0].get("encrypted_content").is_none(),
+            "foreign ciphertext must not reach the provider"
+        );
+        assert_eq!(
+            input[3]["content"],
+            json!([{"type": "reasoning_text", "text": "already plain"}]),
+            "existing plaintext content must stay byte-identical"
+        );
+        assert_eq!(
+            input[4]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}])
+        );
+        let rebuild = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-official-reasoning",
+            official,
+            body,
+        )
+        .unwrap();
+        assert_eq!(
+            wire.body(),
+            rebuild.body(),
+            "the reasoning rewrite must be deterministic for upstream cache prefixes"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_reasoning_rewrite_ignores_requested_model_family() {
+        // 线上缺陷：真实路由的 canonical/requested 模型是客户端模型 gpt-5.5
+        // （gpt 家族），provider 实际模型在 wire_model。契约若挂在
+        // `is_v3_gpt_family_model(canonical_model_id)` 分支上就永不生效，
+        // deepseek 官方端点持续 400 `reasoning_text must be passed back`。
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": null},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut routed = target();
+        routed.canonical_model_id = "gpt-5.5".into();
+        routed.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-official-routed", routed, body).unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "run ls"}]),
+            "official deepseek contract must apply when the requested model is gpt family"
+        );
+        assert!(
+            wire.body()["input"][0].get("encrypted_content").is_none(),
+            "ciphertext is meaningless for the official endpoint and must be stripped"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_synthesizes_when_content_has_no_usable_text() {
+        // content 数组非空但没有任何可用明文（空 text / 缺 text）时，必须走合成：
+        // 上游要求可回传的 `reasoning_text`，缺 text 的 part 会被上游拒绝。
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_empty_text",
+                 "content": [{"type": "reasoning_text", "text": ""}],
+                 "summary": [{"type": "summary_text", "text": "from summary"}]},
+                {"type": "reasoning", "id": "rs_missing_text",
+                 "content": [{"type": "reasoning_text"}]},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-official-empty-text", official, body)
+                .unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "from summary"}]),
+            "empty reasoning_text must be replaced by usable plaintext"
+        );
+        assert_eq!(
+            wire.body()["input"][1]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}]),
+            "content part without text must be replaced by the deterministic placeholder"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_rewrites_mixed_usable_and_unusable_content_parts() {
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_mixed",
+                 "content": [
+                    {"type": "reasoning_text"},
+                    {"type": "reasoning_text", "text": "usable"}
+                 ]},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-official-mixed-text", official, body)
+                .unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "usable"}]),
+            "a content part without text must not be forwarded even when another part is usable"
+        );
+    }
+
+    #[test]
+    fn non_official_target_keeps_narrow_reasoning_cleanup() {
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": "rsn_foreign"},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-narrow-cleanup", target(), body).unwrap();
+        assert!(
+            wire.body()["input"][0]["content"].is_null(),
+            "non-official targets must not gain a synthesized reasoning_text: {}",
+            wire.body()["input"][0]
+        );
+        assert_eq!(
+            wire.body()["input"][0]["summary"],
+            json!([{"type": "summary_text", "text": "run ls"}])
+        );
+    }
+
+    #[test]
     fn current_turn_invalid_png_data_image_is_rejected_before_provider_transport() {
         let body = json!({
             "model": "upstream-model", "input": [
