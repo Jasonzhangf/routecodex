@@ -70,20 +70,44 @@ impl V3FrontTransportCloseoutState {
     /// Returns `false` when the closeout is deferred because a streaming terminal
     /// already owns the client-visible boundary and its response head has not reached
     /// the client yet. Closing there would drop the head and turn the SSE transport
-    /// break back into the silent zero-byte close it replaces; the terminal fails its
-    /// body immediately afterwards, which closes the connection.
+    /// break back into the silent zero-byte close it replaces. The deferred closeout
+    /// stays owned by the request cycle: the streaming terminal drains it when its
+    /// body fails and the head never reached the client, so the client always
+    /// observes either the SSE transport break or the restart `503` frame.
     pub(crate) fn close_for_exec_replacement(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
         if request_cycle.terminal_frame_suppressed && !request_cycle.response_started {
+            request_cycle.frame = Some(build_v3_restart_closeout_http_error());
             return false;
         }
         self.closed.store(true, Ordering::Release);
         if request_cycle.request_started && !request_cycle.response_started {
             request_cycle.frame = Some(build_v3_restart_closeout_http_error());
         }
+        true
+    }
+
+    /// Commit the deferred restart closeout when the streaming terminal's body failed
+    /// and its response head never reached the client.
+    ///
+    /// Called from the streaming terminal right before its body fails, so a restart
+    /// replacement that raced the transport break still delivers its `503` frame
+    /// instead of leaving the client with zero response bytes. Returns `true` when the
+    /// closeout must be signalled; the head already reached the client makes the SSE
+    /// transport break the client boundary and drops the deferred frame.
+    pub(crate) fn commit_deferred_restart_closeout(&self) -> bool {
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        if request_cycle.response_started || request_cycle.frame.is_none() {
+            request_cycle.frame = None;
+            return false;
+        }
+        self.closed.store(true, Ordering::Release);
         true
     }
 
@@ -119,14 +143,6 @@ impl V3FrontTransportCloseoutState {
         request_cycle.terminal_frame_suppressed = true;
         request_cycle.frame = None;
         true
-    }
-
-    #[cfg(test)]
-    pub(crate) fn terminal_frame_suppressed(&self) -> bool {
-        self.request_cycle
-            .lock()
-            .expect("front closeout request cycle lock")
-            .terminal_frame_suppressed
     }
 
     pub(crate) fn close(&self) {

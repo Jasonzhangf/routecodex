@@ -417,17 +417,18 @@ impl V3FrontTransportBroker {
         }
     }
 
-    /// Suppress the pending restart closeout frame for the current Front connection.
+    /// Settle the streaming no-response terminal that owns its own client boundary.
     ///
-    /// The streaming no-response terminal keeps the connection open to write the SSE
-    /// transport break, so a concurrent restart replacement must not also queue the
-    /// `503` closeout frame on this connection. The connection stays open until the
-    /// terminal fails its body, unless the restart closeout already committed first, in
-    /// which case its `503` stays the client-visible boundary. Returns whether the
-    /// current connection was resolved.
-    pub fn suppress_current_connection_restart_closeout(
+    /// Suppresses a restart closeout that has not committed, waits up to `head_wait` for
+    /// this response head to reach the client, and then commits the restart closeout a
+    /// concurrent exec replacement deferred. Committing it keeps the restart `503`
+    /// observable when the head never reached the client, instead of leaving the client
+    /// with zero response bytes. Returns whether the restart closeout stayed the
+    /// client-visible boundary.
+    pub async fn settle_current_connection_transport_break(
         &self,
         connection: V3FrontConnectionIdentity,
+        head_wait: Duration,
     ) -> bool {
         let socket = self.front_socket(connection).or_else(|| {
             let key = self.connection_lease(connection)?;
@@ -436,28 +437,8 @@ impl V3FrontTransportBroker {
         match socket {
             Some(socket) => {
                 socket.suppress_restart_closeout_frame();
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// Wait until the current Front connection wrote response bytes to its client socket.
-    ///
-    /// Returns `false` when the connection is no longer registered, so a terminal can
-    /// still finish instead of waiting on a transport that cannot report progress.
-    pub async fn wait_current_connection_transport_wrote(
-        &self,
-        connection: V3FrontConnectionIdentity,
-    ) -> bool {
-        let socket = self.front_socket(connection).or_else(|| {
-            let key = self.connection_lease(connection)?;
-            self.client_socket(&key)
-        });
-        match socket {
-            Some(socket) => {
-                socket.wait_transport_wrote().await;
-                true
+                let _ = tokio::time::timeout(head_wait, socket.wait_transport_wrote()).await;
+                socket.commit_deferred_restart_closeout()
             }
             None => false,
         }
@@ -1033,6 +1014,18 @@ impl V3StableFrontSocket {
 
     fn suppress_restart_closeout_frame(&self) -> bool {
         self.closeout_state.suppress_restart_closeout_frame()
+    }
+
+    /// Commit a restart closeout that was deferred because a streaming terminal had
+    /// not written its response head yet. Signalling the closeout lets the write
+    /// worker deliver the `503` frame instead of leaving the client with zero bytes.
+    fn commit_deferred_restart_closeout(&self) -> bool {
+        if self.closeout_state.commit_deferred_restart_closeout() {
+            self.signal_close();
+            true
+        } else {
+            false
+        }
     }
 
     async fn wait_transport_wrote(&self) {

@@ -440,14 +440,6 @@ pub(crate) fn provider_terminal_response(
                 // the same request, instead of reading a header-less close as a
                 // normal end of stream. No client payload and no fabricated upstream
                 // status is sent; the typed Error chain keeps the real cause.
-                if let Some(connection) = connection {
-                    // A concurrent restart closeout may have committed its `503` first.
-                    // That response is then the client-visible boundary and Hyper drops
-                    // this one, so suppression is best-effort by contract.
-                    let _ = state
-                        .front_transport_broker
-                        .suppress_current_connection_restart_closeout(connection);
-                }
                 return v3_sse_transport_disconnect_response(state, connection);
             }
             let connection = connection.expect("accepted Front connection identity");
@@ -476,6 +468,11 @@ pub(crate) fn provider_terminal_response(
 /// stream aborts the connection before the response head reaches the client, which is
 /// exactly the silent close this terminal must not produce. The bounded wait keeps the
 /// terminal finite when the transport can no longer report progress.
+///
+/// A concurrent exec replacement owns the same client boundary. This terminal
+/// suppresses a restart closeout that has not committed, and commits the restart
+/// closeout that the replacement deferred while waiting for the head. The client then
+/// observes either the SSE transport break or the restart `503`, never zero bytes.
 fn v3_sse_transport_disconnect_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
@@ -486,11 +483,9 @@ fn v3_sse_transport_disconnect_response(
     })
     .chain(stream::once(async move {
         if let Some(connection) = connection {
-            let _ = tokio::time::timeout(
-                Duration::from_secs(2),
-                broker.wait_current_connection_transport_wrote(connection),
-            )
-            .await;
+            broker
+                .settle_current_connection_transport_break(connection, Duration::from_secs(2))
+                .await;
         }
         Err(io::Error::other(
             "provider pool exhausted; SSE transport unavailable",

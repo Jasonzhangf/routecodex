@@ -39,24 +39,44 @@ fn persistent_connection_second_request_gets_preheader_restart_terminal() {
 }
 
 #[test]
-fn suppressed_streaming_terminal_defers_the_restart_closeout() {
+fn deferred_restart_closeout_is_committed_when_the_sse_head_never_reached_the_client() {
     let state = V3FrontTransportCloseoutState::new();
     state.mark_request_started();
-    state.set_frame(b"HTTP/1.1 503 Service Unavailable\r\n\r\n".to_vec());
     assert!(state.suppress_restart_closeout_frame());
     assert!(
         !state.close_for_exec_replacement(),
         "a suppressed streaming terminal must defer the restart closeout"
     );
     assert!(
-        state.take_frame().is_none(),
-        "a deferred restart closeout must not queue a frame"
-    );
-    assert!(
         !state.is_closed(),
         "a deferred restart closeout must leave the transport writable for the SSE head"
     );
-    assert!(state.terminal_frame_suppressed());
+    assert!(
+        state.commit_deferred_restart_closeout(),
+        "the deferred closeout must be committed when the head never reached the client"
+    );
+    assert!(state.is_closed());
+    let frame = state
+        .take_frame()
+        .expect("the deferred restart frame must still reach the client");
+    let text = String::from_utf8(frame).expect("restart response is HTTP bytes");
+    assert!(text.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    assert!(text.contains("server_restart_in_progress"));
+}
+
+#[test]
+fn deferred_restart_closeout_is_dropped_when_the_sse_head_reached_the_client() {
+    let state = V3FrontTransportCloseoutState::new();
+    state.mark_request_started();
+    assert!(state.suppress_restart_closeout_frame());
+    assert!(!state.close_for_exec_replacement());
+    state.mark_response_started();
+    assert!(
+        !state.commit_deferred_restart_closeout(),
+        "the SSE transport break is the client boundary once the head was written"
+    );
+    assert!(!state.is_closed());
+    assert!(state.take_frame().is_none());
 }
 
 #[test]
@@ -102,6 +122,11 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
             )
             .await
             .expect("the deferred transport must still accept the SSE boundary frame");
+        socket.closeout_state.mark_response_started();
+        assert!(
+            !socket.commit_deferred_restart_closeout(),
+            "a delivered SSE head must keep the transport break as the client boundary"
+        );
         socket
     });
     let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -128,6 +153,43 @@ async fn front_socket_deferred_closeout_keeps_the_sse_head_writable() {
     );
     let socket = accept.await.unwrap();
     assert!(socket.closeout_state.take_frame().is_none());
+}
+
+#[tokio::test]
+async fn front_socket_deferred_closeout_without_a_head_delivers_the_restart_503() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let accept = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (_, write_half) = stream.into_split();
+        let socket = V3StableFrontSocket::spawn(write_half);
+        socket.mark_request_started();
+        assert!(socket.suppress_restart_closeout_frame());
+        socket.close_for_exec_replacement();
+        assert!(!socket.is_closed());
+        assert!(
+            socket.commit_deferred_restart_closeout(),
+            "a head that never reached the client must commit the deferred closeout"
+        );
+    });
+    let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        tokio::io::AsyncReadExt::read_to_end(&mut client, &mut response),
+    )
+    .await
+    .expect("a committed deferred closeout must terminate the client transport")
+    .expect("client read must succeed");
+    let response = String::from_utf8(response).expect("restart response must be HTTP bytes");
+    assert!(
+        response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"),
+        "a head that never reached the client must observe the restart boundary: {response:?}"
+    );
+    assert!(response.contains("server_restart_in_progress"));
+    accept.await.unwrap();
 }
 
 #[tokio::test]
