@@ -1,8 +1,9 @@
 # V3 WebUI Provider / Deploy / Observability Overhaul Plan
 
 Status: design-admission-NOT-SATISFIED（第一/二/三轮独立 review 均 FAIL；处置分别见 §9、§9.1、§9.3。**编码前门禁在本轮未被满足**：实现与门禁并发，属用户直接授权下的流程偏离，不追溯转换为门禁 PASS；设计产物已冻结于 §9.2）
+Implementation-review: **PASS**（第四轮独立 L2 架构 review，候选 `a64f25de4`；第三轮 FAIL 的两个阻断项 B1/B2 及验证期新发现的第三个缺陷均已确认关闭，两个已披露边界判为 acceptable-bounded，无 gate-gaming。证据见 §11）
 Branch: `codex/webui-provider-deploy-overhaul-20261001`
-Baseline: `origin/main` @ `ebe3a3c6d`
+Baseline: `origin/main` @ `b7db02e2f`（merge 前复核点为 `dfd3e851c`，已 rebase）
 Owner feature: `v3.admin_observability_aggregation`（`v3/admin-webui/` + `routecodex-v3-admin` 表面的唯一 owner）
 
 ### 1.1 共同 owner（本方案跨 feature 的边界声明）
@@ -465,3 +466,35 @@ advisory：§4.2.1 已补声明图 C 对 `v3.admin.provider_patrol` 的单向读
 
 - `POST /api/providers/import` 不新增独立 DAG 节点：它是同一对象源对多候选的重复执行。
 - WebUI 不提供 provider 级 OAuth、不提供 binary 升级、不提供任意文件读取；`/api/observability/artifacts/content` 只允许 5 个白名单文件名。
+
+## 11. 第四轮独立 L2 架构 review 与交付证据
+
+### 11.1 第三轮 FAIL 的两个阻断项 → 均已确认关闭
+
+**B1（定时巡检在生产拓扑里从不 tick）**：真实生命周期入口 `spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket` 原先从不调 `spawn_background()`，而 `rccv3-admin` 独立 binary 无人拉起 → `PatrolRuntime::run_due` 在生产里无生产者。
+修复：`routecodex-v3-server/src/lib.rs:498-516` 的 `admin_webui` 分支先 `Arc::new(AppState)`、再 `spawn_background()`、再由同一个 Arc 建 router；`spawn_patrol_loop` 改为先用进程级 `OnceLock<PathBuf>` 抢所有权再 spawn（重复启动直接 log 后返回），loop 为 `select! { sleep(next_tick_ms()) | wait_for_plan_change() }`；`PatrolRuntime` 增加 `loop_started` / `plan_change`。
+证据：新 E2E `tests/patrol_scheduler_managed.rs::scheduled_patrol_ticks_in_the_in_process_admin_entry` 走真实聚合入口、**不持有 AppState、从不调 `run_due`**，断言 `loop_started == true`、第二个 starter 拿到 `false`、写入 1s `l1_contract` plan 后轮询到**两条** `trigger:"scheduled"` 记录（证明是循环不是单次）、shutdown 后两个端口可重绑。
+
+**B2（`observed_error` 合并可被抹除）**：`merge_v3_obs_error_truth` 对 `source` / `chain` 是 first-writer-wins，而 `error06_projection_not_exposed` 空 marker 与 typed truth 会写同一行 → 谁先到谁说了算。
+修复：`webui_observability.rs:429-438` 新增唯一优先级阶梯（空 0 / `provider_attempt_failure` 1 / `not_exposed` 2 / `error06_projection` 3，未知值按 2 计），`453-497` 的合并为「source 取最高级、chain 非空必胜、其余 incoming-or-previous」，单调且与到达顺序无关；`impl_bulk.rs:804-823` 只在车道**stamp** 显示其无法承载 typed Error06 时才记 absence marker（判据是 `execution_mode`，不是调用方意图），`867-894` 让 direct 车道先落真实 `frame.error_chain`；`live_snapshot.rs:9-18` 删除死参数。
+证据：单测断言 **marker→real 与 real→marker 两个顺序**均收敛到 typed source + 6 节点链；relay 车道无 typed projection 时 marker 原样保留且链为空；回放测试 `failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts` 通过真实 admin HTTP 取回 6 节点链 + 冷却池 + 真实样本目录。
+
+**第三个缺陷（验证期新发现，非 review 提出）**：上述 B2 修复引入了 `record_observed` 的**第二个**持久化点，导致 `test:v3-execution-control-payload-architecture-red-fixtures` 变红——注入「删除 `drop(inner);`」的突变后校验器不再拒绝它，因为校验器按首次出现做顺序判断，第一个分支满足顺序即可掩盖第二个分支的并发契约退化。这不是 gate 误报，是真实的契约弱化。
+修复：`record_observed` 改为 `let mut row;` + `if terminal_event_after_terminal_row { 只合 meta } else { 全量记账 }`，两条分支汇合到**唯一**持久化点（`insert → drop(inner) → writer.enqueue(row)`），顺序契约由结构保证，无法被单一分支满足而另一分支退化。
+
+### 11.2 已披露边界的裁决
+
+- **§9.4 边界 A**（relay 车道 `health_action` / `error_class` 为 null）：判为 **acceptable-bounded**。该车道载体确实无法承载 typed Error06，代码显式记录 absence marker 且 typed truth 在优先级上高于它，并有测试证明「无 typed projection 时 marker 原样保留、链为空」。语义从「空链＝没有错误链」变为「空链＝此车道无法暴露 typed truth」。未发明不存在的 projection。
+- **§9.4 边界 B**（openai_chat / anthropic / gemini 终态短路）：判为 **acceptable-bounded**，但前提是如实记为「本轮未修」的显式范围外缺口，不得表述为已修。
+
+### 11.3 门禁与测试证据（候选 `a64f25de4`，已 rebase 到 `origin/main@dfd3e851c`）
+
+- `npm run verify:v3-architecture-ci` → `ok (40/40 sub-gates green)`，含 `test:v3-execution-control-payload-architecture-red-fixtures` = `ok (37 forbidden mutations rejected)`
+- `verify:v3-file-size` ok（302 文件 / 13 条 ratchet，**policy 文件未改动**）、`verify:v3-module-boundaries` ok、`verify:v3-cargo-fmt` exit 0、`verify:webui-smoke` exit 0、`verify:v3-resource-relation-edge-lock` ok（208 资源 / 489 边）、`verify:v3-resource-map` ok、`verify:v3-dagpipe-feature-graphs` governed 3、`verify:v3-contract-map-owner` ok、`verify:function-map-compile-gate` ok、`verify:v3-dagpipe-governance` ok
+- `cargo test -p routecodex-v3-server` → 253 passed / 0 failed；`-p routecodex-v3-admin` → 62 passed / 0 failed；`-p routecodex-v3-provider-responses` → 全绿
+- 两个阻断项的专项测试：`patrol_scheduler_managed` 1 passed、`observability_admin_replay` 1 passed
+
+### 11.4 已知环境与诚实边界
+
+- `multi_listener_server` 在本机为**并行负载 flake**：隔离单测 6/6 通过；整文件 2/3 通过（`68 passed` 与 `67 passed/1 failed` 交替，失败断言是 provider 重选 502 vs 200，与本次改动无关——`record_observed` 的生产调用方只有一个 observability 包装函数，不可达 routing）；`cargo test -p routecodex-v3-server` 整包 253/0。与 §9.4 前序结论一致。
+- 远端 `main` 受强制 `test` status check + `required_approving_review_count=1` 保护，且本地 `.githooks/pre-push` 按设计禁用直推 `main`，故本轮以 **PR #292** 交付，停在「待人工 approving review」。**未自动 merge**——PR merge 需要人类的 approving review，这是本轮的授权边界，不由 review PASS 授予。
