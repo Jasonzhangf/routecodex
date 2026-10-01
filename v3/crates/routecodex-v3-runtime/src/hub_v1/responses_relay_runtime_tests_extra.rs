@@ -824,3 +824,60 @@ fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
     let serialized = serde_json::to_string(&response).unwrap();
     assert!(!serialized.contains("<function_calls>"));
 }
+
+#[test]
+fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
+    // Scope guard: the Resp03 control-text rule is bound to the Responses Relay
+    // SSE materialization path, where provider_protocol stays canonical Responses
+    // and the Anthropic wire protocol is carried by the typed source witness.
+    // The Anthropic JSON projection keeps its existing path, so a literal text
+    // block must reach the client unchanged instead of being rewritten or
+    // rejected as a malformed control frame.
+    let provider_response = json!({
+        "id":"msg_anthropic_json_literal",
+        "type":"message",
+        "role":"assistant",
+        "model":"claude-test",
+        "content":[{
+            "type":"text",
+            "text":"<thinking>private plan\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>"
+        }],
+        "stop_reason":"end_turn",
+        "usage":{"input_tokens":1,"output_tokens":8}
+    });
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let mut trace = Vec::new();
+    let (response, _) = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "anthropic-json-literal",
+            request_id: "anthropic-json-literal",
+            provider_value: &provider_response,
+            provider_semantic_body: &json!({"model":"client-model"}),
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("anthropic_first"),
+            expected_model_id: "claude-test",
+            provider_protocol: V3HubProviderWireProtocol::Anthropic,
+            source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
+            projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            provider_response_transport_intent: V3HubTransportIntent::Json,
+            compatibility_profile: None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut trace,
+    )
+    .expect("Anthropic JSON relay must not reject literal provider text");
+    let serialized = serde_json::to_string(&response).unwrap();
+    assert!(
+        serialized.contains("private plan"),
+        "literal Anthropic JSON text must survive Resp03: {serialized}"
+    );
+    assert!(
+        serialized.contains("｜DSML｜tool_calls>"),
+        "literal Anthropic JSON text must not be rewritten at Resp03: {serialized}"
+    );
+}

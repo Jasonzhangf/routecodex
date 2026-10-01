@@ -47,7 +47,14 @@ fn classify_v3_anthropic_text_frame_at_resp03(text: &str) -> V3AnthropicTextFram
 pub(super) fn govern_v3_anthropic_control_text_at_resp03(
     input: &mut V3HubRespInbound02Normalized,
 ) -> Result<bool, V3HubRelayResponseError> {
-    if input.provider_raw().source_provider_protocol != V3HubProviderWireProtocol::Anthropic
+    // Scope guard: the control-text rule is bound to the Responses Relay SSE
+    // materialization path only. There `provider_protocol` stays canonical
+    // Responses while the Anthropic wire protocol is carried by the typed
+    // `source_provider_protocol` witness. Any other Anthropic source - notably
+    // the Anthropic JSON projection used by the OpenAI Chat and Responses
+    // relays - keeps its existing path and is not rewritten here.
+    if input.provider_raw().provider_protocol != V3HubProviderWireProtocol::Responses
+        || input.provider_raw().source_provider_protocol != V3HubProviderWireProtocol::Anthropic
         || input.semantic_protocol() != V3HubProviderWireProtocol::Responses
     {
         return Ok(false);
