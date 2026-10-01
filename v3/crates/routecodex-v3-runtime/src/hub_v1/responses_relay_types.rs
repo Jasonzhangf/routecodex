@@ -253,6 +253,8 @@ pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
     pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub(crate) received_http_semantic_failure:
+        Option<routecodex_v3_error::V3ReceivedHttpSemanticFailure>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
 }
 

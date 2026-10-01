@@ -261,6 +261,42 @@ fn provider_terminal_without_real_http_response_is_no_response() {
 }
 
 #[test]
+fn received_http_semantic_failure_projects_error06_instead_of_aborting_front() {
+    let evidence = V3ReceivedHttpSemanticFailure::new(200).expect("received upstream HTTP 200");
+    assert_eq!(evidence.status(), 200);
+    assert_eq!(
+        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
+            Some(V3ProviderTerminalDisposition::NoResponse),
+            Some(evidence),
+        ),
+        None,
+    );
+    assert_eq!(
+        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
+            Some(V3ProviderTerminalDisposition::NoResponse),
+            None,
+        ),
+        Some(V3ProviderTerminalDisposition::NoResponse),
+    );
+    assert!(V3ReceivedHttpSemanticFailure::new(502).is_none());
+}
+
+#[test]
+fn received_http_semantic_failure_preserves_prior_external_http_error() {
+    let external = V3EligibleExternalHttpResponse::new(429, vec![], b"rate limited".to_vec())
+        .expect("real upstream HTTP error");
+    assert_eq!(
+        V3ErrorHandlingCenter::disposition_after_received_http_semantic_failure(
+            Some(V3ProviderTerminalDisposition::ExternalHttp(
+                external.clone()
+            )),
+            V3ReceivedHttpSemanticFailure::new(200),
+        ),
+        Some(V3ProviderTerminalDisposition::ExternalHttp(external)),
+    );
+}
+
+#[test]
 fn upstream_http_502_is_ineligible_for_client_projection() {
     assert!(V3EligibleExternalHttpResponse::new(502, vec![], b"bad gateway".to_vec()).is_none());
     assert!(V3EligibleExternalHttpResponse::new(200, vec![], b"ok".to_vec()).is_none());

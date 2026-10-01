@@ -11,6 +11,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) provider_id: Option<&'a str>,
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
+    pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
     pub(crate) projection_context: &'a V3AnthropicResponsesProjectionContext,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
@@ -46,7 +47,11 @@ pub(crate) fn run_json_response_hooks(
         normalized_provider_value,
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
-            input.provider_protocol,
+            if input.provider_response_transport_intent == V3HubTransportIntent::Sse {
+                input.source_provider_protocol
+            } else {
+                input.provider_protocol
+            },
             V3HubExecutionMode::Relay,
             V3HubInvocationSource::Client,
             input.provider_response_transport_intent,

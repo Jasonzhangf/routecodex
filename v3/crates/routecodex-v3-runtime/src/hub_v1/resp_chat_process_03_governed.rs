@@ -8,6 +8,10 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
 
+#[path = "resp_chat_process_03_anthropic_control_text.rs"]
+mod anthropic_control_text;
+use anthropic_control_text::govern_v3_anthropic_control_text_at_resp03;
+
 include!("resp_chat_process_03_governed_provider_identity.rs");
 
 #[derive(Clone, Copy)]
@@ -1080,6 +1084,7 @@ fn govern_v3_hub_relay_response(
     let input =
         strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
     let mut input = harvest_v3_think_blocks_at_resp03(input);
+    let anthropic_text_governed = govern_v3_anthropic_control_text_at_resp03(&mut input)?;
     let is_responses_protocol = input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);
     if is_responses_protocol {
@@ -1144,6 +1149,19 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
+    if anthropic_text_governed
+        && governance.tool_calls.is_empty()
+        && input
+            .provider_payload()
+            .get("output_text")
+            .and_then(Value::as_str)
+            .is_none_or(|text| text.trim().is_empty())
+    {
+        return Err(V3HubRelayResponseError::ProviderProtocolResponseMalformed {
+            protocol: "anthropic",
+            reason: "control frame contained no visible answer or native tool call",
+        });
+    }
     let servertool_tool_call_followup = governance
         .tool_calls
         .iter()

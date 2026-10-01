@@ -198,6 +198,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                         observability: None,
                         terminal_projection: None,
                         terminal_disposition: None,
+                        received_http_semantic_failure: None,
                         matched_policy: None,
                     };
                     return Ok(provider_failure_output(
@@ -800,6 +801,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_id: Some(&selected_target_provider_id),
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
+                            source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
                             provider_response_transport_intent: V3HubTransportIntent::Json,
                             tool_thinking_enabled: request_tool_thinking_enabled,
@@ -819,8 +821,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ) {
                         Ok(value) => value,
                         Err(error) if is_v3_responses_provider_response_failure(&error) => {
-                            let failure = provider_response_hook_failure(
+                            let failure = provider_response_hook_failure_with_status(
                                 error,
+                                Some(provider_status),
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
@@ -993,13 +996,15 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                 let provider_value = match provider_value_result {
                     Ok(value) => value,
                     Err(error) => {
-                        let failure =
-                            handle_error_before_resp03!(provider_response_stream_relay_failure(
+                        let failure = handle_error_before_resp03!(
+                            provider_response_stream_relay_failure_with_status(
                                 error,
+                                Some(provider_status),
                                 &input.request_id,
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
-                            ));
+                            )
+                        );
                         let residence_deadline_error = failure.policy_error_message.contains(
                             "provider SSE attempt exceeded the request residence deadline",
                         );
@@ -1143,6 +1148,7 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                             provider_id: Some(&selected_target_provider_id),
                             expected_model_id: &selected_target_model_id,
                             provider_protocol: hook_provider_protocol,
+                            source_provider_protocol: provider_wire_protocol,
                             projection_context: &anthropic_response_projection_context,
                             provider_response_transport_intent: V3HubTransportIntent::Sse,
                             tool_thinking_enabled: request_tool_thinking_enabled,
@@ -1177,8 +1183,9 @@ pub(crate) async fn execute_v3_responses_relay_runtime_inner<T: ResponsesTranspo
                     ) {
                         Ok(value) => value,
                         Err(error) if is_v3_responses_provider_response_failure(&error) => {
-                            let failure = provider_response_hook_failure(
+                            let failure = provider_response_hook_failure_with_status(
                                 error,
+                                Some(provider_status),
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
