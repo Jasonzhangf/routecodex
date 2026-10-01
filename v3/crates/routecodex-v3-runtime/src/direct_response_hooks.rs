@@ -18,7 +18,7 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     retain_response_cipher: bool,
 ) {
     if !retain_response_cipher {
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false, false);
     }
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(payload);

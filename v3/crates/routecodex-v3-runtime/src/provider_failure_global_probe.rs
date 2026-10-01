@@ -209,7 +209,7 @@ fn validate_v3_provider_probe_json(
     let object = value.as_object().ok_or_else(|| {
         format!("provider global probe returned non-object JSON for {provider_id}")
     })?;
-    if object.contains_key("error") {
+    if object.get("error").is_some_and(|error| !error.is_null()) {
         return Err(format!(
             "provider global probe returned 2xx with embedded error payload for {provider_id}"
         ));
@@ -313,6 +313,16 @@ mod tests {
         )
         .expect_err("embedded provider error must fail the probe");
         assert!(error.contains("embedded error payload"));
+    }
+
+    #[test]
+    fn completed_response_with_null_error_recovers_provider() {
+        assert!(validate_v3_provider_probe_json(
+            "deepseek_official",
+            "responses",
+            br#"{"status":"completed","error":null,"output":[{"type":"message"}]}"#,
+        )
+        .is_ok());
     }
 
     #[test]

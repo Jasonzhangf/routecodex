@@ -1,8 +1,8 @@
 use crate::transport::{
     build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
-    build_v3_transport_13_responses_http_request_from_v3_provider_12,
-    V3ProviderRequestHeader, V3Transport13ResponsesRequest,
+    build_v3_transport_13_responses_http_request_from_v3_provider_12, V3ProviderRequestHeader,
+    V3Transport13ResponsesRequest,
 };
 use crate::wire::{
     build_v3_provider_12_responses_wire_payload, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
@@ -21,8 +21,8 @@ pub fn build_v3_provider_global_probe_request(
     let body = match provider_type.as_str() {
         "responses" => serde_json::json!({
             "model": target.wire_model,
-            "input": [{"role":"user","content":[{"type":"input_text","text":"routecodex health probe"}]}],
-            "max_output_tokens": 1,
+            "input": [{"role":"user","content":[{"type":"input_text","text":"Reply PONG only."}]}],
+            "max_output_tokens": 256,
             "stream": false,
         }),
         "openai_chat" => serde_json::json!({
@@ -99,6 +99,37 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn responses_probe_allows_reasoning_and_visible_output() {
+        let target = V3ResponsesProviderTarget {
+            provider_id: "deepseek_official".into(),
+            provider_type: "responses".into(),
+            base_url: "https://api.deepseek.com".into(),
+            canonical_model_id: "deepseek-flash".into(),
+            wire_model: "deepseek-flash".into(),
+            compatibility_profile: None,
+            headers: BTreeMap::new(),
+            auth: V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test".into()),
+            },
+            responses_transport: V3ResponsesTransportKind::Http,
+            websocket_v2_url: None,
+            provider_request_cleanup: Default::default(),
+            request_timeout_ms: 120_000,
+            sse_first_frame_timeout_ms: None,
+            initial_concurrency_budget: 8,
+            concurrency_acquire_timeout_ms: 60_000,
+        };
+        let request = build_v3_provider_global_probe_request(target, "probe-deepseek".into())
+            .expect("responses probe request builds");
+        assert_eq!(request.body()["max_output_tokens"], 256);
+        assert_eq!(
+            request.body()["input"][0]["content"][0]["text"],
+            "Reply PONG only."
+        );
+    }
+
+    #[test]
     fn non_responses_probe_request_carries_provider_headers() {
         let target = V3ResponsesProviderTarget {
             provider_id: "inferai".into(),
@@ -123,8 +154,9 @@ mod tests {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
         };
-        let request = build_v3_provider_global_probe_request(target, "probe-provider-header".into())
-            .expect("probe request builds");
+        let request =
+            build_v3_provider_global_probe_request(target, "probe-provider-header".into())
+                .expect("probe request builds");
         assert!(
             request
                 .provider_headers()

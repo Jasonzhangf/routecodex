@@ -707,26 +707,29 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
     }
 }
 
-/// 递归剥离 responses canonical 响应中的 `encrypted_content` 字段。
+/// 在 Inbound 无损归一化之后，按 typed provider 来源治理 reasoning 密文。
 /// `retain_response_cipher` 由请求侧 VR 路由决策算好并写入 profile：仅当目标是 gpt
 /// 模型**且该模型只有单一 provider 候选**时才为 true（Codex 客户端需要自己的密文
 /// 重建 reasoning 历史）；其余情况一律剥离——非 gpt provider（deepseek 网关等）响应
-/// 的 reasoning 条目只允许携带明文（summary/content/text），任何位置的密文字段都在
-/// 进入下游投影前删除。响应侧只消费该标记，不重复判定。
+/// 的 reasoning 条目不向客户端发送跨 provider 密文；Anthropic
+/// thinking signature 保留以维持续接语义。响应侧只消费该标记，不重复判定。
 fn strip_v3_resp03_encrypted_reasoning_content(
     mut input: V3HubRespInbound02Normalized,
     retain_response_cipher: bool,
+    preserve_anthropic_signature: bool,
 ) -> V3HubRespInbound02Normalized {
     if !retain_response_cipher {
-        // 非单一 gpt provider（retain=false）时，响应里出现的 Codex 密文
-        // （encrypted_content 以 `rsn_` / `gAAAA` 开头）一律丢弃，客户端透明无感知
-        // （响应只携带明文 summary/content）。anthropic 链的 thinking signature 载体
-        // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）不是
-        // Codex 密文，必须保留给客户端做签名校验。
+        // Inbound 来源与 Anthropic 客户端出口共同决定协议签名保留。
         // 唯一密文剥离 hook（provider-responses）：direct 与 relay 响应侧共用，
-        // 保证"只有单 gpt provider 才进客户端"的密文策略单一实现。
+        // 保证密文治理只有一个实现；Anthropic 协议签名是续接例外。
+        let preserve_anthropic_signature = preserve_anthropic_signature
+            || input.provider_raw().provider_protocol == V3HubProviderWireProtocol::Anthropic;
         let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+            payload,
+            false,
+            preserve_anthropic_signature,
+        );
     }
     input
 }
@@ -813,6 +816,7 @@ pub struct V3HubRelayResponseHookProfile {
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
     /// 默认 false（剥离），响应侧只消费该结果，不重复判定。
     retain_response_cipher: bool,
+    preserve_anthropic_signature: bool,
     tool_thinking: bool,
     toolreason_client_projection: bool,
     toolreason_expected_model_id: Option<String>,
@@ -836,6 +840,7 @@ impl V3HubRelayResponseHookProfile {
             web_search_execution_mode: None,
             web_search_center_state: None,
             retain_response_cipher: false,
+            preserve_anthropic_signature: false,
             tool_thinking: false,
             toolreason_client_projection: true,
             toolreason_expected_model_id: None,
@@ -886,6 +891,11 @@ impl V3HubRelayResponseHookProfile {
 
     pub fn retain_response_cipher(&self) -> bool {
         self.retain_response_cipher
+    }
+
+    pub fn with_preserve_anthropic_signature(mut self, preserve: bool) -> Self {
+        self.preserve_anthropic_signature = preserve;
+        self
     }
 
     pub fn with_tool_thinking_enabled(mut self, enabled: bool) -> Self {
@@ -1076,9 +1086,12 @@ fn govern_v3_hub_relay_response(
     profile: &V3HubRelayResponseHookProfile,
 ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
     // 响应侧密文清理（运行时真路径）：消费请求侧 VR 路由决策写入的
-    // retain_response_cipher 标记——仅 gpt 单 provider 保留，其余一律剥离。
-    let input =
-        strip_v3_resp03_encrypted_reasoning_content(input, profile.retain_response_cipher());
+    // retain_response_cipher 标记与 Anthropic 协议签名例外分别消费。
+    let input = strip_v3_resp03_encrypted_reasoning_content(
+        input,
+        profile.retain_response_cipher(),
+        profile.preserve_anthropic_signature,
+    );
     let mut input = harvest_v3_think_blocks_at_resp03(input);
     let is_responses_protocol = input.semantic_protocol() == V3HubProviderWireProtocol::Responses;
     let payload = Arc::make_mut(&mut input.previous.previous.payload.0);

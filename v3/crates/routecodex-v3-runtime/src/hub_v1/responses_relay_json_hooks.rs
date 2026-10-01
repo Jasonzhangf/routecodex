@@ -11,6 +11,7 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) provider_id: Option<&'a str>,
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
+    pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
     pub(crate) projection_context: &'a V3AnthropicResponsesProjectionContext,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
@@ -81,6 +82,9 @@ pub(crate) fn run_json_response_hooks(
         input.tool_thinking_enabled,
         input.expected_model_id,
         input.tool_thinking_turn_context,
+    );
+    let response_hook_profile = response_hook_profile.with_preserve_anthropic_signature(
+        input.source_provider_protocol == V3HubProviderWireProtocol::Anthropic,
     );
     let response_hook_profile = match input.web_search_center_state {
         Some(state) => response_hook_profile.with_web_search_center_state(state),

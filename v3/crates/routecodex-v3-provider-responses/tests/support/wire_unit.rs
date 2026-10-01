@@ -1241,6 +1241,41 @@ mod tests {
     }
 
     #[test]
+    fn official_deepseek_wire_preserves_reasoning_history_and_supplies_required_text() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-flash".into();
+        target.wire_model = "deepseek-flash".into();
+        let body = json!({
+            "model": "deepseek-flash",
+            "input": [
+                {"type":"reasoning","id":"prior","content":[],"summary":[{"type":"summary_text","text":"prior thinking summary"}],"encrypted_content":null},
+                {"type":"reasoning","id":"native","content":[{"type":"reasoning_text","text":"native thinking"}],"summary":[],"encrypted_content":"native-cipher"}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-official", target, body).unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input[0]["content"], json!([{"type":"reasoning_text","text":"prior thinking summary"}]));
+        assert_eq!(input[0]["summary"], json!([{"type":"summary_text","text":"prior thinking summary"}]));
+        assert_eq!(input[1]["content"], json!([{"type":"reasoning_text","text":"native thinking"}]));
+        assert_eq!(input[1]["encrypted_content"], "native-cipher");
+    }
+
+    #[test]
+    fn official_deepseek_opaque_reasoning_still_reaches_provider() {
+        let mut target = target();
+        target.canonical_model_id = "deepseek-flash".into();
+        target.wire_model = "deepseek-flash".into();
+        let body = json!({
+            "model":"deepseek-flash",
+            "input":[{"type":"reasoning","id":"opaque","content":null,"summary":[],"encrypted_content":"113833ee-native-cipher"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-opaque", target, body)
+            .expect("opaque history must not be rejected before reaching the provider");
+        assert_eq!(wire.body()["input"][0]["encrypted_content"], "113833ee-native-cipher");
+        assert!(wire.body()["input"][0]["content"].is_null());
+    }
+
+    #[test]
     fn wire_maps_summary_only_reasoning_to_content_for_non_gpt_target() {
         let mut target = target();
         target.canonical_model_id = "deepseek-v4-flash".into();
@@ -2069,7 +2104,7 @@ mod tests {
     }
 
     #[test]
-    fn response_cipher_policy_strips_codex_cipher_but_keeps_anthropic_signature() {
+    fn response_cipher_policy_uses_typed_anthropic_source_instead_of_cipher_shape() {
         let mut payload = json!({
             "status": "completed",
             "output": [
@@ -2090,10 +2125,16 @@ mod tests {
                     "id": "rs_sig",
                     "encrypted_content": "anthropic-signature-value",
                     "summary": [{"type": "summary_text", "text": "signed"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_deepseek",
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "deepseek plain"}]
                 }
             ]
         });
-        apply_v3_response_cipher_policy(&mut payload, false);
+        apply_v3_response_cipher_policy(&mut payload, false, false);
         assert!(
             !payload.to_string().contains("rsn_CIPHERTEXT"),
             "rsn_ cipher must be stripped"
@@ -2102,20 +2143,22 @@ mod tests {
             !payload.to_string().contains("gAAAA_cipher"),
             "gAAAA cipher must be stripped"
         );
-        assert_eq!(
-            payload["output"][2]["encrypted_content"], "anthropic-signature-value",
-            "non-rsn_/gAAAA signature carrier is not Codex cipher and must be kept"
-        );
+        assert!(payload["output"][2].get("encrypted_content").is_none());
+        assert!(payload["output"][3].get("encrypted_content").is_none());
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
-        apply_v3_response_cipher_policy(&mut retained, true);
+        apply_v3_response_cipher_policy(&mut retained, true, false);
         assert_eq!(
             retained["output"][0]["encrypted_content"], "rsn_KEEP",
             "retain=true must keep cipher verbatim"
         );
+
+        let mut anthropic = json!({"output": [{"type": "reasoning", "encrypted_content": "anthropic-signature-value"}]});
+        apply_v3_response_cipher_policy(&mut anthropic, false, true);
+        assert_eq!(anthropic["output"][0]["encrypted_content"], "anthropic-signature-value");
     }
 
     #[test]

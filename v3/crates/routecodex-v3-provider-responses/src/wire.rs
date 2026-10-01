@@ -192,18 +192,15 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
-    // 1. 历史密文剥离（encrypted_content）对所有非 gpt 目标统一执行——gpt 官方系
-    //    接受密文，保留透传；响应侧主防线（`apply_v3_response_cipher_policy`，
-    //    唯一 hook）保证客户端正常情况拿不到密文，此兜底只处理历史残留密文跨
-    //    provider 回传的窗口。
-    // 2. DeepSeek/opencode 目标额外把 reasoning 重写为统一
-    //    `content:[{type:"reasoning_text",text}]` 形态（否则上游 400
-    //    `reasoning_text must be passed back`）；该重写只在已证明需要的模型上
-    //    执行，避免未经证实的其他非 gpt responses provider 被改写 reasoning 形态。
+    // DeepSeek 官方 Responses 要求历史 reasoning 具有 reasoning_text；对只有
+    // summary 的历史补充同一明文表示，保留原字段与官方密文。其他非 GPT 目标
+    // 沿既有窄清理；Console Go 的独立协议适配仍由其明确 profile 控制。
     if !is_v3_gpt_family_model(&target.canonical_model_id) {
         let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
             || target.wire_model == "deepseek-v4-flash";
-        strip_v3_request_encrypted_reasoning(&mut body, deepseek_compat);
+        let official_deepseek =
+            target.canonical_model_id == "deepseek-flash" || target.wire_model == "deepseek-flash";
+        strip_v3_request_encrypted_reasoning(&mut body, deepseek_compat, official_deepseek);
         // junction 合成 reasoning 只属于已证实的 opencode-go/Console Go 网关：
         // compatibility profile（responses:deepseek-console-go）锁网关契约
         // （请求侧 custom->function 工具映射 + 响应侧回射也按同一 profile
@@ -233,25 +230,29 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
 }
 
 /// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
-/// `retain_response_cipher=true`（仅 gpt 模型且路由只有单一 provider 候选时，
+/// `retain_response_cipher=true`（路由只有单一 provider 候选时，
 /// 由调用方 VR 路由决策用 `is_v3_retain_response_cipher` 算好传入）原样保留
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
-/// 其余场景递归删除 payload 中所有 Codex 密文字段，保证密文不进入客户端。
+/// 其余场景剥离响应密文；Anthropic thinking signature 是协议续接载体，
+/// 由调用方根据已知来源或 Anthropic 客户端出口决定保留。工具结果属于业务数据。
 /// 响应侧是密文治理的唯一入口；本 hook 只消费判定结果，不重复判定。
-pub fn apply_v3_response_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
-    if !retain_response_cipher {
+pub fn apply_v3_response_cipher_policy(
+    payload: &mut Value,
+    retain_response_cipher: bool,
+    preserve_anthropic_signature: bool,
+) {
+    if !retain_response_cipher && !preserve_anthropic_signature {
         strip_v3_encrypted_fields_recursive(payload);
     }
 }
 
-/// 递归删除 Codex 密文字段：`encrypted_content` 值以 `rsn_` / `gAAAA` 开头
-/// （Codex 客户端本地密文）一律删除；anthropic 链的 thinking signature 载体
-/// （redacted_thinking.data / thinking.signature，值非 rsn_/gAAAA 前缀）不是
-/// Codex 密文，保留给客户端签名校验。请求侧与响应侧共用此唯一递归剥离器。
+/// 响应侧按 typed 来源决定是否保留 Anthropic signature，不能猜密文格式。
 fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
     match value {
         Value::Object(map) => {
-            strip_v3_cipher_field(map);
+            if map.get("type").and_then(Value::as_str) != Some("function_call_output") {
+                map.remove("encrypted_content");
+            }
             for child in map.values_mut() {
                 strip_v3_encrypted_fields_recursive(child);
             }
@@ -265,7 +266,7 @@ fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
     }
 }
 
-/// 单一对象的密文键剥离（请求侧 reasoning 条目与响应侧递归共用同一语义）。
+/// 请求侧只剥离已知外来密文，保留目标 provider 可续接的原生载体。
 fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
     if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
         return;
@@ -279,13 +280,19 @@ fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
 
 /// 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）。
 ///
-/// 密文剥离对所有非 gpt 目标统一执行；DeepSeek/opencode 目标（deepseek_compat）
-/// 额外做统一重写：opencode/DeepSeek 网关把 Responses reasoning 转 Chat 时只认
+/// DeepSeek 官方目标仅剥离已知外来密文，并在只有 summary 时补充同一明文的
+/// reasoning_text；保留已有 content、summary 和官方密文。其他非 GPT 目标沿既有
+/// 密文剥离；opencode/DeepSeek 网关目标（deepseek_compat）额外做统一重写：
+/// 该网关把 Responses reasoning 转 Chat 时只认
 /// `content:[{type:"reasoning_text",text}]`（对应官方 `reasoning_content` 回传
 /// 规则），`summary`、顶层 `text`、`encrypted_content` 形态都会让上游 400
 /// （`reasoning_text must be passed back`）。重写确定性执行，同一请求反复构建
 /// wire 输出字节不变，保证上游缓存前缀稳定。
-fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool) {
+fn strip_v3_request_encrypted_reasoning(
+    body: &mut Value,
+    deepseek_compat: bool,
+    official_deepseek: bool,
+) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
     };
@@ -294,6 +301,31 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
             continue;
         };
         if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        if official_deepseek {
+            strip_v3_cipher_field(obj);
+            let content_empty = obj.get("content").is_none_or(|content| {
+                content.is_null() || content.as_array().is_some_and(Vec::is_empty)
+            });
+            if content_empty {
+                let summary = obj
+                    .get("summary")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.get("text").and_then(Value::as_str))
+                            .collect::<String>()
+                    })
+                    .unwrap_or_default();
+                if !summary.is_empty() {
+                    obj.insert(
+                        "content".to_string(),
+                        json!([{"type": "reasoning_text", "text": summary}]),
+                    );
+                }
+            }
             continue;
         }
         obj.remove("encrypted_content");
