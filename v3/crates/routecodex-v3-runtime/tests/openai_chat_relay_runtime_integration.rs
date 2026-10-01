@@ -4098,15 +4098,19 @@ data: {"type":"message_stop"}
         .find(|frame| frame.contains("\"usage\""))
         .unwrap_or_else(|| panic!("client stream must emit a usage chunk: {joined:?}"));
     assert!(
-        usage_chunk.contains("\"prompt_tokens\":37"),
-        "MiniMax message_delta input_tokens must override the message_start placeholder zero: {usage_chunk}"
+        usage_chunk.contains("\"prompt_tokens\":165"),
+        "MiniMax message_delta input_tokens must override the message_start placeholder zero and fold cache_read_input_tokens into the OpenAI Chat prompt total: {usage_chunk}"
+    );
+    assert!(
+        usage_chunk.contains("\"prompt_tokens_details\":{\"cached_tokens\":128}"),
+        "MiniMax cache_read_input_tokens must project as the OpenAI Chat cached sub-count: {usage_chunk}"
     );
     assert!(
         usage_chunk.contains("\"completion_tokens\":10"),
         "MiniMax message_delta output_tokens must project: {usage_chunk}"
     );
     assert!(
-        usage_chunk.contains("\"total_tokens\":47"),
-        "MiniMax usage total must sum input+output: {usage_chunk}"
+        usage_chunk.contains("\"total_tokens\":175"),
+        "MiniMax usage total must sum prompt+completion: {usage_chunk}"
     );
 }

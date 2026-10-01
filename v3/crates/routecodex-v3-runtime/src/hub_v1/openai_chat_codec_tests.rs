@@ -507,3 +507,125 @@ fn transducer_reports_tool_calls_finish_reason_after_tool_call_item() {
         "stream terminal after a tool call must be finish_reason=tool_calls: {terminal:?}"
     );
 }
+
+// Anthropic 语义的 usage 把缓存命中记在 `cache_read_input_tokens`，`input_tokens`
+// 只记未命中增量；OpenAI Chat 的 `prompt_tokens` 是完整输入，
+// `prompt_tokens_details.cached_tokens` 只是它的子计数。真实样本
+// (2026-10-01 4444 openai-chat goaichat/glm-5.3) provider message_delta 为
+// input_tokens=1601 / cache_read_input_tokens=186368，客户端却只收到
+// prompt_tokens=1601，dsh 因此把 186368 缓存读计为 0。
+#[test]
+fn chat_wire_usage_folds_anthropic_cache_read_into_prompt_tokens() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 1601,
+        "output_tokens": 265,
+        "total_tokens": 1866,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 186368
+    }))
+    .expect("anthropic-shaped canonical usage must project");
+    assert_eq!(projected["prompt_tokens"], json!(187969));
+    assert_eq!(
+        projected["prompt_tokens_details"]["cached_tokens"],
+        json!(186368)
+    );
+    assert_eq!(projected["completion_tokens"], json!(265));
+    assert_eq!(projected["total_tokens"], json!(188234));
+}
+
+#[test]
+fn chat_wire_usage_keeps_openai_cached_subcount_without_double_counting() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14,
+        "input_tokens_details": {"cached_tokens": 6}
+    }))
+    .expect("openai-shaped canonical usage must project");
+    assert_eq!(projected["prompt_tokens"], json!(10));
+    assert_eq!(
+        projected["prompt_tokens_details"]["cached_tokens"],
+        json!(6)
+    );
+    assert_eq!(projected["completion_tokens"], json!(4));
+    assert_eq!(projected["total_tokens"], json!(14));
+}
+
+#[test]
+fn chat_wire_usage_projects_reasoning_details() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "input_tokens_details": {"cached_tokens": 6},
+        "output_tokens_details": {"reasoning_tokens": 2}
+    }))
+    .expect("reasoning details must project");
+    assert_eq!(
+        projected["completion_tokens_details"]["reasoning_tokens"],
+        json!(2)
+    );
+}
+
+// Anthropic transducer 是同一 Chat wire usage 语义的第二个产出点；它必须与
+// RespOutbound05 共用同一归一化入口，不得各自复制一份缓存处理。
+#[test]
+fn anthropic_transducer_folds_cache_read_into_chat_prompt_tokens() {
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_usage",
+                "model": "MiniMax-M3",
+                "role": "assistant",
+                "content": [],
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0
+                }
+            }
+        }))
+        .expect("message_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        }))
+        .expect("content_block_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "answer"}
+        }))
+        .expect("content_block_delta");
+    transducer
+        .push_event(json!({"type": "content_block_stop", "index": 0}))
+        .expect("content_block_stop");
+    transducer
+        .push_event(json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {
+                "input_tokens": 37,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 128,
+                "cache_creation_input_tokens": 4
+            }
+        }))
+        .expect("message_delta");
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .expect("message_stop");
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("anthropic terminal must carry usage");
+    assert_eq!(usage["prompt_tokens"], json!(169));
+    assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], json!(128));
+    assert_eq!(usage["completion_tokens"], json!(10));
+    assert_eq!(usage["total_tokens"], json!(179));
+}

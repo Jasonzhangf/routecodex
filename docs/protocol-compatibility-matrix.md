@@ -6,8 +6,9 @@
 - L28-L47 `chat-ssot`：chat process 字段落盘真源。
 - L49-L88 `responses-outbound`：Responses 到其他协议的请求侧映射矩阵。
 - L90-L129 `to-responses`：其他协议到 Responses 的请求/响应侧映射矩阵。
-- L106-L114 `response-path`：provider response → client protocol 的兼容结论。
-- L116-L137 `known-gaps`：当前确认缺口、非目标与真实样本覆盖边界。
+- L109-L117 `response-path`：provider response → client protocol 的兼容结论。
+- L119-L132 `usage-matrix`：Chat client wire 的 usage 输入语义与投影契约。
+- L134-L155 `known-gaps`：当前确认缺口、非目标与真实样本覆盖边界。
 
 ## 目标
 
@@ -115,6 +116,21 @@
 | Chat canonical -> Responses client | `full` | 支持 response object / required_action / usage / continuation 恢复 |
 | Chat canonical -> Anthropic client | `full with alias-semantics dependency` | 需要 `semantics.tools.toolNameAliasMap` / `clientToolsRaw` / `semantics.anthropic.*` 参与恢复 |
 | Chat canonical -> Gemini client | `internal-only` | 当前未作为 public client protocol 暴露 |
+
+### Usage 字段矩阵（Chat client wire）
+
+Chat canonical 的 `usage` 允许两种输入侧语义；投影到 OpenAI Chat wire 时必须择一，
+不得同时套用（`V3RuntimeUsageSummary` 字段契约）：
+
+| 输入语义 | canonical 字段 | OpenAI Chat wire 投影 |
+|---|---|---|
+| OpenAI / Responses | `input_tokens` 已含缓存；`input_tokens_details.cached_tokens` 只是它的子计数 | `prompt_tokens` = `input_tokens`；`prompt_tokens_details.cached_tokens` = 子计数 |
+| Anthropic / MiniMax / glm | `input_tokens` 只记未命中缓存的增量；`cache_read_input_tokens` / `cache_creation_input_tokens` 独立计数 | `prompt_tokens` = `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens`；`prompt_tokens_details.cached_tokens` = `cache_read_input_tokens` |
+
+- `total_tokens` 一律为投影后的 `prompt_tokens + completion_tokens`；不得沿用只含未命中增量的 canonical 合计。
+- `output_tokens_details.reasoning_tokens` 投影为 `completion_tokens_details.reasoning_tokens`。
+- 唯一 owner：`project_v3_chat_usage_from_canonical`（JSON 响应与 SSE 终帧共用）；Anthropic transducer 只能累计后调用它，不得自建第二份换算。
+- 客户端（如 dsh `parseChunkUsage`）用 `prompt_tokens_details.cached_tokens` 识别命中缓存，并用 `prompt_tokens - cached_tokens` 反推未命中增量；缺失子计数会把全部输入计成未命中、把缓存读计为 0，`total_tokens` 同步偏小。
 
 ## 当前确认缺口 / 非目标
 
