@@ -441,12 +441,12 @@ pub(crate) fn provider_terminal_response(
                 // normal end of stream. No client payload and no fabricated upstream
                 // status is sent; the typed Error chain keeps the real cause.
                 if let Some(connection) = connection {
-                    assert!(
-                        state
-                            .front_transport_broker
-                            .suppress_current_connection_restart_closeout(connection),
-                        "streaming no-response must suppress the restart closeout frame"
-                    );
+                    // A concurrent restart closeout may have committed its `503` first.
+                    // That response is then the client-visible boundary and Hyper drops
+                    // this one, so suppression is best-effort by contract.
+                    let _ = state
+                        .front_transport_broker
+                        .suppress_current_connection_restart_closeout(connection);
                 }
                 return v3_sse_transport_disconnect_response(state, connection);
             }

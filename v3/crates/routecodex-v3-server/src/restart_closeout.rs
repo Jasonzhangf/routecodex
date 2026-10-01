@@ -65,18 +65,26 @@ impl V3FrontTransportCloseoutState {
             .frame = Some(frame);
     }
 
-    pub(crate) fn close_for_exec_replacement(&self) {
-        self.closed.store(true, Ordering::Release);
+    /// Close this connection for an exec replacement.
+    ///
+    /// Returns `false` when the closeout is deferred because a streaming terminal
+    /// already owns the client-visible boundary and its response head has not reached
+    /// the client yet. Closing there would drop the head and turn the SSE transport
+    /// break back into the silent zero-byte close it replaces; the terminal fails its
+    /// body immediately afterwards, which closes the connection.
+    pub(crate) fn close_for_exec_replacement(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if request_cycle.request_started
-            && !request_cycle.response_started
-            && !request_cycle.terminal_frame_suppressed
-        {
+        if request_cycle.terminal_frame_suppressed && !request_cycle.response_started {
+            return false;
+        }
+        self.closed.store(true, Ordering::Release);
+        if request_cycle.request_started && !request_cycle.response_started {
             request_cycle.frame = Some(build_v3_restart_closeout_http_error());
         }
+        true
     }
 
     pub(crate) fn abort_without_response(&self) {
@@ -96,13 +104,29 @@ impl V3FrontTransportCloseoutState {
     /// concurrent restart replacement must not also queue the `503` closeout frame.
     /// Unlike `abort_without_response` this leaves the connection open, because Hyper
     /// still has to write the response head before the body fails.
-    pub(crate) fn suppress_restart_closeout_frame(&self) {
+    ///
+    /// Returns `false` when a restart closeout already committed on this connection.
+    /// The committed `503` is the client-visible boundary then, and clearing it would
+    /// leave the client with the same silent zero-byte close this terminal removes.
+    pub(crate) fn suppress_restart_closeout_frame(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
+        if self.closed.load(Ordering::Acquire) {
+            return false;
+        }
         request_cycle.terminal_frame_suppressed = true;
         request_cycle.frame = None;
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn terminal_frame_suppressed(&self) -> bool {
+        self.request_cycle
+            .lock()
+            .expect("front closeout request cycle lock")
+            .terminal_frame_suppressed
     }
 
     pub(crate) fn close(&self) {
