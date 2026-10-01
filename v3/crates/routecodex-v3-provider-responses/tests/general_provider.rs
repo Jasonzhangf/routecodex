@@ -224,6 +224,48 @@ async fn one_generic_provider_serves_distinct_instances_and_preserves_wire_seman
 }
 
 #[tokio::test]
+async fn official_deepseek_reasoning_history_reaches_provider_with_required_text() {
+    let (base_url, mut captures, shutdown) = start_upstream().await;
+    let target = target_with_auth(
+        "deepseek_official",
+        &base_url,
+        "deepseek-flash",
+        "key1",
+        V3ProviderAuthSecretHandle::ApiKey("sk-test".into()),
+    );
+    let body = json!({
+        "model":"deepseek-flash",
+        "input":[
+            {"type":"reasoning","id":"prior","content":[],"summary":[{"type":"summary_text","text":"prior thinking summary"}],"encrypted_content":null},
+            {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_1","output":"ok"},
+            {"role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ],
+        "stream":false
+    });
+    let wire =
+        build_v3_provider_12_responses_wire_payload("req-deepseek-history", target, body).unwrap();
+    let request = build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap();
+    let raw = ReqwestResponsesTransport::default()
+        .send(request)
+        .await
+        .unwrap();
+    assert_eq!(raw.status(), 200);
+    let captured = captures.recv().await.unwrap().body;
+    assert_eq!(
+        captured["input"][0]["content"],
+        json!([{"type":"reasoning_text","text":"prior thinking summary"}])
+    );
+    assert_eq!(
+        captured["input"][0]["summary"],
+        json!([{"type":"summary_text","text":"prior thinking summary"}])
+    );
+    assert_eq!(captured["input"][1]["call_id"], "call_1");
+    assert_eq!(captured["input"][2]["call_id"], "call_1");
+    shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 async fn token_file_auth_is_resolved_only_at_transport_boundary() {
     let (base_url, mut captures, shutdown) = start_upstream().await;
     let transport = ReqwestResponsesTransport::default();

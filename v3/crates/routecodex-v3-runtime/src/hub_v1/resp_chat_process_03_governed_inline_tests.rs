@@ -244,7 +244,7 @@ fn resp03_strips_encrypted_content_from_reasoning_entries_but_keeps_plaintext() 
         ]
     });
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert!(!payload.to_string().contains("encrypted_content"));
     assert!(!payload.to_string().contains("rsn_CIPHERTEXT"));
@@ -270,7 +270,7 @@ fn resp03_strips_encrypted_content_recursively_anywhere_in_response() {
         }]
     });
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert!(!payload.to_string().contains("encrypted_content"));
     assert!(payload.to_string().contains("nested plain"));
@@ -284,23 +284,18 @@ fn resp03_noop_when_response_has_no_encrypted_content() {
     });
     let original = payload.clone();
 
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut payload, false, false);
 
     assert_eq!(payload, original);
 }
 
 #[test]
-fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
-    // 请求侧 VR 路由决策判定（is_v3_gpt_canonical_model / is_v3_retain_response_cipher）：
-    // 响应侧 Resp03 只消费标记，不重复判定模型。
-    assert!(is_v3_gpt_canonical_model("gpt-5.6-sol"));
-    assert!(!is_v3_gpt_canonical_model("deepseek-v4-flash"));
-    assert!(!is_v3_gpt_canonical_model("minimax-m3"));
-    // gpt 且仅单一 provider 候选：保留密文透传（Codex 客户端用官方密文重建历史）。
+fn resp03_gpt_single_provider_keeps_encrypted_content_and_other_routes_strip_it() {
+    // 请求侧 VR 路由决策判定，响应侧 Resp03 只消费标记。
+    // gpt 且单一 provider 候选保留密文透传。
     assert!(is_v3_retain_response_cipher(1, "gpt-5.6-sol"));
-    // 同模型多 provider 候选：不保留（跨 provider 密文无意义，必须剥离）。
+    // 多 provider 候选不保留。
     assert!(!is_v3_retain_response_cipher(2, "gpt-5.6-sol"));
-    // 非 gpt 模型：无论候选数一律剥离。
     assert!(!is_v3_retain_response_cipher(1, "deepseek-v4-flash"));
 
     // 标记驱动的剥离语义：retain=false 时递归剥离密文；retain=true 时原样保留。
@@ -317,15 +312,15 @@ fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
             }]
         })
     };
-    // retain=false（非 gpt / 多 provider）：剥离。
+    // retain=false（多 provider）：剥离。
     let mut stripped = build_payload();
-    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut stripped, false);
+    routecodex_v3_provider_responses::apply_v3_response_cipher_policy(&mut stripped, false, false);
     assert!(
         !stripped.to_string().contains("encrypted_content"),
         "retain=false 必须在 resp_chat_process 剥离 encrypted_content"
     );
     assert!(stripped.to_string().contains("ds summary"));
-    // retain=true（gpt 单 provider）：原样保留。
+    // retain=true（单 provider）：原样保留。
     let mut retained = build_payload();
     if true {
         // 保留分支不做任何剥离（对应 strip_v3_resp03_encrypted_reasoning_content
@@ -339,10 +334,9 @@ fn resp03_gpt_target_keeps_encrypted_content_but_non_gpt_strips_it() {
 }
 
 #[test]
-fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() {
+fn resp03_govern_runtime_path_strips_ciphers_without_anthropic_source() {
     // 运行时真路径（govern_v3_hub_relay_response，此前剥离从未在该路径执行）：
-    // Codex rsn_ 密文默认剥离（retain=false）；anthropic thinking signature
-    // 载体（非 rsn_ 前缀）必须保留给客户端签名校验。
+    // retain=false 时剥离已确认的 Codex/DeepSeek 密文形态。
     let payload_with = |encrypted: &str, summary: &str| {
         json!({
             "id": "resp_govern",
@@ -385,7 +379,18 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
     );
     assert!(payload.contains("signed thought"));
 
-    // retain=true（gpt 单 provider）：govern 运行时路径保留密文透传。
+    let resp02 = build_resp02(payload_with(
+        "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+        "deepseek thought",
+    ));
+    let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
+        .expect("govern must succeed");
+    let (governed, _, _) = outcome.into_parts();
+    let payload = payload_str(&governed);
+    assert!(!payload.contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"));
+    assert!(payload.contains("deepseek thought"));
+
+    // retain=true（单 provider）：govern 运行时路径保留密文透传。
     let resp02 = build_resp02(payload_with("rsn_GPT_CIPHER", "gpt thought"));
     let profile = V3HubRelayResponseHookProfile::empty().with_retain_response_cipher(true);
     let outcome = govern_v3_hub_relay_response(resp02, &profile).expect("govern must succeed");
@@ -395,16 +400,15 @@ fn resp03_govern_runtime_path_strips_rsn_cipher_but_keeps_anthropic_signature() 
         "gpt 单 provider 必须保留 encrypted_content 透传"
     );
 
-    // anthropic thinking signature 载体（值非 rsn_/gAAAA 前缀）永不清除——
-    // recursive 层只剥离 Codex 密文（rsn_ / gAAAA 开头）。
+    // Responses 来源的任意密文形态都在多 provider 场景剥离。
     let resp02 = build_resp02(payload_with("resp04-signature", "signed"));
     let outcome = govern_v3_hub_relay_response(resp02, &V3HubRelayResponseHookProfile::empty())
         .expect("govern must succeed");
     let (governed, _, _) = outcome.into_parts();
     let payload = payload_str(&governed);
     assert!(
-        payload.contains("resp04-signature"),
-        "anthropic thinking signature 载体不得被剥离: {payload}"
+        !payload.contains("resp04-signature"),
+        "Responses 来源的密文必须剥离: {payload}"
     );
     assert!(
         payload.contains("signed"),

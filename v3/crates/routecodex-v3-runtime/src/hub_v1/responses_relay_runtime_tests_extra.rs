@@ -340,6 +340,7 @@ fn responses_provider_json_restores_declared_mcp_identity_for_tool_followup() {
             provider_id: Some("openai_second"),
             expected_model_id: "chat-test",
             provider_protocol: V3HubProviderWireProtocol::Responses,
+            source_provider_protocol: V3HubProviderWireProtocol::Responses,
             projection_context: &projection_context,
             provider_response_transport_intent: V3HubTransportIntent::Json,
             compatibility_profile: None,
