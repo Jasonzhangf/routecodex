@@ -14,16 +14,17 @@
 2. Give the first target a context declaration smaller than the request and the second target a sufficient context window.
 3. Positive: when the request is within `short`'s window, Target10 selects the configured first target without an overflow reason.
 4. Negative: when the request exceeds `short`'s window, Target10 skips `short`, records `context_window_exceeded`, and selects `long`; request-local provider failure still switches to the next candidate.
+5. Near-limit: a request at 90% through 100% of a higher-tier candidate's window keeps that higher tier ahead of a lower-tier normal candidate; within one route tier, a normal candidate is selected before a near-limit candidate.
 
 ## White-box impact
 
 - Keep context admission in the Target10 owner; do not create a separate route-priority heuristic or payload cleanup path.
-- Preserve genuine search/vision capability validation, health availability, direct pin semantics, default-floor semantics, candidate order among eligible candidates, and request-local failure exclusion.
+- Preserve genuine search/vision capability validation, health availability, direct pin semantics, default-floor semantics, candidate order among eligible candidates, and request-local failure exclusion. Near-limit demotion applies only below normal candidates in the same route tier and never crosses route-tier precedence.
 
 ## Module/project black-box impact
 
 - Reproduce the failing Fable shape with a request estimate above its `262144` context window and prove Target10 does not select Fable for provider transport.
-- Reproduce a 90% through 100% request and prove the candidate is demoted rather than filtered.
+- Reproduce a 90% through 100% request and prove the candidate is demoted below same-tier normal candidates rather than filtered, while still beating lower-tier normal candidates.
 - Verify cc-sol uses its configured/catalog context truth and is not classified from Fable's upstream tokenizer count.
 
 ## Required evidence

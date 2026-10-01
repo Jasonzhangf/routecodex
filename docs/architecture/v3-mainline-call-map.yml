@@ -439,7 +439,7 @@ chains:
     owner_feature_id: v3.virtual_router_target_interpreter
     semantic_contract:
       - Initial Relay resolution selects from Target09 with session availability and the request-local exclusion set supplied by the owning runtime.
-      - Context-oversized candidates are filtered before Relay provider transport; near-limit candidates remain eligible after normal candidates.
+      - Context-oversized candidates are filtered before Relay provider transport; near-limit candidates remain eligible, are demoted only below normal candidates in the same route tier, and a higher route tier still beats a lower-tier normal candidate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]

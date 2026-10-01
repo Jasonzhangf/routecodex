@@ -1858,6 +1858,154 @@ targets = [
 }
 
 #[test]
+fn context_near_limit_preserves_higher_route_tier_over_lower_normal_candidate() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.high]
+type = "responses"
+base_url = "http://high.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "HIGH_KEY" }] }
+[providers.high.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[providers.low]
+type = "responses"
+base_url = "http://low.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "LOW_KEY" }] }
+[providers.low.models.m]
+capabilities = ["text"]
+max_context_tokens = 100000
+[route_groups.g.pools.high]
+selection = { strategy = "priority" }
+match = { precedence = 10, entry_protocol = "responses" }
+targets = [{ kind = "provider_model", provider = "high", model = "m", key = "key", priority = 1 }]
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "low", model = "m", key = "key", priority = 1000 }]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 950,
+                route_classification: test_route("high", &["high", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+
+    assert_eq!(
+        selected.candidate.provider_id, "high",
+        "a near-limit candidate in a higher route tier must not be filtered out by a lower-tier normal candidate"
+    );
+    assert!(selected.unavailable_candidates.iter().any(|entry| {
+        entry == "high:key:m:context_window_near_limit(input_tokens=950,max_context_tokens=1000)"
+    }));
+}
+
+#[test]
+fn context_near_limit_is_demoted_below_normal_candidate_within_same_route_tier() {
+    let source = r#"
+version = 3
+[servers.s]
+bind = "127.0.0.1"
+port = 1
+routing_group = "g"
+[providers.near]
+type = "responses"
+base_url = "http://near.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "NEAR_KEY" }] }
+[providers.near.models.m]
+capabilities = ["text"]
+max_context_tokens = 1000
+[providers.normal]
+type = "responses"
+base_url = "http://normal.invalid/v1"
+default_model = "m"
+auth = { type = "api_key", entries = [{ alias = "key", env = "NORMAL_KEY" }] }
+[providers.normal.models.m]
+capabilities = ["text"]
+max_context_tokens = 100000
+[route_groups.g.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "near", model = "m", key = "key", priority = 1000 },
+  { kind = "provider_model", provider = "normal", model = "m", key = "key", priority = 1 }
+]
+"#;
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(source).unwrap()).unwrap();
+    let router = V3VirtualRouter::default();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::new(),
+                input_tokens: 950,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let target = V3TargetInterpreter::default();
+    let expanded = target
+        .expand_candidates(&manifest, target.classify_kind(hit), 0)
+        .unwrap();
+    let selected = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+
+    assert_eq!(selected.candidate.provider_id, "normal");
+    assert!(selected.unavailable_candidates.iter().any(|entry| {
+        entry == "near:key:m:context_window_near_limit(input_tokens=950,max_context_tokens=1000)"
+    }));
+}
+
+#[test]
 fn context_admission_rejects_oversized_exact_pin_before_transport() {
     let source = r#"
 version = 3
