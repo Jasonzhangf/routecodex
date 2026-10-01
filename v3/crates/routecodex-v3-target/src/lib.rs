@@ -378,7 +378,14 @@ impl V3TargetInterpreter {
                 {
                     continue;
                 }
-                eligible.push((index, candidate, projection, route_tier_rank, near_limit));
+                eligible.push((
+                    index,
+                    candidate,
+                    projection,
+                    route_tier_rank,
+                    scheduled_priority,
+                    near_limit,
+                ));
             } else {
                 unavailable.push(format_candidate_scheduling_unavailable(
                     candidate,
@@ -387,11 +394,15 @@ impl V3TargetInterpreter {
             }
         }
         let candidate_count = eligible.len().max(1);
-        // Route tier is the primary key. Near-limit is only a same-tier
-        // demotion, so it cannot hand selection to a lower route tier.
-        let Some(max_route_tier_rank) = eligible
+        // A route pool can encode its configured tiers as target priority.
+        // Plan tier index orders separate pools; scheduled priority orders the
+        // tiers inside one pool. Near-limit is only a same-tier demotion, so it
+        // cannot hand selection to a lower pool or a lower in-pool tier.
+        let Some(max_route_tier_scope) = eligible
             .iter()
-            .map(|(_, _, _, route_tier_rank, _)| *route_tier_rank)
+            .map(|(_, _, _, route_tier_rank, scheduled_priority, _)| {
+                (*route_tier_rank, *scheduled_priority)
+            })
             .max()
         else {
             return Err(V3TargetExhaustion {
@@ -399,22 +410,23 @@ impl V3TargetInterpreter {
                 attempted_candidates: unavailable,
             });
         };
-        let highest_route_tier_has_normal =
-            eligible
-                .iter()
-                .any(|(_, _, _, route_tier_rank, near_limit)| {
-                    *route_tier_rank == max_route_tier_rank && !*near_limit
-                });
+        let highest_route_tier_has_normal = eligible.iter().any(
+            |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
+                (*route_tier_rank, *scheduled_priority) == max_route_tier_scope && !*near_limit
+            },
+        );
         let mut candidates = eligible
             .into_iter()
-            .filter(|(_, _, _, route_tier_rank, near_limit)| {
-                *route_tier_rank == max_route_tier_rank
-                    && (!highest_route_tier_has_normal || !*near_limit)
-            })
+            .filter(
+                |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
+                    (*route_tier_rank, *scheduled_priority) == max_route_tier_scope
+                        && (!highest_route_tier_has_normal || !*near_limit)
+                },
+            )
             .collect::<Vec<_>>();
         let Some(max_priority) = candidates
             .iter()
-            .map(|(_, _, projection, _, _)| projection.effective_priority)
+            .map(|(_, _, projection, _, _, _)| projection.effective_priority)
             .max()
         else {
             return Err(V3TargetExhaustion {
@@ -424,22 +436,22 @@ impl V3TargetInterpreter {
         };
         let mut tier = candidates
             .drain(..)
-            .filter(|(_, _, projection, _, _)| projection.effective_priority == max_priority)
+            .filter(|(_, _, projection, _, _, _)| projection.effective_priority == max_priority)
             .collect::<Vec<_>>();
         let total_weight = tier
             .iter()
-            .map(|(_, _, projection, _, _)| projection.effective_weight_milli)
+            .map(|(_, _, projection, _, _, _)| projection.effective_weight_milli)
             .sum::<u64>();
         let mut point = deterministic_sample % total_weight.max(1);
         let mut chosen = 0;
-        for (tier_index, (_, _, projection, _, _)) in tier.iter().enumerate() {
+        for (tier_index, (_, _, projection, _, _, _)) in tier.iter().enumerate() {
             if point < projection.effective_weight_milli {
                 chosen = tier_index;
                 break;
             }
             point = point.saturating_sub(projection.effective_weight_milli);
         }
-        let (index, candidate, _, _, _) = tier.swap_remove(chosen);
+        let (index, candidate, _, _, _, _) = tier.swap_remove(chosen);
         let mut route = expanded.route;
         if let Some(pool_id) = route
             .target_plan
