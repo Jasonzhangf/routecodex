@@ -10,7 +10,7 @@ fn provider_default_http_read_timeout_matches_fifteen_minute_local_budget() {
 }
 use crate::wire::{
     build_v3_provider_12_responses_compact_wire_payload,
-    build_v3_provider_12_responses_wire_payload, V3ProviderAuthSecretHandle,
+    build_v3_provider_12_responses_wire_payload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
     V3ResponsesProviderTarget,
 };
 use crate::{
@@ -875,4 +875,172 @@ async fn transport_response_carries_target_compatibility_profile() {
         raw.compatibility_profile(),
         Some("responses:deepseek-console-go")
     );
+}
+
+// ---------------------------------------------------------------------------
+// upstream model discovery (WebUI onboarding)
+// ---------------------------------------------------------------------------
+
+const DISCOVERY_SECRET: &str = "sk-discover-secret-value";
+
+fn discovery_auth() -> V3ProviderAuthHandle {
+    V3ProviderAuthHandle {
+        alias: "key1".into(),
+        secret: V3ProviderAuthSecretHandle::ApiKey(DISCOVERY_SECRET.into()),
+    }
+}
+
+/// 单连接 mock：捕获请求行与请求头，返回固定响应。
+async fn spawn_discovery_server(
+    status: u16,
+    body: &'static str,
+) -> (String, std::sync::Arc<std::sync::Mutex<String>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let captured_for_server = std::sync::Arc::clone(&captured);
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut buffer).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..n]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        *captured_for_server.lock().unwrap() = String::from_utf8_lossy(&request).into_owned();
+        let reason = if status == 200 { "OK" } else { "Unauthorized" };
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    (format!("http://{addr}"), captured)
+}
+
+#[tokio::test]
+async fn discover_models_uses_provider_specific_path_and_auth_header() {
+    let cases = [
+        (
+            "openai_chat",
+            "/models",
+            "authorization: bearer sk-discover-secret-value",
+            r#"{"data":[{"id":"gpt-a"},{"id":"gpt-b"}]}"#,
+        ),
+        (
+            "responses",
+            "/models",
+            "authorization: bearer sk-discover-secret-value",
+            r#"{"data":[{"id":"gpt-a"},{"id":"gpt-b"}]}"#,
+        ),
+        (
+            "anthropic",
+            "/v1/models",
+            "x-api-key: sk-discover-secret-value",
+            r#"{"data":[{"id":"claude-a"}]}"#,
+        ),
+        (
+            "gemini",
+            "/v1beta/models",
+            "x-goog-api-key: sk-discover-secret-value",
+            r#"{"models":[{"name":"models/gemini-a"}]}"#,
+        ),
+    ];
+    for (provider_type, expected_path, expected_header, body) in cases {
+        let (base_url, captured) = spawn_discovery_server(200, body).await;
+        let models = discover_v3_provider_models(
+            "discover-provider",
+            provider_type,
+            &base_url,
+            &discovery_auth(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{provider_type} discovery must succeed, got {error}"));
+        assert!(
+            !models.is_empty(),
+            "{provider_type} must return model names"
+        );
+        let raw = captured.lock().unwrap().to_ascii_lowercase();
+        assert!(
+            raw.starts_with(&format!("get {expected_path} http/1.1")),
+            "{provider_type} must GET {expected_path}, got {:?}",
+            raw.lines().next().unwrap_or_default()
+        );
+        assert!(
+            raw.contains(expected_header),
+            "{provider_type} must send {expected_header}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn discover_models_strips_gemini_prefix_and_dedupes() {
+    let (base_url, _) = spawn_discovery_server(
+        200,
+        r#"{"models":[{"name":"models/gemini-a"},{"name":"gemini-a"},{"name":"models/gemini-b"}]}"#,
+    )
+    .await;
+    let models =
+        discover_v3_provider_models("discover-provider", "gemini", &base_url, &discovery_auth())
+            .await
+            .unwrap();
+    assert_eq!(models, vec!["gemini-a".to_string(), "gemini-b".to_string()]);
+}
+
+#[tokio::test]
+async fn discover_models_failure_is_typed_and_never_leaks_the_secret() {
+    let (base_url, _) = spawn_discovery_server(401, r#"{"error":{"message":"bad key"}}"#).await;
+    let error = discover_v3_provider_models(
+        "discover-provider",
+        "openai_chat",
+        &base_url,
+        &discovery_auth(),
+    )
+    .await
+    .expect_err("HTTP 401 must not be reported as success");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("401"),
+        "failure must carry the real status, got {rendered}"
+    );
+    assert!(
+        !rendered.contains(DISCOVERY_SECRET),
+        "failure must not echo the resolved secret, got {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn discover_models_rejects_unrecognized_shape_instead_of_guessing() {
+    let (base_url, _) = spawn_discovery_server(200, r#"{"unexpected":[]}"#).await;
+    let error = discover_v3_provider_models(
+        "discover-provider",
+        "openai_chat",
+        &base_url,
+        &discovery_auth(),
+    )
+    .await
+    .expect_err("unrecognized body shape must not yield a guessed list");
+    assert!(error.to_string().contains("unrecognized"), "got {error}");
+}
+
+#[tokio::test]
+async fn discover_models_rejects_unknown_provider_type_without_network_call() {
+    let error = discover_v3_provider_models(
+        "discover-provider",
+        "carrier_pigeon",
+        "http://127.0.0.1:1",
+        &discovery_auth(),
+    )
+    .await
+    .expect_err("unknown provider type must fail explicitly");
+    assert!(error.to_string().contains("carrier_pigeon"), "got {error}");
 }

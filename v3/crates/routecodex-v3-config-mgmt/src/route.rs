@@ -7,7 +7,7 @@ use routecodex_v3_config::{
     V3Config02AuthoringParsed, V3RouteGroupAuthoringConfig, V3RoutePoolAuthoringConfig,
     V3RoutePoolMatchAuthoringConfig, V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind,
     V3SelectionPolicy, V3SelectionStrategy, V3ServerAuthoringConfig,
-    V3UserConfig02RoutingSelectionParsed, V3UserRouteMember,
+    V3UserConfig02RoutingSelectionParsed, V3UserRouteMember, V3UserRoutePool,
 };
 use std::collections::BTreeMap;
 
@@ -112,6 +112,12 @@ pub fn user_route_groups_from_selection(
         .collect()
 }
 
+/// 把 user routing 视图写回 selection。
+///
+/// 视图里出现而 selection 中尚不存在的 pool 按 `new_default_pool_view` 的语义
+/// 创建为空 pool（priority 策略、无 match rule、无 tier），再写入视图 tiers；
+/// 这样 "新增 provider 并接线" 在只有 default pool 的配置上也可达，而不是
+/// 因 `unknown route pool` 直接失败。server 不存在仍然报错（不隐式建 server）。
 pub fn apply_user_route_group_view(
     selection: &mut V3UserConfig02RoutingSelectionParsed,
     group: &UserRouteGroupView,
@@ -123,8 +129,8 @@ pub fn apply_user_route_group_view(
     for pool in &group.pools {
         let target = server
             .routes
-            .get_mut(&pool.name)
-            .ok_or_else(|| format!("unknown route pool {}.{}", group.server_id, pool.name))?;
+            .entry(pool.name.clone())
+            .or_insert_with(new_default_user_route_pool);
         target.tiers = pool
             .tiers
             .iter()
@@ -143,6 +149,96 @@ pub fn apply_user_route_group_view(
             .collect::<Result<Vec<_>, String>>()?;
     }
     Ok(())
+}
+
+/// `new_default_pool_view` 在 user routing 侧的等价构造：空 tiers 即默认 priority pool。
+/// 这是 user routing 侧 default pool 的唯一构造点。
+fn new_default_user_route_pool() -> V3UserRoutePool {
+    V3UserRoutePool { tiers: Vec::new() }
+}
+
+/// 一次 user routing 成员绑定的结果；所有字段反映写入后的最终状态。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRouteMemberBinding {
+    pub server_id: String,
+    pub pool: String,
+    pub tier: usize,
+    pub use_ref: String,
+    pub weight: Option<u32>,
+    /// pool 在本次绑定前不存在，由 default pool 语义创建。
+    pub pool_created: bool,
+    /// tier 下标在本次绑定前不存在，被创建为空 tier。
+    pub tier_created: bool,
+    /// 同 `use_ref` 成员已存在，本次原地替换了它的 weight。
+    pub replaced: bool,
+    /// 同 `use_ref` 且 weight 相同的成员已存在：不需要任何写入。
+    pub already_bound: bool,
+}
+
+/// 把 `use_ref` 成员写入 user routing 的 server/pool/tier。
+///
+/// - server 不存在：显式报错并列出已知 server id（不隐式建 server）。
+/// - pool / tier 不存在：按 default pool 语义创建（`new_default_user_route_pool`
+///   是唯一 owner）。
+/// - 同 tier 内已有同 `use_ref` 成员：原地替换，不追加重复成员；weight 相同时
+///   报告 `already_bound` 且不修改任何内容。
+pub fn bind_user_route_member(
+    selection: &mut V3UserConfig02RoutingSelectionParsed,
+    server_id: &str,
+    pool_name: &str,
+    tier_index: usize,
+    use_ref: &str,
+    weight: Option<u32>,
+) -> Result<UserRouteMemberBinding, String> {
+    let (provider, model) = use_ref
+        .split_once('/')
+        .ok_or_else(|| format!("invalid provider/model {use_ref:?}"))?;
+    if provider.is_empty() || model.is_empty() {
+        return Err(format!("invalid provider/model {use_ref:?}"));
+    }
+    let known_servers = selection
+        .servers
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let server = selection
+        .servers
+        .get_mut(server_id)
+        .ok_or_else(|| format!("unknown server {server_id:?}; known servers: {known_servers}"))?;
+    let pool_created = !server.routes.contains_key(pool_name);
+    let pool = server
+        .routes
+        .entry(pool_name.to_string())
+        .or_insert_with(new_default_user_route_pool);
+    let tier_created = pool.tiers.len() <= tier_index;
+    while pool.tiers.len() <= tier_index {
+        pool.tiers.push(Vec::new());
+    }
+    let tier = &mut pool.tiers[tier_index];
+    let existing = tier.iter().position(|member| member.use_ref() == use_ref);
+    let already_bound = existing
+        .map(|index| tier[index].weight == weight)
+        .unwrap_or(false);
+    let replaced = existing.is_some() && !already_bound;
+    match existing {
+        Some(index) if !already_bound => {
+            tier[index] = V3UserRouteMember::new(provider, model, weight);
+        }
+        Some(_) => {}
+        None => tier.push(V3UserRouteMember::new(provider, model, weight)),
+    }
+    Ok(UserRouteMemberBinding {
+        server_id: server_id.to_string(),
+        pool: pool_name.to_string(),
+        tier: tier_index,
+        use_ref: use_ref.to_string(),
+        weight,
+        pool_created,
+        tier_created,
+        replaced,
+        already_bound,
+    })
 }
 
 pub fn route_groups_from_authoring(authoring: &V3Config02AuthoringParsed) -> Vec<RouteGroupView> {

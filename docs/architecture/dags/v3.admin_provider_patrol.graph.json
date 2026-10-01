@@ -1,0 +1,59 @@
+{
+  "id": "v3.admin_provider_patrol",
+  "version": "2",
+  "inputs": [
+    { "id": "patrol-scheduler-tick", "schema": "Object", "schema_ref": "v3.admin_provider_patrol.arc.scheduler_tick" }
+  ],
+  "nodes": [
+    {
+      "id": "patrol_m01_schedule_tick",
+      "operator": "routecodex.v3.admin.provider_patrol.PatrolRuntime::run_due",
+      "operator_version": "1",
+      "inputs": ["patrol-scheduler-tick"],
+      "output": { "id": "patrol-tick", "schema": "Object", "schema_ref": "v3.admin_provider_patrol.arc.tick" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan"], "writes": [] }
+    },
+    {
+      "id": "patrol_m02_due_plans_selected",
+      "operator": "routecodex.v3.admin.provider_patrol.run_now",
+      "operator_version": "1",
+      "inputs": ["patrol-tick"],
+      "output": { "id": "patrol-due-plans", "schema": "Object", "schema_ref": "v3.admin_provider_patrol.arc.due_plans" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan", "v3.provider.directory_authoring"], "writes": [] }
+    },
+    {
+      "id": "patrol_m03_probe_executed",
+      "operator": "routecodex.v3.admin.provider_probe.run_probe",
+      "operator_version": "1",
+      "inputs": ["patrol-due-plans"],
+      "output": { "id": "patrol-probe-result", "schema": "Object", "schema_ref": "v3.admin_provider_patrol.arc.probe_result" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.provider.directory_authoring"], "writes": ["v3.admin.provider_probe_result"] }
+    },
+    {
+      "id": "patrol_m04_result_recorded",
+      "operator": "routecodex.v3.admin.provider_patrol.PatrolRuntime::run",
+      "operator_version": "1",
+      "inputs": ["patrol-probe-result"],
+      "output": { "id": "patrol-history-row", "schema": "Object", "schema_ref": "v3.admin_provider_patrol.arc.history_row" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_probe_result"], "writes": ["v3.admin.provider_patrol"] }
+    }
+  ],
+  "edges": [
+    { "from": "patrol_m01_schedule_tick", "to": "patrol_m02_due_plans_selected", "arc_id": "patrol-tick" },
+    { "from": "patrol_m02_due_plans_selected", "to": "patrol_m03_probe_executed", "arc_id": "patrol-due-plans" },
+    { "from": "patrol_m03_probe_executed", "to": "patrol_m04_result_recorded", "arc_id": "patrol-probe-result" }
+  ],
+  "outputs": ["patrol-history-row"]
+}

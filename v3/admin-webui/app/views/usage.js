@@ -1,8 +1,7 @@
 // RCC V3 Admin WebUI — Usage (Requests) view.
 // feature_id: v3.admin_observability_aggregation (v3/admin-webui/app/views/usage.js)
 
-import { api, el, fmtMs, fmtCompact, timeText, escapeHtml, showStatus, startAutoRefresh } from "../core.js";
-import { openPanel, closePanel, wireDrawer } from "../drawer.js";
+import { api, el, fmtMs, fmtCompact, timeText, escapeHtml, showStatus, startAutoRefresh, copyText, kv, badge, getAdminToken } from "../core.js";
 import { renderBarChart, renderDonut } from "../charts.js";
 import { initShell } from "../shell.js";
 
@@ -10,8 +9,6 @@ initShell("usage", {
   title: "Usage",
   subtitle: "Request records, tokens, cache hit rate and errors",
 });
-
-wireDrawer();
 
 // Endpoint label: shorten canonical V3 entry paths so exports stay compact
 // without losing the protocol identity; non-canonical paths pass through.
@@ -108,9 +105,8 @@ const state = {
   entriesGroup: "pool",
   stats: {},
   timeseries: [],
-  facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, error_status_codes: {} },
+  facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, entry_protocols: {}, error_status_codes: {} },
   errorStatusCode: null,
-  selected: null,
   tableWidths: { entries: null, attempts: null, errors: null },
   loading: false,
   // layered filter model: port tabs (Layer 1) → status kinds (Layer 2) →
@@ -129,6 +125,25 @@ const state = {
   providerCounts: {},
   modelCounts: {},
   exports: [],
+  // Absolute time range (epoch ms). When either bound is set the request uses
+  // range=all so the server cannot overwrite the explicit bounds.
+  timeFrom: null,
+  timeTo: null,
+  // Current cooldown truth, read only from GET /api/observability/cooldown-pool.
+  cooldown: null,
+  cooldownError: null,
+  cooldownFetchedAtMs: 0,
+  // SSE live mode. Polling stays the default and resumes when live is off.
+  live: false,
+  liveCursor: 0,
+  liveEvents: 0,
+  liveLastEventAtMs: 0,
+  liveAbort: null,
+  // Error-detail modal payload for the currently open request key.
+  detail: null,
+  detailKey: null,
+  detailRow: null,
+  detailTimer: null,
 };
 
 function statusOf(row) {
@@ -359,41 +374,63 @@ async function loadRecords() {
   }
 }
 
+// An absolute range overrides the relative Range selector; the server rewrites
+// time_from_ms for range=today|week|month, so the explicit bounds are only
+// honoured with range=all.
+function activeRange() {
+  return state.timeFrom != null || state.timeTo != null
+    ? "all"
+    : document.getElementById("chart-range").value;
+}
+
+function applyTimeRange(params) {
+  params.set("range", activeRange());
+  params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
+  if (state.timeFrom != null) params.set("time_from_ms", String(state.timeFrom));
+  if (state.timeTo != null) params.set("time_to_ms", String(state.timeTo));
+}
+
+// Single owner of the record query parameters: the table load, the export and
+// the error-example probes all build the same filtered query.
+function buildQueryParams(page) {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("page_size", String(state.pageSize));
+  applyTimeRange(params);
+  const sortMode = state.sortMode;
+  if (sortMode === "time") {
+    params.set("sort_by", "started_epoch_ms");
+    params.set("sort_order", "desc");
+  } else if (sortMode === "code") {
+    params.set("sort_by", "result");
+    params.set("sort_order", "desc");
+  } else {
+    params.set("sort_by", document.getElementById("sort-field").value);
+    params.set("sort_order", document.getElementById("sort-order").value);
+  }
+  const port = document.getElementById("port-filter").value;
+  if (port !== "all") params.set("port", port);
+  const provider = document.getElementById("provider-filter").value;
+  if (provider !== "all") params.set("provider", provider);
+  const model = document.getElementById("model-filter").value;
+  if (model !== "all") params.set("model", model);
+  const endpoint = document.getElementById("endpoint-filter").value;
+  if (endpoint !== "all") params.set("endpoint", endpoint);
+  const route = document.getElementById("route-filter").value.trim();
+  if (route) params.set("route", route);
+  const protocol = document.getElementById("protocol-filter").value;
+  if (protocol !== "all") params.set("entry_protocol", protocol);
+  const mode = document.getElementById("mode-filter").value;
+  if (mode !== "all") params.set("execution_mode", mode);
+  const search = document.getElementById("search-filter").value.trim();
+  if (search) params.set("search", search);
+  if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
+  return params;
+}
+
 async function loadRecordsInner() {
   try {
-    const params = new URLSearchParams();
-    params.set("page", String(state.page));
-    params.set("page_size", String(state.pageSize));
-    params.set("range", document.getElementById("chart-range").value);
-    params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
-    const sortMode = state.sortMode;
-    if (sortMode === "time") {
-      params.set("sort_by", "started_epoch_ms");
-      params.set("sort_order", "desc");
-    } else if (sortMode === "code") {
-      params.set("sort_by", "result");
-      params.set("sort_order", "desc");
-    } else {
-      params.set("sort_by", document.getElementById("sort-field").value);
-      params.set("sort_order", document.getElementById("sort-order").value);
-    }
-    const port = document.getElementById("port-filter").value;
-    if (port !== "all") params.set("port", port);
-    const provider = document.getElementById("provider-filter").value;
-    if (provider !== "all") params.set("provider", provider);
-    const model = document.getElementById("model-filter").value;
-    if (model !== "all") params.set("model", model);
-    const endpoint = document.getElementById("endpoint-filter").value;
-    if (endpoint !== "all") params.set("endpoint", endpoint);
-    const route = document.getElementById("route-filter").value.trim();
-    if (route) params.set("route", route);
-    const protocol = document.getElementById("protocol-filter").value;
-    if (protocol !== "all") params.set("entry_protocol", protocol);
-    const mode = document.getElementById("mode-filter").value;
-    if (mode !== "all") params.set("execution_mode", mode);
-    const search = document.getElementById("search-filter").value.trim();
-    if (search) params.set("search", search);
-    if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
+    const params = buildQueryParams(state.page);
     // Rail multi-selects win over the single-value facet selects when set.
     const plans = activePlans();
     if (plans.length > 12) {
@@ -418,16 +455,18 @@ async function loadRecordsInner() {
 
 async function loadAttempts() {
   try {
+    // `status=retrying` is the failed-attempt projection: exactly the provider
+    // attempt rows, with a server-side total that matches the filter.
     const params = new URLSearchParams();
-    params.set("status", "error");
+    params.set("status", "retrying");
     params.set("page", String(state.attemptsPage));
-    params.set("page_size", "50");
+    params.set("page_size", String(state.pageSize));
     params.set("sort_by", "updated_epoch_ms");
     params.set("sort_order", "desc");
-    params.set("range", "today");
+    applyTimeRange(params);
     const response = await api(`/api/observability/records?${params}`);
-    state.attemptRecords = (response.records || []).filter((row) => row.result === "failed-attempt");
-    state.attemptsTotal = state.attemptRecords.length;
+    state.attemptRecords = response.records || [];
+    state.attemptsTotal = Number(response.total || 0);
   } catch (error) {
     state.attemptRecords = [];
     state.attemptsTotal = 0;
@@ -442,14 +481,13 @@ async function loadErrors() {
     state.errorFacets = codes;
     state.errorStatuses = codes.reduce((sum, item) => sum + Number(item.count || 0), 0);
     state.errorExamples = {};
-    await Promise.all(codes.slice(0, 12).map(async (item) => {
+    // Every facet status code is probed, not a truncated sample.
+    await Promise.all(codes.map(async (item) => {
       try {
-        const params = new URLSearchParams();
+        const params = buildQueryParams(1);
         params.set("status", "error");
         params.set("error_status_code", item.code);
-        params.set("page", "1");
         params.set("page_size", "1");
-        params.set("range", "today");
         const response = await api(`/api/observability/records?${params}`);
         const first = (response.records || [])[0];
         state.errorExamples[item.code] = first?.meta?.error_detail
@@ -466,7 +504,90 @@ async function loadErrors() {
 }
 
 async function load() {
-  await loadRecords();
+  await Promise.all([loadRecords(), loadCooldown()]);
+}
+
+// ---------- cooldown panel ----------
+// GET /api/observability/cooldown-pool is the only current provider health /
+// cooldown truth. Observability rows only ever carry immutable attempt-time
+// snapshots and are never read as current state.
+
+async function loadCooldown() {
+  try {
+    state.cooldown = await api("/api/observability/cooldown-pool");
+    state.cooldownError = null;
+    state.cooldownFetchedAtMs = Date.now();
+  } catch (error) {
+    state.cooldown = null;
+    state.cooldownError = error.message;
+  }
+  renderCooldownPanel();
+  if (state.detailKey) renderDetailCooldown();
+}
+
+function renderCooldownPanel() {
+  const host = document.getElementById("cooldown-panel");
+  if (!host) return;
+  if (state.cooldownError) {
+    host.replaceChildren(el("div", "error-summary", `cooldown pool unavailable: ${state.cooldownError}`));
+    return;
+  }
+  if (!state.cooldown) {
+    host.replaceChildren(el("div", "loading", "loading…"));
+    return;
+  }
+  const listeners = Array.isArray(state.cooldown.listeners) ? state.cooldown.listeners : [];
+  if (!listeners.length) {
+    host.replaceChildren(el("div", "empty-state", "No listener returned a cooldown pool."));
+    return;
+  }
+  const grid = el("div", "cooldown-grid");
+  for (const listener of listeners) {
+    const card = el("div", "cooldown-card");
+    card.appendChild(el("h4", null, `${listener.server_id ?? "unknown"} :${listener.port ?? "—"}`));
+    const entries = Array.isArray(listener.entries) ? listener.entries : [];
+    if (!entries.length) {
+      card.appendChild(el("div", "muted", "no active cooldown entries"));
+    } else {
+      for (const entry of entries) {
+        const line = el("div", "kv");
+        line.appendChild(el("span", "kv-key", entry.provider_id ?? "unknown"));
+        const value = el("span", "kv-value");
+        value.appendChild(badge(entry.state ?? "unknown"));
+        const parts = [];
+        if (entry.kind) parts.push(`kind ${entry.kind}`);
+        if (entry.auth_alias) parts.push(`key ${entry.auth_alias}`);
+        if (entry.model_id) parts.push(`model ${entry.model_id}`);
+        if (parts.length) value.appendChild(document.createTextNode(` · ${parts.join(" · ")}`));
+        if (entry.remaining_ms != null) {
+          const remaining = el("span", "cooldown-remaining", ` · ${fmtMs(Math.max(0, Number(entry.remaining_ms)))}`);
+          remaining.dataset.remainingMs = String(entry.remaining_ms);
+          value.appendChild(remaining);
+        } else {
+          value.appendChild(document.createTextNode(" · remaining unknown"));
+        }
+        if (entry.reason) value.appendChild(document.createTextNode(` · ${entry.reason}`));
+        if (entry.failure_count != null) value.appendChild(document.createTextNode(` · failures ${entry.failure_count}`));
+        line.appendChild(value);
+        card.appendChild(line);
+      }
+    }
+    grid.appendChild(card);
+  }
+  host.replaceChildren(
+    grid,
+    el("div", "muted", state.cooldownFetchedAtMs ? `pool read at ${timeText(state.cooldownFetchedAtMs)} · refreshes every 5 s` : ""),
+  );
+}
+
+function tickCooldowns() {
+  const elapsed = state.cooldownFetchedAtMs ? Date.now() - state.cooldownFetchedAtMs : 0;
+  document.querySelectorAll("#cooldown-panel .cooldown-remaining").forEach((node) => {
+    const base = Number(node.dataset.remainingMs);
+    if (!Number.isFinite(base)) return;
+    const left = base - elapsed;
+    node.textContent = ` · ${left > 0 ? fmtMs(left) : "expired (pool refresh pending)"}`;
+  });
 }
 
 function renderStats(stats) {
@@ -518,7 +639,7 @@ function renderStats(stats) {
     const option = el("option", null, String(port)); option.value = String(port); return option;
   }));
   portSelect.value = [...portSelect.options].some((option) => option.value === selectedPort) ? selectedPort : "all";
-  populateFacetSelect("protocol-filter", state.facets.response_types || {});
+  populateFacetSelect("protocol-filter", state.facets.entry_protocols || {});
   populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
   populateFacetSelect("model-filter", state.facets.models || {}, "all models");
   populateFacetSelect("endpoint-filter", state.facets.endpoints || {}, "all endpoints");
@@ -548,6 +669,7 @@ function detailGrid(row) {
     ["route", row.meta?.route], ["pool", row.meta?.pool],
     ["model", row.meta?.model], ["wire model", row.meta?.wire_model], ["provider", row.meta?.provider],
     ["provider id", row.meta?.provider_id], ["provider type", row.meta?.provider_type],
+    ["auth key", row.meta?.auth_alias],
     ["attempts", row.attempts], ["failed attempts", row.failed_attempts], ["switches", row.switches],
     ["provider status", row.meta?.provider_status], ["response status", row.meta?.response_status],
     ["finish reason", row.meta?.finish_reason],
@@ -615,13 +737,36 @@ function requestRow(row) {
   usageCell.appendChild(el("div", "hit-rate", hitRateText(usage)));
   tr.appendChild(usageCell);
   tr.appendChild(el("td", "num mono", fmtMs(row.duration_ms)));
+  tr.appendChild(copyCell(row));
   return tr;
+}
+
+// Per-row copy affordance: copies the request id plus the error detail, which
+// is what an operator pastes into an issue or a log search.
+function copyCell(row) {
+  const td = el("td", "col-copy");
+  const button = el("button", "btn row-copy", "copy");
+  button.title = "Copy request id and error detail";
+  button.setAttribute("aria-label", `Copy request id ${row.meta?.request_id || row.request_key}`);
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const text = [
+      `request_id: ${row.meta?.request_id || row.request_key}`,
+      `request_key: ${row.request_key}`,
+      `status: ${statusText(row)}`,
+      `error: ${row.meta?.error_detail || row.meta?.error_category || "—"}`,
+    ].join("\n");
+    const ok = await copyText(text);
+    showStatus(ok ? "ok" : "err", ok ? "Copied request id and error detail." : "Clipboard unavailable (browser permission denied).");
+  });
+  td.appendChild(button);
+  return td;
 }
 
 function groupHeadRow(code, groupRows) {
   const tr = el("tr", "group-head" + (state.collapsed.has(code) ? " collapsed" : ""));
   const td = el("td");
-  td.colSpan = 8;
+  td.colSpan = 9;
   const btn = el("button", "group-head-btn");
   btn.type = "button";
   btn.setAttribute("aria-expanded", String(!state.collapsed.has(code)));
@@ -654,7 +799,7 @@ function groupHeadRow(code, groupRows) {
 function excludeRowEl(code, groupRows) {
   const tr = el("tr", "exclude-row");
   const td = el("td");
-  td.colSpan = 8;
+  td.colSpan = 9;
   const list = el("div", "exclude-list");
   const combos = new Map();
   for (const row of groupRows) combos.set(comboOf(row), (combos.get(comboOf(row)) || 0) + 1);
@@ -687,22 +832,291 @@ function drilldownErrorStatus(code) {
   loadRecords();
 }
 
+// ---------- error-detail modal ----------
+// One detail surface per request. It reads GET /api/observability/records/:request_key
+// for the immutable per-attempt truth (row, error chain, health action, artifacts) and
+// GET /api/observability/cooldown-pool for the *current* cooldown countdown.
+
+const ERROR_CHAIN_STATE_CLASS = {
+  raised: "bad",
+  observed: "warn",
+  cleared: "ok",
+  not_reached: "neutral",
+};
+
 function openRequestDetail(row) {
-  state.selected = row;
-  renderRequestDetail();
-  openPanel();
+  state.detailKey = row.request_key;
+  state.detailRow = row;
+  state.detail = null;
+  document.getElementById("error-detail-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
+  document.getElementById("error-detail-body").replaceChildren(el("div", "loading", "loading detail…"));
+  openDetailModal();
+  loadRequestDetail(row);
 }
 
-function renderRequestDetail() {
-  const row = state.selected;
-  const body = document.getElementById("drawer-body");
-  if (!row) {
-    document.getElementById("drawer-title").textContent = "Details";
-    body.replaceChildren();
+async function loadRequestDetail(row) {
+  try {
+    const detail = await api(`/api/observability/records/${encodeURIComponent(row.request_key)}`);
+    if (state.detailKey !== row.request_key) return;
+    state.detail = detail;
+    renderDetailBody();
+  } catch (error) {
+    if (state.detailKey !== row.request_key) return;
+    const body = document.getElementById("error-detail-body");
+    body.replaceChildren(
+      el("div", "error-summary", `request detail unavailable: ${error.message}`),
+      detailGrid(row),
+    );
+  }
+}
+
+function openDetailModal() {
+  const modal = document.getElementById("error-detail-modal");
+  const backdrop = document.getElementById("detail-backdrop");
+  if (!modal) return;
+  modal.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+  document.getElementById("error-detail-close")?.focus();
+  startDetailCountdown();
+}
+
+function closeDetailModal() {
+  const modal = document.getElementById("error-detail-modal");
+  const backdrop = document.getElementById("detail-backdrop");
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+  state.detailKey = null;
+  state.detail = null;
+  state.detailRow = null;
+  stopDetailCountdown();
+}
+
+function detailSection(title, hostId) {
+  const section = el("div", "detail-section");
+  section.appendChild(el("h3", null, title));
+  const host = el("div");
+  host.id = hostId;
+  section.appendChild(host);
+  return section;
+}
+
+function renderDetailBody() {
+  const body = document.getElementById("error-detail-body");
+  const detail = state.detail || {};
+  const row = detail.row || state.detailRow;
+  if (!body || !row) return;
+  const actions = el("div", "modal-actions");
+  const copyId = el("button", "btn", "Copy request id");
+  copyId.addEventListener("click", async () => {
+    const ok = await copyText(row.meta?.request_id || row.request_key);
+    showStatus(ok ? "ok" : "err", ok ? "Copied request id." : "Clipboard unavailable (browser permission denied).");
+  });
+  const copyError = el("button", "btn", "Copy error detail");
+  copyError.addEventListener("click", async () => {
+    const ok = await copyText(errorDetailText(row, detail));
+    showStatus(ok ? "ok" : "err", ok ? "Copied error detail." : "Clipboard unavailable (browser permission denied).");
+  });
+  actions.append(copyId, copyError);
+  body.replaceChildren(
+    actions,
+    detailGrid(row),
+    detailSection("Current cooldown (live pool)", "detail-cooldown-live"),
+    detailSection("Error chain (attempt-time snapshot)", "detail-error-chain"),
+    detailSection("Health action (attempt-time snapshot)", "detail-health"),
+    detailSection("Artifacts", "detail-artifacts"),
+  );
+  renderDetailCooldown();
+  renderDetailChain();
+  renderDetailHealth();
+  renderDetailArtifacts();
+}
+
+function errorDetailText(row, detail) {
+  return JSON.stringify({
+    request_key: row.request_key,
+    request_id: row.meta?.request_id ?? null,
+    status: statusText(row),
+    error_class: row.meta?.error_class ?? null,
+    error_category: row.meta?.error_category ?? null,
+    error_detail: row.meta?.error_detail ?? null,
+    observed_error_source: detail?.observed_error_source ?? null,
+    error_chain: detail?.error_chain ?? null,
+  }, null, 2);
+}
+
+function renderDetailChain() {
+  const host = document.getElementById("detail-error-chain");
+  if (!host) return;
+  const chain = Array.isArray(state.detail?.error_chain) ? state.detail.error_chain : [];
+  if (!chain.length) {
+    host.replaceChildren(el("div", "loading", "no error chain recorded for this request"));
     return;
   }
-  document.getElementById("drawer-title").textContent = `Request ${row.meta?.request_id || row.request_key}`;
-  body.replaceChildren(detailGrid(row));
+  const list = el("div", "timeline");
+  for (const node of chain) {
+    const nodeState = node?.state || "not_reached";
+    const classes = ["timeline-node"];
+    if (nodeState !== "not_reached") classes.push(nodeState);
+    const item = el("div", classes.join(" "));
+    item.appendChild(el("span", "node-id", node?.node || "unknown"));
+    const value = el("span");
+    value.appendChild(el("span", `badge ${ERROR_CHAIN_STATE_CLASS[nodeState] || "neutral"}`, nodeState));
+    value.appendChild(el("span", "mono", node?.code ? ` · ${node.code}` : " · code —"));
+    item.appendChild(value);
+    list.appendChild(item);
+  }
+  host.replaceChildren(list);
+}
+
+function renderDetailHealth() {
+  const host = document.getElementById("detail-health");
+  if (!host) return;
+  const detail = state.detail || {};
+  const health = detail.health_action || null;
+  const rows = [];
+  if (!health) {
+    rows.push(el("div", "loading", "no typed health action was exposed for this attempt (unknown)"));
+  } else {
+    rows.push(kv("scope", health.scope ?? "unknown"));
+    rows.push(kv("scope target", health.scope_target ?? "—", { mono: true }));
+    rows.push(kv("reason", health.reason ?? "unknown"));
+    rows.push(kv("duration", health.duration_ms != null ? fmtMs(health.duration_ms) : "unknown"));
+    rows.push(kv("retry eligible", health.retry_eligible === true ? "yes" : health.retry_eligible === false ? "no" : "unknown"));
+    rows.push(kv("health affecting", health.health_affecting === true ? "yes" : health.health_affecting === false ? "no" : "unknown"));
+    rows.push(kv("exhaustion effect", health.exhaustion_effect ?? "unknown"));
+  }
+  rows.push(kv("observed error source", detail.observed_error_source ?? "—", { mono: true }));
+  host.replaceChildren(...rows);
+}
+
+function renderDetailArtifacts() {
+  const host = document.getElementById("detail-artifacts");
+  if (!host) return;
+  const detail = state.detail || {};
+  const row = detail.row || state.detailRow || {};
+  const artifacts = Array.isArray(detail.artifacts) ? detail.artifacts : [];
+  if (!artifacts.length) {
+    host.replaceChildren(el("div", "loading", "no artifact files for this request"));
+    return;
+  }
+  const port = row.scope?.port;
+  const requestId = row.meta?.request_id;
+  host.replaceChildren(...artifacts.map((artifact) => {
+    const item = el("div", "artifact-row");
+    item.appendChild(el("span", "mono", artifact?.file ?? "unknown"));
+    item.appendChild(el("span", "muted", artifact?.size_bytes != null ? `${Number(artifact.size_bytes).toLocaleString()} bytes` : "size unknown"));
+    item.appendChild(el("span", "spacer"));
+    const open = el("button", "btn", "open artifact");
+    open.addEventListener("click", () => openArtifact(port, requestId, artifact?.file));
+    item.appendChild(open);
+    return item;
+  }));
+}
+
+function openArtifact(port, requestId, file) {
+  if (port == null || !requestId || !file) {
+    showStatus("err", "cannot open artifact: the row is missing port / request id / file");
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set("port", String(port));
+  params.set("request_id", String(requestId));
+  params.set("file", String(file));
+  window.open(`/api/observability/artifacts/content?${params}`, "_blank", "noopener");
+}
+
+// The row's attempt-time health snapshot is immutable history; current cooldown
+// truth comes only from the cooldown pool.
+function cooldownIdentity(row) {
+  return {
+    providerId: row?.meta?.provider_id ?? row?.meta?.provider ?? null,
+    authAlias: row?.meta?.auth_alias ?? null,
+    modelId: row?.meta?.model ?? null,
+  };
+}
+
+function findCooldownEntry(row) {
+  const pool = state.cooldown;
+  if (!pool || !Array.isArray(pool.listeners)) return null;
+  const identity = cooldownIdentity(row);
+  if (!identity.providerId) return null;
+  for (const listener of pool.listeners) {
+    for (const entry of listener?.entries || []) {
+      if (entry?.provider_id !== identity.providerId) continue;
+      if ((entry.auth_alias ?? null) !== identity.authAlias) continue;
+      if (entry.model_id != null && identity.modelId != null && entry.model_id !== identity.modelId) continue;
+      return { listener, entry };
+    }
+  }
+  return null;
+}
+
+function renderDetailCooldown() {
+  const host = document.getElementById("detail-cooldown-live");
+  if (!host) return;
+  const row = state.detail?.row || state.detailRow;
+  if (!row) return;
+  if (!state.cooldown) {
+    host.replaceChildren(el("div", "loading", state.cooldownError
+      ? `cooldown pool unavailable: ${state.cooldownError}`
+      : "cooldown pool not loaded yet"));
+    return;
+  }
+  const match = findCooldownEntry(row);
+  if (!match) {
+    host.replaceChildren(kv("state", "no current cooldown entry for this provider/key/model"));
+    return;
+  }
+  const { listener, entry } = match;
+  host.replaceChildren(
+    kv("state", entry.state ?? "unknown"),
+    kv("kind", entry.kind ?? "unknown"),
+    kv("listener", `${listener.server_id ?? "unknown"} :${listener.port ?? "—"}`, { mono: true }),
+    kv("reason", entry.reason ?? "—"),
+    kv("failure count", entry.failure_count != null ? String(entry.failure_count) : "unknown"),
+    kv("until", entry.until_ms != null ? new Date(entry.until_ms).toLocaleString([], { hour12: false }) : "unknown"),
+    (() => {
+      const remaining = el("div", "kv");
+      remaining.appendChild(el("span", "kv-key", "remaining"));
+      const value = el("span", "kv-value cooldown-remaining", "—");
+      value.id = "detail-cooldown-remaining";
+      remaining.appendChild(value);
+      return remaining;
+    })(),
+  );
+  updateDetailCountdown();
+}
+
+function updateDetailCountdown() {
+  const host = document.getElementById("detail-cooldown-remaining");
+  if (!host) return;
+  const row = state.detail?.row || state.detailRow;
+  const match = row ? findCooldownEntry(row) : null;
+  if (!match) {
+    host.textContent = "—";
+    return;
+  }
+  const base = Number(match.listener?.now_ms);
+  const remaining = Number(match.entry?.remaining_ms);
+  if (!Number.isFinite(base) || !Number.isFinite(remaining)) {
+    host.textContent = "unknown";
+    return;
+  }
+  const left = remaining - (Date.now() - base);
+  host.textContent = left > 0 ? `${fmtMs(left)} remaining` : "expired (pool refresh pending)";
+}
+
+function startDetailCountdown() {
+  stopDetailCountdown();
+  state.detailTimer = setInterval(updateDetailCountdown, 500);
+}
+
+function stopDetailCountdown() {
+  if (state.detailTimer) {
+    clearInterval(state.detailTimer);
+    state.detailTimer = null;
+  }
 }
 
 function renderRequests() {
@@ -756,6 +1170,7 @@ const ENTRY_COLUMNS = [
   { key: "meta.pool", label: "Pool", colClass: "col-pool", width: 110 },
   { key: "usage_total_tokens", label: "Usage", colClass: "col-usage", width: 160 },
   { key: "duration_ms", label: "Duration", colClass: "col-dur", width: 84 },
+  { key: "__copy", label: "", colClass: "col-copy", width: 60 },
 ];
 
 function renderEntriesPanel(panel) {
@@ -865,6 +1280,7 @@ function renderAttemptsPanel(panel) {
     { key: "error", label: "Error", colClass: "col-usage" },
     { key: "switches", label: "Next", colClass: "col-finish" },
     { key: "updated_epoch_ms", label: "When", colClass: "col-time col-time-last" },
+    { key: "__copy", label: "", colClass: "col-copy" },
   ];
   const colgroup = el("colgroup");
   columns.forEach((col) => colgroup.appendChild(el("col", col.colClass)));
@@ -895,6 +1311,7 @@ function renderAttemptsPanel(panel) {
     tr.appendChild(el("td", "mono col-usage", detail));
     tr.appendChild(el("td", "col-finish", row.switches > 0 ? "switched" : "terminal"));
     tr.appendChild(el("td", "mono col-time col-time-last", timeText(row.updated_epoch_ms)));
+    tr.appendChild(copyCell(row));
     body.appendChild(tr);
   });
   table.appendChild(body);
@@ -1046,6 +1463,8 @@ function checkboxList(container, entries, selectedSet, onToggle) {
 
 // ---------- selection & export ----------
 const CSV_HEAD = ["time", "port", "status", "endpoint", "provider", "model", "key", "pool", "input", "output", "duration", "request_id", "error_detail"];
+// Upper bound for a filtered export so one click cannot page the whole store.
+const MAX_EXPORT_ROWS = 5000;
 function selectedRows() {
   return state.exports;
 }
@@ -1077,19 +1496,91 @@ function toCSV(rows) {
 function renderSelection() {
   const bar = document.getElementById("selection-bar");
   state.exports = state.records.filter((row) => state.selection.has(row.request_key));
-  // The bar reflects what an export would actually contain: the selected
-  // rows among the currently loaded records.
+  // The bar reflects what a selection export would actually contain: the
+  // selected rows among the currently loaded records.
   bar.classList.toggle("show", state.exports.length > 0);
   document.getElementById("sel-count").textContent = String(state.exports.length);
-  const has = state.exports.length > 0;
-  for (const id of ["export-csv-top", "copy-tsv-top"]) document.getElementById(id).disabled = !has;
+  // The top buttons export the whole current filter, not just this page.
+  const hasFiltered = Number(state.total || 0) > 0;
+  for (const id of ["export-csv-top", "copy-tsv-top"]) document.getElementById(id).disabled = !hasFiltered;
 }
+
+/** Page through the current filter (including the rail multi-selects) so an
+ *  export is not limited to the visible page. */
+async function fetchFilteredRows() {
+  const plans = activePlans();
+  if (plans.length > 12) {
+    throw new Error("too many checked combinations (>12 queries) — uncheck some Layer 2-4 selections");
+  }
+  const rows = [];
+  let total = 0;
+  for (const plan of plans) {
+    let collected = 0;
+    let planTotal = 0;
+    for (let page = 1; ; page += 1) {
+      const response = await fetchPlan(buildQueryParams(page), plan);
+      planTotal = Number(response.total || 0);
+      const batch = response.records || [];
+      rows.push(...batch);
+      collected += batch.length;
+      if (!batch.length || collected >= planTotal || rows.length >= MAX_EXPORT_ROWS) break;
+    }
+    total += planTotal;
+    if (rows.length >= MAX_EXPORT_ROWS) break;
+  }
+  return { rows, total };
+}
+
+async function copyFilteredTSV() {
+  try {
+    const { rows, total } = await fetchFilteredRows();
+    if (!rows.length) {
+      showStatus("warn", "No rows match the current filter.");
+      return;
+    }
+    const ok = await copyText(toTSV(rows));
+    const detail = rows.length < total
+      ? `Copied ${rows.length} of ${total.toLocaleString()} filtered rows (export cap ${MAX_EXPORT_ROWS}).`
+      : `Copied ${rows.length} filtered rows to clipboard (TSV, includes request_id / error_detail).`;
+    showStatus(ok ? (rows.length < total ? "warn" : "ok") : "err", ok ? detail : "Clipboard unavailable (browser permission denied).");
+  } catch (error) {
+    showStatus("err", `filtered copy failed: ${error.message}`);
+  }
+}
+
+async function exportFilteredCSV() {
+  try {
+    const { rows, total } = await fetchFilteredRows();
+    if (!rows.length) {
+      showStatus("warn", "No rows match the current filter.");
+      return;
+    }
+    downloadCSV(rows);
+    showStatus(rows.length < total ? "warn" : "ok", rows.length < total
+      ? `Exported ${rows.length} of ${total.toLocaleString()} filtered rows (export cap ${MAX_EXPORT_ROWS}).`
+      : `Exported ${rows.length} filtered rows to CSV.`);
+  } catch (error) {
+    showStatus("err", `filtered export failed: ${error.message}`);
+  }
+}
+
+function downloadCSV(rows) {
+  const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `rcc-requests-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 async function copyTSV() {
   const rows = selectedRows();
   if (!rows.length) return;
   try {
-    await navigator.clipboard.writeText(toTSV(rows));
-    showStatus("ok", `Copied ${rows.length} rows to clipboard (TSV, includes request_id / error_detail).`);
+    const ok = await copyText(toTSV(rows));
+    showStatus(ok ? "ok" : "err", ok
+      ? `Copied ${rows.length} selected rows to clipboard (TSV, includes request_id / error_detail).`
+      : "Clipboard unavailable (browser permission denied).");
   } catch (error) {
     showStatus("err", "Clipboard unavailable (browser permission denied).");
   }
@@ -1097,13 +1588,8 @@ async function copyTSV() {
 function exportCSV() {
   const rows = selectedRows();
   if (!rows.length) return;
-  const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `rcc-requests-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  showStatus("ok", `Exported ${rows.length} rows to CSV.`);
+  downloadCSV(rows);
+  showStatus("ok", `Exported ${rows.length} selected rows to CSV.`);
 }
 
 function renderStatsCards() {
@@ -1146,26 +1632,37 @@ function renderStatsCards() {
 function renderTimeseries() {
   const chart = document.getElementById("usage-chart");
   const metric = document.getElementById("chart-metric").value;
-  const range = document.getElementById("chart-range").value;
-  renderBarChart(chart, state.timeseries || [], metric, range);
+  renderBarChart(chart, state.timeseries || [], metric, activeRange());
+}
+
+// The pager follows the active tab: Entries and Attempts each keep their own
+// page number and their own server total.
+function activePagination() {
+  const attempts = (state.tab || "entries") === "attempts";
+  return {
+    attempts,
+    page: attempts ? state.attemptsPage : state.page,
+    total: attempts ? state.attemptsTotal : state.total,
+  };
 }
 
 function renderPagination() {
-  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
+  const { attempts, page, total } = activePagination();
+  const pages = Math.max(1, Math.ceil(total / state.pageSize));
   const info = document.getElementById("page-info");
-  info.textContent = `page ${state.page} of ${pages} · ${state.total.toLocaleString()} records`;
-  document.getElementById("page-prev").disabled = state.page <= 1;
-  document.getElementById("page-next").disabled = state.page >= pages;
+  if (info) info.textContent = `${attempts ? "attempts " : ""}page ${page} of ${pages} · ${total.toLocaleString()} records`;
+  document.getElementById("page-prev").disabled = page <= 1;
+  document.getElementById("page-next").disabled = page >= pages;
 }
 
 function renderAll() {
   renderStats(state.stats);
   renderStatsCards();
   renderTimeseries();
+  renderTimeHint();
   renderTabCounts();
   renderRequests();
   renderPagination();
-  renderRequestDetail();
 }
 
 function renderTabCounts() {
@@ -1184,7 +1681,7 @@ document.getElementById("reload-btn").addEventListener("click", () => load().cat
 document.querySelectorAll("#requests-tab-bar .tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.tab = btn.dataset.tab;
-    if (state.tab === "attempts" && !state.attemptRecords.length) loadAttempts().then(renderAll);
+    if (state.tab === "attempts") loadAttempts().then(renderAll);
     else renderAll();
   });
 });
@@ -1197,17 +1694,22 @@ document.querySelectorAll("#entries-sub-tab-bar .sub-tab-btn").forEach((btn) => 
   });
 });
 ["chart-range","chart-metric"].forEach((id) => {
-  document.getElementById(id).addEventListener("change", () => { state.page = 1; loadRecords(); });
+  document.getElementById(id).addEventListener("change", () => {
+    state.page = 1;
+    state.attemptsPage = 1;
+    loadRecords();
+  });
 });
 ["provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
   const input = document.getElementById(id);
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => { state.page = 1; loadRecords(); }, 400);
+    timer = setTimeout(() => { state.page = 1; state.attemptsPage = 1; loadRecords(); }, 400);
   });
   if (input.tagName === "SELECT") input.addEventListener("change", () => {
     state.page = 1;
+    state.attemptsPage = 1;
     loadRecords();
   });
 });
@@ -1217,17 +1719,60 @@ document.getElementById("sort-field").addEventListener("change", () => {
   loadRecords();
 });
 document.getElementById("sort-order").addEventListener("change", () => { state.page = 1; loadRecords(); });
+
+// ---------- absolute time range ----------
+function applyAbsoluteTime() {
+  const fromValue = document.getElementById("time-from").value;
+  const toValue = document.getElementById("time-to").value;
+  const from = fromValue ? new Date(fromValue).getTime() : null;
+  const to = toValue ? new Date(toValue).getTime() : null;
+  state.timeFrom = Number.isFinite(from) ? from : null;
+  state.timeTo = Number.isFinite(to) ? to : null;
+  state.page = 1;
+  state.attemptsPage = 1;
+  loadRecords();
+}
+function clearAbsoluteTime() {
+  document.getElementById("time-from").value = "";
+  document.getElementById("time-to").value = "";
+  state.timeFrom = null;
+  state.timeTo = null;
+  state.page = 1;
+  state.attemptsPage = 1;
+  loadRecords();
+}
+function renderTimeHint() {
+  const hint = document.getElementById("time-hint");
+  if (!hint) return;
+  if (state.timeFrom == null && state.timeTo == null) {
+    hint.textContent = "An absolute range overrides the Range selector and is sent as time_from_ms / time_to_ms.";
+    return;
+  }
+  const from = state.timeFrom != null ? new Date(state.timeFrom).toLocaleString([], { hour12: false }) : "—";
+  const to = state.timeTo != null ? new Date(state.timeTo).toLocaleString([], { hour12: false }) : "—";
+  hint.textContent = `absolute range active: ${from} → ${to}`;
+}
+for (const id of ["time-from", "time-to"]) document.getElementById(id).addEventListener("change", applyAbsoluteTime);
+document.getElementById("time-clear").addEventListener("click", clearAbsoluteTime);
+
 document.getElementById("page-prev").addEventListener("click", () => {
-  if (state.page > 1) { state.page -= 1; loadRecords(); }
+  const { attempts, page } = activePagination();
+  if (page <= 1) return;
+  if (attempts) { state.attemptsPage = page - 1; loadAttempts().then(renderAll); }
+  else { state.page = page - 1; loadRecords(); }
 });
 document.getElementById("page-size").addEventListener("change", (event) => {
   state.pageSize = Number(event.currentTarget.value);
   state.page = 1;
+  state.attemptsPage = 1;
   loadRecords();
 });
 document.getElementById("page-next").addEventListener("click", () => {
-  const pages = Math.max(1, Math.ceil(state.total / state.pageSize));
-  if (state.page < pages) { state.page += 1; loadRecords(); }
+  const { attempts, page, total } = activePagination();
+  const pages = Math.max(1, Math.ceil(total / state.pageSize));
+  if (page >= pages) return;
+  if (attempts) { state.attemptsPage = page + 1; loadAttempts().then(renderAll); }
+  else { state.page = page + 1; loadRecords(); }
 });
 document.getElementById("sort-mode").addEventListener("click", (event) => {
   const btn = event.target.closest("button[data-mode]");
@@ -1242,32 +1787,164 @@ function setSortMode(mode) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.sortMode));
   });
 }
-for (const id of ["copy-tsv-bar", "copy-tsv-top"]) document.getElementById(id).addEventListener("click", copyTSV);
-for (const id of ["export-csv-bar", "export-csv-top"]) document.getElementById(id).addEventListener("click", exportCSV);
+// The bar buttons export the selection; the top buttons export the whole
+// current filter, not just the loaded page.
+for (const id of ["copy-tsv-bar"]) document.getElementById(id).addEventListener("click", copyTSV);
+for (const id of ["export-csv-bar"]) document.getElementById(id).addEventListener("click", exportCSV);
+document.getElementById("copy-tsv-top").addEventListener("click", copyFilteredTSV);
+document.getElementById("export-csv-top").addEventListener("click", exportFilteredCSV);
 document.getElementById("sel-clear").addEventListener("click", () => {
   state.selection.clear();
   renderSelection();
   renderRequests();
 });
-startAutoRefresh(() => loadRecords(), 5000);
-document.getElementById("drawer-back")?.addEventListener("click", () => {
-  const previous = state.drawerSourceTab;
-  closePanel();
-  if (previous && previous !== state.tab) {
-    state.tab = previous;
-    renderAll();
-  }
+
+// ---------- error-detail modal wiring ----------
+document.getElementById("error-detail-close")?.addEventListener("click", closeDetailModal);
+document.getElementById("detail-backdrop")?.addEventListener("click", closeDetailModal);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeDetailModal();
 });
-document.getElementById("drawer")?.addEventListener("transitionend", (event) => {
-  if (event.propertyName !== "transform" && event.propertyName !== "opacity") return;
-  const drawer = document.getElementById("drawer");
-  if (!drawer || drawer.classList.contains("is-open")) return;
-  const previous = state.drawerSourceTab;
-  state.drawerSourceTab = null;
-  if (previous && previous !== state.tab) {
-    state.tab = previous;
-    renderAll();
+
+// ---------- live mode (SSE) ----------
+// GET /api/observability/stream?cursor=<seq> decides *when* to re-read the
+// filtered query; the server stays the single owner of filter semantics.
+// Polling remains the default and resumes whenever live mode is off.
+
+let liveReloadTimer = null;
+
+function setLiveState(text, tone = "") {
+  const node = document.getElementById("live-state");
+  if (!node) return;
+  node.textContent = text;
+  node.className = `live-state${tone ? ` ${tone}` : ""}`;
+}
+
+function scheduleLiveReload() {
+  if (liveReloadTimer) return;
+  liveReloadTimer = setTimeout(() => {
+    liveReloadTimer = null;
+    if (state.live) loadRecords();
+  }, 400);
+}
+
+function handleSseFrame(frame) {
+  let event = "message";
+  const dataLines = [];
+  for (const rawLine of frame.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
+  if (!dataLines.length) return;
+  let payload = null;
+  try {
+    payload = JSON.parse(dataLines.join("\n"));
+  } catch (_error) {
+    payload = null;
+  }
+  if (!payload) return;
+  if (typeof payload.seq === "number") state.liveCursor = payload.seq;
+  state.liveLastEventAtMs = Date.now();
+  if (payload.error) {
+    setLiveState(`stream error: ${payload.error}`, "err");
+    showStatus("err", `live stream reported: ${payload.error}`);
+    return;
+  }
+  if (event === "row") {
+    state.liveEvents += 1;
+    setLiveState(`live · ${state.liveEvents} rows · seq ${state.liveCursor}`, "on");
+    scheduleLiveReload();
+  } else if (event === "heartbeat") {
+    setLiveState(`live · waiting · seq ${state.liveCursor}`, "on");
+  }
+}
+
+async function readSseStream(reader) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
+    let index = buffer.indexOf("\n\n");
+    while (index !== -1) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      handleSseFrame(frame);
+      index = buffer.indexOf("\n\n");
+    }
+  }
+}
+
+async function startLive() {
+  if (state.live) return;
+  state.live = true;
+  state.liveLastEventAtMs = Date.now();
+  const controller = new AbortController();
+  state.liveAbort = controller;
+  setLiveState("connecting…", "on");
+  const headers = { Accept: "text/event-stream" };
+  const token = getAdminToken();
+  if (token) headers["x-routecodex-admin-token"] = token;
+  // No cursor on the first connect: the stream tails from its current
+  // high-water mark and the first heartbeat seeds the cursor for reconnects.
+  const cursor = state.liveCursor > 0 ? `?cursor=${state.liveCursor}` : "";
+  try {
+    const response = await fetch(`/api/observability/stream${cursor}`, {
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`stream unavailable (${response.status})`);
+    }
+    setLiveState(`live · seq ${state.liveCursor}`, "on");
+    await readSseStream(response.body.getReader());
+    if (state.live) stopLive("live stream ended");
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    stopLive(`live stream failed: ${error.message}`);
+  }
+}
+
+function stopLive(message) {
+  state.live = false;
+  if (liveReloadTimer) {
+    clearTimeout(liveReloadTimer);
+    liveReloadTimer = null;
+  }
+  if (state.liveAbort) {
+    state.liveAbort.abort();
+    state.liveAbort = null;
+  }
+  const toggle = document.getElementById("live-mode");
+  if (toggle) toggle.checked = false;
+  setLiveState(message ? `stream error: ${message}` : "polling", message ? "err" : "");
+  if (message) showStatus("err", `${message}; reverted to polling`);
+}
+
+// The stream emits a heartbeat at least once per second while idle, so a
+// silence longer than 3 s is real evidence that live mode is stale.
+function tickLiveLiveness() {
+  if (!state.live || !state.liveLastEventAtMs) return;
+  const silentMs = Date.now() - state.liveLastEventAtMs;
+  if (silentMs > 3000) {
+    setLiveState(`live · stale (no heartbeat for ${Math.round(silentMs / 1000)} s)`, "err");
+  }
+}
+
+document.getElementById("live-mode").addEventListener("change", (event) => {
+  if (event.currentTarget.checked) startLive();
+  else stopLive();
 });
+
+// Polling stays the fallback path and is suppressed while the stream is live.
+startAutoRefresh(() => { if (!state.live) loadRecords(); }, 5000);
+setInterval(() => { if (!document.hidden) loadCooldown(); }, 5000);
+setInterval(() => {
+  tickCooldowns();
+  tickLiveLiveness();
+}, 1000);
 
 load().catch((error) => showStatus("err", `observability failed: ${error.message}`));

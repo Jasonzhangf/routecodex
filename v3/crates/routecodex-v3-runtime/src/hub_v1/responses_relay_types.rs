@@ -161,6 +161,10 @@ pub struct V3RuntimeProviderFailureObservation {
     pub external_error_code: Option<String>,
     pub external_error_status: Option<u16>,
     pub internal_code: Option<String>,
+    /// Upstream provider request id captured from the provider response headers.
+    /// `None` means this lane did not expose one (an honest unknown), never a
+    /// synthesised id.
+    pub upstream_request_id: Option<String>,
     pub message: String,
     pub failure_count: u32,
     pub health_state: String,

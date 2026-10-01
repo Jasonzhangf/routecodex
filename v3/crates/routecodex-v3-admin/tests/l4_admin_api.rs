@@ -1,10 +1,9 @@
 // feature_id: v3.admin_api_integration
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
-use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
+use routecodex_v3_admin::{router, AppState};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn temp_home() -> PathBuf {
@@ -72,6 +71,15 @@ fn http_client() -> reqwest::Client {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| panic!("http client"))
+}
+
+/// Local admin token provisioned by `AppState::new` for this temp config dir. Mutating
+/// admin requests must carry it (one rule, no path exceptions).
+fn admin_token(home: &std::path::Path) -> String {
+    std::fs::read_to_string(home.join("state").join("admin-token"))
+        .expect("admin token provisioned under <config_dir>/state/admin-token")
+        .trim()
+        .to_string()
 }
 
 async fn bind_test_server() -> (String, AppState, PathBuf) {
@@ -253,7 +261,8 @@ async fn routes_get_returns_tree() {
 
 #[tokio::test]
 async fn routes_validate_rejects_invalid_target() {
-    let (base, _state, _home) = bind_test_server().await;
+    let (base, _state, home) = bind_test_server().await;
+    let token = admin_token(&home);
     let body = serde_json::json!({
         "servers": [{
             "server_id": "routecodex_v3_4444", "port": 4444,
@@ -268,6 +277,7 @@ async fn routes_validate_rejects_invalid_target() {
     });
     let response = http_client()
         .post(format!("{base}/api/routes/validate"))
+        .header("x-routecodex-admin-token", &token)
         .json(&body)
         .send()
         .await
@@ -291,6 +301,7 @@ async fn routes_validate_rejects_invalid_target() {
     });
     let response = http_client()
         .post(format!("{base}/api/routes/validate"))
+        .header("x-routecodex-admin-token", &token)
         .json(&zero_weight)
         .send()
         .await
@@ -395,22 +406,9 @@ async fn revisions_and_static_assets_are_served() {
     assert!(css.status().is_success());
 }
 
-static HEALTH_ENTRY: OnceLock<ProviderHealthEntry> = OnceLock::new();
-
-fn sample_health() -> ProviderHealthEntry {
-    HEALTH_ENTRY
-        .get_or_init(|| ProviderHealthEntry {
-            tested_at_epoch_ms: 1,
-            ok: true,
-            latency_ms: 1,
-            error: None,
-        })
-        .clone()
-}
-
 #[tokio::test]
-async fn provider_health_test_returns_record() {
-    let (base, state, home) = bind_test_server().await;
+async fn provider_health_test_returns_inline_diagnostic_without_second_health_truth() {
+    let (base, _state, home) = bind_test_server().await;
     let provider_dir = home.join("provider").join("local");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -437,22 +435,57 @@ supportsStreaming = true
     .expect("write local provider");
     let response = http_client()
         .post(format!("{base}/api/providers/local/health-test"))
+        .header("x-routecodex-admin-token", admin_token(&home))
         .send()
         .await
         .expect("health response");
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("health json");
+    assert_eq!(body["provider_id"].as_str(), Some("local"));
     assert!(
-        body.get("tested_at_epoch_ms").is_some(),
-        "tested_at_epoch_ms present"
+        body.get("latency_ms").is_some(),
+        "the ad-hoc diagnostic returns its measurement inline: {body}"
     );
-    let cached = state.health_cache.lock().await.get("local").cloned();
-    assert!(cached.is_some(), "health cached in app state");
+    assert_eq!(
+        body["ok"].as_bool(),
+        Some(false),
+        "an unreachable base URL must report a real failure: {body}"
+    );
     assert!(
-        cached.unwrap().error.is_some(),
-        "error message captured when endpoint unreachable"
+        body["error"].is_string(),
+        "the ad-hoc diagnostic must expose the failure inline: {body}"
     );
-    let _ = sample_health();
+
+    // No second provider-health truth: neither the list nor the detail projection may
+    // expose a cached `health` field.
+    let list: serde_json::Value = http_client()
+        .get(format!("{base}/api/providers"))
+        .send()
+        .await
+        .expect("providers response")
+        .json()
+        .await
+        .expect("providers json");
+    let providers = list.as_array().expect("providers array");
+    assert!(!providers.is_empty(), "provider list populated");
+    for provider in providers {
+        assert!(
+            provider.get("health").is_none(),
+            "provider list must not expose a second provider-health truth: {provider}"
+        );
+    }
+    let detail: serde_json::Value = http_client()
+        .get(format!("{base}/api/providers/local"))
+        .send()
+        .await
+        .expect("provider detail response")
+        .json()
+        .await
+        .expect("provider detail json");
+    assert!(
+        detail.get("health").is_none(),
+        "provider detail must not expose a second provider-health truth: {detail}"
+    );
 }
 
 #[tokio::test]

@@ -24,7 +24,7 @@ fn main() {
                 config = args.get(index).map(PathBuf::from);
             }
             "--help" | "-h" => {
-                println!("rccv3-admin [--bind 127.0.0.1:8777] [--config ~/.rcc/config.v3.toml]");
+                println!("rccv3-admin [--bind 127.0.0.1:8777] [--config ~/.rcc/config.toml]");
                 return;
             }
             _ => {}
@@ -42,7 +42,9 @@ fn main() {
             "[admin] RCC V3 Config Management WebUI listening on http://{bind} (config: {})",
             config_path.display()
         );
-        axum::serve(listener, router(AppState::new(config_path)))
+        let state = std::sync::Arc::new(AppState::new(config_path));
+        state.spawn_background();
+        axum::serve(listener, router((*state).clone()))
             .await
             .expect("axum serve");
     });
@@ -50,5 +52,5 @@ fn main() {
 
 fn default_config_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".rcc").join("config.v3.toml")
+    PathBuf::from(home).join(".rcc").join("config.toml")
 }

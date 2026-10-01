@@ -161,19 +161,35 @@ features:
   - backup file naming <path>.bak-<UTC-compact>-<reason> matches manual style
   - revision store append is monotonic and survives restart
   - invalid commit fails without touching the file
-  - CLI init with --provider preset writes provider/<id>/config.v2.toml + minimal default pool
-  - WebUI static pages (Dashboard/Routes/Providers) render without console errors
+  - CLI init selects an existing enabled provider with a routed model and writes a minimal config.toml (it does not create provider files)
+  - admin provider candidate validation rejects an invalid candidate without writing any file
+  - admin provider create writes provider/<id>/config.v2.toml atomically with backup and correct revision fields
+  - admin provider delete refuses when the provider is referenced by a route pool and lists the references
+  - admin provider probe reports L1 contract / L2 reachability / L3 semantic stages with raw evidence and redacted secrets
+  - admin provider patrol plan persists and patrol results append without mutating runtime provider health
+  - admin environment projection derives version, binary hash, instance, and listeners without owning runtime truth
+  - admin doctor reports FAIL for binary build_version drift and for a listener port conflict
+  - admin mutating endpoints reject a request without a valid local admin token
+  - WebUI static pages (Dashboard/Usage/Providers/Routes/Deploy) render without console errors
   - admin /api/routes/validate rejects invalid authoring without commit
   required_integration:
   - full workspace cargo test green
-  - rccv3 init non-interactive (preset+key+port) end-to-end creates provider+config
-  - rccv3-admin serves Dashboard / Routes / Providers from real ~/.rcc config
+  - rccv3 init non-interactive (provider+model+port) end-to-end writes a minimal config.toml over an existing provider directory
+  - rccv3-admin serves Dashboard / Usage / Providers / Routes / Deploy from real ~/.rcc config
+  - WebUI provider onboarding creates a provider, probes it, and wires it into a route pool end-to-end
   - PUT /api/routes persists new authoring with backup + revision entry
-  - routecodex restart triggered via /api/reload preserves running requests
+  - POST /api/reload restarts the instance selected by the served config path (explicit -c)
+  - observability rows carry error_class, error chain, health action, cooldown state, and a resolvable raw_artifact_ref
+  - Usage page renders the runtime cooldown pool from /api/observability/cooldown-pool
   required_gates:
-  - cargo test -p routecodex-v3-config-mgmt
-  - cargo test -p routecodex-v3-admin
-  - cargo test --workspace --no-fail-fast
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-config-mgmt
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
+  - npm run verify:webui-smoke
+  - npm run verify:function-map-compile-gate
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-dagpipe-feature-graphs
+  - npm run verify:v3-architecture-ci
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml --workspace --no-fail-fast
   completion_rule:
     source: all unit + integration tests pass
     runtime: WebUI/CLI behave correctly against real ~/.rcc config

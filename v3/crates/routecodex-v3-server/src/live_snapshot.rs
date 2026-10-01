@@ -6,10 +6,14 @@ use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
-pub(crate) fn v3_output_has_terminal_client_error(
-    status: u16,
-    error_chain: Option<&[&'static str]>,
-) -> bool {
+/// `true` when a relay/direct runtime output carries a terminal client error.
+///
+/// The client status is the whole predicate: the output's Error chain is not
+/// consulted, because a terminal failure is already visible to the client as an
+/// error status, and requiring a chain here would drop error evidence for a
+/// failure the client really received. This is the contract the recovered-attempt
+/// test asserts (`recovered_provider_attempts_do_not_create_terminal_client_error_truth`).
+pub(crate) fn v3_output_has_terminal_client_error(status: u16) -> bool {
     status >= 400
 }
 
@@ -492,8 +496,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     raw_request_payload: &Value,
     output: &mut V3OpenAiChatRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let force_error_evidence =
-        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
+    let force_error_evidence = v3_output_has_terminal_client_error(output.status);
     if force_error_evidence {
         if let Err(error) = persist_v3_error_evidence_payload(
             state,
@@ -661,8 +664,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let terminal_error_evidence =
-        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
+    let terminal_error_evidence = v3_output_has_terminal_client_error(output.status);
     let provider_attempt_evidence = output
         .observability
         .as_ref()
@@ -847,6 +849,109 @@ pub(crate) fn capture_v3_anthropic_relay_response(
     None
 }
 
+/// Persist the error evidence for a Responses relay output that ends in a
+/// terminal client error.
+///
+/// Both the ordinary relay closeout and the provider-terminal-disposition
+/// closeout need this. A terminal disposition returns the provider's own HTTP
+/// response verbatim, so without an explicit call a request that really failed
+/// would leave no `request.json`/`error.json` evidence on disk and no artifact
+/// reference to resolve. Returns a debug-failure response when the debug sink
+/// itself fails; `None` means the output is not a terminal client error.
+pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    if !v3_output_has_terminal_client_error(output.status) {
+        return None;
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(raw_request_payload.clone()),
+        (output.status >= 400).then_some(output.status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "error.json",
+        &state.debug.project_payload_verbatim(json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": output.status,
+            "request_id": request_id,
+            "endpoint": endpoint,
+            "node_trace": output.node_trace.clone(),
+            "error_chain": output.error_chain.clone(),
+            "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+        })),
+        (output.status >= 400).then_some(output.status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    None
+}
+
+/// Project the typed Error chain of a Responses relay output into the debug
+/// trace and the observability store.
+///
+/// The relay lane exposes only the chain, never the typed
+/// `V3Error06ClientProjected`, so it records the explicit "Error06 typed truth
+/// not exposed" marker instead of an empty chain that would read as "no error
+/// chain". `None` when the output carries no chain, or when the node-event sink
+/// fails and the caller must return the debug-failure response.
+pub(crate) fn project_v3_responses_relay_error_chain(
+    state: &Arc<V3ListenerState>,
+    trace_scope: &V3DebugTraceScope,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    session_id: Option<&str>,
+    request_console_project_path: Option<&str>,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    let error_chain = output.error_chain.as_deref()?;
+    record_and_emit_v3_error_projection(
+        state,
+        trace_scope,
+        V3ErrorProjectionConsoleInput {
+            endpoint,
+            request_id,
+            entry_protocol,
+            session_id,
+            status: output.status,
+            error_chain,
+            body: relay_error_body_for_console(&output.client_body),
+            project_path: request_console_project_path,
+            // The live-snapshot relay lane exposes only the chain; record the
+            // explicit "Error06 typed truth not exposed" marker.
+            error06_exposed: false,
+            error_class: None,
+            health_action: None,
+            upstream_request_id: None,
+        },
+    )
+}
+
 pub(crate) fn finalize_v3_responses_relay_server_output(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
@@ -861,49 +966,17 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     raw_request_payload: &Value,
     keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
-    if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
-        if let Err(error) = persist_v3_error_evidence_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "request.json",
-            &state
-                .debug
-                .project_payload_verbatim(raw_request_payload.clone()),
-            (output.status >= 400).then_some(output.status),
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugErrorEvidenceCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-        if let Err(error) = persist_v3_error_evidence_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "error.json",
-            &state
-                .debug
-                .project_payload_verbatim(json!({
-                    "object": "routecodex.v3.error_evidence",
-                    "stage": "error",
-                    "status": output.status,
-                    "request_id": request_id,
-                    "endpoint": endpoint,
-                    "node_trace": output.node_trace.clone(),
-                    "error_chain": output.error_chain.clone(),
-                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-            })),
-            (output.status >= 400).then_some(output.status),
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugErrorEvidenceCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-
+    if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        raw_request_payload,
+        &output,
+    ) {
+        return response;
+    }
+    if v3_output_has_terminal_client_error(output.status) {
         // Direct provider failures can happen before the protocol handoff to
         // relay. In that case the relay snapshot carrier is absent, but the
         // direct SSE observer still owns the provider bytes already received.
@@ -1002,23 +1075,17 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     ) {
         return response;
     }
-    if let Some(error_chain) = output.error_chain.as_deref() {
-        if let Some(response) = record_and_emit_v3_error_projection(
-            state,
-            trace_scope,
-            V3ErrorProjectionConsoleInput {
-                endpoint,
-                request_id,
-                entry_protocol,
-                session_id: Some(&console_context.identity.session_id),
-                status: output.status,
-                error_chain,
-                body: relay_error_body_for_console(&output.client_body),
-                project_path: request_console_project_path,
-            },
-        ) {
-            return response;
-        }
+    if let Some(response) = project_v3_responses_relay_error_chain(
+        state,
+        trace_scope,
+        entry_protocol,
+        endpoint,
+        request_id,
+        Some(&console_context.identity.session_id),
+        request_console_project_path,
+        &output,
+    ) {
+        return response;
     }
     let stream_console_finalizer = match (
         output.stream_observation.clone(),

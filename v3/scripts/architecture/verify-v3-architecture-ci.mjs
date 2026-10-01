@@ -27,6 +27,7 @@ const STEPS = [
   ['verify:v3-file-size', 'V3 file-size ratchet (<=1500 or approved whitelist)'],
   ['test:v3-file-size-red-fixtures', 'V3 file-size policy mutations are rejected'],
   ['verify:v3-resource-map', 'V3 resource-operation-map parseable + bound'],
+  ['verify:v3-dagpipe-feature-graphs', 'V3 non-proxy feature DAG graphs validate as SESE'],
   ['test:v3-resource-relation-edge-lock-red-fixtures', 'V3 resource relation mutations are rejected'],
   ['verify:v3-provider-key-health-model-binding', 'Provider key health model identity source binding'],
   ['test:v3-provider-key-health-model-binding-red-fixtures', 'Provider key health model binding mutations are rejected'],

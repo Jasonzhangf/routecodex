@@ -212,14 +212,7 @@ impl V3CodexSampleStore {
             .lock()
             .map_err(|error| format!("codex sample persistence lock poisoned: {error}"))?;
         let samples_root = resolve_v3_codex_samples_root()?;
-        let port_root = samples_root
-            .join(format_v3_codex_sample_endpoint_dir(
-                entry_protocol,
-                endpoint,
-            ))
-            .join("ports")
-            .join(port.to_string());
-        let dir = port_root.join(encode_v3_codex_sample_path_segment(request_id));
+        let dir = v3_codex_sample_request_dir(port, entry_protocol, endpoint, request_id)?;
         fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
         // 样本含敏感请求/错误载荷：目录 0700、文件 0600（不依赖 umask）。
         let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
@@ -589,7 +582,11 @@ fn merge_provider_snapshot_attempts(
     Ok(existing)
 }
 
-fn resolve_v3_codex_samples_root() -> Result<PathBuf, String> {
+/// Single owner of the debug sample root: `<HOME>/.rcc/codex-samples`.
+/// The runtime sample writer, the server observability projection and the admin
+/// artifact reader all resolve artifact locations through this function so the
+/// layout never gets a second implementation.
+pub fn resolve_v3_codex_samples_root() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME")
         .ok_or_else(|| "codex sample filesystem requires HOME".to_string())?;
     if home.to_string_lossy().trim().is_empty() {
@@ -598,7 +595,8 @@ fn resolve_v3_codex_samples_root() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".rcc").join("codex-samples"))
 }
 
-fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> String {
+/// Single owner of the `<endpointDir>` mapping used below the samples root.
+pub fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> String {
     match (entry_protocol, endpoint) {
         ("responses", "/v1/responses") => "openai-responses".to_string(),
         ("openai_chat", "/v1/chat/completions") => "openai-chat-completions".to_string(),
@@ -610,7 +608,8 @@ fn format_v3_codex_sample_endpoint_dir(entry_protocol: &str, endpoint: &str) -> 
     }
 }
 
-fn encode_v3_codex_sample_path_segment(value: &str) -> String {
+/// Single owner of the per-request sample directory segment encoding.
+pub fn encode_v3_codex_sample_path_segment(value: &str) -> String {
     let path_safe = value
         .chars()
         .map(|character| {
@@ -628,6 +627,46 @@ fn encode_v3_codex_sample_path_segment(value: &str) -> String {
     } else {
         path_safe
     }
+}
+
+/// Single owner of the per-request debug sample directory:
+/// `<samples_root>/<endpointDir>/ports/<port>/<encoded request id>`.
+///
+/// Callers must treat a missing directory as "no artifact captured", never as
+/// proof that the request succeeded or failed.
+pub fn v3_codex_sample_request_dir(
+    port: u16,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(v3_codex_sample_request_dir_in(
+        &resolve_v3_codex_samples_root()?,
+        port,
+        entry_protocol,
+        endpoint,
+        request_id,
+    ))
+}
+
+/// Same layout, with the samples root supplied by the caller. Only the root
+/// lookup is environment dependent, so this is the form pure callers and tests
+/// use.
+pub fn v3_codex_sample_request_dir_in(
+    samples_root: &Path,
+    port: u16,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+) -> PathBuf {
+    samples_root
+        .join(format_v3_codex_sample_endpoint_dir(
+            entry_protocol,
+            endpoint,
+        ))
+        .join("ports")
+        .join(port.to_string())
+        .join(encode_v3_codex_sample_path_segment(request_id))
 }
 
 fn enforce_v3_codex_sample_global_retention(

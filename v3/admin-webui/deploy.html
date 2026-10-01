@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RouteCodex — Deploy</title>
+<link rel="stylesheet" href="/vendor/ambient.css">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  /* Page-scoped layout for the Deploy view; shared primitives live in styles.css. */
+  .deploy-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+  .deploy-card { padding: 12px 14px; }
+  .deploy-note { grid-column: 1 / -1; }
+  .deploy-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .deploy-card-head h3 {
+    margin: 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .deploy-card-head .btn { margin-left: auto; }
+  .deploy-card-body .kv-value { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .deploy-card-body .kv-value .badge { flex: 0 0 auto; }
+  #first-run-guide { padding: 14px 16px; margin-bottom: 14px; }
+  #first-run-guide[hidden] { display: none; }
+  #first-run-guide h3 { margin: 0 0 6px; }
+  #first-run-guide p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+  #first-run-guide .wizard-steps { flex-direction: column; align-items: stretch; }
+  #first-run-guide .wizard-step {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    border: 0;
+    border-radius: 0;
+    padding: 2px 0;
+    color: var(--label);
+  }
+  #doctor-panel .table td { vertical-align: top; }
+  #lifecycle-panel .actions { margin-bottom: 8px; }
+  .confirm-dialog {
+    border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
+    border-radius: var(--radius);
+    padding: 0;
+    max-width: 440px;
+    color: var(--label);
+  }
+  .confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+  .confirm-dialog-shell { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .confirm-dialog-shell h2 { margin: 0; font-size: 15px; }
+  .confirm-dialog-message { margin: 0; color: var(--muted); font-size: 13px; }
+  .confirm-dialog .actions { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+</head>
+<body class="ambient">
+<aside id="sidebar" class="sidebar amb-surface amb-elevation-1 amb-chamfer" aria-label="Primary"></aside>
+<div class="shell">
+  <div class="topbar">
+    <div class="spacer"></div>
+    <button class="btn amb-button amb-button-cap" id="refresh-btn" type="button">Refresh</button>
+    <button class="btn primary amb-button amb-button-cap amb-light-tl" id="deploy-reload-btn" type="button">Reload config</button>
+  </div>
+  <main>
+    <h1 id="page-title">Deploy</h1>
+    <div id="page-sub" class="sub">Runtime environment, self-check and lifecycle control</div>
+    <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
+    <section id="first-run-guide" class="panel amb-surface amb-elevation-1" aria-label="First run guide" hidden></section>
+    <div class="section">
+      <h2>Environment</h2>
+      <div class="deploy-grid" id="environment-cards"><div class="loading">loading…</div></div>
+    </div>
+    <div class="section">
+      <h2>Doctor</h2>
+      <div class="panel amb-surface amb-elevation-1" id="doctor-panel"><div class="loading">loading…</div></div>
+    </div>
+    <div class="section">
+      <h2>Lifecycle</h2>
+      <div class="panel amb-surface amb-elevation-1" id="lifecycle-panel"></div>
+    </div>
+  </main>
+</div>
+
+<script type="module" src="/app/views/deploy.js"></script>
+</body>
+</html>

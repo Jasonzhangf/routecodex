@@ -282,8 +282,8 @@
       <div class="hero-meta">
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span>78 functional paths</span>
-        <span>472 caller edges</span>
+        <span>84 functional paths</span>
+        <span>489 caller edges</span>
       </div>
     </header>
 
@@ -472,7 +472,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>22</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>361</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>378</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -668,6 +668,12 @@ flowchart TD
 <tr><td><a href="#chain-v3_operation_runner_dagpipe_request"><code>v3.operation_runner.dagpipe.request</code></a><br/>v 3.operation_runner.dagpipe.request</td><td><span class="status pending_review">pending review</span></td><td>9</td><td>17</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:b7f431db088b…</code></td></tr>
 <tr><td><a href="#chain-v3_operation_runner_dagpipe_response"><code>v3.operation_runner.dagpipe.response</code></a><br/>v 3.operation_runner.dagpipe.response</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>13</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:35766f4e2942…</code></td></tr>
 <tr><td><a href="#chain-v3_operation_runner_dagpipe_error"><code>v3.operation_runner.dagpipe.error</code></a><br/>v 3.operation_runner.dagpipe.error</td><td><span class="status pending_review">pending review</span></td><td>5</td><td>4</td><td><code>v3.unified_operation_runner_design</code></td><td><code>sha256:42fff5fcd38c…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_control_plane_admission"><code>v3.admin.control_plane_admission</code></a><br/>v 3.admin.control_plane_admission</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>1</td><td><code>v3.config_management</code></td><td><code>sha256:76051b37c30b…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_environment_projection"><code>v3.admin.environment_projection</code></a><br/>v 3.admin.environment_projection</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>1</td><td><code>v3.config_management</code></td><td><code>sha256:9ec0cef66882…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_provider_candidate_probe"><code>v3.admin.provider_candidate_probe</code></a><br/>v 3.admin.provider_candidate_probe</td><td><span class="status pending_review">pending review</span></td><td>3</td><td>2</td><td><code>v3.config_management</code></td><td><code>sha256:fe143d67c651…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_provider_authoring_write"><code>v3.admin.provider_authoring_write</code></a><br/>v 3.admin.provider_authoring_write</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>2</td><td><code>v3.config_management</code></td><td><code>sha256:42725314b19e…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_provider_patrol_plan_authoring"><code>v3.admin.provider_patrol_plan_authoring</code></a><br/>v 3.admin.provider_patrol_plan_authoring</td><td><span class="status pending_review">pending review</span></td><td>2</td><td>1</td><td><code>v3.config_management</code></td><td><code>sha256:efbe34fc02d1…</code></td></tr>
+<tr><td><a href="#chain-v3_admin_provider_patrol_run"><code>v3.admin.provider_patrol_run</code></a><br/>v 3.admin.provider_patrol_run</td><td><span class="status pending_review">pending review</span></td><td>4</td><td>3</td><td><code>v3.config_management</code></td><td><code>sha256:fb6f0c1c73f8…</code></td></tr>
 </tbody>
 </table>
     </section>
@@ -934,6 +940,48 @@ flowchart TD
             <span>V3OperationRunnerCompatResponse → V3OperationRunnerFrameClient</span>
             <span><code>v3.operation_runner.dagpipe.response</code></span>
             <span>4 edges · 13 resources · pending</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_control_plane_admission">
+            <span class="chain-id">v 3.admin.control_plane_admission</span>
+            <span>V3AdminControlTokenProvisioned → V3AdminAdmissionDecision</span>
+            <span><code>v3.admin.control_plane_admission</code></span>
+            <span>3 edges · 1 resources · routecodex-v3-admin</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_environment_projection">
+            <span class="chain-id">v 3.admin.environment_projection</span>
+            <span>V3AdminDoctorRequest → V3AdminListenerHealth</span>
+            <span><code>v3.admin.environment_projection</code></span>
+            <span>3 edges · 1 resources · routecodex-v3-admin</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_provider_candidate_probe">
+            <span class="chain-id">v 3.admin.provider_candidate_probe</span>
+            <span>V3AdminProbeCandidate → V3AdminProbeEvidence</span>
+            <span><code>v3.admin.provider_candidate_probe</code></span>
+            <span>3 edges · 2 resources · routecodex-v3-admin</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_provider_authoring_write">
+            <span class="chain-id">v 3.admin.provider_authoring_write</span>
+            <span>V3AdminProviderCandidateRequest → V3AdminProviderDirectoryAuthoring</span>
+            <span><code>v3.admin.provider_authoring_write</code></span>
+            <span>2 edges · 2 resources · routecodex-v3-admin</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_provider_patrol_plan_authoring">
+            <span class="chain-id">v 3.admin.provider_patrol_plan_authoring</span>
+            <span>V3AdminPatrolPlanRequest → V3AdminPatrolPlanValidated</span>
+            <span><code>v3.admin.provider_patrol_plan_authoring</code></span>
+            <span>2 edges · 1 resources · routecodex-v3-admin</span>
+            <span class="status pending_review">pending review</span>
+          </a>
+<a class="branch-card" href="#chain-v3_admin_provider_patrol_run">
+            <span class="chain-id">v 3.admin.provider_patrol_run</span>
+            <span>V3AdminPatrolLoop → V3AdminPatrolStageReport</span>
+            <span><code>v3.admin.provider_patrol_run</code></span>
+            <span>4 edges · 3 resources · routecodex-v3-admin</span>
             <span class="status pending_review">pending review</span>
           </a>
       </div>
@@ -5209,6 +5257,255 @@ flowchart TD
 <tr><td><code>v3-op-runner-err-03</code></td><td><code>ErrorErr03RuntimeClassified</code><br/>→ <code>ErrorErr04RouterPolicyApplied</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
 <tr><td><code>v3-op-runner-err-04</code></td><td><code>ErrorErr04RouterPolicyApplied</code><br/>→ <code>ErrorErr05ExecutionDecision</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.chain</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
 <tr><td><code>v3-op-runner-err-05</code></td><td><code>ErrorErr05ExecutionDecision</code><br/>→ <code>ErrorErr06ClientProjected</code></td><td><span class="status binding_pending">binding_pending</span></td><td><span class="status binding_pending" title="map owner exists but runtime/source binding is not proven">binding_pending</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.error.chain</code> <code>v3.error.execution_decision</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.error.client_projection_candidate</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.error.chain</code> <code>v3.error.execution_decision</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.error.client_projection_candidate</code></div></td><td><code>pending</code><br/><small>pending</small></td><td><code>pending</code><br/><small>pending</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_control_plane_admission" >
+      <summary>
+        <span class="summary-main">v 3.admin.control_plane_admission</span>
+        <span class="summary-sub">V3AdminControlTokenProvisioned → V3AdminAdmissionDecision</span>
+        <span class="summary-sub">3 edges · <code>v3.admin.control_plane_admission</code> · V3AdminControlTokenProvisioned → V3AdminAdmissionDecision</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">The admin control plane provisions its local trust token at process start, mounts the admission middleware on the served router, and admits or rejects one request against that token before any handler runs.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>1</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_control_plane_admission_0[&quot;&lt;b&gt;Admin Control Token Provisioned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminControlTokenProvisioned&lt;/small&gt;&quot;]
+  n_v3_admin_control_plane_admission_1[&quot;&lt;b&gt;Admin Router Mounted&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminRouterMounted&lt;/small&gt;&quot;]
+  n_v3_admin_control_plane_admission_2[&quot;&lt;b&gt;Admin Request Admitted&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminRequestAdmitted&lt;/small&gt;&quot;]
+  n_v3_admin_control_plane_admission_3[&quot;&lt;b&gt;Admin Admission Decision&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminAdmissionDecision&lt;/small&gt;&quot;]
+  n_v3_admin_control_plane_admission_0 --&gt;|v3-admin-admission-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_control_plane_admission_1
+  n_v3_admin_control_plane_admission_1 --&gt;|v3-admin-admission-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_control_plane_admission_2
+  n_v3_admin_control_plane_admission_2 --&gt;|v3-admin-admission-03&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_control_plane_admission_3
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_control_plane_admission_0,n_v3_admin_control_plane_admission_1,n_v3_admin_control_plane_admission_2,n_v3_admin_control_plane_admission_3 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-admission-01</code></td><td><code>V3AdminControlTokenProvisioned</code><br/>→ <code>V3AdminRouterMounted</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.admin.control_token</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.control_token</code></div></td><td><code>AppState::new</code><br/><small>routecodex-v3-admin/src/lib.rs</small></td><td><code>AdminToken::load_or_create</code><br/><small>routecodex-v3-admin/src/auth.rs</small></td></tr>
+<tr><td><code>v3-admin-admission-02</code></td><td><code>V3AdminRouterMounted</code><br/>→ <code>V3AdminRequestAdmitted</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.control_token</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.control_token</code></div></td><td><code>build_router</code><br/><small>routecodex-v3-admin/src/api/mod.rs</small></td><td><code>require_admin</code><br/><small>routecodex-v3-admin/src/auth.rs</small></td></tr>
+<tr><td><code>v3-admin-admission-03</code></td><td><code>V3AdminRequestAdmitted</code><br/>→ <code>V3AdminAdmissionDecision</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.control_token</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.control_token</code></div></td><td><code>require_admin</code><br/><small>routecodex-v3-admin/src/auth.rs</small></td><td><code>reject</code><br/><small>routecodex-v3-admin/src/auth.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_environment_projection" >
+      <summary>
+        <span class="summary-main">v 3.admin.environment_projection</span>
+        <span class="summary-sub">V3AdminDoctorRequest → V3AdminListenerHealth</span>
+        <span class="summary-sub">3 edges · <code>v3.admin.environment_projection</code> · V3AdminDoctorRequest → V3AdminListenerHealth</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">A doctor request builds the derived admin environment projection from the served config, the installed binary, and a live listener probe; the projection is read-only and never becomes runtime truth.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>1</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_environment_projection_0[&quot;&lt;b&gt;Admin Doctor Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminDoctorRequest&lt;/small&gt;&quot;]
+  n_v3_admin_environment_projection_1[&quot;&lt;b&gt;Admin Doctor Report&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminDoctorReport&lt;/small&gt;&quot;]
+  n_v3_admin_environment_projection_2[&quot;&lt;b&gt;Admin Environment Snapshot&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminEnvironmentSnapshot&lt;/small&gt;&quot;]
+  n_v3_admin_environment_projection_3[&quot;&lt;b&gt;Admin Listener Health&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminListenerHealth&lt;/small&gt;&quot;]
+  n_v3_admin_environment_projection_0 --&gt;|v3-admin-environment-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_environment_projection_1
+  n_v3_admin_environment_projection_1 --&gt;|v3-admin-environment-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_environment_projection_2
+  n_v3_admin_environment_projection_2 --&gt;|v3-admin-environment-03&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_environment_projection_3
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_environment_projection_0,n_v3_admin_environment_projection_1,n_v3_admin_environment_projection_2,n_v3_admin_environment_projection_3 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-environment-01</code></td><td><code>V3AdminDoctorRequest</code><br/>→ <code>V3AdminDoctorReport</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.environment</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.environment</code></div></td><td><code>doctor</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td><td><code>build_doctor</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td></tr>
+<tr><td><code>v3-admin-environment-02</code></td><td><code>V3AdminDoctorReport</code><br/>→ <code>V3AdminEnvironmentSnapshot</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.admin.environment</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.environment</code></div></td><td><code>build_doctor</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td><td><code>build_environment</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td></tr>
+<tr><td><code>v3-admin-environment-03</code></td><td><code>V3AdminEnvironmentSnapshot</code><br/>→ <code>V3AdminListenerHealth</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.environment</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.environment</code></div></td><td><code>build_environment</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td><td><code>probe_listeners</code><br/><small>routecodex-v3-admin/src/api/deploy.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_provider_candidate_probe" >
+      <summary>
+        <span class="summary-main">v 3.admin.provider_candidate_probe</span>
+        <span class="summary-sub">V3AdminProbeCandidate → V3AdminProbeEvidence</span>
+        <span class="summary-sub">3 edges · <code>v3.admin.provider_candidate_probe</code> · V3AdminProbeCandidate → V3AdminProbeEvidence</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">An unsaved provider candidate is spawned into an SSE probe run that executes one typed stage and projects redacted probe evidence; the candidate itself is never persisted by this path.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>2</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_provider_candidate_probe_0[&quot;&lt;b&gt;Admin Probe Candidate&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProbeCandidate&lt;/small&gt;&quot;]
+  n_v3_admin_provider_candidate_probe_1[&quot;&lt;b&gt;Admin Probe Stream&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProbeStream&lt;/small&gt;&quot;]
+  n_v3_admin_provider_candidate_probe_2[&quot;&lt;b&gt;Admin Probe Run&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProbeRun&lt;/small&gt;&quot;]
+  n_v3_admin_provider_candidate_probe_3[&quot;&lt;b&gt;Admin Probe Evidence&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProbeEvidence&lt;/small&gt;&quot;]
+  n_v3_admin_provider_candidate_probe_0 --&gt;|v3-admin-probe-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_candidate_probe_1
+  n_v3_admin_provider_candidate_probe_1 --&gt;|v3-admin-probe-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_candidate_probe_2
+  n_v3_admin_provider_candidate_probe_2 --&gt;|v3-admin-probe-03&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_candidate_probe_3
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_provider_candidate_probe_0,n_v3_admin_provider_candidate_probe_1,n_v3_admin_provider_candidate_probe_2,n_v3_admin_provider_candidate_probe_3 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-probe-01</code></td><td><code>V3AdminProbeCandidate</code><br/>→ <code>V3AdminProbeStream</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_candidate</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_candidate</code></div></td><td><code>probe_candidate</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td><td><code>start_probe</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td></tr>
+<tr><td><code>v3-admin-probe-02</code></td><td><code>V3AdminProbeStream</code><br/>→ <code>V3AdminProbeRun</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.admin.provider_probe_result</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.provider_probe_result</code></div></td><td><code>start_probe</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td><td><code>run_probe</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td></tr>
+<tr><td><code>v3-admin-probe-03</code></td><td><code>V3AdminProbeRun</code><br/>→ <code>V3AdminProbeEvidence</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_probe_result</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_probe_result</code></div></td><td><code>run_probe</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td><td><code>execute_stage</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_provider_authoring_write" >
+      <summary>
+        <span class="summary-main">v 3.admin.provider_authoring_write</span>
+        <span class="summary-sub">V3AdminProviderCandidateRequest → V3AdminProviderDirectoryAuthoring</span>
+        <span class="summary-sub">2 edges · <code>v3.admin.provider_authoring_write</code> · V3AdminProviderCandidateRequest → V3AdminProviderDirectoryAuthoring</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">A provider create request identifies the candidate and writes it through the config-core authoring path with backup and revision; the admin never fabricates the provider directory file itself.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>2</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_provider_authoring_write_0[&quot;&lt;b&gt;Admin Provider Candidate Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProviderCandidateRequest&lt;/small&gt;&quot;]
+  n_v3_admin_provider_authoring_write_1[&quot;&lt;b&gt;Admin Provider Candidate Identified&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProviderCandidateIdentified&lt;/small&gt;&quot;]
+  n_v3_admin_provider_authoring_write_2[&quot;&lt;b&gt;Admin Provider Directory Authoring&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminProviderDirectoryAuthoring&lt;/small&gt;&quot;]
+  n_v3_admin_provider_authoring_write_0 --&gt;|v3-admin-authoring-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_authoring_write_1
+  n_v3_admin_provider_authoring_write_1 --&gt;|v3-admin-authoring-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_authoring_write_2
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_provider_authoring_write_0,n_v3_admin_provider_authoring_write_1,n_v3_admin_provider_authoring_write_2 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-authoring-01</code></td><td><code>V3AdminProviderCandidateRequest</code><br/>→ <code>V3AdminProviderCandidateIdentified</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_candidate</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_candidate</code></div></td><td><code>create_provider</code><br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small></td><td><code>candidate_id</code><br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small></td></tr>
+<tr><td><code>v3-admin-authoring-02</code></td><td><code>V3AdminProviderCandidateIdentified</code><br/>→ <code>V3AdminProviderDirectoryAuthoring</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_candidate</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.directory_authoring</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_candidate</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.directory_authoring</code></div></td><td><code>create_provider</code><br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small></td><td><code>write_provider</code><br/><small>routecodex-v3-admin/src/provider_onboarding.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_provider_patrol_plan_authoring" >
+      <summary>
+        <span class="summary-main">v 3.admin.provider_patrol_plan_authoring</span>
+        <span class="summary-sub">V3AdminPatrolPlanRequest → V3AdminPatrolPlanValidated</span>
+        <span class="summary-sub">2 edges · <code>v3.admin.provider_patrol_plan_authoring</code> · V3AdminPatrolPlanRequest → V3AdminPatrolPlanValidated</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">An operator patrol plan is validated and atomically stored; an invalid plan leaves the persisted plan file untouched.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>1</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_provider_patrol_plan_authoring_0[&quot;&lt;b&gt;Admin Patrol Plan Request&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolPlanRequest&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_plan_authoring_1[&quot;&lt;b&gt;Admin Patrol Plan Stored&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolPlanStored&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_plan_authoring_2[&quot;&lt;b&gt;Admin Patrol Plan Validated&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolPlanValidated&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_plan_authoring_0 --&gt;|v3-admin-patrol-plan-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_plan_authoring_1
+  n_v3_admin_provider_patrol_plan_authoring_1 --&gt;|v3-admin-patrol-plan-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_plan_authoring_2
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_provider_patrol_plan_authoring_0,n_v3_admin_provider_patrol_plan_authoring_1,n_v3_admin_provider_patrol_plan_authoring_2 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-patrol-plan-01</code></td><td><code>V3AdminPatrolPlanRequest</code><br/>→ <code>V3AdminPatrolPlanStored</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>produces:</strong> <code>v3.admin.provider_patrol_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.provider_patrol_plan</code></div></td><td><code>put_plan</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td><td><code>PatrolRuntime::set_plan</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td></tr>
+<tr><td><code>v3-admin-patrol-plan-02</code></td><td><code>V3AdminPatrolPlanStored</code><br/>→ <code>V3AdminPatrolPlanValidated</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_patrol_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_patrol_plan</code></div></td><td><code>PatrolRuntime::set_plan</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td><td><code>validate_plan</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td></tr>
+</tbody>
+</table>
+      </div>
+    </details>
+
+
+    <details class="branch-detail" id="chain-v3_admin_provider_patrol_run" >
+      <summary>
+        <span class="summary-main">v 3.admin.provider_patrol_run</span>
+        <span class="summary-sub">V3AdminPatrolLoop → V3AdminPatrolStageReport</span>
+        <span class="summary-sub">4 edges · <code>v3.admin.provider_patrol_run</code> · V3AdminPatrolLoop → V3AdminPatrolStageReport</span>
+      </summary>
+      <div class="branch-body">
+        <p class="chain-summary">The advisory patrol tick loop selects due plans, runs each plan through the shared probe stage implementation, and appends diagnostic results without mutating runtime provider health.</p>
+        <div class="branch-meta">
+          <span>owner: <code>v3.config_management</code></span>
+          <span>audit: <span class="status pending_review">pending review</span></span>
+          <span>modules: <code>routecodex-v3-admin</code></span>
+          <span>resources: <code>3</code></span>
+
+
+        </div>
+        <div class="diagram-shell">
+          <pre class="mermaid">%%{init: {&quot;flowchart&quot;: {&quot;htmlLabels&quot;: true, &quot;curve&quot;: &quot;basis&quot;, &quot;rankSpacing&quot;: 82, &quot;nodeSpacing&quot;: 46}, &quot;themeVariables&quot;: {&quot;fontSize&quot;: &quot;18px&quot;}} }%%
+flowchart TD
+  n_v3_admin_provider_patrol_run_0[&quot;&lt;b&gt;Admin Patrol Loop&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolLoop&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_run_1[&quot;&lt;b&gt;Admin Patrol Due Batch&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolDueBatch&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_run_2[&quot;&lt;b&gt;Admin Patrol Result&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolResult&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_run_3[&quot;&lt;b&gt;Admin Patrol Stage Evidence&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolStageEvidence&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_run_4[&quot;&lt;b&gt;Admin Patrol Stage Report&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3AdminPatrolStageReport&lt;/small&gt;&quot;]
+  n_v3_admin_provider_patrol_run_0 --&gt;|v3-admin-patrol-run-01&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_run_1
+  n_v3_admin_provider_patrol_run_1 --&gt;|v3-admin-patrol-run-02&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_run_2
+  n_v3_admin_provider_patrol_run_2 --&gt;|v3-admin-patrol-run-03&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_run_3
+  n_v3_admin_provider_patrol_run_3 --&gt;|v3-admin-patrol-run-04&lt;br/&gt;routecodex-v3-admin → routecodex-v3-admin| n_v3_admin_provider_patrol_run_4
+  classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
+  classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
+  class n_v3_admin_provider_patrol_run_0,n_v3_admin_provider_patrol_run_1,n_v3_admin_provider_patrol_run_2,n_v3_admin_provider_patrol_run_3,n_v3_admin_provider_patrol_run_4 node;</pre>
+        </div>
+        <table>
+<thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
+<tbody>
+<tr><td><code>v3-admin-patrol-run-01</code></td><td><code>V3AdminPatrolLoop</code><br/>→ <code>V3AdminPatrolDueBatch</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_patrol_plan</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_patrol_plan</code></div></td><td><code>spawn_patrol_loop</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td><td><code>PatrolRuntime::run_due</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td></tr>
+<tr><td><code>v3-admin-patrol-run-02</code></td><td><code>V3AdminPatrolDueBatch</code><br/>→ <code>V3AdminPatrolResult</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_patrol_plan</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.admin.provider_patrol</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_patrol_plan</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.provider_patrol</code></div></td><td><code>PatrolRuntime::run_due</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td><td><code>PatrolRuntime::run</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td></tr>
+<tr><td><code>v3-admin-patrol-run-03</code></td><td><code>V3AdminPatrolResult</code><br/>→ <code>V3AdminPatrolStageEvidence</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_patrol</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.admin.provider_probe_result</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_patrol</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.admin.provider_probe_result</code></div></td><td><code>PatrolRuntime::run</code><br/><small>routecodex-v3-admin/src/provider_patrol.rs</small></td><td><code>execute_stages</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td></tr>
+<tr><td><code>v3-admin-patrol-run-04</code></td><td><code>V3AdminPatrolStageEvidence</code><br/>→ <code>V3AdminPatrolStageReport</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.admin.provider_probe_result</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.admin.provider_probe_result</code></div></td><td><code>execute_stages</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td><td><code>execute_stage</code><br/><small>routecodex-v3-admin/src/provider_probe.rs</small></td></tr>
 </tbody>
 </table>
       </div>

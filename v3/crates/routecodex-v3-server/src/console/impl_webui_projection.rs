@@ -1,6 +1,6 @@
 use crate::webui_observability::{
     build_v3_obs_request_key, record_v3_observability_event, record_v3_webui_error_projection,
-    V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
+    V3ObsErrorProjection, V3ObsErrorTruth, V3ObsEventType, V3ObsRequestMeta, V3ObsScope,
 };
 use crate::*;
 use serde_json::Value;
@@ -39,6 +39,7 @@ pub(crate) fn build_v3_webui_meta_for_context(
         finish_reason: observability.finish_reason.clone(),
         error_category: None,
         error_detail: None,
+        observed_error: None,
     }
 }
 
@@ -82,11 +83,13 @@ pub(crate) fn record_v3_webui_event_for_context(
 }
 
 /// WebUI error projection for the already-projected Error06. Keeps the typed
-/// projection logic in webui_observability; console callers only adapt scope.
+/// projection logic in webui_observability; console callers only adapt scope and
+/// forward the typed Error06 truth their lane exposes.
 pub(crate) fn record_v3_webui_error_for_context(
     context: &V3ConsoleEmissionContext,
     status: u16,
     body: Option<&Value>,
+    typed: V3ObsErrorProjection<'_>,
 ) -> Result<u64, String> {
     record_v3_webui_error_projection(
         &context.state.webui_observability,
@@ -98,6 +101,7 @@ pub(crate) fn record_v3_webui_error_for_context(
         Some(&context.identity.session_id),
         status,
         body,
+        typed,
     )
 }
 
@@ -165,6 +169,24 @@ pub(crate) fn record_v3_webui_provider_failure(
             .unwrap_or_else(|| format!("http_{status}")),
     );
     meta.error_detail = Some(event.message.clone());
+    // Observed-at-attempt diagnostic snapshot: forward the typed provider-failure
+    // observation verbatim. `attempt_index` is filled by the store from the row
+    // attempt counter once this event lands.
+    meta.observed_error = Some(V3ObsErrorTruth {
+        source: "provider_attempt_failure".to_string(),
+        internal_code: event.internal_code.clone(),
+        external_error_kind: event.external_error_kind.clone(),
+        external_error_code: event.external_error_code.clone(),
+        external_error_status: event.external_error_status,
+        upstream_request_id: event.upstream_request_id.clone(),
+        health_state: Some(event.health_state.clone()).filter(|value| !value.trim().is_empty()),
+        action: Some(event.action.clone()).filter(|value| !value.trim().is_empty()),
+        failure_count: Some(event.failure_count),
+        cooldown_until_ms: event.cooldown_until_ms,
+        next_provider_key: event.next_provider_key.clone(),
+        wait_ms: event.wait_ms,
+        ..Default::default()
+    });
     if let Err(error) = record_v3_observability_event(
         &context.state.webui_observability,
         V3ObsEventType::ProviderAttemptFailed,
