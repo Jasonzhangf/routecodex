@@ -607,7 +607,7 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
         "unexpected error: {error}"
     );
 
-    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -615,14 +615,11 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect("underscore-prefixed provider data must remain representable");
-    let tool_result: Value = serde_json::from_str(
-        request["messages"][1]["content"]
-            .as_str()
-            .expect("tool result content is JSON text"),
-    )
-    .expect("hosted tool result JSON");
-    assert_eq!(tool_result["action"]["_debug"], true);
+    .expect_err("control fields must fail before provider tool-result JSON stringification");
+    assert!(
+        error.contains("side-channel field") && error.contains("_debug"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]
