@@ -7,21 +7,34 @@ enum V3AnthropicTextFrame<'a> {
     Malformed,
 }
 
+const DSML_PARAMETER_CLOSE: &str = "<\u{2f}｜DSML｜parameter>";
+const DSML_CLOSING_BLOCK: &str =
+    concat!("<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>");
+
 fn classify_v3_anthropic_text_frame_at_resp03(text: &str) -> V3AnthropicTextFrame<'_> {
     let Some(after_open) = text.strip_prefix("<thinking>") else {
         return V3AnthropicTextFrame::Ordinary;
     };
     if text.contains("｜DSML｜") {
-        return if text
-            .trim_end()
-            .ends_with("</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>")
-        {
-            V3AnthropicTextFrame::InternalOnly
-        } else {
-            V3AnthropicTextFrame::Malformed
-        };
+        if !text.trim_end().ends_with(DSML_CLOSING_BLOCK) {
+            return V3AnthropicTextFrame::Malformed;
+        }
+        // The observed control frame is a whole-item "<thinking> ... closing block".
+        // If the provider also emitted a complete closing tag pair with visible prose
+        // before the closing block, keep that prose and drop only the frame.
+        if let Some((_, remainder)) = after_open.split_once("<\u{2f}thinking>") {
+            let visible = remainder
+                .split(DSML_PARAMETER_CLOSE)
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !visible.is_empty() {
+                return V3AnthropicTextFrame::Visible(visible);
+            }
+        }
+        return V3AnthropicTextFrame::InternalOnly;
     }
-    let Some((_, visible)) = after_open.split_once("</thinking>") else {
+    let Some((_, visible)) = after_open.split_once("<\u{2f}thinking>") else {
         return V3AnthropicTextFrame::Ordinary;
     };
     if visible.trim().is_empty() {
@@ -34,7 +47,7 @@ fn classify_v3_anthropic_text_frame_at_resp03(text: &str) -> V3AnthropicTextFram
 pub(super) fn govern_v3_anthropic_control_text_at_resp03(
     input: &mut V3HubRespInbound02Normalized,
 ) -> Result<bool, V3HubRelayResponseError> {
-    if input.provider_raw().provider_protocol != V3HubProviderWireProtocol::Anthropic
+    if input.provider_raw().source_provider_protocol != V3HubProviderWireProtocol::Anthropic
         || input.semantic_protocol() != V3HubProviderWireProtocol::Responses
     {
         return Ok(false);

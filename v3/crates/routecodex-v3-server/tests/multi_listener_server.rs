@@ -2626,6 +2626,11 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             "call_native_dsml",
         ),
         ("<thinking>private</thinking>Visible answer", false, "Visible answer"),
+        (
+            "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
+            false,
+            "Visible answer",
+        ),
         ("Quoted <thinking>literal</thinking> text", false, "Quoted"),
         ("```\n<thinking>literal</thinking>\n```", false, "literal"),
         ("Prefix <thinking>literal</thinking>", false, "Prefix"),

@@ -772,3 +772,55 @@ async fn openai_chat_stream_usage_preserves_cached_input_tokens() {
 mod extracted_tests_tail;
 #[path = "responses_relay_runtime_extra_tail_tests.rs"]
 mod extracted_tests_tail_2;
+
+#[test]
+fn anthropic_sse_minimax_profile_still_harvests_text_tool_calls() {
+    // The Responses Relay SSE path materializes Anthropic text into a canonical
+    // Responses payload while retaining a separate Anthropic source witness.
+    // ProviderRespCompat02 must still see the canonical protocol so a declared
+    // chat:minimax profile harvests a text tool envelope instead of leaking it
+    // as visible text or rejecting it as malformed.
+    let provider_response = json!({
+        "id":"resp_minimax_sse_tool",
+        "status":"completed",
+        "output":[{
+            "type":"message",
+            "role":"assistant",
+            "content":[{
+                "type":"output_text",
+                "text":"<function_calls>{\"tool_calls\":[{\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"pwd\"}}]}</function_calls>"
+            }]
+        }]
+    });
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let mut trace = Vec::new();
+    let (response, _) = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "anthropic-sse-minimax",
+            request_id: "anthropic-sse-minimax",
+            provider_value: &provider_response,
+            provider_semantic_body: &json!({"model":"client-model"}),
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("anthropic_first"),
+            expected_model_id: "claude-test",
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
+            projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            provider_response_transport_intent: V3HubTransportIntent::Sse,
+            compatibility_profile: Some("chat:minimax"),
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut trace,
+    )
+    .expect("chat:minimax must harvest the text tool envelope through the canonical protocol");
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["name"], "exec_command");
+    assert_eq!(response["output"][0]["arguments"], "{\"cmd\":\"pwd\"}");
+    let serialized = serde_json::to_string(&response).unwrap();
+    assert!(!serialized.contains("<function_calls>"));
+}
