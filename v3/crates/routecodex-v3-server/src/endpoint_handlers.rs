@@ -541,7 +541,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
             };
         if let Some(disposition) = output.terminal_disposition.clone() {
-            return provider_terminal_response(&state, front_connection_identity, disposition);
+            return provider_terminal_response(
+                &state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+            );
         }
         if output.error_chain.is_some() {
             if let Some(response) = emit_relay_error_chain_if_any(
@@ -644,7 +649,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Err(error) => project_v3_anthropic_relay_runtime_failure(error),
         };
         if let Some(disposition) = output.terminal_disposition.clone() {
-            return provider_terminal_response(&state, front_connection_identity, disposition);
+            return provider_terminal_response(
+                &state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+            );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
@@ -754,7 +764,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Err(error) => project_v3_gemini_relay_runtime_failure(error),
         };
         if let Some(disposition) = output.terminal_disposition.clone() {
-            return provider_terminal_response(&state, front_connection_identity, disposition);
+            return provider_terminal_response(
+                &state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+            );
         }
         if let Some(response) = emit_relay_error_chain_if_any(
             &state,
@@ -960,7 +975,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         };
         if let Some(disposition) = output.terminal_disposition.take() {
-            return provider_terminal_response(&state, front_connection_identity, disposition);
+            return provider_terminal_response(
+                &state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+            );
         }
         if output.protocol_direct_handoff.is_some() {
             if let Some(response) = capture_v3_responses_relay_provider_snapshots(
@@ -997,6 +1017,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &state,
                         front_connection_identity,
                         disposition,
+                        requested_stream,
                     );
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
@@ -1075,6 +1096,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                             &state,
                             front_connection_identity,
                             disposition,
+                            requested_stream,
                         );
                     }
                     prepend_v3_protocol_plan_trace_to_responses_relay_output(
@@ -1151,7 +1173,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         .await;
         match outcome {
             V3ResponsesDirectServerOutcome::ProviderTerminal(disposition) => {
-                provider_terminal_response(&state, front_connection_identity, disposition)
+                provider_terminal_response(
+                    &state,
+                    front_connection_identity,
+                    disposition,
+                    requested_stream,
+                )
             }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                 // Recovered provider attempts are observability events, not a terminal
@@ -1257,6 +1284,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &state,
                         front_connection_identity,
                         disposition,
+                        requested_stream,
                     );
                 }
                 finalize_v3_responses_relay_server_output(

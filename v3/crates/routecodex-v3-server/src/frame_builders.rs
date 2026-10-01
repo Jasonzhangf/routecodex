@@ -390,6 +390,7 @@ pub(crate) fn provider_terminal_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
     disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
@@ -433,6 +434,14 @@ pub(crate) fn provider_terminal_response(
             response
         }
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {
+            if requested_stream {
+                // A streaming client must observe a transport failure. The response
+                // head is written so the client stays in streaming mode and retries
+                // the same request, instead of reading a header-less close as a
+                // normal end of stream. No client payload and no fabricated upstream
+                // status is sent; the typed Error chain keeps the real cause.
+                return v3_sse_transport_disconnect_response();
+            }
             let connection = connection.expect("accepted Front connection identity");
             assert!(
                 state
@@ -444,6 +453,36 @@ pub(crate) fn provider_terminal_response(
             Response::new(Body::empty())
         }
     }
+}
+
+/// Break the client SSE transport for a provider terminal that has no client payload.
+///
+/// The client observes an aborted transfer: the response head plus one SSE comment
+/// frame are flushed, then the body fails, so the transfer never terminates with a
+/// valid final chunk. A client that retries a transport failure keeps the session
+/// alive across provider exhaustion and recovers when a provider becomes eligible
+/// again.
+///
+/// The body stays pending between the comment frame and the failure. Hyper writes a
+/// body only while it can make progress, so an immediately failing stream aborts the
+/// connection before the response head reaches the client, which is exactly the
+/// silent close this terminal must not produce.
+fn v3_sse_transport_disconnect_response() -> Response<Body> {
+    let body = stream::once(async {
+        Ok::<Vec<u8>, io::Error>(b": routecodex provider transport break\n\n".to_vec())
+    })
+    .chain(stream::once(async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        Err(io::Error::other(
+            "provider pool exhausted; SSE transport unavailable",
+        ))
+    }));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(body))
+        .expect("V3 SSE transport disconnect response")
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(

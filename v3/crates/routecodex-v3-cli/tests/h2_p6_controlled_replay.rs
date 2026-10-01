@@ -176,7 +176,7 @@ async fn bug_705d624_last_real_429_survives_later_transport_failure_and_reselect
 }
 
 #[tokio::test]
-async fn bug_705d624_all_provider_no_response_closes_front_without_http_headers() {
+async fn bug_705d624_all_provider_no_response_breaks_streaming_client_transport() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
     let mut no_response_a = start_no_response_upstream().await;
     let mut no_response_b = start_no_response_upstream().await;
@@ -186,9 +186,8 @@ async fn bug_705d624_all_provider_no_response_closes_front_without_http_headers(
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    for stream in [false, true] {
-        assert_no_front_http_headers(ports.exhausted, stream).await;
-    }
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
     next_capture(&mut no_response_a.captures, "first no-response transport").await;
     next_capture(&mut no_response_b.captures, "second no-response transport").await;
     drop(cli);
@@ -206,9 +205,8 @@ async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    for stream in [false, true] {
-        assert_no_front_http_headers(ports.exhausted, stream).await;
-    }
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
     next_capture(
         &mut bad_gateway_a.captures,
         "first actual HTTP 502 upstream",
@@ -224,6 +222,45 @@ async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
 }
 
 async fn assert_no_front_http_headers(port: u16, stream: bool) {
+    assert!(
+        !stream,
+        "only a non-streaming client is closed without HTTP response bytes"
+    );
+    let response = read_front_response(port, stream).await;
+    assert!(
+        response.is_empty(),
+        "stream={stream} expected zero HTTP response bytes, got {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+/// A streaming client must observe an aborted transfer instead of a normal end of
+/// stream: the response head is written, the SSE body breaks, and the transfer never
+/// terminates with a valid final chunk. That is the transport failure a client
+/// retries, so provider exhaustion does not end the session.
+async fn assert_front_sse_transport_break(port: u16) {
+    let response = read_front_response(port, true).await;
+    let text = String::from_utf8_lossy(&response).into_owned();
+    assert!(
+        text.starts_with("HTTP/1.1 200"),
+        "streaming no-response must write the response head: {text:?}"
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "streaming no-response must keep the SSE boundary: {text:?}"
+    );
+    assert!(
+        text.contains(": routecodex provider transport break"),
+        "streaming no-response must flush the SSE boundary frame before breaking: {text:?}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "streaming no-response must abort the transfer instead of terminating it: {text:?}"
+    );
+}
+
+async fn read_front_response(port: u16, stream: bool) -> Vec<u8> {
     let payload = serde_json::to_string(
         &json!({"model":"client-test","input":"upstream no response","stream":stream}),
     )
@@ -234,17 +271,16 @@ async fn assert_no_front_http_headers(port: u16, stream: bool) {
         payload.len(), payload
     );
     socket.write_all(request.as_bytes()).await.unwrap();
-    let mut response = [0u8; 8192];
-    let count = timeout(Duration::from_secs(10), socket.read(&mut response))
-        .await
-        .expect("front connection must terminate before timeout")
-        .unwrap_or(0);
-    assert_eq!(
-        count,
-        0,
-        "stream={stream} expected zero HTTP response bytes, got {}",
-        String::from_utf8_lossy(&response[..count])
-    );
+    let mut received = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        match timeout(Duration::from_secs(10), socket.read(&mut buffer)).await {
+            Ok(Ok(0)) | Ok(Err(_)) => break,
+            Ok(Ok(count)) => received.extend_from_slice(&buffer[..count]),
+            Err(_) => panic!("front connection must terminate before timeout"),
+        }
+    }
+    received
 }
 
 #[tokio::test]
