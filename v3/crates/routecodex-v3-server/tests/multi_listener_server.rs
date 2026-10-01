@@ -2625,7 +2625,7 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             true,
             "call_native_dsml",
         ),
-        ("<thinking>private</thinking>Visible answer", false, "Visible answer"),
+        ("<thinking>private</thinking>Visible answer", false, "<thinking>private</thinking>Visible answer"),
         (
             "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
             false,
@@ -2671,7 +2671,10 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             assert!(body.contains("pwd"), "{body}");
             assert!(!body.contains("DSML"), "{body}");
             assert!(!body.contains("<thinking>"), "{body}");
-        } else if text.contains("</thinking>") && text.starts_with("<thinking>") {
+        } else if expected == "Visible answer"
+            && text.contains("</thinking>")
+            && text.starts_with("<thinking>")
+        {
             assert!(!body.contains("private"), "{body}");
             assert!(!body.contains("<thinking>"), "{body}");
         } else {
@@ -2685,24 +2688,22 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
 }
 
 #[tokio::test]
-async fn responses_relay_incomplete_anthropic_control_frame_reselects_without_leak() {
+async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (bad_base_url, mut bad_captures, bad_shutdown) =
-        start_controlled_terminal_upstream_with_body(
-            StatusCode::OK,
-            "text/event-stream",
-            anthropic_sse_text_fixture("<thinking>unfinished ｜DSML｜invoke", false),
-        )
-        .await;
-    let (good_base_url, mut good_captures, good_shutdown) =
-        start_controlled_responses_relay_upstream().await;
+    let literal = "<thinking>unfinished ｜DSML｜invoke";
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_text_fixture(literal, false),
+    )
+    .await;
     std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
     let manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
-        bad_base_url.trim_end_matches("/v1"),
+        provider_base_url.trim_end_matches("/v1"),
         "anthropic",
-        Some(&good_base_url),
+        None,
     );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let response = reqwest::Client::builder()
@@ -2717,15 +2718,12 @@ async fn responses_relay_incomplete_anthropic_control_frame_reselects_without_le
         .unwrap();
     let status = response.status();
     let body = response.text().await.unwrap();
-    assert!(bad_captures.recv().await.is_some());
-    assert!(good_captures.recv().await.is_some());
+    assert!(captures.recv().await.is_some());
     handle.shutdown().await;
-    bad_shutdown.send(()).unwrap();
-    good_shutdown.send(()).unwrap();
+    shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body.contains("relay sse final text"), "{body}");
-    assert!(!body.contains("DSML"), "{body}");
+    assert!(body.contains("unfinished ｜DSML｜invoke"), "{body}");
 }
 
 #[tokio::test]

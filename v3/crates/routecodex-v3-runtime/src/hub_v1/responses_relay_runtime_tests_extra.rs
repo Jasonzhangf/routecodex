@@ -881,3 +881,51 @@ fn anthropic_json_relay_keeps_literal_control_text_unchanged() {
         "literal Anthropic JSON text must not be rewritten at Resp03: {serialized}"
     );
 }
+
+#[test]
+fn anthropic_sse_whole_item_thinking_literal_stays_visible() {
+    // Scope guard: Resp03 governs only the proven complete DSML control frame.
+    // A whole-item `<thinking>...</thinking>` literal that does not carry the
+    // exact DSML closing block is representable provider text and must be
+    // forwarded unchanged instead of being dropped as internal-only.
+    let provider_response = json!({
+        "id":"resp_thinking_literal",
+        "status":"completed",
+        "output":[{
+            "type":"message",
+            "role":"assistant",
+            "content":[{"type":"output_text","text":"<thinking>private</thinking>"}]
+        }]
+    });
+    let manifest = super::responses_relay_runtime_tests::anthropic_then_openai_chat_manifest();
+    let mut trace = Vec::new();
+    let (response, _) = run_json_response_hooks(
+        V3ResponsesRelayJsonResponseHookInput {
+            session_id: "anthropic-sse-thinking-literal",
+            request_id: "anthropic-sse-thinking-literal",
+            provider_value: &provider_response,
+            provider_semantic_body: &json!({"model":"client-model"}),
+            manifest: &manifest,
+            server_id: "test",
+            provider_id: Some("anthropic_first"),
+            expected_model_id: "claude-test",
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            source_provider_protocol: V3HubProviderWireProtocol::Anthropic,
+            projection_context: &V3AnthropicResponsesProjectionContext::default(),
+            provider_response_transport_intent: V3HubTransportIntent::Sse,
+            compatibility_profile: None,
+            web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            web_search_center_state: None,
+            retain_response_cipher: false,
+            tool_thinking_enabled: false,
+            tool_thinking_turn_context: &V3ToolThinkingTurnContext::disabled(),
+        },
+        &mut trace,
+    )
+    .expect("Anthropic SSE whole-item literal must pass through Resp03");
+    let serialized = serde_json::to_string(&response).unwrap();
+    assert!(
+        serialized.contains("<thinking>private</thinking>"),
+        "whole-item `<thinking>` literal must stay visible: {serialized}"
+    );
+}

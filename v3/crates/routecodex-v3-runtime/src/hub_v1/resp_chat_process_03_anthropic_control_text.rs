@@ -4,7 +4,6 @@ enum V3AnthropicTextFrame<'a> {
     Ordinary,
     Visible(&'a str),
     InternalOnly,
-    Malformed,
 }
 
 const DSML_PARAMETER_CLOSE: &str = "<\u{2f}｜DSML｜parameter>";
@@ -12,36 +11,29 @@ const DSML_CLOSING_BLOCK: &str =
     concat!("<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>");
 
 fn classify_v3_anthropic_text_frame_at_resp03(text: &str) -> V3AnthropicTextFrame<'_> {
-    let Some(after_open) = text.strip_prefix("<thinking>") else {
+    // Only the proven upstream control frame is governed: a whole text item that
+    // starts exactly with `<thinking>` and ends with the exact three-line DSML
+    // closing block. Every other Anthropic text item - suspect text that merely
+    // resembles the frame, incomplete frames, quoted forms, and paired
+    // `<thinking>` prose - is forwarded unchanged because the proxy must not
+    // reject or rewrite representable provider text without provenance proof.
+    if !text.starts_with("<thinking>") || !text.trim_end().ends_with(DSML_CLOSING_BLOCK) {
         return V3AnthropicTextFrame::Ordinary;
-    };
-    if text.contains("｜DSML｜") {
-        if !text.trim_end().ends_with(DSML_CLOSING_BLOCK) {
-            return V3AnthropicTextFrame::Malformed;
-        }
-        // The observed control frame is a whole-item "<thinking> ... closing block".
-        // If the provider also emitted a complete closing tag pair with visible prose
-        // before the closing block, keep that prose and drop only the frame.
-        if let Some((_, remainder)) = after_open.split_once("<\u{2f}thinking>") {
-            let visible = remainder
-                .split(DSML_PARAMETER_CLOSE)
-                .next()
-                .unwrap_or("")
-                .trim();
-            if !visible.is_empty() {
-                return V3AnthropicTextFrame::Visible(visible);
-            }
-        }
-        return V3AnthropicTextFrame::InternalOnly;
     }
-    let Some((_, visible)) = after_open.split_once("<\u{2f}thinking>") else {
-        return V3AnthropicTextFrame::Ordinary;
-    };
-    if visible.trim().is_empty() {
-        V3AnthropicTextFrame::InternalOnly
-    } else {
-        V3AnthropicTextFrame::Visible(visible)
+    // The observed control frame is a whole-item "<thinking> ... closing block".
+    // If the provider also emitted a complete closing tag pair with visible prose
+    // before the closing block, keep that prose and drop only the frame.
+    if let Some((_, remainder)) = text.split_once("<\u{2f}thinking>") {
+        let visible = remainder
+            .split(DSML_PARAMETER_CLOSE)
+            .next()
+            .unwrap_or("")
+            .trim();
+        if !visible.is_empty() {
+            return V3AnthropicTextFrame::Visible(visible);
+        }
     }
+    V3AnthropicTextFrame::InternalOnly
 }
 
 pub(super) fn govern_v3_anthropic_control_text_at_resp03(
@@ -77,12 +69,6 @@ pub(super) fn govern_v3_anthropic_control_text_at_resp03(
                     V3AnthropicTextFrame::Ordinary => continue,
                     V3AnthropicTextFrame::Visible(text) => text.to_string(),
                     V3AnthropicTextFrame::InternalOnly => String::new(),
-                    V3AnthropicTextFrame::Malformed => {
-                        return Err(V3HubRelayResponseError::ProviderProtocolResponseMalformed {
-                            protocol: "anthropic",
-                            reason: "incomplete provider control text frame",
-                        });
-                    }
                 };
                 row.insert("text".to_string(), Value::String(replacement));
                 changed = true;
@@ -112,14 +98,6 @@ pub(super) fn govern_v3_anthropic_control_text_at_resp03(
                             changed = true;
                         }
                         V3AnthropicTextFrame::InternalOnly => changed = true,
-                        V3AnthropicTextFrame::Malformed => {
-                            return Err(
-                                V3HubRelayResponseError::ProviderProtocolResponseMalformed {
-                                    protocol: "anthropic",
-                                    reason: "incomplete provider control text frame",
-                                },
-                            );
-                        }
                     }
                 }
                 *parts = next;
