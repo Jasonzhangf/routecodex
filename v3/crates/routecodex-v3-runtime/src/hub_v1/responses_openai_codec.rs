@@ -924,11 +924,6 @@ fn ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(
             "Responses tool_search_output contains RouteCodex side-channel field before Chat canonicalization: {key}"
         ));
     }
-    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
-        return Err(format!(
-            "Responses tool_search_output contains private debug field before Chat canonicalization: {key}"
-        ));
-    }
     Ok(())
 }
 
@@ -974,31 +969,7 @@ fn ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
             "Responses {item_type} contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
         ));
     }
-    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
-        return Err(format!(
-            "Responses {item_type} contains private debug field before OpenAI Chat provider encoding: {key}"
-        ));
-    }
     Ok(())
-}
-
-fn find_v3_openai_chat_hosted_tool_private_payload_key(value: &Value) -> Option<String> {
-    match value {
-        Value::Object(object) => {
-            for key in object.keys() {
-                if key.starts_with('_') {
-                    return Some(key.clone());
-                }
-            }
-            object
-                .values()
-                .find_map(find_v3_openai_chat_hosted_tool_private_payload_key)
-        }
-        Value::Array(items) => items
-            .iter()
-            .find_map(find_v3_openai_chat_hosted_tool_private_payload_key),
-        _ => None,
-    }
 }
 
 fn build_v3_openai_chat_hosted_tool_history_call_id(
