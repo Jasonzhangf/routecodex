@@ -2543,18 +2543,31 @@ async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_wi
         .await
         .expect("Anthropic mock must receive provider request")
         .unwrap();
+    // The provider-attempt failure is isolated from the client: exhaustion ends the
+    // streaming client transport as an aborted SSE transfer instead of projecting a
+    // provider-derived Error06/502, a response.failed event, or the malformed
+    // control text.
+    let response = send_result.expect(
+        "exhausted malformed provider response must not project a provider-derived error \
+         status",
+    );
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/event-stream",
+        "exhausted malformed provider response must keep the SSE boundary, not a \
+         terminal error frame",
+    );
+    // A complete response body (including any provider-derived 502/response.failed
+    // payload) would read Ok here; an Err is the aborted SSE transfer that the
+    // streaming client retries, so exhaustion does not end the session.
+    let _body_error = response.bytes().await.expect_err(
+        "exhausted malformed provider response must abort the streaming body instead of \
+         ending the transfer normally",
+    );
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(capture.body["model"], "wire-test");
-    // The provider-attempt failure is isolated from the client: exhaustion must
-    // terminate the client transport with zero HTTP status instead of projecting
-    // a provider-derived Error06/502 or leaking the malformed control text.
-    assert!(
-        send_result.is_err(),
-        "exhausted malformed provider response must break the client transport with no HTTP \
-         status; received {send_result:?}"
-    );
 }
 
 #[tokio::test]
