@@ -132,6 +132,7 @@ pub(crate) struct RecordQuery {
     response_type: Option<String>,
     error_category: Option<String>,
     error_status_code: Option<String>,
+    error_origin: Option<String>,
     session: Option<String>,
     search: Option<String>,
     range: String,
@@ -149,6 +150,10 @@ struct QueryRow {
     meta: serde_json::Value,
     scope: SourceScope,
     result: Option<String>,
+    /// Projection of this row's own `error_category`, filled by
+    /// `project_query_rows`; `null` for rows that carry no error result.
+    #[serde(default)]
+    error_origin: Option<String>,
     attempts: u64,
     failed_attempts: u64,
     switches: u64,
@@ -167,7 +172,7 @@ pub(crate) struct RecordsResponse {
     page: u64,
     page_size: u64,
     stats: serde_json::Value,
-    facets: BTreeMap<String, BTreeMap<String, u64>>,
+    facets: BTreeMap<String, serde_json::Value>,
     timeseries: Vec<TimeseriesBucket>,
 }
 
@@ -279,6 +284,12 @@ impl RecordQuery {
                         return Err(format!("invalid error_status_code: {value}"));
                     }
                     query.error_status_code = Some(value.to_string());
+                }
+                "error_origin" => {
+                    if !matches!(value, "upstream" | "local" | "unknown") {
+                        return Err(format!("invalid error_origin: {value}"));
+                    }
+                    query.error_origin = Some(value.to_string());
                 }
                 "session" => query.session = Some(value.to_string()),
                 "search" => query.search = Some(value.to_string()),
@@ -425,6 +436,16 @@ impl RecordQuery {
             if !attempt_matches && !terminal_matches {
                 return false;
             }
+        }
+        // AND-combines with `error_status_code`. Origin is defined only for rows
+        // that carry an error result, so this never selects a row whose own
+        // `error_origin` is null (success, active, cancelled).
+        if self
+            .error_origin
+            .as_deref()
+            .is_some_and(|origin| row_error_origin_opt(row) != Some(origin))
+        {
+            return false;
         }
         if let Some(search) = self
             .search
@@ -598,6 +619,9 @@ fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
             .map(|row| to_attempt_query_row(row))
             .collect::<Vec<_>>(),
     );
+    for row in query_rows.iter_mut() {
+        row.error_origin = row_error_origin_opt(row).map(str::to_string);
+    }
     query_rows
 }
 
@@ -617,6 +641,7 @@ fn to_attempt_query_row(row: SourceRow) -> QueryRow {
         meta: row.meta,
         scope: row.scope,
         result: Some("failed-attempt".to_string()),
+        error_origin: None,
         attempts: row.attempts,
         failed_attempts: row.failed_attempts,
         switches: row.switches,
@@ -625,6 +650,39 @@ fn to_attempt_query_row(row: SourceRow) -> QueryRow {
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
         raw_artifact_ref: row.raw_artifact_ref,
+    }
+}
+
+/// Classifies a failure row from the typed `error_category`, never from the
+/// status: `provider_status` is the *projected client* status, so a network
+/// failure also shows up as `502` there, while `error_category` is the only field
+/// that separates "the provider rejected us" from "we failed to get an answer".
+///
+/// The rule is deliberately **positive for `upstream` and open for `local`**: the
+/// category set is open-ended, so a closed allowlist of local categories would
+/// silently misclassify every category added later. `provider_http_<code>` with a
+/// non-numeric `<code>` is therefore `local`, not `upstream`.
+fn row_error_origin(row: &QueryRow) -> &'static str {
+    let Some(category) = row.meta.get("error_category").and_then(Value::as_str) else {
+        return "unknown";
+    };
+    let category = category.trim();
+    if category.is_empty() {
+        return "unknown";
+    }
+    match category.strip_prefix("provider_http_") {
+        Some(code) if code.parse::<u16>().is_ok() => "upstream",
+        _ => "local",
+    }
+}
+
+/// Origin-bearing rows are exactly the rows that carry an error result. A
+/// success, active, or cancelled row has no origin: its serialized
+/// `error_origin` is `null` and no `error_origin` filter selects it.
+fn row_error_origin_opt(row: &QueryRow) -> Option<&'static str> {
+    match row.result.as_deref() {
+        Some("error") | Some("failed-attempt") => Some(row_error_origin(row)),
+        _ => None,
     }
 }
 
@@ -646,6 +704,20 @@ fn facet_add_status_code_label(
         .entry(name.to_string())
         .or_default()
         .entry(label)
+        .or_default() += 1;
+}
+
+/// Splits one `error_status_codes` bucket by origin; fed from the same places, so
+/// the three origin counts sum to `error_status_codes[s]` for every status `s`.
+fn facet_add_status_origin(
+    status_origins: &mut BTreeMap<String, BTreeMap<String, u64>>,
+    label: String,
+    origin: &'static str,
+) {
+    *status_origins
+        .entry(label)
+        .or_default()
+        .entry(origin.to_string())
         .or_default() += 1;
 }
 
@@ -885,7 +957,18 @@ async fn records(
         "provider_failure_count":0u64,
         "by_provider": {}
     });
-    let mut facets = BTreeMap::new();
+    let mut facets: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    // `error_status_origins` splits each `error_status_codes` bucket by origin and
+    // `error_origins` is its rollup over error rows; both are seeded so a fixture
+    // with no failure row still reports explicit zero counts.
+    let mut status_origins: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    facets.insert(
+        "error_origins".to_string(),
+        ["upstream", "local", "unknown"]
+            .into_iter()
+            .map(|origin| (origin.to_string(), 0u64))
+            .collect(),
+    );
     let count = filtered.len() as f64;
     let mut input = 0;
     let mut output = 0;
@@ -935,6 +1018,12 @@ async fn records(
         }
         if row.result.as_deref() == Some("failed-attempt") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
+            facet_add_status_origin(
+                &mut status_origins,
+                row_status_code(row),
+                row_error_origin(row),
+            );
+            facet_add(&mut facets, "error_origins", Some(row_error_origin(row)));
         }
         if matches!(
             row.result.as_deref(),
@@ -1008,8 +1097,23 @@ async fn records(
         );
         if row.result.as_deref() == Some("error") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
+            facet_add_status_origin(
+                &mut status_origins,
+                row_status_code(row),
+                row_error_origin(row),
+            );
+            facet_add(&mut facets, "error_origins", Some(row_error_origin(row)));
         } else if row.result.as_deref() == Some("cancelled") {
             facet_add_status_code_label(&mut facets, "error_status_codes", "499".to_string());
+            // Mirrors the pre-existing 499 bucket so `error_status_origins` stays a
+            // strict refinement of `error_status_codes`. A cancellation carries no
+            // category, so it lands in `unknown` — but it is NOT counted in
+            // `error_origins`, which must not report a cancellation as an error.
+            facet_add_status_origin(
+                &mut status_origins,
+                "499".to_string(),
+                row_error_origin(row),
+            );
         }
     }
     stats["count"] = json!(count as u64);
@@ -1127,6 +1231,11 @@ async fn records(
     if with_duration > 0 {
         stats["avg_duration_ms"] = json!(durations as f64 / with_duration as f64);
     }
+    let mut facets: BTreeMap<String, serde_json::Value> = facets
+        .into_iter()
+        .map(|(name, counts)| (name, json!(counts)))
+        .collect();
+    facets.insert("error_status_origins".to_string(), json!(status_origins));
     Json(RecordsResponse {
         records: page_rows.to_vec(),
         total,
@@ -1323,104 +1432,5 @@ fn urldecode_component(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        error_category_status_code, row_cache_creation_value, row_cache_hit_numerator,
-        row_cache_read_value, row_cached_value, row_effective_input, row_input_value,
-        row_output_value, row_total_value, QueryRow, SourceScope,
-    };
-    use serde_json::{json, Value};
-
-    #[test]
-    fn openai_cached_subcount_keeps_raw_input_as_denominator() {
-        // OpenAI/Responses shape: input_tokens already includes cached_tokens;
-        // cache hit is cached / input_tokens.
-        let row = build_usage_row(json!({
-            "input_tokens": 1000,
-            "output_tokens": 200,
-            "cached_tokens": 250,
-            "total_tokens": 1200,
-        }));
-        assert_eq!(row_input_value(&row), 1000);
-        assert_eq!(row_output_value(&row), 200);
-        assert_eq!(row_cached_value(&row), Some(250));
-        assert_eq!(row_cache_read_value(&row), None);
-        assert_eq!(row_total_value(&row), 1200);
-        assert_eq!(row_cache_hit_numerator(&row), 250);
-        assert_eq!(row_effective_input(&row), 1000);
-    }
-
-    #[test]
-    fn split_anthropic_cache_fields_keep_read_and_creation_distinct() {
-        let row = build_usage_row(json!({
-            "input_tokens": 800,
-            "output_tokens": 150,
-            "cache_read_input_tokens": 600,
-            "cache_creation_input_tokens": 100,
-            "total_tokens": 950,
-        }));
-        assert_eq!(row_input_value(&row), 800);
-        assert_eq!(row_cached_value(&row), None);
-        assert_eq!(row_cache_read_value(&row), Some(600));
-        assert_eq!(row_cache_creation_value(&row), Some(100));
-        // Anthropic input excludes cache, so the denominator is
-        // input + read + creation and the hit count is the read count.
-        assert_eq!(row_cache_hit_numerator(&row), 600);
-        assert_eq!(row_effective_input(&row), 1500);
-    }
-
-    #[test]
-    fn split_cache_read_zero_does_not_use_creation_as_hit() {
-        let row = build_usage_row(json!({
-            "input_tokens": 100,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 30,
-            "total_tokens": 105,
-        }));
-        assert_eq!(row_cache_read_value(&row), Some(0));
-        assert_eq!(row_cache_creation_value(&row), Some(30));
-        // Creation is never a hit, but it still belongs in the denominator.
-        assert_eq!(row_cache_hit_numerator(&row), 0);
-        assert_eq!(row_effective_input(&row), 130);
-    }
-
-    fn build_usage_row(usage: Value) -> QueryRow {
-        QueryRow {
-            request_key: "k".to_string(),
-            event_type: "request.completed".to_string(),
-            started_epoch_ms: 0,
-            updated_epoch_ms: 0,
-            finished_epoch_ms: Some(0),
-            duration_ms: Some(0),
-            meta: json!({}),
-            scope: SourceScope::default(),
-            result: Some("success".to_string()),
-            attempts: 1,
-            failed_attempts: 0,
-            switches: 0,
-            usage: Some(usage),
-            timing_internal_ms: None,
-            timing_external_ms: None,
-            servertool: false,
-            raw_artifact_ref: None,
-        }
-    }
-
-    #[test]
-    fn error_categories_always_have_numbered_status_projection() {
-        assert_eq!(
-            error_category_status_code(Some("malformed_json")),
-            Some("400".to_string())
-        );
-        assert_eq!(
-            error_category_status_code(Some("provider_response_sse_event_invalid")),
-            Some("599".to_string())
-        );
-        assert_eq!(
-            error_category_status_code(Some("v3_debug_failure")),
-            Some("598".to_string())
-        );
-        assert_eq!(error_category_status_code(Some("unclassified")), None);
-    }
-}
+#[path = "observability_tests.rs"]
+mod tests;

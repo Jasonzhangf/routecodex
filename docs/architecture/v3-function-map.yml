@@ -5460,6 +5460,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/dashboard.rs
   - v3/crates/routecodex-v3-admin/src/api/deploy.rs
   - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/observability_tests.rs
   - v3/crates/routecodex-v3-admin/src/api/providers.rs
   - v3/crates/routecodex-v3-admin/src/api/reload.rs
   - v3/crates/routecodex-v3-admin/src/api/routes.rs
@@ -5543,6 +5544,7 @@ features:
   - v3/crates/routecodex-v3-admin/src/api/dashboard.rs
   - v3/crates/routecodex-v3-admin/src/api/deploy.rs
   - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/crates/routecodex-v3-admin/src/api/observability_tests.rs
   - v3/crates/routecodex-v3-admin/src/api/providers.rs
   - v3/crates/routecodex-v3-admin/src/api/reload.rs
   - v3/crates/routecodex-v3-admin/src/api/routes.rs

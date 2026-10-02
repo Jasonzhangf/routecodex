@@ -650,3 +650,249 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
         "failed-attempt"
     );
 }
+
+/// Same request row shape, with the typed error category chosen by the caller.
+/// `provider_status` stays the projected client status, which is why a local
+/// transport failure and a genuine upstream 502 both project `502`.
+fn observability_attempt_row_with_category(
+    request_key: &str,
+    provider_status: u16,
+    error_category: &str,
+) -> serde_json::Value {
+    let mut row = observability_attempt_row(request_key, provider_status);
+    row["meta"]["error_category"] = serde_json::json!(error_category);
+    row
+}
+
+fn find_record<'a>(body: &'a serde_json::Value, request_key: &str) -> &'a serde_json::Value {
+    body["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .find(|row| row["request_key"] == request_key)
+        .unwrap_or_else(|| panic!("record {request_key} missing from {body}"))
+}
+
+/// Acceptance criteria 2 and 5: one `502` bucket splits into the provider really
+/// answering 502 versus our own transport failure, while the pre-existing
+/// `error_status_codes` facet stays exactly as it was.
+#[tokio::test]
+async fn observability_splits_one_error_status_bucket_by_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:local", 502, "provider_transport_error"),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    // Unchanged: both rows still project the client status 502.
+    assert_eq!(body["facets"]["error_status_codes"]["502"], 2);
+    // The new facet is the direct answer to the complaint: `502` is 1 + 1, not 2.
+    assert_eq!(
+        body["facets"]["error_status_origins"]["502"],
+        serde_json::json!({"upstream": 1, "local": 1})
+    );
+    assert_eq!(
+        body["facets"]["error_origins"],
+        serde_json::json!({"upstream": 1, "local": 1, "unknown": 0})
+    );
+}
+
+/// Acceptance criterion 3: every failure row carries its own origin next to
+/// `result`, and a success row carries none.
+#[tokio::test]
+async fn observability_rows_expose_error_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:local", 502, "provider_transport_error"),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    assert_eq!(
+        find_record(&body, "4444:upstream")["error_origin"],
+        "upstream"
+    );
+    assert_eq!(find_record(&body, "4444:local")["error_origin"], "local");
+    assert!(
+        find_record(&body, "4444:ok")["error_origin"].is_null(),
+        "a success row has no error origin"
+    );
+}
+
+/// Acceptance criterion 5: for every status `s`, the origin counts sum to
+/// `error_status_codes[s]` and `error_status_origins[s].upstream` equals the
+/// number of rows whose category really is `provider_http_s`. This is what makes
+/// the new facet a strict refinement of the old one rather than a second,
+/// independently-computed number.
+#[tokio::test]
+async fn observability_status_origins_refine_status_codes_per_status() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:up-502", 502, "provider_http_502"),
+            observability_attempt_row_with_category(
+                "4444:loc-502",
+                502,
+                "provider_transport_error",
+            ),
+            observability_attempt_row_with_category("4444:up-429", 429, "provider_http_429"),
+            observability_attempt_row_with_category("4444:loc-503", 503, "api_error"),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    let codes = body["facets"]["error_status_codes"]
+        .as_object()
+        .expect("error_status_codes object");
+    let origins = body["facets"]["error_status_origins"]
+        .as_object()
+        .expect("error_status_origins object");
+    assert_eq!(
+        codes.keys().collect::<Vec<_>>(),
+        origins.keys().collect::<Vec<_>>(),
+        "the refined facet must cover exactly the statuses the old facet reports"
+    );
+    // The cross-check: upstream == the number of rows whose category really is
+    // `provider_http_<status>` (only 502 and 429 have such a row above).
+    let upstream_rows_for = |status: &str| -> u64 {
+        match status {
+            "502" | "429" => 1,
+            _ => 0,
+        }
+    };
+    for (status, code_count) in codes {
+        let split = origins[status]
+            .as_object()
+            .expect("per-status origin object");
+        let split_total: u64 = split.values().map(|count| count.as_u64().unwrap()).sum();
+        assert_eq!(
+            split_total,
+            code_count.as_u64().unwrap(),
+            "status {status} must split into exactly its own total"
+        );
+        assert_eq!(
+            split
+                .get("upstream")
+                .and_then(|count| count.as_u64())
+                .unwrap_or(0),
+            upstream_rows_for(status),
+            "status {status} upstream count must equal its provider_http_{status} rows"
+        );
+    }
+    assert_eq!(
+        origins["502"],
+        serde_json::json!({"upstream": 1, "local": 1})
+    );
+    assert_eq!(origins["429"], serde_json::json!({"upstream": 1}));
+    assert_eq!(origins["503"], serde_json::json!({"local": 1}));
+}
+
+/// Acceptance criterion 4: the filter selects by origin, AND-combines with
+/// `error_status_code`, and rejects an unknown origin value.
+#[tokio::test]
+async fn observability_filters_by_error_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream-502", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:upstream-503", 503, "provider_http_503"),
+            observability_attempt_row_with_category(
+                "4444:local-502",
+                502,
+                "provider_transport_error",
+            ),
+            observability_attempt_row_with_category(
+                "4444:local-timeout",
+                502,
+                "provider_response_header_timeout",
+            ),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let local: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&error_origin=local"
+        ))
+        .send()
+        .await
+        .expect("local response")
+        .json()
+        .await
+        .expect("local json");
+    assert_eq!(local["total"], 2);
+    for row in local["records"].as_array().expect("local records") {
+        assert_eq!(row["error_origin"], "local");
+    }
+
+    let upstream_502: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&error_origin=upstream&error_status_code=502"
+        ))
+        .send()
+        .await
+        .expect("upstream 502 response")
+        .json()
+        .await
+        .expect("upstream 502 json");
+    assert_eq!(
+        upstream_502["total"], 1,
+        "only the genuine upstream 502, not the local failures that also project 502"
+    );
+    assert_eq!(
+        find_record(&upstream_502, "4444:upstream-502")["error_origin"],
+        "upstream"
+    );
+
+    let rejected = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&error_origin=bogus"
+        ))
+        .send()
+        .await
+        .expect("bogus origin response");
+    assert_eq!(rejected.status(), 400);
+    let rejected_body: serde_json::Value = rejected.json().await.expect("bogus origin json");
+    assert_eq!(rejected_body["error"], "invalid error_origin: bogus");
+}
