@@ -5983,3 +5983,47 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server openai_chat_http_entry_completes_responses_tool_round_trip
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_inbound_websocket_projects_json_completed_event_and_enters_runtime
   - git diff --check
+- feature_id: v3.anthropic_control_text_resp03
+  status: source_gate_verified
+  change_risk: high
+  owner_kind: rust_project_v3_runtime_chat_process_gate
+  owner_scope: Resp03-only governance of the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; all suspect, incomplete, and literal control text stays ordinary visible output.
+  owner_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  resource_bindings:
+  - v3.hub.response_semantic
+  mainline_bindings:
+  - v3-hub-relay-resp-03
+  entry_symbols:
+  - govern_v3_anthropic_control_text_at_resp03
+  - classify_v3_anthropic_text_frame_at_resp03
+  allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_resp_inbound_01_raw.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_json_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-error/src/tests.rs
+  - docs/goals/v3-anthropic-dsml-text-leak-20261001.md
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  - docs/architecture/v3-verification-map.yml
+  forbidden_paths:
+  - v3/crates/routecodex-v3-server/src
+  - v3/crates/routecodex-v3-provider-responses/src
+  - src
+  - sharedmodule
+  - ~/.rcc
+  required_gates:
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - git diff --check
