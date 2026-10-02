@@ -44,62 +44,71 @@ impl V3ProviderHealthPersistenceTicket {
 }
 
 impl V3ProviderHealthPersistenceWriter {
-    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
+    fn start(coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
+        Self::start_with_spawn(coordinator, |name, work| {
+            std::thread::Builder::new().name(name).spawn(work)
+        })
+    }
+
+    fn start_with_spawn(
+        mut coordinator: V3ProviderCooldownCoordinator,
+        spawn: impl FnOnce(
+            String,
+            Box<dyn FnOnce() + Send + 'static>,
+        ) -> std::io::Result<std::thread::JoinHandle<()>>,
+    ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
         let alarm = Arc::new(RwLock::new(None));
         let writer_alarm = Arc::clone(&alarm);
-        let spawned = std::thread::Builder::new()
-            .name("v3-provider-health-persistence".to_string())
-            .spawn(move || {
-                let mut persisted_entries = coordinator.persisted_entries();
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        V3ProviderHealthPersistenceCommand::Replace(entries) => {
-                            let mut merged_entries = persisted_entries
-                                .iter()
-                                .filter(|(key, _, _)| {
-                                    !matches!(
-                                        key.failure_class,
-                                        V3ProviderCooldownFailureClass::Semantic
-                                            | V3ProviderCooldownFailureClass::ProbeLong
-                                    )
-                                })
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            merged_entries.extend(entries);
-                            if merged_entries == persisted_entries {
-                                continue;
-                            }
-                            match coordinator.replace_entries(merged_entries.clone()) {
-                                Ok(()) => {
-                                    persisted_entries = merged_entries;
-                                    if let Ok(mut alarm) = writer_alarm.write() {
-                                        *alarm = None;
-                                    }
-                                }
-                                Err(error) => set_persistence_alarm(
-                                    &writer_alarm,
-                                    format!("provider health persistence write failed: {error}"),
-                                ),
-                            }
+        let work: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
+            let mut persisted_entries = coordinator.persisted_entries();
+            while let Ok(command) = receiver.recv() {
+                match command {
+                    V3ProviderHealthPersistenceCommand::Replace(entries) => {
+                        let mut merged_entries = persisted_entries
+                            .iter()
+                            .filter(|(key, _, _)| {
+                                !matches!(
+                                    key.failure_class,
+                                    V3ProviderCooldownFailureClass::Semantic
+                                        | V3ProviderCooldownFailureClass::ProbeLong
+                                )
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        merged_entries.extend(entries);
+                        if merged_entries == persisted_entries {
+                            continue;
                         }
-                        V3ProviderHealthPersistenceCommand::Flush(receipt) => {
-                            let result = writer_alarm
-                                .read()
-                                .map_err(|error| {
-                                    format!(
-                                        "provider health persistence alarm lock poisoned: {error}"
-                                    )
-                                })
-                                .and_then(|alarm| match alarm.as_ref() {
-                                    Some(error) => Err(error.clone()),
-                                    None => Ok(()),
-                                });
-                            let _ = receipt.send(result);
+                        match coordinator.replace_entries(merged_entries.clone()) {
+                            Ok(()) => {
+                                persisted_entries = merged_entries;
+                                if let Ok(mut alarm) = writer_alarm.write() {
+                                    *alarm = None;
+                                }
+                            }
+                            Err(error) => set_persistence_alarm(
+                                &writer_alarm,
+                                format!("provider health persistence write failed: {error}"),
+                            ),
                         }
                     }
+                    V3ProviderHealthPersistenceCommand::Flush(receipt) => {
+                        let result = writer_alarm
+                            .read()
+                            .map_err(|error| {
+                                format!("provider health persistence alarm lock poisoned: {error}")
+                            })
+                            .and_then(|alarm| match alarm.as_ref() {
+                                Some(error) => Err(error.clone()),
+                                None => Ok(()),
+                            });
+                        let _ = receipt.send(result);
+                    }
                 }
-            });
+            }
+        });
+        let spawned = spawn("v3-provider-health-persistence".to_string(), work);
         Self::after_spawn(sender, alarm, spawned)
     }
 
@@ -168,6 +177,26 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
+    start_provider_health_persistence_with_writer(
+        manifest,
+        persistence_path,
+        legacy_persistence_path,
+        V3ProviderHealthPersistenceWriter::start,
+    )
+}
+
+fn start_provider_health_persistence_with_writer<F>(
+    manifest: &V3Config05ManifestPublished,
+    persistence_path: Option<PathBuf>,
+    legacy_persistence_path: Option<PathBuf>,
+    start_writer: F,
+) -> Option<(
+    V3ProviderHealthPersistenceWriter,
+    V3ProviderCooldownPersistenceEntries,
+)>
+where
+    F: FnOnce(V3ProviderCooldownCoordinator) -> Result<V3ProviderHealthPersistenceWriter, String>,
+{
     let path = persistence_path?;
     let mut coordinator =
         match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
@@ -191,7 +220,7 @@ pub(super) fn start_provider_health_persistence(
         ));
     }
     let entries = coordinator.persisted_entries();
-    match V3ProviderHealthPersistenceWriter::start(coordinator) {
+    match start_writer(coordinator) {
         Ok(writer) => Some((writer, entries)),
         Err(error) => Some((disabled_persistence_writer(error), entries)),
     }
@@ -746,22 +775,39 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     }
 
     #[test]
-    fn persistence_writer_start_failure_is_disabled_without_panicking() {
-        let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
-        drop(receiver);
-        let alarm = Arc::new(RwLock::new(None));
-        let error = V3ProviderHealthPersistenceWriter::after_spawn(
-            sender,
-            Arc::clone(&alarm),
-            Err(std::io::Error::other("injected writer start failure")),
-        )
-        .expect_err("a failed writer start must be returned to the startup caller");
+    fn persistence_writer_spawn_failure_disables_startup_without_panicking() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+        coordinator
+            .record_failure(
+                "p",
+                Some("k"),
+                Some("m"),
+                V3ProviderCooldownFailureClass::Semantic,
+                100,
+                crate::global_cooldown::V3ProviderCooldownObservation::default(),
+            )
+            .expect("seed persisted cooldown");
+        let manifest = manifest("s", "127.0.0.1", 1);
 
-        assert!(
-            error.contains("provider health persistence writer start failed"),
-            "{error}"
+        let (writer, entries) = start_provider_health_persistence_with_writer(
+            &manifest,
+            Some(path),
+            None,
+            |coordinator| {
+                V3ProviderHealthPersistenceWriter::start_with_spawn(coordinator, |_name, _work| {
+                    Err(std::io::Error::other("injected writer start failure"))
+                })
+            },
+        )
+        .expect("spawn failure must degrade provider health persistence");
+
+        assert_eq!(
+            entries.len(),
+            1,
+            "startup failure must preserve cooldown entries"
         );
-        let writer = disabled_persistence_writer(error);
         assert!(writer
             .alarm()
             .expect("disabled writer must retain the startup failure")
