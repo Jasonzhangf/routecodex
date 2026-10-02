@@ -964,4 +964,9 @@ fn persistence_writer_start_failure_raises_alarm_instead_of_panicking() {
     // unwrapping the writer thread.
     writer.enqueue(V3ObsRequestRow::default());
     assert!(writer.flush().is_err());
+    assert!(alarm
+        .read()
+        .expect("observability alarm lock")
+        .as_deref()
+        .is_some_and(|failure| failure.contains("observability persistence writer start failed")));
 }
