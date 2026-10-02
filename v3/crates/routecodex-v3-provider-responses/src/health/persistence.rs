@@ -165,12 +165,13 @@ pub(super) fn start_provider_health_persistence(
             Err(error) => return Some((disabled_persistence_writer(error), Vec::new())),
         };
     if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
-        return Some((disabled_persistence_writer(error), Vec::new()));
+        let entries = coordinator.persisted_entries();
+        return Some((disabled_persistence_writer(error), entries));
     }
     let entries = coordinator.persisted_entries();
     match V3ProviderHealthPersistenceWriter::start(coordinator) {
         Ok(writer) => Some((writer, entries)),
-        Err(error) => Some((disabled_persistence_writer(error), Vec::new())),
+        Err(error) => Some((disabled_persistence_writer(error), entries)),
     }
 }
 
@@ -374,7 +375,9 @@ impl V3ProviderHealthStore {
 
 fn set_persistence_alarm(alarm: &RwLock<Option<String>>, message: String) {
     if let Ok(mut alarm) = alarm.write() {
-        *alarm = Some(message);
+        if alarm.is_none() {
+            *alarm = Some(message);
+        }
     }
 }
 
@@ -535,6 +538,17 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .expect("disabled persistence must retain its failure")
             .contains("unsupported provider cooldown state schema 3"));
         assert_eq!(std::fs::read(path).expect("read original state"), contents);
+
+        writer.enqueue(Vec::new());
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its first failure")
+            .contains("unsupported provider cooldown state schema 3"));
+        assert!(writer.flush_snapshot(Vec::new()).is_err());
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its first failure after flush")
+            .contains("unsupported provider cooldown state schema 3"));
     }
 
     #[test]
