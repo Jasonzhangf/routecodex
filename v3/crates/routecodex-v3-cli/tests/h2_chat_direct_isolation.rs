@@ -120,8 +120,13 @@ async fn chat_direct_success_baseline_json_and_sse() {
     wait_for_health(&client, &mut cli, ports.success, "chat_success").await;
 
     let json_response = client
-        .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.success))
-        .json(&json!({"model":"client-test","messages":[{"role":"user","content":"json baseline"}]}))
+        .post(format!(
+            "http://127.0.0.1:{}/v1/chat/completions",
+            ports.success
+        ))
+        .json(
+            &json!({"model":"client-test","messages":[{"role":"user","content":"json baseline"}]}),
+        )
         .send()
         .await
         .unwrap();
@@ -287,12 +292,7 @@ async fn chat_direct_last_real_429_survives_later_transport_failure_and_reselect
     let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut no_response = start_no_response_upstream().await;
     let ports = ChatPorts::allocate();
-    let config = write_chat_config(
-        &ports,
-        &success,
-        Some(&rate),
-        Some(&no_response),
-    );
+    let config = write_chat_config(&ports, &success, Some(&rate), Some(&no_response));
     let client = reqwest::Client::new();
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
@@ -464,8 +464,10 @@ async fn chat_relay_cross_protocol_pool_exhaustion_no_response_breaks_client_tra
 #[tokio::test]
 async fn chat_relay_cross_protocol_upstream_http_502_is_not_forwarded_to_client() {
     let success = start_controlled_responses_upstream(ProviderMode::Success).await;
-    let mut bad_gateway_a = start_controlled_responses_upstream(ProviderMode::UpstreamBadGateway).await;
-    let mut bad_gateway_b = start_controlled_responses_upstream(ProviderMode::UpstreamBadGateway).await;
+    let mut bad_gateway_a =
+        start_controlled_responses_upstream(ProviderMode::UpstreamBadGateway).await;
+    let mut bad_gateway_b =
+        start_controlled_responses_upstream(ProviderMode::UpstreamBadGateway).await;
     let ports = ChatPorts::allocate();
     let config = write_chat_config_for_provider_type(
         &ports,
@@ -491,7 +493,8 @@ async fn chat_relay_cross_protocol_upstream_http_502_is_not_forwarded_to_client(
 #[tokio::test]
 async fn chat_relay_cross_protocol_error_then_reselect_succeeds() {
     let mut success = start_controlled_responses_upstream(ProviderMode::Success).await;
-    let mut unavailable = start_controlled_responses_upstream(ProviderMode::UpstreamServiceUnavailable).await;
+    let mut unavailable =
+        start_controlled_responses_upstream(ProviderMode::UpstreamServiceUnavailable).await;
     let ports = ChatPorts::allocate();
     let config = write_chat_config_for_provider_type(
         &ports,
@@ -542,8 +545,16 @@ async fn chat_direct_incomplete_provider_terminal_breaks_client_transport() {
 
     assert_chat_no_front_http_headers(ports.exhausted).await;
     assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut incomplete_a.captures, "first incomplete provider terminal").await;
-    next_capture(&mut incomplete_b.captures, "second incomplete provider terminal").await;
+    next_capture(
+        &mut incomplete_a.captures,
+        "first incomplete provider terminal",
+    )
+    .await;
+    next_capture(
+        &mut incomplete_b.captures,
+        "second incomplete provider terminal",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -572,8 +583,16 @@ async fn chat_relay_cross_protocol_incomplete_provider_terminal_breaks_client_tr
 
     assert_chat_no_front_http_headers(ports.exhausted).await;
     assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut incomplete_a.captures, "relay first incomplete terminal").await;
-    next_capture(&mut incomplete_b.captures, "relay second incomplete terminal").await;
+    next_capture(
+        &mut incomplete_a.captures,
+        "relay first incomplete terminal",
+    )
+    .await;
+    next_capture(
+        &mut incomplete_b.captures,
+        "relay second incomplete terminal",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -850,12 +869,9 @@ supports_streaming = true
         ),
         None => String::new(),
     };
-    let success_target =
-        r#"{ kind = "provider_model", provider = "success", model = "test", key = "success", priority = 1 }"#;
-    let failure_a_target =
-        r#"{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 1 }"#;
-    let failure_b_target =
-        r#"{ kind = "provider_model", provider = "failure_b", model = "test", key = "failure-b", priority = 1 }"#;
+    let success_target = r#"{ kind = "provider_model", provider = "success", model = "test", key = "success", priority = 1 }"#;
+    let failure_a_target = r#"{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 1 }"#;
+    let failure_b_target = r#"{ kind = "provider_model", provider = "failure_b", model = "test", key = "failure-b", priority = 1 }"#;
     // Reselect walks the cooled provider first and must recover on the healthy one.
     let reselect_forwarder_targets = match failure_a {
         Some(_) => format!("{failure_a_target},\n  {success_target}"),
@@ -996,7 +1012,6 @@ targets = [{{ kind = "forwarder", id = "chat_exhausted", priority = 1 }}]
         _config_dir: config_dir,
     }
 }
-
 
 fn start_cli_server(config_path: &ChatConfig, _ports: Vec<u16>) -> CliProcess {
     let runtime_dir = tempfile::Builder::new()
