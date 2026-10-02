@@ -1325,9 +1325,11 @@ fn usage_summary_extracts_cached_read_hit_tokens() {
     assert_eq!(summary.cache_read_input_tokens, Some(41_984));
     assert_eq!(summary.cache_creation_input_tokens, Some(7));
     assert_eq!(summary.cached_tokens, None);
+    // Anthropic input excludes cache, so the denominator includes both the read
+    // and the creation count: 59842 + 41984 + 7 = 101833.
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=59842 usage_out=822 usage_cache=41984/101826(41.2%) usage_total=60664"
+        "usage_in=59842 usage_out=822 usage_cache=41984/101833(41.2%) usage_total=60664"
     );
 }
 

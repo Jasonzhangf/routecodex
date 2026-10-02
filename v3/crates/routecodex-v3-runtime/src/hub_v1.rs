@@ -153,6 +153,7 @@ mod anthropic_relay_runtime_codec;
 pub use anthropic_relay_runtime_codec::*;
 mod relay_sse_hooks;
 mod resource_hooks;
+pub mod usage_normalization;
 pub use resource_hooks::*;
 
 #[cfg(test)]

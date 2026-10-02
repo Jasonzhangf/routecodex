@@ -1221,32 +1221,6 @@ pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
     Ok(projected)
 }
 
-pub(super) fn anthropic_usage_as_responses_usage(value: Option<&Value>) -> Option<Value> {
-    let object = value?.as_object()?;
-    let input = object
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output = object
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let mut usage = Map::new();
-    usage.insert("input_tokens".to_string(), json!(input));
-    usage.insert("output_tokens".to_string(), json!(output));
-    usage.insert("total_tokens".to_string(), json!(input + output));
-    if let Some(cache_creation) = object.get("cache_creation_input_tokens") {
-        usage.insert(
-            "cache_creation_input_tokens".to_string(),
-            cache_creation.clone(),
-        );
-    }
-    if let Some(cache_read) = object.get("cache_read_input_tokens") {
-        usage.insert("cache_read_input_tokens".to_string(), cache_read.clone());
-    }
-    Some(Value::Object(usage))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

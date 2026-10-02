@@ -2510,6 +2510,231 @@ fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
     bytes
 }
 
+fn anthropic_sse_cache_usage_fixture(
+    input_tokens: u64,
+    cache_read: u64,
+    cache_creation: u64,
+    output_tokens: u64,
+    text: &str,
+) -> Vec<u8> {
+    let events = vec![
+        json!({"type":"message_start","message":{"id":"msg_usage_fixture","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":input_tokens,"cache_read_input_tokens":cache_read,"cache_creation_input_tokens":cache_creation}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":output_tokens}}),
+        json!({"type":"message_stop"}),
+    ];
+    let mut bytes = Vec::new();
+    for event in events {
+        bytes.extend_from_slice(
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+fn client_sse_terminal_usage(body: &str) -> Value {
+    let mut usage = None;
+    for line in body.lines() {
+        let Some(data) = line.strip_prefix("data: ") else {
+            continue;
+        };
+        let Ok(event) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        let candidate = event
+            .get("response")
+            .and_then(|response| response.get("usage"))
+            .or_else(|| event.get("usage"));
+        if let Some(value) = candidate {
+            if value.is_object() {
+                usage = Some(value.clone());
+            }
+        }
+    }
+    usage.expect("client terminal event must carry usage")
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_cache_usage_projects_openai_details_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usage = client_sse_terminal_usage(&body);
+    assert_eq!(usage["input_tokens"], json!(220836), "{body}");
+    assert_eq!(
+        usage["input_tokens_details"]["cached_tokens"],
+        json!(217088),
+        "{body}"
+    );
+    assert_eq!(usage["total_tokens"], json!(221543), "{body}");
+    assert_eq!(usage["output_tokens"], json!(707), "{body}");
+    assert!(
+        !body.contains("cache_read_input_tokens"),
+        "anthropic-private cache field leaked to responses client: {body}"
+    );
+    assert!(
+        !body.contains("cache_creation_input_tokens"),
+        "anthropic-private cache field leaked to responses client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn anthropic_client_anthropic_cache_usage_keeps_native_wire_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec![
+            "responses".to_string(),
+            "anthropic".to_string(),
+            "gemini".to_string(),
+            "openai_chat".to_string(),
+        ];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(format!("{base}/v1/messages"))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "max_tokens":64,
+            "messages":[{"role":"user","content":"hello"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("\"input_tokens\":3748"), "{body}");
+    assert!(body.contains("\"output_tokens\":707"), "{body}");
+    assert!(
+        body.contains("\"cache_read_input_tokens\":217088"),
+        "{body}"
+    );
+    assert!(
+        !body.contains("total_tokens"),
+        "responses-only field leaked to anthropic client: {body}"
+    );
+    assert!(
+        !body.contains("input_tokens_details"),
+        "responses-only field leaked to anthropic client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn chat_client_anthropic_cache_usage_projects_prompt_details_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec![
+            "responses".to_string(),
+            "anthropic".to_string(),
+            "gemini".to_string(),
+            "openai_chat".to_string(),
+        ];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(format!("{base}/v1/chat/completions"))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "messages":[{"role":"user","content":"hello"}],
+            "stream":true,
+            "stream_options":{"include_usage":true}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usage = client_sse_terminal_usage(&body);
+    assert_eq!(usage["prompt_tokens"], json!(220836), "{body}");
+    assert_eq!(
+        usage["prompt_tokens_details"]["cached_tokens"],
+        json!(217088),
+        "{body}"
+    );
+    assert_eq!(usage["completion_tokens"], json!(707), "{body}");
+    assert_eq!(usage["total_tokens"], json!(221543), "{body}");
+    assert!(
+        !body.contains("cache_read_input_tokens"),
+        "anthropic-private cache field leaked to chat client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[tokio::test]
 async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_without_error_to_client(
 ) {

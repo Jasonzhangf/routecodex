@@ -543,7 +543,13 @@ fn anthropic_responses_field_parity_response_matrix() {
     assert_eq!(projected["stop_reason"], "tool_use");
     assert_eq!(projected["usage"]["input_tokens"], 13);
     assert_eq!(projected["usage"]["output_tokens"], 8);
-    assert_eq!(projected["usage"]["total_tokens"], 21);
+    // Anthropic Messages wire has no `total_tokens`; Responses-only fields must not leak.
+    assert!(
+        projected["usage"].get("total_tokens").is_none(),
+        "unexpected total_tokens on anthropic client wire: {}",
+        projected["usage"]
+    );
+    assert!(projected["usage"].get("input_tokens_details").is_none());
     assert_eq!(
         projected["content"],
         json!([

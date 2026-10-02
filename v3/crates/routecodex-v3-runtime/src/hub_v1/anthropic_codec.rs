@@ -20,6 +20,7 @@ mod namespace_tool_names;
 mod projection_context;
 mod response_projection;
 mod responses_to_anthropic;
+use super::usage_normalization::project_v3_responses_usage_from_canonical;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
 use response_projection::{
@@ -29,9 +30,9 @@ use response_projection::{
     V3AnthropicTerminalKind,
 };
 use responses_to_anthropic::{
-    anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
-    responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
-    responses_tool_choice_as_anthropic_tool_choice, responses_tools_for_anthropic_wire,
+    chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
+    responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
+    responses_tools_for_anthropic_wire,
 };
 pub(crate) use responses_to_anthropic::{
     project_v3_responses_reasoning_item_as_anthropic_content,
@@ -1150,7 +1151,10 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         response.insert("model".to_string(), model.clone());
     }
     response.insert("output".to_string(), Value::Array(output_items));
-    if let Some(usage) = anthropic_usage_as_responses_usage(object.get("usage")) {
+    if let Some(usage) = object
+        .get("usage")
+        .and_then(project_v3_responses_usage_from_canonical)
+    {
         response.insert("usage".to_string(), usage);
     }
     // Responses has no `finish_reason` field. Terminality is carried by

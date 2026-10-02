@@ -21,6 +21,9 @@ use crate::AppState;
 use axum::extract::{Path as AxumPath, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use routecodex_v3_runtime::hub_v1::usage_normalization::{
+    split_v3_canonical_usage_cache, V3CanonicalUsageCache,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -669,39 +672,47 @@ fn row_output_value(row: &QueryRow) -> u64 {
     usage_value(row, "output_tokens")
 }
 
-fn row_cached_value(row: &QueryRow) -> u64 {
-    usage_value(row, "cached_tokens")
+fn row_cached_value(row: &QueryRow) -> Option<u64> {
+    usage_value_opt(row, "cached_tokens")
 }
 
-fn row_cache_read_value(row: &QueryRow) -> u64 {
+fn row_cache_read_value(row: &QueryRow) -> Option<u64> {
     usage_value_opt(row, "cache_read_input_tokens")
-        .or_else(|| usage_value_opt(row, "cached_tokens"))
-        .unwrap_or(0)
 }
 
-fn row_cache_creation_value(row: &QueryRow) -> u64 {
-    usage_value(row, "cache_creation_input_tokens")
+fn row_cache_creation_value(row: &QueryRow) -> Option<u64> {
+    usage_value_opt(row, "cache_creation_input_tokens")
 }
 
 fn row_total_value(row: &QueryRow) -> u64 {
     usage_value(row, "total_tokens")
 }
 
-/// Returns the cache-hit numerator for the Anthropic/MiniMax/glm-5.3 cache
-/// shape, which exposes `cache_read_input_tokens` independently of
-/// `cache_creation_input_tokens`. Falls back to `cached_tokens` for the
-/// OpenAI/Responses shape that pre-dates the split, so the pre-existing
-/// Admin aggregation stays numerically identical for OpenAI traffic.
-fn row_cache_hit_numerator(row: &QueryRow) -> u64 {
-    let read = row_cache_read_value(row);
-    if read > 0 {
-        return read;
-    }
-    row_cached_value(row)
+/// Row usage -> canonical cache split via the shared truth source.
+///
+/// OpenAI/Responses/Gemini rows carry `cached_tokens` as a sub-count of an
+/// input that already includes cache; Anthropic/MiniMax/glm rows carry
+/// `cache_read_input_tokens` / `cache_creation_input_tokens` as independent
+/// counts that must be added to the uncached input.
+fn row_canonical_usage_cache(row: &QueryRow) -> V3CanonicalUsageCache {
+    split_v3_canonical_usage_cache(
+        Some(row_input_value(row)),
+        row_cached_value(row),
+        row_cache_read_value(row),
+        row_cache_creation_value(row),
+    )
 }
 
+/// Cache-hit numerator: the canonical cached sub-count, i.e. the cache read
+/// count under Anthropic/MiniMax/glm semantics.
+fn row_cache_hit_numerator(row: &QueryRow) -> u64 {
+    row_canonical_usage_cache(row).cached_tokens.unwrap_or(0)
+}
+
+/// Cache-hit denominator: the canonical effective input, i.e. input + read +
+/// creation under Anthropic/MiniMax/glm semantics.
 fn row_effective_input(row: &QueryRow) -> u64 {
-    row_input_value(row).max(row_cached_value(row))
+    row_canonical_usage_cache(row).effective_input_tokens
 }
 
 fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
@@ -899,9 +910,11 @@ async fn records(
         if is_success {
             let row_input = row_input_value(row);
             let row_output = row_output_value(row);
-            let row_cached = row_cached_value(row);
-            let row_cache_read = row_cache_read_value(row);
-            let row_cache_creation = row_cache_creation_value(row);
+            let row_cached = row_cached_value(row).unwrap_or(0);
+            // Canonical hit count: OpenAI `cached_tokens` sub-count, otherwise
+            // Anthropic `cache_read_input_tokens`.
+            let row_cache_read = row_cache_hit_numerator(row);
+            let row_cache_creation = row_cache_creation_value(row).unwrap_or(0);
             input += row_input;
             output += row_output;
             cached += row_cached;
@@ -1312,14 +1325,14 @@ fn urldecode_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        error_category_status_code, row_cache_creation_value, row_cache_read_value,
-        row_cached_value, row_input_value, row_output_value, row_total_value, QueryRow,
-        SourceScope,
+        error_category_status_code, row_cache_creation_value, row_cache_hit_numerator,
+        row_cache_read_value, row_cached_value, row_effective_input, row_input_value,
+        row_output_value, row_total_value, QueryRow, SourceScope,
     };
     use serde_json::{json, Value};
 
     #[test]
-    fn cache_read_uses_raw_input_as_denominator() {
+    fn openai_cached_subcount_keeps_raw_input_as_denominator() {
         // OpenAI/Responses shape: input_tokens already includes cached_tokens;
         // cache hit is cached / input_tokens.
         let row = build_usage_row(json!({
@@ -1330,9 +1343,11 @@ mod tests {
         }));
         assert_eq!(row_input_value(&row), 1000);
         assert_eq!(row_output_value(&row), 200);
-        assert_eq!(row_cached_value(&row), 250);
+        assert_eq!(row_cached_value(&row), Some(250));
+        assert_eq!(row_cache_read_value(&row), None);
         assert_eq!(row_total_value(&row), 1200);
-        assert_eq!(row_cache_read_value(&row), 250);
+        assert_eq!(row_cache_hit_numerator(&row), 250);
+        assert_eq!(row_effective_input(&row), 1000);
     }
 
     #[test]
@@ -1345,9 +1360,13 @@ mod tests {
             "total_tokens": 950,
         }));
         assert_eq!(row_input_value(&row), 800);
-        assert_eq!(row_cached_value(&row), 0);
-        assert_eq!(row_cache_read_value(&row), 600);
-        assert_eq!(row_cache_creation_value(&row), 100);
+        assert_eq!(row_cached_value(&row), None);
+        assert_eq!(row_cache_read_value(&row), Some(600));
+        assert_eq!(row_cache_creation_value(&row), Some(100));
+        // Anthropic input excludes cache, so the denominator is
+        // input + read + creation and the hit count is the read count.
+        assert_eq!(row_cache_hit_numerator(&row), 600);
+        assert_eq!(row_effective_input(&row), 1500);
     }
 
     #[test]
@@ -1359,8 +1378,11 @@ mod tests {
             "cache_creation_input_tokens": 30,
             "total_tokens": 105,
         }));
-        assert_eq!(row_cache_read_value(&row), 0);
-        assert_eq!(row_cache_creation_value(&row), 30);
+        assert_eq!(row_cache_read_value(&row), Some(0));
+        assert_eq!(row_cache_creation_value(&row), Some(30));
+        // Creation is never a hit, but it still belongs in the denominator.
+        assert_eq!(row_cache_hit_numerator(&row), 0);
+        assert_eq!(row_effective_input(&row), 130);
     }
 
     fn build_usage_row(usage: Value) -> QueryRow {
