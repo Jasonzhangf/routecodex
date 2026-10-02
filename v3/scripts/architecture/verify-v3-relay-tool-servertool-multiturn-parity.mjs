@@ -225,7 +225,7 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
 // client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。注释里可以
 // 说明被禁止的协议终止符，因此这里只在去掉行注释后的代码视图上判定。
 forbid(
-  stripRustLineComments(text.responsesRelayRuntime),
+  stripRustComments(text.responsesRelayRuntime),
   files.responsesRelayRuntime,
   /"response\.done"|data: \[DONE\]/,
   'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
@@ -375,11 +375,131 @@ function forbid(source, owner, pattern, label) {
 }
 
 // 门禁只判定代码，不判定说明文字：注释需要能点名被禁止的协议终止符。
-function stripRustLineComments(source) {
-  return source
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n');
+// 必须是字符串/字符/注释感知的扫描：`//` 出现在字符串字面量里（例如 URL）
+// 时不能把该行后续代码当作注释清掉，否则真实违规会被遮蔽。
+// Rust 字符字面量形如 `'a'` / `'\n'` / `'\\'` / `'\u{1F600}'`；`&'static str`
+// 这类生命周期不是字面量。只有在很短的窗口内闭合才按字面量处理，否则视为
+// 生命周期，避免把后续代码整段吞进字面量状态而遮蔽真实违规。
+function rustCharLiteralLength(source, index) {
+  if (source[index] !== "'") return 0;
+  let cursor = index + 1;
+  if (source[cursor] === '\\') {
+    cursor += 1;
+    const escape = source[cursor];
+    if (escape === 'u') {
+      const open = source.indexOf('{', cursor);
+      const close = open < 0 ? -1 : source.indexOf('}', open);
+      if (open < 0 || close < 0 || close - open > 10) return 0;
+      cursor = close + 1;
+    } else if (escape === 'x') {
+      cursor += 3;
+    } else {
+      cursor += 1;
+    }
+  } else {
+    const point = source.codePointAt(cursor);
+    if (point === undefined) return 0;
+    cursor += String.fromCodePoint(point).length;
+  }
+  return source[cursor] === "'" ? cursor + 1 - index : 0;
+}
+
+function stripRustComments(source) {
+  // 就地构造，避免依赖函数外的 `const`（顶层门禁逻辑在该 `const` 初始化前调用本函数）。
+  const rawStringOpen = /^r(#*)"/;
+  let out = '';
+  let index = 0;
+  let state = 'code';
+  let rawStringHashes = '';
+  while (index < source.length) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (state === 'code') {
+      if (char === '/' && next === '/') {
+        state = 'lineComment';
+        index += 2;
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        state = 'blockComment';
+        index += 2;
+        continue;
+      }
+      const rawMatch = rawStringOpen.exec(source.slice(index, index + 12));
+      if (rawMatch) {
+        rawStringHashes = rawMatch[1];
+        // 保留 `r#"` 前缀，使 raw 字符串内容保持可见。
+        out += rawMatch[0];
+        index += rawMatch[0].length;
+        state = 'rawString';
+        continue;
+      }
+      if (char === '"') {
+        state = 'string';
+        out += char;
+        index += 1;
+        continue;
+      }
+      if (char === "'") {
+        const length = rustCharLiteralLength(source, index);
+        if (length > 0) {
+          out += source.slice(index, index + length);
+          index += length;
+          continue;
+        }
+        out += char;
+        index += 1;
+        continue;
+      }
+      out += char;
+      index += 1;
+      continue;
+    }
+    if (state === 'lineComment') {
+      if (char === '\n') {
+        state = 'code';
+        out += char;
+      }
+      index += 1;
+      continue;
+    }
+    if (state === 'blockComment') {
+      if (char === '*' && next === '/') {
+        state = 'code';
+        index += 2;
+        continue;
+      }
+      if (char === '\n') out += char;
+      index += 1;
+      continue;
+    }
+    if (state === 'rawString') {
+      const closing = `"${'#'.repeat(rawStringHashes.length)}`;
+      if (source.startsWith(closing, index)) {
+        out += closing;
+        index += closing.length;
+        state = 'code';
+        rawStringHashes = '';
+        continue;
+      }
+      out += char;
+      index += 1;
+      continue;
+    }
+    // string literal: keep the bytes so literal payloads stay visible to the
+    // forbids, and honour escapes.
+    out += char;
+    if (char === '\\') {
+      if (next !== undefined) out += next;
+      index += 2;
+      continue;
+    }
+    if (char === '"') {
+      state = 'code';
+    }
+    index += 1;
+  }
+  return out;
 }
 
 function requireOrdered(source, owner, phrases, label = 'Req04') {
