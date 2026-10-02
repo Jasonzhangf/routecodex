@@ -2190,6 +2190,7 @@ features:
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-cli/tests/h2_chat_direct_isolation.rs
   resource_bindings:
   - v3.hub.entry_protocol
   - v3.hub.provider_protocol
@@ -2257,6 +2258,7 @@ features:
   - fallback
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
+  - npm run test:v3-h2-chat-direct-isolation
   - npm run verify:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
   - npm run verify:v3-architecture-docs
