@@ -14,6 +14,10 @@ const MODULES = [
   "./app/probe.js",
   "./app/views/providers.js",
   "./app/views/provider-models.js",
+  "./app/views/provider-model-api.js",
+  "./app/views/provider-model-capabilities.js",
+  "./app/views/provider-model-dialog.js",
+  "./app/views/provider-model-picker.js",
 ];
 
 function source(relativePath) {
@@ -192,23 +196,38 @@ assert.match(view, /bindProvidersToRoute/);
 assert.match(view, /await confirmDialog\(\{/);
 
 const models = source("./app/views/provider-models.js");
+const modelApi = source("./app/views/provider-model-api.js");
+const modelCapabilities = source("./app/views/provider-model-capabilities.js");
+const modelDialog = source("./app/views/provider-model-dialog.js");
+const modelPicker = source("./app/views/provider-model-picker.js");
+
 assert.match(models, /export function renderModelsSection\(/);
-assert.match(models, /export function describeApiError\(/);
-assert.match(models, /encodeURIComponent\(providerId\)\}\/models`/);
-assert.match(models, /models\/capability-test`/);
-assert.match(models, /api\("\/api\/providers\/discover", \{/);
-assert.match(models, /body: JSON\.stringify\(\{ id: providerId \}\)/);
+// providers.js keeps importing the error identity from provider-models.js, so the
+// drawer module must keep re-exporting it after the split.
+assert.match(models, /export \{ describeApiError \};/);
+assert.match(modelApi, /export function describeApiError\(/);
+assert.match(modelApi, /encodeURIComponent\(providerId\)\}\/models`/);
+assert.match(modelApi, /models\/capability-test`/);
+assert.match(modelPicker, /api\("\/api\/providers\/discover", \{/);
+assert.match(modelPicker, /body: JSON\.stringify\(\{ id: providerId \}\)/);
 // E1: the replacement marker is a top-level list of names, never an entry key.
-assert.match(models, /REPLACE_FIELD\] = \[name\]/);
-assert.doesNotMatch(
-  models,
-  /payload\[REPLACE_FIELD\]|MODEL_ENTRY_REPLACE_FLAG/,
-  "the replacement marker must not be written into the model entry",
-);
+assert.match(modelDialog, /REPLACE_FIELD\] = \[name\]/);
+for (const [name, text] of [
+  ["provider-model-api.js", modelApi],
+  ["provider-model-dialog.js", modelDialog],
+  ["provider-model-picker.js", modelPicker],
+  ["provider-models.js", models],
+]) {
+  assert.doesNotMatch(
+    text,
+    /payload\[REPLACE_FIELD\]|MODEL_ENTRY_REPLACE_FLAG/,
+    `the replacement marker must not be written into the model entry (${name})`,
+  );
+}
 // E4: a manual capability is written only after its test returned tested && passed.
-assert.match(models, /entry\.source === "manual" && entry\.tested && entry\.passed/);
-assert.match(models, /if \(!\(state\.tested && state\.passed\)\) failure = state\.detail;/);
-assert.match(models, /state\.source = null;/);
+assert.match(modelCapabilities, /entry\.source === "manual" && entry\.tested && entry\.passed/);
+assert.match(modelDialog, /if \(!\(state\.tested && state\.passed\)\) failure = state\.detail;/);
+assert.match(modelDialog, /state\.source = null;/);
 
 // ---------------------------------------------------------------------------
 // E1 round-trip regression (task-21)
@@ -219,35 +238,37 @@ assert.match(models, /state\.source = null;/);
 // These assertions drive the real payload builder and capability resolver.
 // ---------------------------------------------------------------------------
 
-const modelModule = await import(new URL("./app/views/provider-models.js", import.meta.url));
+// The split moved these helpers into their own modules; drive the real ones.
+const capabilitiesModule = await import(new URL("./app/views/provider-model-capabilities.js", import.meta.url));
+const apiModule = await import(new URL("./app/views/provider-model-api.js", import.meta.url));
 
 // One row per CANONICAL capability: `thinking` and `web_search_direct` are aliases
 // the V2->V3 boundary folds into `reasoning` / `web_search`, so offering them as
 // extra rows would let a write carry two names for one capability.
-assert.ok(modelModule.MODEL_CAPABILITIES.includes("web_search"), "web_search must be a real row");
+assert.ok(capabilitiesModule.MODEL_CAPABILITIES.includes("web_search"), "web_search must be a real row");
 for (const alias of ["thinking", "web_search_direct"]) {
   assert.ok(
-    !modelModule.MODEL_CAPABILITIES.includes(alias),
+    !capabilitiesModule.MODEL_CAPABILITIES.includes(alias),
     `${alias} must not be a row: it normalizes to its canonical capability`,
   );
 }
-assert.equal(modelModule.normalizeCapability("thinking"), "reasoning");
-assert.equal(modelModule.normalizeCapability("web_search_direct"), "web_search");
-assert.equal(modelModule.normalizeCapability("web_search"), "web_search");
-assert.equal(modelModule.normalizeCapability("not_a_capability"), null);
+assert.equal(capabilitiesModule.normalizeCapability("thinking"), "reasoning");
+assert.equal(capabilitiesModule.normalizeCapability("web_search_direct"), "web_search");
+assert.equal(capabilitiesModule.normalizeCapability("web_search"), "web_search");
+assert.equal(capabilitiesModule.normalizeCapability("not_a_capability"), null);
 
 // A stored alias plus its canonical name must collapse to ONE written entry.
-const aliased = modelModule.createCapabilitySession({ stored: ["text", "reasoning", "thinking"], detected: [] });
+const aliased = capabilitiesModule.createCapabilitySession({ stored: ["text", "reasoning", "thinking"], detected: [] });
 assert.deepEqual(
-  modelModule.writtenCapabilities(aliased.session, aliased.preserved),
+  capabilitiesModule.writtenCapabilities(aliased.session, aliased.preserved),
   ["text", "reasoning"],
   "thinking and reasoning must not both be written",
 );
 
 // A stored capability the vocabulary cannot name rides through verbatim.
-const preserved = modelModule.createCapabilitySession({ stored: ["text", "web_search", "custom_probe"], detected: [] });
+const preserved = capabilitiesModule.createCapabilitySession({ stored: ["text", "web_search", "custom_probe"], detected: [] });
 assert.deepEqual(preserved.preserved, ["custom_probe"]);
-assert.deepEqual(modelModule.writtenCapabilities(preserved.session, preserved.preserved), [
+assert.deepEqual(capabilitiesModule.writtenCapabilities(preserved.session, preserved.preserved), [
   "text",
   "web_search",
   "custom_probe",
@@ -268,8 +289,8 @@ const storedEntry = {
   features: { json_mode: true },
   wireName: null,
 };
-const editSession = modelModule.createCapabilitySession({ stored: storedEntry.capabilities, detected: [] });
-const editPayload = modelModule.buildModelWritePayload({
+const editSession = capabilitiesModule.createCapabilitySession({ stored: storedEntry.capabilities, detected: [] });
+const editPayload = apiModule.buildModelWritePayload({
   isNew: false,
   existing: storedEntry,
   values: {
@@ -280,7 +301,7 @@ const editPayload = modelModule.buildModelWritePayload({
     supportsStreaming: true,
     supportsThinking: false,
   },
-  capabilities: modelModule.writtenCapabilities(editSession.session, editSession.preserved),
+  capabilities: capabilitiesModule.writtenCapabilities(editSession.session, editSession.preserved),
 });
 assert.equal(editPayload.maxTokens, 4096, "the edited field must be applied");
 for (const [key, value] of Object.entries({
@@ -300,7 +321,7 @@ assert.ok(editPayload.capabilities.includes("web_search"), "web_search must surv
 assert.ok(!editPayload.capabilities.includes("web_search_direct"));
 
 // Clearing a rendered field really clears it instead of silently keeping the old value.
-const cleared = modelModule.buildModelWritePayload({
+const cleared = apiModule.buildModelWritePayload({
   isNew: false,
   existing: { maxTokens: 8192, capabilities: ["text"] },
   values: { wireName: "", thinking: "", maxTokens: "", maxContextTokens: "", supportsStreaming: false, supportsThinking: false },
@@ -309,7 +330,7 @@ const cleared = modelModule.buildModelWritePayload({
 assert.ok(!("maxTokens" in cleared), "clearing maxTokens must drop the field");
 
 // A new model starts from nothing, so only rendered fields are written.
-const fresh = modelModule.buildModelWritePayload({
+const fresh = apiModule.buildModelWritePayload({
   isNew: true,
   existing: undefined,
   values: { wireName: "wire-1", thinking: "", maxTokens: "16", maxContextTokens: "", supportsStreaming: false, supportsThinking: false },
@@ -320,7 +341,7 @@ assert.deepEqual(fresh, { wireName: "wire-1", maxTokens: 16, capabilities: ["tex
 // A non-positive numeric control is rejected instead of written.
 assert.throws(
   () =>
-    modelModule.buildModelWritePayload({
+    apiModule.buildModelWritePayload({
       isNew: true,
       existing: undefined,
       values: { wireName: "", thinking: "", maxTokens: "0", maxContextTokens: "", supportsStreaming: false, supportsThinking: false },
