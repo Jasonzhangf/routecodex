@@ -261,6 +261,21 @@ fn provider_terminal_without_real_http_response_is_no_response() {
 }
 
 #[test]
+fn exhausted_semantic_failure_never_projects_an_error_to_the_client() {
+    // A provider that returned HTTP 2xx but whose payload cannot be represented
+    // is a provider-attempt failure: it reselects a candidate while attempts
+    // remain, and on exhaustion it terminates the client boundary without a
+    // fabricated error. The client never receives the provider-derived Error06.
+    assert_eq!(
+        V3ErrorHandlingCenter::provider_terminal_disposition(
+            exhausted_provider_error_05("provider_response_semantic_failure"),
+            None,
+        ),
+        V3ProviderTerminalDisposition::NoResponse
+    );
+}
+
+#[test]
 fn upstream_http_502_is_ineligible_for_client_projection() {
     assert!(V3EligibleExternalHttpResponse::new(502, vec![], b"bad gateway".to_vec()).is_none());
     assert!(V3EligibleExternalHttpResponse::new(200, vec![], b"ok".to_vec()).is_none());

@@ -363,10 +363,30 @@ fn responses_relay_manifest(
     port_b: u16,
     provider_base_url: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_relay_provider_protocol_manifest(port_a, port_b, provider_base_url, "responses", None)
+}
+
+fn responses_relay_provider_protocol_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_type: &str,
+    fallback_base_url: Option<&str>,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let fallback_provider = fallback_base_url.map_or(String::new(), |base_url| {
+        format!(
+            "[providers.fallback]\ntype = \"responses\"\nbase_url = \"{base_url}\"\ndefault_model = \"test\"\nauth = {{ type = \"api_key\", entries = [{{ alias = \"key\", env = \"V3_P6_TEST_KEY\" }}] }}\n[providers.fallback.models.test]\nwire_name = \"wire-test\"\ncapabilities = [\"text\", \"tools\"]\nsupports_streaming = true\nmax_tokens = 4096\nmax_context_tokens = 128000\n"
+        )
+    });
+    let targets = if fallback_base_url.is_some() {
+        "{ kind = \"provider_model\", provider = \"test\", model = \"test\", key = \"key\", priority = 2 }, { kind = \"provider_model\", provider = \"fallback\", model = \"test\", key = \"key\", priority = 1 }"
+    } else {
+        "{ kind = \"provider_model\", provider = \"test\", model = \"test\", key = \"key\", priority = 1 }"
+    };
     let source = format!(
         r#"
 version = 3
@@ -383,7 +403,7 @@ routing_group = "default"
 endpoints = ["responses"]
 {hub_v1_server_execution}
 [providers.test]
-type = "responses"
+type = "{provider_type}"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
@@ -398,6 +418,7 @@ supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
+{fallback_provider}
 [debug]
 log_console = false
 snapshots = true
@@ -406,10 +427,10 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{targets}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{targets}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -1176,6 +1197,7 @@ async fn start_controlled_terminal_upstream_with_body(
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/responses", post(controlled_terminal_upstream))
+        .route("/v1/messages", post(controlled_terminal_upstream))
         .with_state(Arc::new(ControlledTerminalState {
             captures: captures_tx,
             status,
@@ -2439,6 +2461,334 @@ async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns(
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+const DSML_ANTHROPIC_SSE: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan\\n</｜DSML｜parameter>\\n</｜DSML｜invoke>\\n</｜DSML｜tool_calls>\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+);
+
+fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
+    let mut events = vec![
+        json!({"type":"message_start","message":{"id":"msg_control_fixture","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":1}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":0}),
+    ];
+    if native_tool {
+        events.extend([
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_native_dsml","name":"exec_command","input":{}}}),
+            json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":\"pwd\"}"}}),
+            json!({"type":"content_block_stop","index":1}),
+        ]);
+    }
+    events.extend([
+        json!({"type":"message_delta","delta":{"stop_reason":if native_tool {"tool_use"} else {"end_turn"}},"usage":{"output_tokens":8}}),
+        json!({"type":"message_stop"}),
+    ]);
+    let mut bytes = Vec::new();
+    for event in events {
+        bytes.extend_from_slice(
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_exhausted_control_frame_breaks_stream_without_error_to_client(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let send_result = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await;
+    let capture = timeout(Duration::from_secs(15), captures.recv())
+        .await
+        .expect("Anthropic mock must receive provider request")
+        .unwrap();
+    // The provider-attempt failure is isolated from the client: exhaustion ends the
+    // streaming client transport as an aborted SSE transfer instead of projecting a
+    // provider-derived Error06/502, a response.failed event, or the malformed
+    // control text.
+    let response = send_result.expect(
+        "exhausted malformed provider response must not project a provider-derived error \
+         status",
+    );
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/event-stream",
+        "exhausted malformed provider response must keep the SSE boundary, not a \
+         terminal error frame",
+    );
+    // A complete response body (including any provider-derived 502/response.failed
+    // payload) would read Ok here; an Err is the aborted SSE transfer that the
+    // streaming client retries, so exhaustion does not end the session.
+    let _body_error = response.bytes().await.expect_err(
+        "exhausted malformed provider response must abort the streaming body instead of \
+         ending the transfer normally",
+    );
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(capture.body["model"], "wire-test");
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_failure_reselects_valid_provider() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (bad_base_url, mut bad_captures, bad_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "text/event-stream",
+            DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
+        )
+        .await;
+    let (good_base_url, mut good_captures, good_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        bad_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        Some(&good_base_url),
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    let bad_capture = timeout(Duration::from_secs(15), bad_captures.recv())
+        .await
+        .unwrap();
+    let good_capture = timeout(Duration::from_secs(15), good_captures.recv())
+        .await
+        .unwrap();
+    handle.shutdown().await;
+    bad_shutdown.send(()).unwrap();
+    good_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        bad_capture.is_some(),
+        "first Anthropic attempt must reach provider"
+    );
+    assert!(
+        good_capture.is_some(),
+        "typed failure must reselect next provider"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("relay sse final text"), "{body}");
+    assert!(!body.contains("<thinking>"), "{body}");
+    assert!(!body.contains("DSML"), "{body}");
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordinary_prose() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let cases = [
+        (
+            "<thinking>internal plan\n</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>",
+            true,
+            "call_native_dsml",
+        ),
+        ("<thinking>private</thinking>Visible answer", false, "<thinking>private</thinking>Visible answer"),
+        (
+            "<thinking>private<\u{2f}thinking>Visible answer\n<\u{2f}｜DSML｜parameter>\n<\u{2f}｜DSML｜invoke>\n<\u{2f}｜DSML｜tool_calls>",
+            false,
+            "Visible answer",
+        ),
+        ("Quoted <thinking>literal</thinking> text", false, "Quoted"),
+        ("```\n<thinking>literal</thinking>\n```", false, "literal"),
+        ("Prefix <thinking>literal</thinking>", false, "Prefix"),
+        ("<thinking>literal unfinished example", false, "literal unfinished example"),
+    ];
+    for (text, native_tool, expected) in cases {
+        let (provider_base_url, mut captures, shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                "text/event-stream",
+                anthropic_sse_text_fixture(text, native_tool),
+            )
+            .await;
+        let manifest = responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            provider_base_url.trim_end_matches("/v1"),
+            "anthropic",
+            None,
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("accept", "text/event-stream")
+            .json(&json!({"model":"client-test","input":"hello","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        assert!(captures.recv().await.is_some());
+        handle.shutdown().await;
+        shutdown.send(()).unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains(expected), "missing {expected}: {body}");
+        if native_tool {
+            assert!(body.contains("exec_command"), "{body}");
+            assert!(body.contains("pwd"), "{body}");
+            assert!(!body.contains("DSML"), "{body}");
+            assert!(!body.contains("<thinking>"), "{body}");
+        } else if expected == "Visible answer"
+            && text.contains("</thinking>")
+            && text.starts_with("<thinking>")
+        {
+            assert!(!body.contains("private"), "{body}");
+            assert!(!body.contains("<thinking>"), "{body}");
+        } else {
+            assert!(
+                body.contains("<thinking>"),
+                "ordinary text was changed: {body}"
+            );
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let literal = "<thinking>unfinished ｜DSML｜invoke";
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_text_fixture(literal, false),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("unfinished ｜DSML｜invoke"), "{body}");
+}
+
+#[tokio::test]
+async fn responses_relay_genuine_responses_source_preserves_literal_control_text() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let literal = "<thinking>quoted literal ｜DSML｜invoke";
+    let upstream_body = json!({
+        "id":"resp_literal",
+        "status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":literal}]}],
+    })
+    .to_string();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        upstream_body.into_bytes(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        "responses",
+        None,
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(timeout(Duration::from_secs(15), captures.recv())
+        .await
+        .unwrap()
+        .is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.contains(literal),
+        "Responses literal was rewritten: {body}"
+    );
 }
 
 #[tokio::test]

@@ -449,7 +449,7 @@ pub(crate) fn provider_response_hook_failure(
             V3ResponsesRelayProviderFailure {
                 status: 502,
                 policy_error_type: "provider_response_event_codec_failure".to_string(),
-                policy_error_message: message.clone(),
+                policy_error_message: message,
                 provider_id: provider_id.to_string(),
                 source_stage: "V3HubRespChatProcess03Governed",
                 observability,
@@ -545,6 +545,52 @@ pub(crate) fn error_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exhausted_received_http_200_codec_failure_never_projects_error06_to_client() {
+        let mut failure = provider_response_hook_failure(
+            V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+                "invalid Anthropic response meaning".to_string(),
+            ),
+            "provider-1",
+            None,
+        );
+        assert_eq!(failure.status, 502);
+        failure = terminalize_v3_responses_relay_provider_failure(failure, None);
+        assert_eq!(
+            failure.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+        let output = provider_failure_output(failure, vec!["V3ProviderRespInbound01Raw"], 0);
+        // The provider-derived Error06 body must never become the client response;
+        // the exhausted terminal keeps the typed no-response disposition so the
+        // Server terminates the client boundary instead.
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+    }
+
+    #[test]
+    fn exhausted_failure_without_received_http_preserves_no_response() {
+        let failure = terminalize_v3_responses_relay_provider_failure(
+            provider_runtime_failure(
+                V3ProviderError::Transport {
+                    request_id: "req-no-response".to_string(),
+                    provider_id: "provider-1".to_string(),
+                    reason: "connection closed before response headers".to_string(),
+                },
+                "provider-1",
+                None,
+            ),
+            None,
+        );
+        let output = provider_failure_output(failure, vec!["V3ProviderRespInbound01Raw"], 0);
+        assert_eq!(
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+        );
+    }
 
     #[test]
     fn relay_transport_error_is_promoted_to_provider_malformed_sse() {
