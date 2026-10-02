@@ -788,7 +788,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .with(|failure| failure.set(Some("injected writer start failure".to_string())));
 
         let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
-            .expect("spawn failure must degrade provider health persistence");
+            .expect("spawn failure must keep provider health persistence available");
 
         assert_eq!(
             entries.len(),
