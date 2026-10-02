@@ -1537,6 +1537,7 @@ features:
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_relay_controlled.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_direct_isolation_controlled.rs
+  - v3/crates/routecodex-v3-cli/tests/h2_chat_direct_isolation.rs
   design:
   - docs/goals/v3-openai-chat-relay-runtime-integration-plan.md
   - docs/goals/v3-openai-chat-relay-runtime-integration-test-design.md
@@ -1560,8 +1561,11 @@ features:
   - Server 429 response exposes Error01-06 and does not wrap success
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - rejected metadata_center request produces zero upstream captures
+  - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
+  - a real external upstream status (429/503) reaches the client unchanged, and a healthy later candidate is reselected
   required_gates:
   - npm run test:v3-openai-chat-relay-runtime-integration
+  - npm run test:v3-h2-chat-direct-isolation
   - npm run verify:v3-openai-chat-relay-runtime-integration
   - npm run test:v3-openai-chat-relay-runtime-integration-red-fixtures
   - npm run verify:v3-module-boundaries
