@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
 
 const V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY: usize = 32;
+const MAX_PROVIDER_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
 
 type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64)>;
 
@@ -43,11 +44,18 @@ impl V3ProviderHealthPersistenceTicket {
 }
 
 impl V3ProviderHealthPersistenceWriter {
-    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Self {
+    fn start(coordinator: V3ProviderCooldownCoordinator) -> Self {
+        Self::start_with_alarm(coordinator, None)
+    }
+
+    fn start_with_alarm(
+        mut coordinator: V3ProviderCooldownCoordinator,
+        initial_alarm: Option<String>,
+    ) -> Self {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
-        let alarm = Arc::new(RwLock::new(None));
+        let alarm = Arc::new(RwLock::new(initial_alarm));
         let writer_alarm = Arc::clone(&alarm);
-        std::thread::Builder::new()
+        if let Err(error) = std::thread::Builder::new()
             .name("v3-provider-health-persistence".to_string())
             .spawn(move || {
                 let mut persisted_entries = coordinator.persisted_entries();
@@ -99,9 +107,15 @@ impl V3ProviderHealthPersistenceWriter {
                     }
                 }
             })
-            .unwrap_or_else(|error| {
-                panic!("provider health persistence writer start failed: {error}")
-            });
+        {
+            // The writer thread is the only owner of the receive side. Without it
+            // every update fails the queue send and is surfaced through the
+            // persistence alarm instead of crashing the startup process.
+            set_persistence_alarm(
+                &alarm,
+                format!("provider health persistence writer start failed: {error}"),
+            );
+        }
         Self { sender, alarm }
     }
 
@@ -150,19 +164,36 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
-    let mut coordinator = persistence_path.map(|path| {
-        load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path)
-            .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
-    });
-    coordinator.as_mut().map(|coordinator| {
-        coordinator
-            .reset_probe_schedule_for_startup()
-            .unwrap_or_else(|error| {
-                panic!("provider cooldown startup probe reset failed: {error}")
+    persistence_path.map(|path| {
+        let mut alarm = None;
+        // Provider health is advisory state, not business truth: a persisted file
+        // that cannot be read (unreadable, corrupt, or written by a schema this
+        // build does not accept) must not crash the startup process. Start from a
+        // fresh coordinator at the same path and surface the failure through the
+        // persistence alarm; the next write replaces the unreadable file.
+        let mut coordinator = match load_provider_cooldown_coordinator(
+            manifest,
+            path.clone(),
+            legacy_persistence_path,
+        ) {
+            Ok(coordinator) => coordinator,
+            Err(error) => {
+                alarm = Some(format!(
+                    "provider cooldown persistence load failed: {error}"
+                ));
+                V3ProviderCooldownCoordinator::new(path, MAX_PROVIDER_COOLDOWN_MS)
+            }
+        };
+        if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
+            let reset = format!("provider cooldown startup probe reset failed: {error}");
+            alarm = Some(match alarm {
+                Some(existing) => format!("{existing}; {reset}"),
+                None => reset,
             });
+        }
         let entries = coordinator.persisted_entries();
         (
-            V3ProviderHealthPersistenceWriter::start(coordinator.clone()),
+            V3ProviderHealthPersistenceWriter::start_with_alarm(coordinator, alarm),
             entries,
         )
     })
@@ -173,21 +204,21 @@ fn load_provider_cooldown_coordinator(
     path: PathBuf,
     legacy_path: Option<PathBuf>,
 ) -> Result<V3ProviderCooldownCoordinator, String> {
-    const MAX_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
     if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_none() && !path.exists() {
         if let Some(legacy_path) = legacy_path.filter(|legacy| legacy != &path && legacy.exists()) {
-            let legacy = V3ProviderCooldownCoordinator::load(legacy_path, MAX_COOLDOWN_MS)?;
+            let legacy =
+                V3ProviderCooldownCoordinator::load(legacy_path, MAX_PROVIDER_COOLDOWN_MS)?;
             let entries = legacy
                 .persisted_entries()
                 .into_iter()
                 .filter(|(key, _, _)| manifest_contains_cooldown_key(manifest, key))
                 .collect();
-            let mut migrated = V3ProviderCooldownCoordinator::new(path, MAX_COOLDOWN_MS);
+            let mut migrated = V3ProviderCooldownCoordinator::new(path, MAX_PROVIDER_COOLDOWN_MS);
             migrated.replace_entries(entries)?;
             return Ok(migrated);
         }
     }
-    V3ProviderCooldownCoordinator::load(path, MAX_COOLDOWN_MS)
+    V3ProviderCooldownCoordinator::load(path, MAX_PROVIDER_COOLDOWN_MS)
 }
 
 fn manifest_contains_cooldown_key(
@@ -648,5 +679,48 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .contains("persistence write failed"));
 
         std::fs::remove_dir_all(&root).expect("remove isolated persistence target");
+    }
+
+    #[test]
+    fn unsupported_provider_cooldown_schema_starts_with_an_alarm_instead_of_panicking() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        std::fs::write(&path, br#"{"schema_version": 99, "entries": []}"#)
+            .expect("write unsupported cooldown state");
+        let manifest = manifest("s", "127.0.0.1", 1);
+
+        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
+            .expect("an unreadable cooldown state must not stop provider health persistence");
+
+        assert!(
+            entries.is_empty(),
+            "an unreadable cooldown state must start from no persisted cooldown"
+        );
+        let alarm = writer
+            .alarm()
+            .expect("an unreadable cooldown state must raise the persistence alarm");
+        assert!(
+            alarm.contains("provider cooldown persistence load failed"),
+            "{alarm}"
+        );
+        assert!(
+            alarm.contains("unsupported provider cooldown state schema 99"),
+            "{alarm}"
+        );
+    }
+
+    #[test]
+    fn corrupt_provider_cooldown_state_starts_with_an_alarm_instead_of_panicking() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        std::fs::write(&path, b"{not json").expect("write corrupt cooldown state");
+        let manifest = manifest("s", "127.0.0.1", 1);
+
+        let (writer, entries) = start_provider_health_persistence(&manifest, Some(path), None)
+            .expect("a corrupt cooldown state must not stop provider health persistence");
+
+        assert!(entries.is_empty());
+        let alarm = writer.alarm().expect("persistence alarm");
+        assert!(alarm.contains("decode provider cooldown state"), "{alarm}");
     }
 }
