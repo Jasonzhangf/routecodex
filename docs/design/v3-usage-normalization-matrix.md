@@ -1,8 +1,10 @@
-# V3 Usage 归一化矩阵（完整版 v3）
+# V3 Usage 归一化矩阵（完整版 v4）
 
-> v1 经独立设计 review FAIL（F1–F10），v2 经二轮 review FAIL（BLOCKER-1/2/3 + MINOR-1..4）。
-> 本版按**已落地代码**校准：命名使用实际 shipped symbol，DAG 与真实 Value 级数据流一致，
-> 并显式声明仍存在的缺口。设计文本不得引用不存在的 symbol 或不可达的 harness。
+> v1 经独立设计 review FAIL（F1–F10），v2 经二轮 review FAIL（BLOCKER-1/2/3 + MINOR-1..4），
+> v3 经实现后独立架构 review PASS（3 minor + 7 advisory，无 P0/P1）。本版按 review 结论校准：
+> 修 MINOR-1（timeseries 桶级二次分类改为逐行累加）、统一三个 projection 的空 usage 策略、
+> 更正文档锚点与两处不实声明，并显式声明 MINOR-2（Relay 同协议 Anthropic 的 creation 丢失）
+> 与未进黑盒矩阵的格。命名使用实际 shipped symbol，DAG 与真实 Value 级数据流一致。
 
 ## 1. 触发证据（provenance）
 
@@ -36,15 +38,27 @@ provider wire usage (serde_json::Value)
 
 shipped symbol（唯一真源 `hub_v1/usage_normalization.rs`）：`V3CanonicalUsageCache`、
 `split_v3_canonical_usage_cache`、`read_v3_canonical_usage_cache_fields`、
-`canonical_usage_cache_for_value`，以及三个 projection。
+`canonical_usage_cache_for_value`、`has_v3_canonical_usage_tokens`，以及三个 projection。
 
-**DAG 建模口径（BLOCKER-3）**：三个 projection 的入参都是原始 provider-wire usage `Value`，
-分类在节点内部调用 `canonical_usage_cache_for_value` 完成；运行期**不存在**一个中间
-`canonical-usage` Value。因此每个投影图是**单节点图**（provider-wire-usage → client-wire-usage），
-不虚构 `m01 → m02` 的 Value 边；分类真源作为节点内部逻辑与共享符号存在，不另立第二张图。
+**空 usage 策略（统一，避免伪造）**：三个 projection 共用 `has_v3_canonical_usage_tokens` 判定；
+usage 对象不含任何可识别计数字段（空对象、只有 `service_tier` 等非计数字段、或只有
+`total_tokens` 而无 input/output 拆分）时，投影返回 `None`，由调用方决定是否保留原始 usage，
+**不得**伪造 `input_tokens:0 / output_tokens:0 / total_tokens:0`。`total_tokens` 不再单独构成
+"可投影"依据，因为投影会从 input+output 重算 total，接受 total-only 等于丢弃 provider 的 total。
+
+**DAG 建模口径（BLOCKER-3）**：三个 projection 的入参都是 usage `Value`，分类在节点内部调用
+`canonical_usage_cache_for_value` 完成；运行期**不存在**一个中间 `canonical-usage` Value。
+因此每个投影图是**单节点图**（usage-Value → client-wire-usage），不虚构 `m01 → m02` 的 Value 边；
+分类真源作为节点内部逻辑与共享符号存在，不另立第二张图。
 命中率消费方是独立单节点图，owner 为 `row_canonical_usage_cache`。
 
-`extract_v3_runtime_usage_summary`（`responses_relay_runtime.rs:592`）返回 `V3RuntimeUsageSummary`，
+**入参来源修正（review ADVISORY）**：`project_v3_chat_usage_from_canonical` 与
+`project_v3_responses_usage_from_canonical` 的入参是 provider-wire / 上游 canonical usage `Value`；
+但 Anthropic **client** 格的入参是 Responses 投影后的 usage（
+`anthropic_relay_runtime.rs:1195-1203` → `anthropic_relay_runtime_codec.rs:81-86`），
+即跨了一次 Responses canonical 中间态。该 hop 的后果见 §4「已知缺口（relay 同协议 Anthropic）」。
+
+`extract_v3_runtime_usage_summary`（`responses_relay_runtime.rs:597`）返回 `V3RuntimeUsageSummary`，
 只服务 observability，**不参与**任何 client 投影，也不作为分类真源。
 
 ## 3. Canonical 契约（三种输入语义）
@@ -74,9 +88,10 @@ shipped symbol（唯一真源 `hub_v1/usage_normalization.rs`）：`V3CanonicalU
 （= `read_v3_canonical_usage_cache_fields` + `split_v3_canonical_usage_cache`）；
 投影层只做字段名映射，不重复推导 `effective_input` / `cached`。
 
-**Gemini client 行（F3）**：Gemini 是 config-reachable client entry
-（`hub_v1.rs` entry_protocols、`endpoint_handlers.rs:749`、黑盒 `gemini_relay_controlled.rs:178`
-断言客户端收到 `usageMetadata.totalTokenCount`）。`gemini_relay_runtime.rs:246` 固定
+**Gemini client 行（F3）**：Gemini 是 config-reachable client entry（entry_protocols 声明在
+`routecodex-v3-config` 的 `types.rs:52` / `defaults.rs:12`，`endpoint_handlers.rs:749`、黑盒
+`gemini_relay_controlled.rs:178` 断言客户端收到 `usageMetadata.totalTokenCount`）。
+`gemini_relay_runtime.rs:246` 固定
 `EXPECTED_PROVIDER_TYPE = Some("Gemini")`（比较见 `relay_runtime_shared.rs:133-147`），
 因此 Gemini client 只有 **same-protocol 直通**格，无独立投影 owner，已由该黑盒覆盖。
 
@@ -88,6 +103,17 @@ client，第 3 行语义对 provider 侧 Gemini 形状是 load-bearing 的。但
 上游没有 `usageMetadata`→`usage` 的映射。因此 **gemini provider → 非 gemini client 目前不产出
 client usage**。当前 active config 无 Gemini provider，该格不可达；本变更不接线，仅在此声明为缺口，
 避免把未接线的能力写成已覆盖。
+
+**已知缺口（review MINOR-2，显式声明，不在本次范围）**：Anthropic provider → Anthropic client 若被
+配置强制走 **Relay**（同协议默认是 Direct 直通，`nodes.rs:732-736` 只在 direct 不可用或
+`responses_process=chat` 时选 Relay），中间会经过 Responses canonical，而 Responses wire 无法表达
+"缓存写入"，`project_v3_responses_usage_from_canonical` 把 creation 折进 effective input 后不再输出它。
+于是 `project_v3_anthropic_usage_from_canonical` 的 creation 分支在该 hop 上不可达：
+`{input_tokens:1000, cache_creation_input_tokens:200}` 回程为
+`{input_tokens:1200, cache_read_input_tokens:0}`——creation 丢失、未命中 input 被高估 200
+（effective 总量不变）。本次黑盒 fixture 的 `cache_creation = 0`，因此该格未被黑盒覆盖。
+该缺口不改变本次修好的 anthropic→responses/chat 与 Direct 直通路径；列此声明以免把
+"Anthropic 目标形状含 creation" 写成在 Relay 同协议 hop 上已覆盖。
 
 **其它 client-facing usage writer 的角色声明（F4）**：
 - `materialize_v3_responses_terminal_usage`（`responses_relay_runtime.rs:856`）：仅补缺失
@@ -107,19 +133,34 @@ client usage**。当前 active config 无 Gemini provider，该格不可达；�
 | Anthropic client 直通 writer | `anthropic_relay_runtime_codec.rs:80-82` | `project_v3_anthropic_usage_from_canonical` |
 | Anthropic client 重建 writer | `anthropic_relay_runtime_codec.rs:194-201` | 同上 |
 | chat projection 自带分类 | `openai_chat_codec.rs`（改为 re-export） | `split_v3_canonical_usage_cache` |
-| console 第三份命中率规则 | `routecodex-v3-server/src/console/impl_display.rs:45-67` | `split_v3_canonical_usage_cache` |
-| console 第二份字段提取/别名规则 | `routecodex-v3-server/src/console/impl_display.rs:121-177`（`extract_v3_console_usage_summary`） | 同上 |
-| timeseries 第二份命中率规则 | `routecodex-v3-admin/src/api/timeseries.rs:289-296` | 同上 |
-| timeseries 旧 read/cached 回退 | `routecodex-v3-admin/src/api/timeseries.rs:48-54`（`row_cache_read`） | 同上 |
-| observability 命中率规则 | `routecodex-v3-admin/src/api/observability.rs:687-697` | `row_canonical_usage_cache` → 同上 |
+| console 第三份命中率规则 | `routecodex-v3-server/src/console/impl_display.rs:46-72` | `split_v3_canonical_usage_cache` |
+| timeseries 桶级二次分类 | `routecodex-v3-admin/src/api/timeseries.rs`（改为逐行累加 canonical） | `split_v3_canonical_usage_cache` |
+| timeseries 旧 read/cached 回退 | `routecodex-v3-admin/src/api/timeseries.rs`（`row_cache_read` 已删） | 同上 |
+| observability 命中率规则 | `routecodex-v3-admin/src/api/observability.rs:689-707` | `row_canonical_usage_cache` → 同上 |
+
+**未收敛（合法不同契约，非重复分类）**：`extract_v3_console_usage_summary`
+（`console/impl_display.rs:126-182`）**未**改为调用共享规则——它是**字段提取/别名表**，
+不是第二份分类规则；只有其下游的命中率计算（`impl_display.rs:46-72`）收敛到共享 split。
+v2 文档曾把该提取器写成"已收敛到 `split_v3_canonical_usage_cache`"，属不准确，此处更正。
+它自身不含 `promptTokenCount`/`candidatesTokenCount`/`cachedContentTokenCount`/`totalTokenCount`
+别名，这是提取面缺口，不是分类分歧。
 
 **形状差异（MINOR-3）**：admin/console 的行数据是**扁平**的（`V3ObsUsageSummary`
 `webui_observability.rs:531-543`、`TimeseriesRow.usage`），Value 级 reader
 `read_v3_canonical_usage_cache_fields` 只读嵌套 `*_details.cached_tokens` + 顶层
 `cache_read/creation` + `cachedContentTokenCount`，**不读扁平 `cached_tokens`**。因此扁平消费方
 直接调用 `split_v3_canonical_usage_cache(input, cached, read, creation)`（`observability.rs:689-707`
-`row_canonical_usage_cache`、`console/impl_display.rs:49-57`、`timeseries.rs:182-210,292-312`），
+`row_canonical_usage_cache`、`console/impl_display.rs:49-57`、`timeseries.rs` 逐行累加点），
 而不是 `canonical_usage_cache_for_value`。这是同一分类规则的两种入参形状，不是第二规则。
+
+**桶级聚合（review MINOR-1，已修）**：`timeseries` 不能对**桶的求和字段**再跑一次分类——
+同一桶内可以混有 OpenAI 语义行（子计数）和 Anthropic 语义行（增量），任一 OpenAI 行都会让
+`(bucket.cached_tokens > 0)` 成立，从而把 Anthropic 行的 read/creation 从分子和分母一起丢掉。
+现在改为**逐行**用共享 split 求出 canonical 命中/有效输入并累加到桶内私有累加器
+（`canonical_cached_tokens` / `canonical_effective_input_tokens`，`#[serde(skip)]` 不改变 API 形状），
+桶命中率只由累加器计算；原始字段仍作展示求和。混桶单测：
+`timeseries_mixed_semantics_bucket_accumulates_canonical_per_row`（OpenAI 250/1000 + Anthropic 600/1500
+→ 850/2500 = 34.0%）。
 
 `routecodex-v3-admin` 已依赖 `routecodex-v3-runtime`，共享规则不需要新依赖。
 
@@ -129,11 +170,14 @@ client usage**。当前 active config 无 Gemini provider，该格不可达；�
 Anthropic 行同样会低估分母；但属 webui 展示面，需 `verify:webui-smoke` 门禁，本变更不触碰。
 这是同一语义的已知剩余重复实现，列为后续收敛项。
 
-**Admin 数据来源（ADVISORY-1）**：observability 读的是 **finalized provider 语义**
-（`relay_runtime_core.rs:1140`、`responses_relay_runtime_inner.rs:935,1308` 读
-`finalized_provider_value`），Anthropic provider payload 由 `resp_inbound_02_normalized.rs:30-55`
-转成 Responses canonical 后才进入该语义。投影修好后新行已是 OpenAI 形状，
-`max(input,cached)` 天然正确；共享分类规则对**历史行 / Direct 行**必要，属兼容既有数据的一次性收敛。
+**Admin 数据来源（review ADVISORY，已更正）**：observability 的行来源**不是**统一读
+`finalized_provider_value`——`relay_runtime_core.rs:1140` 读的是 `client_response`；
+`responses_relay_runtime_inner.rs:935,1308` 才读 `finalized_provider_value`。因此 `/v1/responses`
+入口的行是 Responses 语义，而 `/v1/messages` 入口
+（`anthropic_relay_runtime.rs:1052,1282` → `extract_v3_anthropic_relay_usage_summary`）落库的行
+**即使在本变更后仍是 Anthropic 形状**。所以共享分类规则对新行同样是 load-bearing 的，
+不只是对历史行 / Direct 行的兼容；这也是混桶场景真实存在的原因。
+`responses_relay_runtime_inner.rs:935,1308` 之后仍必须经过对应 projection。
 
 ## 6. 回归面（必须同步更新的具体断言）
 
@@ -144,7 +188,9 @@ Anthropic 行同样会低估分母；但属 webui 展示面，需 `verify:webui-
 | `responses_relay_runtime_tests_extra.rs:758-767` | 旧 OpenAI 形状转换调用点 | 按新 owner 语义复核（未变） |
 | `anthropic_relay_runtime_integration.rs:539-541` | Anthropic client `usage.total_tokens == 21` | 输入 `{input_tokens:13,output_tokens:8,total_tokens:21}` **无缓存字段**，新输出为 `{input_tokens:13,output_tokens:8}`：无 `total_tokens`、无 `input_tokens_details`，也**不产生** `cache_read_input_tokens` |
 | `timeseries.rs:478`（断言在 `:516`） | 期望 `Some(70.0)`（input=1000/read=700/creation=200） | 期望 `Some(36.8)`（700/1900） |
-| `observability.rs:1314,1331` | 命中率单测 | 按共享规则复核 |
+| `timeseries.rs` 新增混桶单测 | — | `timeseries_mixed_semantics_bucket_accumulates_canonical_per_row`（850/2500） |
+| `observability.rs:1327-1377` | 命中率单测 | 按共享规则复核 |
+| `usage_normalization.rs` 新增单测 | — | `projections_skip_usage_without_recognizable_tokens`、`responses_projection_skips_total_only_usage_instead_of_zeroing_it` |
 | console 测试 `routecodex-v3-server/src/tests/mod.rs:1312-1332` | 分母 101826 | 改为 101833（59842+41984+7，含 creation）；`:3152` 同批复核 |
 
 ## 7. 黑盒测试矩阵（每格一条，走真实入口）
@@ -160,12 +206,22 @@ Anthropic 行同样会低估分母；但属 webui 展示面，需 `verify:webui-
 | gemini | Gemini | `gemini_relay_controlled.rs:178`（同协议直通） | `POST /v1beta/models/:model:generateContent` | ✅ 既有 |
 | gemini provider | 非 gemini client | — | — | ❌ 缺口（见 §4，不可达，不接线） |
 
+**只由单测覆盖（未进黑盒矩阵，review ADVISORY）**：provider→Anthropic client 的另两格
+（`responses` provider → Anthropic client、`openai_chat` provider → Anthropic client）目前只在
+`anthropic_relay_runtime_integration.rs:532-547` 的单测层覆盖。它们的 usage 形状由本次新增的
+`project_v3_anthropic_usage_from_canonical` 决定，属受影响面；本次未为其新增黑盒格，
+按缺口列出而不写成已覆盖。
+
+**未被黑盒覆盖的边界**：`anthropic` provider → `anthropic` client 且
+`cache_creation > 0` 的 Relay 同协议格（§4 MINOR-2）——黑盒 fixture 固定 `cache_creation = 0`。
+
 > v2 曾把 "anthropic | Chat" 归到 `openai_chat_relay_controlled.rs:324/33`；该 manifest 硬编码
 > `type = "openai_chat"`、上游 `:33 controlled_openai_chat_upstream` 返回 OpenAI-Chat body，
 > 无法承载 Anthropic provider。本版改用同一 Anthropic-provider manifest + terminal upstream。
 
 每格断言：① 只出现本协议字段；② `effective_input` 含缓存；③ `cached` 子计数正确；
-④ `total` = 投影后 input+output；⑤ 缺缓存字段的 provider 不得伪造 0 子计数。
+④ `total` = 投影后 input+output；⑤ 缺缓存字段的 provider 不得伪造 0 子计数；
+⑥ usage 对象无可识别计数字段时不产出伪造 usage（§2 空 usage 策略）。
 
 ## 8. 非目标
 

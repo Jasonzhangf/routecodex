@@ -100,6 +100,22 @@ pub(crate) fn read_v3_canonical_usage_reasoning_tokens(usage: &Map<String, Value
         .and_then(Value::as_u64)
 }
 
+/// usage 对象是否携带任何本模块能识别的计数字段。
+///
+/// 三个 client 投影共用本判定：provider 只回了非计数字段（或空对象）时，不得
+/// 伪造 `input_tokens:0 / output_tokens:0` 之类的假 usage；此时投影返回 `None`，
+/// 由调用方决定是否保留原始 usage。判定复用读取器本身，不另立字段名单。
+pub(crate) fn has_v3_canonical_usage_tokens(usage: &Map<String, Value>) -> bool {
+    let (input, cached_subcount, cache_read, cache_creation) =
+        read_v3_canonical_usage_cache_fields(usage);
+    input.is_some()
+        || cached_subcount.is_some()
+        || cache_read.is_some()
+        || cache_creation.is_some()
+        || read_v3_canonical_usage_output_tokens(usage).is_some()
+        || read_v3_canonical_usage_reasoning_tokens(usage).is_some()
+}
+
 pub(crate) fn canonical_usage_cache_for_value(usage: &Value) -> Option<V3CanonicalUsageCache> {
     let source = usage.as_object()?;
     let (input, cached_subcount, cache_read, cache_creation) =
@@ -115,6 +131,9 @@ pub(crate) fn canonical_usage_cache_for_value(usage: &Value) -> Option<V3Canonic
 /// Canonical usage -> OpenAI Chat client wire usage 唯一归一化入口（JSON 响应与 SSE 终帧共用）。
 pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Value> {
     let source = usage.as_object()?;
+    if !has_v3_canonical_usage_tokens(source) {
+        return None;
+    }
     let cache = canonical_usage_cache_for_value(usage)?;
     let output_tokens = read_v3_canonical_usage_output_tokens(source).unwrap_or(0);
     let mut projected = Map::new();
@@ -148,13 +167,7 @@ pub(crate) fn project_v3_chat_usage_from_canonical(usage: &Value) -> Option<Valu
 /// Responses client payload；命中信息只经 `input_tokens_details.cached_tokens` 表达。
 pub(crate) fn project_v3_responses_usage_from_canonical(usage: &Value) -> Option<Value> {
     let source = usage.as_object()?;
-    let input_present = source.contains_key("input_tokens")
-        || source.contains_key("prompt_tokens")
-        || source.contains_key("promptTokenCount");
-    let output_present = source.contains_key("output_tokens")
-        || source.contains_key("completion_tokens")
-        || source.contains_key("candidatesTokenCount");
-    if !input_present && !output_present && !source.contains_key("total_tokens") {
+    if !has_v3_canonical_usage_tokens(source) {
         return None;
     }
     let cache = canonical_usage_cache_for_value(usage)?;
@@ -190,6 +203,9 @@ pub(crate) fn project_v3_responses_usage_from_canonical(usage: &Value) -> Option
 /// 且没有 `total_tokens`；OpenAI 形状的 `input_tokens_details` 不得泄漏给 Anthropic client。
 pub(crate) fn project_v3_anthropic_usage_from_canonical(usage: &Value) -> Option<Value> {
     let source = usage.as_object()?;
+    if !has_v3_canonical_usage_tokens(source) {
+        return None;
+    }
     let cache = canonical_usage_cache_for_value(usage)?;
     let cached = cache.cached_tokens.unwrap_or(0);
     let creation = cache.cache_creation_input_tokens.unwrap_or(0);
@@ -325,6 +341,35 @@ mod tests {
         assert_eq!(
             projected["prompt_tokens_details"]["cached_tokens"],
             json!(217_088)
+        );
+    }
+
+    #[test]
+    fn projections_skip_usage_without_recognizable_tokens() {
+        // A provider usage object carrying no recognizable counter must not be
+        // turned into a fabricated zeroed usage by any client projection.
+        for usage in [json!({}), json!({"service_tier": "standard"})] {
+            assert!(
+                project_v3_responses_usage_from_canonical(&usage).is_none(),
+                "responses projection fabricated usage for {usage}"
+            );
+            assert!(
+                project_v3_chat_usage_from_canonical(&usage).is_none(),
+                "chat projection fabricated usage for {usage}"
+            );
+            assert!(
+                project_v3_anthropic_usage_from_canonical(&usage).is_none(),
+                "anthropic projection fabricated usage for {usage}"
+            );
+        }
+    }
+
+    #[test]
+    fn responses_projection_skips_total_only_usage_instead_of_zeroing_it() {
+        // `total_tokens` alone carries no input/output split; recomputing the
+        // total from zeroed input/output would discard the provider's number.
+        assert!(
+            project_v3_responses_usage_from_canonical(&json!({"total_tokens": 4_455})).is_none()
         );
     }
 }
