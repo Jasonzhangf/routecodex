@@ -24,7 +24,8 @@ pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
-    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthError, V3ProviderHealthStore,
+    V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,

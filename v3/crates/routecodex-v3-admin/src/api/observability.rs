@@ -15,7 +15,7 @@ mod stream;
 use self::artifacts::{
     artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
 };
-use self::cooldown::{cooldown_pool, remove_cooldown};
+use self::cooldown::{add_cooldown, cooldown_pool, probe_cooldown, remove_cooldown};
 use self::stream::stream;
 use crate::AppState;
 use axum::extract::{Path as AxumPath, RawQuery, State};
@@ -56,6 +56,14 @@ pub(crate) fn routes() -> axum::Router<crate::AppState> {
         .route(
             "/api/observability/cooldown-pool",
             axum::routing::get(cooldown_pool).post(remove_cooldown),
+        )
+        .route(
+            "/api/observability/cooldown-pool/add",
+            axum::routing::post(add_cooldown),
+        )
+        .route(
+            "/api/observability/cooldown-pool/probe",
+            axum::routing::post(probe_cooldown),
         )
 }
 

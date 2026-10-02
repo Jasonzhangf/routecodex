@@ -21,19 +21,103 @@
   .live-state.err { color: var(--danger); }
   .row-copy { padding: 1px 6px; font-size: 11px; }
   .adv-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
-  .cooldown-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 10px;
+  /* Cooldown panel: one flat table per listener. The old auto-fill card grid
+     squashed every field of an entry into one narrow column. */
+  .cooldown-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 0 0 10px;
+    border-bottom: 1px solid var(--line);
   }
-  .cooldown-card {
+  .cooldown-head-title {
+    flex: 1 1 auto;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--label);
+  }
+  .cooldown-add {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+    padding: 12px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
-    padding: 10px 12px;
   }
-  .cooldown-card h4 { margin: 0 0 6px; font-size: 13px; }
-  .cooldown-remaining { font-variant-numeric: tabular-nums; color: var(--warn); }
+  .cooldown-add[hidden] { display: none; }
+  .cooldown-add label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  /* An author-origin `display` outranks the UA sheet's `[hidden]` rule, so the
+     hidden attribute needs an author rule of its own or the custom-duration
+     field stays visible while a preset is selected. */
+  .cooldown-add label[hidden] { display: none; }
+  .cooldown-add label > span {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .cooldown-add input, .cooldown-add select { width: 100%; }
+  .cooldown-add-actions { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cooldown-add-error { grid-column: 1 / -1; margin: 0; }
+  .cooldown-listener + .cooldown-listener { margin-top: 14px; }
+  .cooldown-listener {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .cooldown-listener-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--surface-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .cooldown-listener-id { margin: 0; font-size: 13px; font-family: var(--mono); }
+  .cooldown-count { font-size: 12px; }
+  .cooldown-table { font-size: 13px; }
+  .cooldown-table th { background: transparent; }
+  .cooldown-provider { color: var(--label); }
+  .cooldown-secondary { display: none; }
+  .cooldown-remaining { font-variant-numeric: tabular-nums; color: var(--warn); white-space: nowrap; }
+  .cooldown-table td.col-reason { color: var(--muted); overflow-wrap: anywhere; }
+  .cooldown-table td.col-model, .cooldown-table td.col-auth { overflow-wrap: anywhere; }
+  .cooldown-table td.col-actions { white-space: nowrap; }
+  .cooldown-action {
+    min-height: 26px;
+    padding: 3px 10px;
+    font-size: 12px;
+  }
+  .cooldown-action + .cooldown-action { margin-left: 6px; }
+  .cooldown-release:hover:not(:disabled) { color: var(--danger); }
+  .cooldown-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+  /* <=860px: Auth/Model/Reason fold into a secondary line under the provider
+     cell instead of forcing horizontal scrolling. */
+  @media (max-width: 860px) {
+    .cooldown-table th.col-auth, .cooldown-table td.col-auth,
+    .cooldown-table th.col-model, .cooldown-table td.col-model,
+    .cooldown-table th.col-reason, .cooldown-table td.col-reason { display: none; }
+    .cooldown-secondary {
+      display: block;
+      font-size: 11.5px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .cooldown-table td.col-provider { max-width: 40vw; }
+    .cooldown-action { padding: 3px 8px; }
+  }
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -113,7 +197,58 @@
     <div class="section">
       <h2>Provider cooldown</h2>
       <p class="help">Current provider health/cooldown, read from <span class="mono">GET /api/observability/cooldown-pool</span>. This is the only source of current cooldown truth; per-request <span class="mono">health_action</span> fields are immutable attempt-time history.</p>
-      <div class="panel amb-surface amb-elevation-1" id="cooldown-panel"><div class="loading">loading…</div></div>
+      <div class="panel amb-surface amb-elevation-1" id="cooldown-panel">
+        <div id="cooldown-panel-head"><div class="loading">loading…</div></div>
+        <div id="cooldown-panel-body"></div>
+        <form class="cooldown-add" id="cooldown-add-form" hidden novalidate>
+          <label>
+            <span>Listener</span>
+            <select id="cooldown-add-port" aria-label="Listener port"></select>
+          </label>
+          <label>
+            <span>Provider id</span>
+            <input id="cooldown-add-provider" type="text" autocomplete="off" placeholder="provider id" required>
+          </label>
+          <label>
+            <span>Auth alias (optional)</span>
+            <input id="cooldown-add-auth" type="text" autocomplete="off" placeholder="auth alias">
+          </label>
+          <label>
+            <span>Model id (optional)</span>
+            <input id="cooldown-add-model" type="text" autocomplete="off" placeholder="model id">
+          </label>
+          <label>
+            <span>Kind</span>
+            <select id="cooldown-add-kind">
+              <option value="auth_key">auth_key</option>
+              <option value="probe">probe</option>
+            </select>
+          </label>
+          <label>
+            <span>Duration</span>
+            <select id="cooldown-add-preset">
+              <option value="5000">5 seconds</option>
+              <option value="30000">30 seconds</option>
+              <option value="60000" selected>1 minute</option>
+              <option value="300000">5 minutes</option>
+              <option value="900000">15 minutes</option>
+              <option value="3600000">1 hour</option>
+              <option value="86400000">24 hours (max)</option>
+              <option value="custom">custom…</option>
+            </select>
+          </label>
+          <label id="cooldown-add-custom-field" hidden>
+            <span>Custom duration (ms)</span>
+            <input id="cooldown-add-custom" type="number" min="1" max="86400000" step="1" placeholder="1 – 86400000">
+          </label>
+          <p class="ff-error cooldown-add-error" id="cooldown-add-error" role="alert"></p>
+          <div class="cooldown-add-actions">
+            <button class="btn primary" id="cooldown-add-submit" type="submit">Add cooldown</button>
+            <button class="btn" id="cooldown-add-cancel" type="button">Cancel</button>
+            <span class="muted tiny">kind <span class="mono">session</span> is not offered: it needs a session identity no operator input can supply.</span>
+          </div>
+        </form>
+      </div>
     </div>
 
     <!-- Layer 1: Port tabs (hidden port-filter select kept for compatibility/tests, synced by the tab bar) -->
