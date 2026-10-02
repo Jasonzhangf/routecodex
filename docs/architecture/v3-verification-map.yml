@@ -3721,3 +3721,35 @@ features:
     mapped_gates: required
     runtime: required_for_node01_capture_client_json_slice
     remaining_operation_nodes: pending
+- feature_id: v3.anthropic_control_text_resp03
+  status: source_gate_verified
+  change_risk: high
+  owner_kind: rust_project_v3_runtime_chat_process_gate
+  owner_scope: Black-box and unit verification for the exact whole-item Anthropic DSML control frame on the Responses Relay SSE materialization path; suspect/incomplete/literal text is preserved and complete frames are governed without client-visible provider failure.
+  owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_anthropic_control_text.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_tests_extra.rs
+  - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
+  - v3/crates/routecodex-v3-error/src/tests.rs
+  mainline_bindings:
+  - v3-hub-relay-resp-03
+  required_contract:
+  - only a whole output_text/message item starting with the exact `<thinking>` opening and ending with the exact three-line DSML closing block is treated as control material
+  - incomplete, suspect, quoted, and whole-item paired-thinking literals are forwarded unchanged
+  - complete control frames with visible prose keep that prose and drop only the frame
+  - complete control frames without visible/native output use the existing exhausted NoResponse transport boundary and never project provider failure to the client
+  - the rule is bound to Responses Relay SSE materialization through the typed source_provider_protocol witness; Anthropic JSON paths remain unchanged
+  required_gates:
+  - npm run verify:v3-architecture-ci
+  - npm run verify:v3-resource-map
+  - npm run verify:v3-module-boundaries
+  - npm run verify:v3-mainline-caller-flow
+  - npm run verify:v3-architecture-docs
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib anthropic_
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_relay_suspect_anthropic_text_is_preserved_without_reselection
+  - git diff --check
+  completion_rule:
+    source: Complete when the classifier, source witness, black-box matrix, runtime and error tests, and all map/resource/mainline gates pass on the exact candidate.
+    runtime: No live claim is made without installed-binary restart and same-entry replay.
+    forbidden_claim: Do not claim live closure from source tests alone.
