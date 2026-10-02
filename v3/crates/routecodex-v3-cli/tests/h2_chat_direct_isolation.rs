@@ -210,6 +210,52 @@ async fn chat_direct_real_upstream_http_429_retains_status_and_error() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
+/// Parity with the Responses entry (`h2_p6_controlled_replay.rs`, "last real
+/// upstream HTTP 503 response must retain its external error meaning"): when the
+/// pool is exhausted and the last provider attempt was a real external 503, the
+/// chat client must still receive that external status and error, not a
+/// fabricated internal failure.
+#[tokio::test]
+async fn chat_direct_real_upstream_http_503_retains_status_and_error() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut unavailable_a =
+        start_controlled_upstream(ProviderMode::UpstreamServiceUnavailable).await;
+    let mut unavailable_b =
+        start_controlled_upstream(ProviderMode::UpstreamServiceUnavailable).await;
+    let ports = ChatPorts::allocate();
+    let config = write_chat_config(&ports, &success, Some(&unavailable_a), Some(&unavailable_b));
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
+
+    for stream in [false, true] {
+        let response = client
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
+            .json(&json!({"model":"client-test","messages":[{"role":"user","content":"503 parity"}],"stream":stream}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            ReqwestStatusCode::SERVICE_UNAVAILABLE,
+            "stream={stream} a terminal real upstream 503 must reach the client unchanged"
+        );
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("upstream_unavailable"),
+            "stream={stream} the real external error must be preserved: {body}"
+        );
+        assert!(
+            !body.contains("network_error"),
+            "stream={stream} a real external failure must not be rewritten: {body}"
+        );
+    }
+    next_capture(&mut unavailable_a.captures, "503 first upstream").await;
+    next_capture(&mut unavailable_b.captures, "503 second upstream").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
 #[tokio::test]
 async fn chat_direct_pool_exhaustion_no_response_breaks_client_transport() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
@@ -523,6 +569,56 @@ async fn chat_relay_cross_protocol_error_then_reselect_succeeds() {
     assert_eq!(first.body["model"], "wire-unavailable");
     let recovered = next_capture(&mut success.captures, "relay success").await;
     assert_eq!(recovered.body["model"], "wire-success");
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+/// The same terminal external 503 preservation on the cross-protocol lane: an
+/// exhausted pool of `responses`-type providers must project the last real
+/// external status and error to the chat client.
+#[tokio::test]
+async fn chat_relay_cross_protocol_real_upstream_http_503_retains_status_and_error() {
+    let success = start_controlled_responses_upstream(ProviderMode::Success).await;
+    let mut unavailable_a =
+        start_controlled_responses_upstream(ProviderMode::UpstreamServiceUnavailable).await;
+    let mut unavailable_b =
+        start_controlled_responses_upstream(ProviderMode::UpstreamServiceUnavailable).await;
+    let ports = ChatPorts::allocate();
+    let config = write_chat_config_for_provider_type(
+        &ports,
+        "responses",
+        &success,
+        Some(&unavailable_a),
+        Some(&unavailable_b),
+    );
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
+
+    for stream in [false, true] {
+        let response = client
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
+            .json(&json!({"model":"client-test","messages":[{"role":"user","content":"relay 503 parity"}],"stream":stream}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            ReqwestStatusCode::SERVICE_UNAVAILABLE,
+            "stream={stream} a terminal real upstream 503 must reach the chat client unchanged"
+        );
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("upstream_unavailable"),
+            "stream={stream} the real external error must be preserved: {body}"
+        );
+        assert!(
+            !body.contains("network_error"),
+            "stream={stream} a real external failure must not be rewritten: {body}"
+        );
+    }
+    next_capture(&mut unavailable_a.captures, "relay 503 first upstream").await;
+    next_capture(&mut unavailable_b.captures, "relay 503 second upstream").await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
