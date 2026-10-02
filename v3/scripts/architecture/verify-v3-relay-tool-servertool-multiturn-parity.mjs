@@ -213,12 +213,7 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
     '"response.in_progress"',
     '"response.completed"',
   ]);
-  forbid(
-    clientSseProjection,
-    files.responsesRelayRuntime,
-    /"response\.done"|data: \[DONE\]/,
-    'non-Responses client SSE terminator (response.done / [DONE])',
-  );
+  // 非协议终止帧由文件级 forbid 统一判定（覆盖本切片），此处不重复声明。
   forbid(
     clientSseProjection,
     files.responsesRelayRuntime,
@@ -227,9 +222,10 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
   );
 }
 // 整个 Responses 客户端帧 owner 文件都不允许出现非协议终止帧：新增的
-// client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。
+// client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。注释里可以
+// 说明被禁止的协议终止符，因此这里只在去掉行注释后的代码视图上判定。
 forbid(
-  text.responsesRelayRuntime,
+  stripRustLineComments(text.responsesRelayRuntime),
   files.responsesRelayRuntime,
   /"response\.done"|data: \[DONE\]/,
   'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
@@ -376,6 +372,14 @@ function requireAll(source, owner, phrases) {
 
 function forbid(source, owner, pattern, label) {
   if (pattern.test(source)) fail(`${owner}: forbidden ${label} (${pattern})`);
+}
+
+// 门禁只判定代码，不判定说明文字：注释需要能点名被禁止的协议终止符。
+function stripRustLineComments(source) {
+  return source
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, ''))
+    .join('\n');
 }
 
 function requireOrdered(source, owner, phrases, label = 'Req04') {
