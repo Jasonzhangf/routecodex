@@ -117,13 +117,12 @@ const cases = [
     diagnostic: /response\.requires_action client SSE terminal projection/,
   },
   {
-    name: 'Responses client SSE done terminal removed',
+    name: 'Responses client SSE non-protocol response.done terminator reintroduced',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker:
-      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",',
+    marker: 'frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
     mutation:
-      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
-    diagnostic: /response\.done/,
+      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",\n                "response": terminal_response,\n            }),\n        ));\n        frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
+    diagnostic: /non-Responses client SSE terminator/,
   },
   {
     name: 'Responses client SSE incomplete remerged into failed terminal',

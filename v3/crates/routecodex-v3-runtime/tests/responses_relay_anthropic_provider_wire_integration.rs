@@ -1338,8 +1338,10 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
                 "thinking text must remain Responses reasoning.summary text: {text}"
             );
             assert!(text.contains("event: response.completed"));
-            assert!(text.contains("event: response.done"));
-            assert!(text.contains("data: [DONE]"));
+            // Responses 客户端帧只由协议终态收口；不得追加 response.done 或
+            // Chat Completions 的 [DONE] 终止符。
+            assert!(!text.contains("event: response.done"));
+            assert!(!text.contains("data: [DONE]"));
             assert!(
                 !text.contains("redacted_thinking"),
                 "provider-wire redacted_thinking must not leak to Responses client payload: {text}"

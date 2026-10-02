@@ -367,7 +367,9 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
             assert!(text.contains("event: response.function_call_arguments.done"));
             assert!(text.contains("event: response.output_item.done"));
             assert!(text.contains("event: response.completed"));
-            assert!(text.contains("event: response.done"));
+            // Responses 客户端帧序列与上游 provider/Direct 路径一致：协议没有
+            // `response.done` 事件，终态只能由 response.completed 承载。
+            assert!(!text.contains("event: response.done"));
             assert!(!text.contains("event: response.requires_action"));
             assert!(text.contains("\"status\":\"requires_action\""));
             assert!(
@@ -380,12 +382,8 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
                         .unwrap()
                         < text.find("event: response.output_item.done").unwrap()
                     && text.find("event: response.output_item.done").unwrap()
-                        < text.find("event: response.completed").unwrap()
-                    && text.find("event: response.completed").unwrap()
-                    < text.find("event: response.done").unwrap()
-                    && text.find("event: response.done").unwrap()
-                        < text.find("data: [DONE]").unwrap(),
-                "Responses Relay client tool-call SSE ordering must be output_item.added -> function_call_arguments.done -> output_item.done -> response.completed -> response.done -> [DONE]: {text}"
+                        < text.find("event: response.completed").unwrap(),
+                "Responses Relay client tool-call SSE ordering must be output_item.added -> function_call_arguments.done -> output_item.done -> response.completed: {text}"
             );
             assert!(text.contains("\"input_tokens\":13"));
             assert!(
@@ -504,8 +502,10 @@ async fn responses_relay_client_sse_request_projects_sse_even_when_provider_retu
             assert!(text.contains("event: response.created"));
             assert!(text.contains("event: response.output_item.done"));
             assert!(text.contains("event: response.completed"));
-            assert!(text.contains("event: response.done"));
-            assert!(text.contains("data: [DONE]"));
+            // Responses 客户端帧只由协议终态收口；不得追加 response.done 或
+            // Chat Completions 的 [DONE] 终止符。
+            assert!(!text.contains("event: response.done"));
+            assert!(!text.contains("data: [DONE]"));
             assert!(text.contains("json upstream"));
         }
         V3ResponsesRelayClientBody::Json(_) => {
@@ -1007,7 +1007,9 @@ async fn responses_relay_sse_completed_without_provider_finish_reason_infers_sto
             let text = String::from_utf8(forwarded).unwrap();
             assert!(text.contains("event: response.output_item.done"));
             assert!(text.contains("event: response.completed"));
-            assert!(text.contains("data: [DONE]"));
+            // Responses 客户端帧只由协议终态收口；不得追加 Chat Completions 的
+            // [DONE] 终止符。
+            assert!(!text.contains("data: [DONE]"));
             assert!(
                 !text.contains("event: response.output_text.delta"),
                 "Responses Relay client SSE transport must not raw-pass provider text event payloads around Hub: {text}"

@@ -205,15 +205,19 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
     'Some("failed")',
     '"response.failed"',
     '"response.incomplete"',
+    '"response.in_progress"',
     '"response.completed"',
-    '"response.done"',
-    'b"data: [DONE]\\n\\n"',
   ]);
   requireOrdered(clientSseProjection, files.responsesRelayRuntime, [
+    '"response.in_progress"',
     '"response.completed"',
-    '"response.done"',
-    'b"data: [DONE]\\n\\n"',
   ]);
+  forbid(
+    clientSseProjection,
+    files.responsesRelayRuntime,
+    /"response\.done"|data: \[DONE\]/,
+    'non-Responses client SSE terminator (response.done / [DONE])',
+  );
   forbid(
     clientSseProjection,
     files.responsesRelayRuntime,

@@ -831,14 +831,29 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
             completed.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
             "completed response.output must use message shape consistent with output_item.done: {completed}"
         );
-    let done = text
-        .find("event: response.done")
-        .map(|index| &text[index..])
-        .expect("response.done frame must be present");
+    // Responses 客户端帧序列与上游 provider/Direct 路径一致：协议没有
+    // `response.done` 事件，`data: [DONE]` 是 Chat Completions 约定，终态只能由
+    // response.completed/response.incomplete/response.failed 承载。
     assert!(
-            done.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
-            "done response.output must use message shape consistent with output_item.done: {done}"
-        );
+        !text.contains("event: response.done"),
+        "Responses client stream must not carry a response.done frame: {text}"
+    );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "Responses client stream must not carry a Chat-completions [DONE] terminator: {text}"
+    );
+    assert!(
+        text.contains("event: response.in_progress"),
+        "response.in_progress frame must be present: {text}"
+    );
+    let created = text
+        .find("event: response.created")
+        .map(|index| &text[index..])
+        .expect("response.created frame must be present");
+    assert!(
+        created.contains(r#""status":"in_progress""#) && created.contains(r#""output":[]"#),
+        "response.created must carry an in-progress snapshot with empty output: {created}"
+    );
 }
 
 #[tokio::test]
@@ -889,8 +904,12 @@ async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
         "partial output must not be dropped: {text}"
     );
     assert!(
-        text.contains("event: response.done") && text.contains("data: [DONE]"),
-        "incomplete terminal must close with response.done + [DONE]: {text}"
+        !text.contains("event: response.done"),
+        "incomplete terminal must not add a non-protocol response.done frame: {text}"
+    );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "incomplete terminal must not add a Chat-completions [DONE] terminator: {text}"
     );
 }
 
