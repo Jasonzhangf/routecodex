@@ -40,6 +40,13 @@ fn responses_incomplete_reason(payload: &Value) -> Option<&str> {
     })
 }
 
+/// Chat output-cap terminals, including gateway aliases such as `max_tokens`,
+/// are valid partial output. They must not enter the provider failure/cooldown
+/// path; the Responses client projection represents them as `incomplete`.
+pub(crate) fn openai_chat_finish_reason_is_output_cap(reason: &str) -> bool {
+    matches!(reason, "length" | "max_tokens" | "max_output_tokens")
+}
+
 fn openai_chat_incomplete_reason(payload: &Value) -> Option<&str> {
     payload
         .get("choices")
@@ -47,10 +54,7 @@ fn openai_chat_incomplete_reason(payload: &Value) -> Option<&str> {
         .iter()
         .find_map(
             |choice| match choice.get("finish_reason").and_then(Value::as_str) {
-                // Chat output-cap terminals, including gateway aliases such as
-                // max_tokens, are valid partial output. They must not enter the
-                // provider failure/cooldown path.
-                Some("length" | "max_tokens" | "max_output_tokens") => None,
+                Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => None,
                 Some("content_filter") => Some("content_filter"),
                 _ => None,
             },

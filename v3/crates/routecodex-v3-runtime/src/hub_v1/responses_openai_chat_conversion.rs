@@ -116,8 +116,10 @@ pub(crate) fn build_v3_responses_provider_response_from_openai_chat_payload_with
     // hang. The presence of tool calls is carried by `output`, not by `status`.
     // Only an explicit truncation is a non-success terminal, and it must use the
     // Responses `incomplete` shape rather than a Chat `finish_reason` field.
+    // 截断词表复用唯一 owner：guard 与投影必须认同一组 reason，否则 `max_tokens`
+    // 等网关别名会被 guard 豁免、却在这里落成 `completed` 的空成功响应。
     let status = match finish_reason.as_deref() {
-        Some("length") => "incomplete",
+        Some(reason) if openai_chat_finish_reason_is_output_cap(reason) => "incomplete",
         _ => "completed",
     };
     let mut response = Map::new();
