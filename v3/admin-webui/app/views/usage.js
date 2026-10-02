@@ -107,6 +107,9 @@ const state = {
   timeseries: [],
   facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, entry_protocols: {}, error_status_codes: {} },
   errorStatusCode: null,
+  // Origin narrows an error drilldown to upstream / local / unknown. It is set
+  // together with errorStatusCode by the errors table and cleared with it.
+  errorOrigin: null,
   tableWidths: { entries: null, attempts: null, errors: null },
   loading: false,
   // layered filter model: port tabs (Layer 1) → status kinds (Layer 2) →
@@ -307,6 +310,16 @@ function mergeFacets(target, source) {
   for (const [key, values] of Object.entries(source || {})) {
     const bucket = target[key] || (target[key] = {});
     for (const [value, count] of Object.entries(values || {})) {
+      // `error_status_origins` is the one nested facet:
+      // { "<status>": { upstream, local, unknown } }. Merging it as a number
+      // would produce NaN in multi-plan mode, so recurse one level.
+      if (count && typeof count === "object") {
+        const nested = bucket[value] || (bucket[value] = {});
+        for (const [innerKey, innerCount] of Object.entries(count)) {
+          nested[innerKey] = (nested[innerKey] || 0) + Number(innerCount || 0);
+        }
+        continue;
+      }
       bucket[value] = (bucket[value] || 0) + Number(count || 0);
     }
   }
@@ -425,6 +438,7 @@ function buildQueryParams(page) {
   const search = document.getElementById("search-filter").value.trim();
   if (search) params.set("search", search);
   if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
+  if (state.errorOrigin) params.set("error_origin", state.errorOrigin);
   return params;
 }
 
@@ -473,28 +487,77 @@ async function loadAttempts() {
   }
 }
 
+// ---------- error origin ----------
+// `facets.error_status_origins` is the frozen contract's answer to "how many of
+// these 502s were the provider's, and how many were ours". Each (status, origin)
+// pair becomes its own row so the two can never be read as one number again.
+
+// Display order inside one status: the provider's own rejections first.
+const ERROR_ORIGIN_ORDER = ["upstream", "local", "unknown"];
+
+// Colour is a hint only; the badge always carries the origin as text so the
+// column still reads correctly in greyscale.
+const ERROR_ORIGIN_BADGE_KIND = { upstream: "warn", local: "bad", unknown: "neutral" };
+
+function errorOriginBadge(origin) {
+  if (!origin) return el("span", "muted", "—");
+  return el("span", `badge ${ERROR_ORIGIN_BADGE_KIND[origin] || "neutral"}`, origin);
+}
+
+// Stable key for the per-pair sample-detail map.
+function errorPairKey(item) {
+  return item.origin ? `${item.code}|${item.origin}` : String(item.code);
+}
+
+// One row per (status, origin): numeric status ascending, then upstream before
+// local before unknown. The listener emits only the origins it actually
+// observed, so the zero-count filter below is defensive rather than
+// load-bearing: it exists so a listener that ever does seed all three keys
+// cannot produce a "502 | unknown | 0" noise row.
+// Fallback: an older listener that does not send `error_status_origins` keeps
+// the previous single-origin rows rather than rendering an empty table.
+function errorOriginRows(facets) {
+  const byStatus = facets?.error_status_origins;
+  if (byStatus && typeof byStatus === "object" && Object.keys(byStatus).length) {
+    return Object.keys(byStatus)
+      .sort((left, right) => Number(left) - Number(right))
+      .flatMap((code) => ERROR_ORIGIN_ORDER
+        .map((origin) => ({ code, origin, count: Number(byStatus[code]?.[origin] || 0) }))
+        .filter((item) => item.count > 0));
+  }
+  return Object.entries(facets?.error_status_codes || {})
+    .map(([code, count]) => ({ code, origin: null, count: Number(count || 0) }))
+    .sort((left, right) => Number(left.code) - Number(right.code));
+}
+
 async function loadErrors() {
   try {
-    const codes = Object.entries(state.facets.error_status_codes || {})
-      .map(([code, count]) => ({ code, count }))
-      .sort((a, b) => b.count - a.count);
-    state.errorFacets = codes;
-    state.errorStatuses = codes.reduce((sum, item) => sum + Number(item.count || 0), 0);
+    const pairs = errorOriginRows(state.facets);
+    state.errorFacets = [...pairs].sort((a, b) => b.count - a.count);
+    // Sum the rendered rows, not `facets.error_origins`. `error_status_origins`
+    // is a strict refinement of `error_status_codes` and still carries the 499
+    // cancellation bucket, which `error_origins` deliberately excludes (a
+    // cancellation is not an error). Summing the rows keeps the previous total
+    // and, more importantly, keeps the total equal to what the table shows.
+    state.errorStatuses = pairs.reduce((sum, item) => sum + item.count, 0);
     state.errorExamples = {};
-    // Every facet status code is probed, not a truncated sample.
-    await Promise.all(codes.map(async (item) => {
+    // Every (status, origin) pair is probed, not a truncated sample, and each
+    // probe carries the origin so the example shown under "502 upstream" is an
+    // upstream row rather than whichever local row happened to sort first.
+    await Promise.all(pairs.map(async (item) => {
       try {
         const params = buildQueryParams(1);
         params.set("status", "error");
         params.set("error_status_code", item.code);
+        if (item.origin) params.set("error_origin", item.origin);
         params.set("page_size", "1");
         const response = await api(`/api/observability/records?${params}`);
         const first = (response.records || [])[0];
-        state.errorExamples[item.code] = first?.meta?.error_detail
+        state.errorExamples[errorPairKey(item)] = first?.meta?.error_detail
           || first?.meta?.error_category
           || "—";
       } catch (error) {
-        state.errorExamples[item.code] = "—";
+        state.errorExamples[errorPairKey(item)] = "—";
       }
     }));
   } catch (error) {
@@ -872,24 +935,25 @@ function renderStats(stats) {
     portBody.replaceChildren(emptyRow);
   }
   const errorBody = document.querySelector("#errors-table tbody");
-  // Group errors by raw numeric status; semantic error details stay in the drawer.
-  const errorMap = new Map();
-  for (const [code, count] of Object.entries(state.facets.error_status_codes || {})) {
-    errorMap.set(code, { terminal: count });
-  }
-  const statusCodes = [...errorMap.entries()]
-    .sort(([left], [right]) => Number(left) - Number(right));
-  errorBody.replaceChildren(...statusCodes.map(([statusCode, entry]) => {
+  // One row per (status, origin): the single "502 | 1699" row is exactly what
+  // made operators read our own transport failures as provider rejections.
+  // Semantic error details stay in the drawer.
+  const errorRows = errorOriginRows(state.facets);
+  errorBody.replaceChildren(...errorRows.map((item) => {
     const row = el("tr", "status-error");
     row.style.cursor = "pointer";
-    row.title = `Filter requests by status code "${statusCode}"`;
-    row.addEventListener("click", () => drilldownErrorStatus(statusCode));
-    row.append(el("td", null, statusCode), numberCell(entry.terminal));
+    row.title = item.origin
+      ? `Filter requests by status code "${item.code}" from the ${item.origin} origin`
+      : `Filter requests by status code "${item.code}"`;
+    row.addEventListener("click", () => drilldownErrorStatus(item.code, item.origin));
+    const originCell = document.createElement("td");
+    originCell.appendChild(errorOriginBadge(item.origin));
+    row.append(el("td", null, item.code), originCell, numberCell(item.count));
     return row;
   }));
-  if (!statusCodes.length) {
+  if (!errorRows.length) {
     const cell = document.createElement("td");
-    cell.colSpan = 2;
+    cell.colSpan = 3;
     const emptyRow = document.createElement("tr");
     emptyRow.appendChild(cell);
     errorBody.replaceChildren(emptyRow);
@@ -1085,12 +1149,14 @@ function excludeRowEl(code, groupRows) {
   return tr;
 }
 
-function drilldownErrorStatus(code) {
-  // Drill into Entries with the clicked status code, layer-2 narrowed to
-  // errors, keeping the rest of the filter rail.
+function drilldownErrorStatus(code, origin = null) {
+  // Drill into Entries with the clicked (status, origin) pair, layer-2 narrowed
+  // to errors, keeping the rest of the filter rail. The origin travels with the
+  // status so "502 upstream" never lands on the local 502 rows.
   state.page = 1;
   state.statusKinds = new Set(["error"]);
   state.errorStatusCode = code;
+  state.errorOrigin = origin;
   state.tab = "entries";
   loadRecords();
 }
@@ -1440,10 +1506,12 @@ function renderEntriesPanel(panel) {
   const rows = state.records;
   const fragments = [];
   if (state.errorStatusCode) {
-    const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}. `);
+    const originLabel = state.errorOrigin ? ` (${state.errorOrigin})` : "";
+    const banner = el("div", "status-bar info", `Filtered by error status ${state.errorStatusCode}${originLabel}. `);
     const clear = el("button", "btn", "Clear filter");
     clear.addEventListener("click", () => {
       state.errorStatusCode = null;
+      state.errorOrigin = null;
       state.page = 1;
       loadRecords();
     });
@@ -1594,6 +1662,7 @@ function renderErrorsPanel(panel) {
   const table = el("table", "request-table");
   const columns = [
     { key: "code", label: "Status", colClass: "col-code" },
+    { key: "origin", label: "Origin", colClass: "col-origin" },
     { key: "count", label: "Count", colClass: "col-port" },
     { key: "example", label: "Example detail", colClass: "col-usage" },
   ];
@@ -1609,15 +1678,20 @@ function renderErrorsPanel(panel) {
   codes.forEach((item) => {
     const tr = el("tr");
     tr.style.cursor = "pointer";
-    tr.title = `View Requests filtered by status ${item.code}`;
+    tr.title = item.origin
+      ? `View Requests filtered by status ${item.code} from the ${item.origin} origin`
+      : `View Requests filtered by status ${item.code}`;
     // Drilldown: jump to Entries tab with layer-2 narrowed to errors and
-    // the clicked status code, keeping other filters.
-    tr.addEventListener("click", () => drilldownErrorStatus(item.code));
+    // the clicked (status, origin) pair, keeping other filters.
+    tr.addEventListener("click", () => drilldownErrorStatus(item.code, item.origin));
     const codeCell = el("td", "col-code");
     codeCell.appendChild(el("span", "status-text error", item.code));
     tr.appendChild(codeCell);
+    const originCell = el("td", "col-origin");
+    originCell.appendChild(errorOriginBadge(item.origin));
+    tr.appendChild(originCell);
     tr.appendChild(el("td", "col-port", String(item.count)));
-    tr.appendChild(el("td", "mono", state.errorExamples?.[item.code] || "—"));
+    tr.appendChild(el("td", "mono", state.errorExamples?.[errorPairKey(item)] || "—"));
     body.appendChild(tr);
   });
   table.appendChild(body);

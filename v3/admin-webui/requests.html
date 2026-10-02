@@ -21,6 +21,21 @@
   .live-state.err { color: var(--danger); }
   .row-copy { padding: 1px 6px; font-size: 11px; }
   .adv-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+  /* Errors table: one row per (status, origin). All three columns are narrow
+     and the origin badge is text-first, so a row must stay on one line at 390px. */
+  #errors-table { width: 100%; }
+  #errors-table th, #errors-table td { white-space: nowrap; }
+  #errors-table .badge { white-space: nowrap; }
+  /* Same Origin column in the Errors tab's request table. */
+  .request-table th.col-origin, .request-table td.col-origin { white-space: nowrap; }
+  /* At <=1000px .requests-grid collapses to one `1fr` column whose automatic
+     minimum is the widest child's min-content. The Errors tab table gained an
+     Origin column, so without an explicit min-width:0 that min-content widens
+     the column — and the filter rail with it — past a 390px viewport. The
+     table keeps its own .panel { overflow-x: auto } scroll instead. */
+  @media (max-width: 1000px) {
+    .requests-grid > * { min-width: 0; }
+  }
   /* Cooldown panel: one flat table per listener. The old auto-fill card grid
      squashed every field of an entry into one narrow column. */
   .cooldown-head {
@@ -190,7 +205,7 @@
       </div>
       <div class="layout">
         <div class="panel amb-surface amb-elevation-1"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
-        <div class="panel amb-surface amb-elevation-1"><table id="errors-table"><thead><tr><th>Status code</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="2" class="loading">no errors</td></tr></tbody></table></div>
+        <div class="panel amb-surface amb-elevation-1"><table id="errors-table"><thead><tr><th>Status code</th><th>Origin</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
       </div>
     </div>
 
