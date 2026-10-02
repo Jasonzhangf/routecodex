@@ -3660,7 +3660,9 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
             assert!(text.contains("event: response.failed"), "{text}");
             assert!(text.contains("HTTP_429"), "{text}");
             assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+            // Responses 错误流同样只由协议终态收口，不得追加 [DONE]。
+            assert!(!text.contains("data: [DONE]"), "{text}");
+            assert!(text.ends_with("}\n\n"), "{text}");
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
@@ -4061,7 +4063,17 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.completed"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    // Responses 客户端帧只由协议终态收口：不得追加 response.done 或 Chat
+    // Completions 的 [DONE] 终止符。
+    assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(
+        text.trim_end()
+            .rsplit("event: ")
+            .next()
+            .unwrap_or_default()
+            .starts_with("response.completed"),
+        "{text}"
+    );
 }
 
 #[tokio::test]
@@ -4091,7 +4103,9 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
     assert!(text.starts_with("event: response.failed\n"), "{text}");
     assert!(text.contains("provider_request_payload_invalid"), "{text}");
     assert!(text.contains("UnmappedOutboundFields"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    // response.failed 就是 Responses 终态，错误流不得追加 [DONE]。
+    assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(text.ends_with("}\n\n"), "{text}");
 }
 
 #[tokio::test]
@@ -4275,7 +4289,9 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let error = std::str::from_utf8(&error).unwrap();
     assert!(error.starts_with("event: response.failed\n"), "{error}");
     assert!(error.contains("internal_response_stream_error"), "{error}");
-    assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
+    // response.failed 就是 Responses 终态，错误流同样不得追加 [DONE]。
+    assert!(!error.contains("data: [DONE]"), "{error}");
+    assert!(error.ends_with("}\n\n"), "{error}");
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
@@ -4375,7 +4391,17 @@ async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provid
     let replay = String::from_utf8(replay).unwrap();
     assert!(replay.contains("event: response.created"), "{replay}");
     assert!(replay.contains("event: response.completed"), "{replay}");
-    assert!(replay.ends_with("data: [DONE]\n\n"), "{replay}");
+    // Direct Responses 客户端帧同样只由协议终态收口：不得出现 [DONE]。
+    assert!(!replay.contains("data: [DONE]"), "{replay}");
+    assert!(
+        replay
+            .trim_end()
+            .rsplit("event: ")
+            .next()
+            .unwrap_or_default()
+            .starts_with("response.completed"),
+        "{replay}"
+    );
 }
 
 #[tokio::test]

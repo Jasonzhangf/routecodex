@@ -2399,7 +2399,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"end_turn"
             }),
             "completed",
-            "end_turn",
+            None,
+            None,
             None,
         ),
         (
@@ -2409,8 +2410,9 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "content":[{"type":"tool_use","id":"call_terminal","name":"lookup","input":{"q":"x"}}],
                 "stop_reason":"tool_use"
             }),
-            "requires_action",
-            "tool_use",
+            "completed",
+            None,
+            None,
             None,
         ),
         (
@@ -2421,8 +2423,9 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"max_tokens"
             }),
             "incomplete",
-            "max_tokens",
+            None,
             Some("max_output_tokens"),
+            None,
         ),
         (
             json!({
@@ -2433,7 +2436,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_sequence":"</answer>"
             }),
             "completed",
-            "stop_sequence",
+            Some("</answer>"),
+            None,
             None,
         ),
         (
@@ -2444,7 +2448,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"pause_turn"
             }),
             "in_progress",
-            "pause_turn",
+            None,
+            None,
             None,
         ),
         (
@@ -2456,28 +2461,43 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_details":{"category":"cyber","explanation":"policy"}
             }),
             "incomplete",
-            "refusal",
+            None,
             Some("content_filter"),
+            Some("cyber"),
         ),
     ];
 
-    for (payload, expected_status, expected_finish_reason, expected_incomplete_reason) in cases {
+    for (
+        payload,
+        expected_status,
+        expected_stop_sequence,
+        expected_incomplete_reason,
+        expected_stop_details_category,
+    ) in cases
+    {
         let response = project_v3_anthropic_message_as_responses_response(&payload)
             .unwrap_or_else(|error| panic!("registered terminal value must project: {error}"));
         assert_eq!(response["status"], expected_status, "{response}");
-        assert_eq!(
-            response["finish_reason"], expected_finish_reason,
-            "{response}"
+        // Responses has no `finish_reason` field: carrying the Anthropic
+        // `stop_reason` as `finish_reason` fabricates a Chat-only field into a
+        // Responses client projection. Terminality is `status` alone.
+        assert!(
+            response.get("finish_reason").is_none(),
+            "Responses projection must not carry finish_reason: {response}"
         );
         match expected_incomplete_reason {
             Some(reason) => assert_eq!(response["incomplete_details"]["reason"], reason),
             None => assert!(response.get("incomplete_details").is_none(), "{response}"),
         }
-        if expected_finish_reason == "stop_sequence" {
-            assert_eq!(response["stop_sequence"], "</answer>", "{response}");
+        match expected_stop_sequence {
+            Some(sequence) => assert_eq!(response["stop_sequence"], sequence, "{response}"),
+            None => assert!(response.get("stop_sequence").is_none(), "{response}"),
         }
-        if expected_finish_reason == "refusal" {
-            assert_eq!(response["stop_details"]["category"], "cyber", "{response}");
+        match expected_stop_details_category {
+            Some(category) => {
+                assert_eq!(response["stop_details"]["category"], category, "{response}")
+            }
+            None => assert!(response.get("stop_details").is_none(), "{response}"),
         }
     }
 }

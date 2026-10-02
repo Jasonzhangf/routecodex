@@ -56,7 +56,7 @@ flowchart LR
 
 | Semantic | JSON must expose | SSE must expose | Equality rule |
 | --- | --- | --- | --- |
-| final completion | final response body | `response.completed` and/or `response.done` terminal event | same terminal truth |
+| final completion | final response body | `response.completed` terminal event | same terminal truth |
 | tool call request | final `assistant.tool_calls` or `required_action.submit_tool_outputs.tool_calls[]` | terminal/completed SSE frame with same tool-call set | same consumer-visible required action |
 | tool-call ids | final body ids | SSE terminal ids | exact id equality |
 | plain output text | final text field | accumulated visible text stream | semantic equality |

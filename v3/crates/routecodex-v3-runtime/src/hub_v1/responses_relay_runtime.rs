@@ -753,24 +753,34 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
     let status = response.get("status").and_then(Value::as_str);
     // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
     // content_filter 触发）：必须按协议投影 response.created + output_item.done
-    // （部分输出）+ response.incomplete + response.done + [DONE]，禁止把它映射
-    // 成 response.failed 丢弃部分输出；只有 status=failed 才是失败终态。
+    // （部分输出）+ response.incomplete，禁止把它映射成 response.failed 丢弃部分
+    // 输出；只有 status=failed 才是失败终态。
+    //
+    // Responses 客户端帧序列与 Direct 路径/上游 provider 保持一致：协议没有
+    // `response.done` 事件，Chat Completions 的 `[DONE]` 终止符也不属于 Responses。
+    // 终态只能由 response.completed/response.incomplete/response.failed 承载，
+    // 不得向 Responses 客户端追加非协议帧。
     let failed = status == Some("failed");
     let incomplete = status == Some("incomplete");
     let mut frames = Vec::new();
     if !failed {
         if let Some(response_id) = response.get("id").and_then(Value::as_str) {
+            // response.created/response.in_progress 承载“尚未产生输出”的响应快照：
+            // 与上游 provider 和 Direct 路径一致，status 为 in_progress、output 为空。
+            let progress_response =
+                build_v3_responses_client_progress_response(&response, response_id);
             frames.push(build_v3_runtime_sse_json_frame(
                 "response.created",
                 &json!({
                     "type": "response.created",
-                    "response": {
-                        "id": response_id,
-                        "status": response
-                            .get("status")
-                            .cloned()
-                            .unwrap_or_else(|| json!("in_progress")),
-                    }
+                    "response": progress_response,
+                }),
+            ));
+            frames.push(build_v3_runtime_sse_json_frame(
+                "response.in_progress",
+                &json!({
+                    "type": "response.in_progress",
+                    "response": progress_response,
                 }),
             ));
             if let Some(output) = response.get("output").and_then(Value::as_array) {
@@ -829,15 +839,7 @@ pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_
             }),
         ));
         terminal_frame_index = frames.len() - 1;
-        frames.push(build_v3_runtime_sse_json_frame(
-            "response.done",
-            &json!({
-                "type": "response.done",
-                "response": terminal_response,
-            }),
-        ));
     }
-    frames.push(b"data: [DONE]\n\n".to_vec());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|error| error.to_string())?;
     for (index, frame) in frames.into_iter().enumerate() {
@@ -1059,6 +1061,27 @@ fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Valu
         projected["id"] = id;
     }
     projected
+}
+
+/// `response.created`/`response.in_progress` 的响应快照：保留 provider 身份
+/// 与模型字段，但按 Responses 协议把状态固定为 `in_progress`、清空 output
+/// （此刻尚未产生任何输出条目），并清掉只在终态成立的字段。禁止在
+/// in-progress 帧里携带终态 status、最终 output、usage 或 incomplete_details。
+fn build_v3_responses_client_progress_response(response: &Value, response_id: &str) -> Value {
+    let mut progress = response.clone();
+    if let Some(object) = progress.as_object_mut() {
+        object.insert("id".to_string(), Value::String(response_id.to_string()));
+        object.insert(
+            "status".to_string(),
+            Value::String("in_progress".to_string()),
+        );
+        object.insert("output".to_string(), Value::Array(Vec::new()));
+        object.insert("usage".to_string(), Value::Null);
+        object.insert("incomplete_details".to_string(), Value::Null);
+        object.remove("completed_at");
+        object.remove("stop_details");
+    }
+    progress
 }
 
 /// SSE 事件级 completed/done 内嵌 response 的 item 表示投影：与

@@ -58,7 +58,7 @@ fn responses_tool_search_output_provider_call_restores_identity_for_tool_followu
         &semantic_request,
     )
     .expect("provider tool call must project through the Responses response owner");
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["namespace"], "mcp__codex_review");
     assert_eq!(response["output"][0]["name"], "review_start");
@@ -155,7 +155,7 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
     let V3ResponsesRelayClientBody::Json(response) = output.client_body else {
         panic!("non-streaming request must return a JSON response");
     };
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["namespace"], "mcp__rcc_probe");
     assert_eq!(response["output"][0]["name"], "echo");
     assert_eq!(
@@ -511,7 +511,7 @@ fn openai_chat_functions_exec_call_restores_shell_namespace_for_responses_client
     )
     .expect("flattened shell call must restore its client namespace");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
     assert_eq!(response["output"][0]["namespace"], "functions");
     assert_eq!(response["output"][0]["name"], "exec");
@@ -766,6 +766,60 @@ async fn openai_chat_stream_usage_preserves_cached_input_tokens() {
         response["usage"]["input_tokens_details"]["cached_tokens"],
         2560
     );
+}
+
+/// A Chat provider that answers with a tool call must project to a Responses
+/// response whose terminal status is `completed`, which is the same semantic a
+/// Responses-native provider reports for a function_call output item.
+/// `requires_action` is not a Responses status and must not be fabricated, and
+/// the Chat-only `finish_reason` field must not enter the Responses object.
+#[test]
+fn openai_chat_tool_call_projects_completed_status_without_finish_reason() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({
+            "id": "chatcmpl_tool_terminal",
+            "model": "wb-deepseek-v4.1-flash",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_weather_1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": "{\"city\":\"Paris\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14}
+        }),
+        &json!({
+            "tools": [{
+                "type": "function",
+                "function": {"name": "get_weather", "parameters": {"type": "object"}}
+            }]
+        }),
+    )
+    .expect("an OpenAI Chat tool call must project to a Responses function_call");
+
+    assert_eq!(
+        response["status"], "completed",
+        "a tool call is a normal Responses output item; the terminal status must stay completed: {response}"
+    );
+    assert!(
+        response.get("finish_reason").is_none(),
+        "finish_reason is a Chat Completions field and must not enter a Responses object: {response}"
+    );
+    assert_eq!(
+        response["id"], "chatcmpl_tool_terminal",
+        "the provider response id must be preserved: {response}"
+    );
+    assert_eq!(response["output"][0]["type"], "function_call");
+    assert_eq!(response["output"][0]["call_id"], "call_weather_1");
+    assert_eq!(response["output"][0]["name"], "get_weather");
 }
 
 #[path = "responses_relay_runtime_extra_tests.rs"]

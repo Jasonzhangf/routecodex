@@ -117,7 +117,8 @@ Review locks:
   wrapped as provider success.
 - Streaming success is recorded only after protocol terminal evidence and clean EOF.
   For provider Responses SSE, only `response.completed` is semantic terminal truth;
-  `response.done` is a client projection event and `[DONE]` is transport-only.
+  Responses 协议没有 `response.done` 事件，`[DONE]` 是 Chat Completions 的终止符，
+  不得出现在 Responses 客户端边界。
   Malformed events, premature EOF, provider stream errors, `response.failed`, and
   post-terminal parse failures record provider failure and leave the next action gated.
 - Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and

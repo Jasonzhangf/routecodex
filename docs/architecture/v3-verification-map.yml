@@ -2259,7 +2259,7 @@ features:
   status: source_gate_verified
   change_risk: critical
   owner_kind: rust_project_v3_runtime_chat_process_gate
-  owner_scope: 'Resp03 response governance small skeleton: text harvest, tool-frame repair, finish_reason branch, tool_call servertool hook, and ordinary governance before client projection.'
+  owner_scope: 'Resp03 response governance small skeleton: text harvest, finish_reason branch, tool_call servertool hook, and ordinary governance before client projection; a completed tool-call response stays completed/tool_calls and is never rewritten to a fabricated Responses tool-continuation status.'
   owner_modules:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
@@ -2274,7 +2274,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
   required_unit:
-  - Resp03 repairs completed tool-call responses to requires_action/tool_calls before ordinary tool governance
+  - Resp03 preserves a completed tool-call response as completed/tool_calls before ordinary tool governance and never rewrites it to requires_action
   - Resp03 runs the registered tool_call servertool hook before ordinary tool governance
   - Resp03 runs ordinary apply_patch/client tool governance only after tool-call servertool pass-through
   - Resp03 owns response tool/servertool governance before client projection

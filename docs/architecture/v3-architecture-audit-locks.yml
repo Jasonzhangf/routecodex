@@ -330,8 +330,8 @@ locked_items:
     reviewed_by: Jason
     locked_at: '2026-09-15T00:00:00-07:00'
     review_surface: docs/architecture/wiki/html/v3-mainline-caller-flow.html
-    fingerprint: sha256:02b1273a9573f68bc4f9d2b911b67055869a7303fda280df1f2a1a34f5da52f5
-    last_manual_authorization_id: auth-20260915-v3-remove-continuation-resp03-governance
+    fingerprint: sha256:941b25453c6b5fd0fa5b4458831cccdc4cd6a713b35cffaa53f3639a76651c00
+    last_manual_authorization_id: auth-20261001-v3-responses-tool-call-completed-lock
   - item_id: chain:v3.live_provider_compat.parity
     chain_id: v3.live_provider_compat.parity
     status: audited_locked
@@ -1237,3 +1237,10 @@ manual_authorizations:
     reason: "Jason instructed continuation after the review finding for issue f305a16. Managed shutdown now records sample persistence failures in terminal status detail, with the failure resource bound to the lifecycle edge; this refresh records that scoped report path."
     fingerprint_before: sha256:a47745d250743cf71218b9d4d80cf09f56f9454de68c05e4aab5e70c56bcffb4
     fingerprint_after: sha256:263429b7022d5741d42c1d776360bda477a5d8e06481726f7bcbab02b9b053a6
+  - authorization_id: auth-20261001-v3-responses-tool-call-completed-lock
+    item_id: chain:v3.resp03_tool_governance_gap_closeout
+    approved_by: Jason
+    approved_at: '2026-10-01T13:43:00-07:00'
+    reason: "Jason authorized completing the V3 Responses tool-call behavior alignment (DSH responses divergence/hang fix). complete_or_repair_v3_resp03_tool_frames was physically deleted because it fabricated a Responses tool-continuation status and finish_reason; edge v3-resp03-tool-governance-01 callee now binds strip_v3_resp03_encrypted_reasoning_content, edge v3-resp03-tool-governance-05 caller was renamed to the renamed characterization test, and the chain summary/owner-scope text now states that a completed tool-call response stays completed/tool_calls and never a fabricated requires_action. Node topology, owners, resources, and control-plane/data-plane boundaries are unchanged."
+    fingerprint_before: sha256:02b1273a9573f68bc4f9d2b911b67055869a7303fda280df1f2a1a34f5da52f5
+    fingerprint_after: sha256:941b25453c6b5fd0fa5b4458831cccdc4cd6a713b35cffaa53f3639a76651c00

@@ -1866,7 +1866,7 @@ flowchart TD
 
 ## v3.resp03_tool_governance_gap_closeout
 
-Resp03 response small skeleton: provider-neutral text harvest and tool-frame repair occur before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; terminal branch preserves response semantics; Resp05 consumes the governed response directly.
+Resp03 response small skeleton: provider-neutral text harvest occurs before finish_reason branch; tool_call branch runs servertool hook before ordinary governance; terminal branch preserves response semantics (a completed tool-call response stays completed/tool_calls, never a fabricated requires_action); Resp05 consumes the governed response directly.
 
 Owner feature: `v3.resp03_tool_governance_gap_closeout`
 Manifest: `docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.mainline.yml`
@@ -1874,12 +1874,12 @@ Manifest: `docs/architecture/manifests/v3.resp03_tool_governance_gap_closeout.ma
 ```mermaid
 flowchart TD
   subgraph c_45_v3_resp03_tool_governance_gap_closeout_m_v3_runtime["v3-runtime"]
-    c_45_v3_resp03_tool_governance_gap_closeout_5["v3-runtime<br/>resp05_consumes_resp03_repaired_payload_without_semantic_repair<br/><small>routecodex-v3-runtime/tests/hub_relay_response_semantics.rs</small>"]
+    c_45_v3_resp03_tool_governance_gap_closeout_5["v3-runtime<br/>resp05_consumes_resp03_governed_payload_without_semantic_repair<br/><small>routecodex-v3-runtime/tests/hub_relay_response_semantics.rs</small>"]
     c_45_v3_resp03_tool_governance_gap_closeout_7["v3-runtime<br/>responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order<br/><small>routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</small>"]
   end
   subgraph c_45_v3_resp03_tool_governance_gap_closeout_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_45_v3_resp03_tool_governance_gap_closeout_0["v3-runtime::hub_v1<br/>govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
-    c_45_v3_resp03_tool_governance_gap_closeout_1["v3-runtime::hub_v1<br/>complete_or_repair_v3_resp03_tool_frames<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
+    c_45_v3_resp03_tool_governance_gap_closeout_1["v3-runtime::hub_v1<br/>strip_v3_resp03_encrypted_reasoning_content<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
     c_45_v3_resp03_tool_governance_gap_closeout_2["v3-runtime::hub_v1<br/>inspect_v3_resp03_finish_reason<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
     c_45_v3_resp03_tool_governance_gap_closeout_3["v3-runtime::hub_v1<br/>apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small>"]
     c_45_v3_resp03_tool_governance_gap_closeout_4["v3-runtime::hub_v1<br/>project_v3_apply_patch_freeform_calls_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small>"]
@@ -1896,11 +1896,11 @@ flowchart TD
 
 | Step | Node edge | Status | Caller | Callee | Owner |
 | --- | --- | --- | --- | --- | --- |
-| `v3-resp03-tool-governance-01` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | complete_or_repair_v3_resp03_tool_frames<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
+| `v3-resp03-tool-governance-01` | `V3HubRespInbound02Normalized` → `V3HubRespChatProcess03Governed` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | strip_v3_resp03_encrypted_reasoning_content<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
 | `v3-resp03-tool-governance-02` | `V3HubRespChatProcess03Governed` → `V3Resp03FinishReasonBranch` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | inspect_v3_resp03_finish_reason<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
 | `v3-resp03-tool-governance-03` | `V3Resp03FinishReasonBranch` → `V3Resp03ToolCallServertoolHook` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | apply_v3_tool_call_servertool_hook_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
 | `v3-resp03-tool-governance-04` | `V3Resp03ToolCallServertoolHook` → `V3Resp03OrdinaryToolGovernance` | anchored | govern_v3_hub_relay_response<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | project_v3_apply_patch_freeform_calls_at_resp03<br/><small>routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
-| `v3-resp03-tool-governance-05` | `V3Resp03OrdinaryToolGovernance` → `V3HubRespOutbound05ClientSemantic` | anchored | resp05_consumes_resp03_repaired_payload_without_semantic_repair<br/><small>routecodex-v3-runtime/tests/hub_relay_response_semantics.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
+| `v3-resp03-tool-governance-05` | `V3Resp03OrdinaryToolGovernance` → `V3HubRespOutbound05ClientSemantic` | anchored | resp05_consumes_resp03_governed_payload_without_semantic_repair<br/><small>routecodex-v3-runtime/tests/hub_relay_response_semantics.rs</small> | build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03<br/><small>routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
 | `v3-resp03-tool-governance-06` | `V3HubRespOutbound05ClientSemantic` → `V3ServerRespOutbound06ClientFrame` | anchored | responses_sse_arbitrary_chunks_preserve_delta_order_and_terminal_tool_order<br/><small>routecodex-v3-runtime/tests/hub_relay_tool_servertool_multiturn_parity.rs</small> | build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05<br/><small>routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs</small> | `v3.resp03_tool_governance_gap_closeout` |
 
 ## v3.live_provider_compat.parity

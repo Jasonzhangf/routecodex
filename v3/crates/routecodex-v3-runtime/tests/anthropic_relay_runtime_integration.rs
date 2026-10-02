@@ -124,7 +124,12 @@ data: {"type":"message_stop"}
         json_response["incomplete_details"]["reason"],
         "max_output_tokens"
     );
-    assert_eq!(json_response["finish_reason"], "max_tokens");
+    // Responses objects carry no `finish_reason`; truncation is carried by
+    // `status=incomplete` + `incomplete_details.reason`.
+    assert!(
+        json_response.get("finish_reason").is_none(),
+        "{json_response}"
+    );
     assert!(
         sse_error
             .to_string()

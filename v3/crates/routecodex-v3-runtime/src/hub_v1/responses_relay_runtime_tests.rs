@@ -806,7 +806,7 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
     )
     .expect("OpenAI Chat function tool_search must project back to Responses tool_search_call");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "tool_search_call");
     assert_eq!(response["output"][0]["call_id"], "call_search_tools");
     assert_eq!(response["output"][0]["execution"], "client");
@@ -836,7 +836,7 @@ fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
     )
     .expect("flattened MCP function call must restore namespace for Responses client");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
     assert_eq!(response["output"][0]["name"], "workspace");
@@ -886,7 +886,7 @@ fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() 
         "OpenAI Chat function web_search must remain pending for Resp03 ServerTool interception",
     );
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["call_id"], "call_web_search");
     assert_eq!(response["output"][0]["name"], "web_search");
@@ -1328,7 +1328,7 @@ fn openai_chat_provider_reasoning_content_projects_replay_content_before_tool_ca
     )
     .expect("OpenAI Chat response must project reasoning to Responses");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "reasoning");
     assert_eq!(
             response["output"][0]["summary"][0]["text"], "Need inspect before running the tool.",
@@ -1373,7 +1373,7 @@ fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
     )
     .expect("Chat function projection must reverse to the declared Responses custom tool");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
     assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
@@ -1409,7 +1409,7 @@ fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custo
     )
     .expect("flattened function tool_call must reverse to the declared Responses custom tool");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
     assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(

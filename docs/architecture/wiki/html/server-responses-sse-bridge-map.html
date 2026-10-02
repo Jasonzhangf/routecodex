@@ -174,7 +174,7 @@
         <thead><tr><th>Semantic</th><th>JSON must expose</th><th>SSE must expose</th><th>Equality rule</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>final completion</td><td>final response body</td><td><code>response.completed</code> and/or <code>response.done</code> terminal event</td><td>same terminal truth</td></tr>
+        <tr><td>final completion</td><td>final response body</td><td><code>response.completed</code> terminal event</td><td>same terminal truth</td></tr>
         <tr><td>tool call request</td><td>final <code>assistant.tool_calls</code> or <code>required_action.submit_tool_outputs.tool_calls[]</code></td><td>terminal/completed SSE frame with same tool-call set</td><td>same consumer-visible required action</td></tr>
         <tr><td>tool-call ids</td><td>final body ids</td><td>SSE terminal ids</td><td>exact id equality</td></tr>
         <tr><td>plain output text</td><td>final text field</td><td>accumulated visible text stream</td><td>semantic equality</td></tr>

@@ -42,6 +42,7 @@ const files = {
   verificationMap: 'docs/architecture/v3-verification-map.yml',
   resourceMap: 'docs/architecture/v3-resource-operation-map.yml',
   wiki: 'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
+  serverFrameBuilders: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   packageJson: 'package.json',
 };
 
@@ -151,7 +152,6 @@ forbid(
 requireAll(text.responseCommon, files.responseCommon, ['pub enum V3HubRelayToolKind']);
 requireAll(text.responseChatProcess, files.responseChatProcess, [
   'pub(crate) fn classify_v3_hub_relay_tool_kind',
-  'fn complete_or_repair_v3_resp03_tool_frames',
   'fn inspect_v3_resp03_finish_reason',
   'fn project_v3_apply_patch_freeform_calls_at_resp03',
   'normalize_v3_apply_patch_freeform_input_for_client',
@@ -160,6 +160,12 @@ requireAll(text.responseChatProcess, files.responseChatProcess, [
   'servertool_action',
   'V3HubServertoolResponseAction::FollowupRequired',
 ]);
+forbid(
+  text.responseChatProcess,
+  files.responseChatProcess,
+  /complete_or_repair_v3_resp03_tool_frames/,
+  'fabricating Responses tool-continuation repair in Resp03',
+);
 requireAll(text.servertoolHooks, files.servertoolHooks, [
   'apply_v3_tool_call_servertool_hook_at_resp03',
 ]);
@@ -171,7 +177,6 @@ if (resp03GovernStart < 0 || resp03GovernEnd < 0) {
   const resp03Govern = text.responseChatProcess.slice(resp03GovernStart, resp03GovernEnd);
   requireOrdered(resp03Govern, files.responseChatProcess, [
     'harvest_v3_think_blocks_at_resp03',
-    'complete_or_repair_v3_resp03_tool_frames',
     'inspect_v3_resp03_finish_reason',
     'apply_v3_tool_call_servertool_hook_at_resp03',
     'project_v3_apply_patch_freeform_calls_at_resp03',
@@ -201,21 +206,56 @@ if (clientSseProjectionStart < 0 || clientSseProjectionEnd < 0) {
     'Some("failed")',
     '"response.failed"',
     '"response.incomplete"',
+    '"response.in_progress"',
     '"response.completed"',
-    '"response.done"',
-    'b"data: [DONE]\\n\\n"',
   ]);
   requireOrdered(clientSseProjection, files.responsesRelayRuntime, [
+    '"response.in_progress"',
     '"response.completed"',
-    '"response.done"',
-    'b"data: [DONE]\\n\\n"',
   ]);
+  // 非协议终止帧由文件级 forbid 统一判定（覆盖本切片），此处不重复声明。
   forbid(
     clientSseProjection,
     files.responsesRelayRuntime,
     /"response\.requires_action"/,
     'response.requires_action client SSE terminal projection',
   );
+}
+// 整个 Responses 客户端帧 owner 文件都不允许出现非协议终止帧：新增的
+// client-frame helper 也必须受约束，不能因为切片边界而逃过门禁。注释里可以
+// 说明被禁止的协议终止符，因此这里只在去掉注释后的代码视图上判定。
+// `data:` 后的空白不固定，`data:[DONE]` / `data:  [DONE]` 同样是合法 SSE 编码。
+forbid(
+  stripRustComments(text.responsesRelayRuntime),
+  files.responsesRelayRuntime,
+  /"response\.done"|data:\s*\[DONE\]/,
+  'non-Responses client SSE terminator (response.done / [DONE]) in the Responses client framing owner',
+);
+{
+  const responsesErrorChunkStart = text.serverFrameBuilders.indexOf(
+    'fn v3_responses_sse_error_event_chunk(',
+  );
+  const responsesErrorChunkEnd = text.serverFrameBuilders.indexOf(
+    '\nfn v3_sse_runtime_error_source_chunk_for_protocol',
+    responsesErrorChunkStart,
+  );
+  if (responsesErrorChunkStart < 0 || responsesErrorChunkEnd < 0) {
+    fail(
+      `${files.serverFrameBuilders}: unable to isolate Responses client SSE error terminal owner`,
+    );
+  } else {
+    const responsesErrorChunk = text.serverFrameBuilders.slice(
+      responsesErrorChunkStart,
+      responsesErrorChunkEnd,
+    );
+    requireAll(responsesErrorChunk, files.serverFrameBuilders, ['"response.failed"']);
+    forbid(
+      responsesErrorChunk,
+      files.serverFrameBuilders,
+      /data:\s*\[DONE\]/,
+      'Chat-completions [DONE] terminator on the Responses client SSE error path',
+    );
+  }
 }
 forbid(
   text.responsesRelayRuntime,
@@ -258,14 +298,14 @@ requireAll(text.tests, files.tests, [
   'attachment_history_missing_resource_is_preserved_as_client_data',
 ]);
 requireAll(text.responseSemanticsTests, files.responseSemanticsTests, [
-  'resp03_repairs_tool_call_finish_reason_before_tool_governance',
-  'resp05_consumes_resp03_repaired_payload_without_semantic_repair',
+  'resp03_preserves_completed_tool_call_response_before_tool_governance',
+  'resp05_consumes_resp03_governed_payload_without_semantic_repair',
 ]);
 requireAll(text.requestSemanticsTests, files.requestSemanticsTests, [
 ]);
 requireAll(text.functionMap, files.functionMap, [
   'feature_id: v3.resp03_tool_governance_gap_closeout',
-  'complete_or_repair_v3_resp03_tool_frames',
+  'resp05_consumes_resp03_governed_payload_without_semantic_repair',
   'apply_v3_tool_call_servertool_hook_at_resp03',
 ]);
 requireAll(text.mainlineMap, files.mainlineMap, [
@@ -333,6 +373,154 @@ function requireAll(source, owner, phrases) {
 
 function forbid(source, owner, pattern, label) {
   if (pattern.test(source)) fail(`${owner}: forbidden ${label} (${pattern})`);
+}
+
+// 门禁只判定代码，不判定说明文字：注释需要能点名被禁止的协议终止符。
+// 必须是字符串/字符/注释感知的扫描：`//` 出现在字符串字面量里（例如 URL）
+// 时不能把该行后续代码当作注释清掉，否则真实违规会被遮蔽。
+// Rust 字符字面量形如 `'a'` / `'\n'` / `'\\'` / `'\u{1F600}'`；`&'static str`
+// 这类生命周期不是字面量。只有在很短的窗口内闭合才按字面量处理，否则视为
+// 生命周期，避免把后续代码整段吞进字面量状态而遮蔽真实违规。
+function rustCharLiteralLength(source, index) {
+  if (source[index] !== "'") return 0;
+  let cursor = index + 1;
+  if (source[cursor] === '\\') {
+    cursor += 1;
+    const escape = source[cursor];
+    if (escape === 'u') {
+      const open = source.indexOf('{', cursor);
+      const close = open < 0 ? -1 : source.indexOf('}', open);
+      if (open < 0 || close < 0 || close - open > 10) return 0;
+      cursor = close + 1;
+    } else if (escape === 'x') {
+      cursor += 3;
+    } else {
+      cursor += 1;
+    }
+  } else {
+    const point = source.codePointAt(cursor);
+    if (point === undefined) return 0;
+    cursor += String.fromCodePoint(point).length;
+  }
+  return source[cursor] === "'" ? cursor + 1 - index : 0;
+}
+
+// Rust raw 字符串前缀 `r"` / `r#"` / `r##"`…，哈希数可达 255。必须按实际
+// 哈希数量判定，固定窗口会在 >=11 个 `#` 时误判成普通字符串，从而把后续
+// 真实违规当作注释清掉（fail-open）。
+function rustRawStringOpenLength(source, index) {
+  if (source[index] !== 'r') return 0;
+  let cursor = index + 1;
+  while (source[cursor] === '#') cursor += 1;
+  if (source[cursor] !== '"') return 0;
+  return cursor + 1 - index;
+}
+
+function stripRustComments(source) {
+  let out = '';
+  let index = 0;
+  let state = 'code';
+  let rawStringHashes = '';
+  let blockCommentDepth = 0;
+  while (index < source.length) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (state === 'code') {
+      if (char === '/' && next === '/') {
+        state = 'lineComment';
+        index += 2;
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        state = 'blockComment';
+        blockCommentDepth = 1;
+        index += 2;
+        continue;
+      }
+      const rawOpenLength = rustRawStringOpenLength(source, index);
+      if (rawOpenLength > 0) {
+        const prefix = source.slice(index, index + rawOpenLength);
+        rawStringHashes = prefix.slice(1, -1);
+        // 保留 `r#"` 前缀，使 raw 字符串内容保持可见。
+        out += prefix;
+        index += rawOpenLength;
+        state = 'rawString';
+        continue;
+      }
+      if (char === '"') {
+        state = 'string';
+        out += char;
+        index += 1;
+        continue;
+      }
+      if (char === "'") {
+        const length = rustCharLiteralLength(source, index);
+        if (length > 0) {
+          out += source.slice(index, index + length);
+          index += length;
+          continue;
+        }
+        out += char;
+        index += 1;
+        continue;
+      }
+      out += char;
+      index += 1;
+      continue;
+    }
+    if (state === 'lineComment') {
+      if (char === '\n') {
+        state = 'code';
+        out += char;
+      }
+      index += 1;
+      continue;
+    }
+    if (state === 'blockComment') {
+      // Rust 块注释可嵌套；只在深度归零时结束，否则内层 `*/` 会提前关闭
+      // 注释并把后续说明文字当成代码判定（false positive）。
+      if (char === '/' && next === '*') {
+        blockCommentDepth += 1;
+        index += 2;
+        continue;
+      }
+      if (char === '*' && next === '/') {
+        blockCommentDepth -= 1;
+        index += 2;
+        if (blockCommentDepth === 0) state = 'code';
+        continue;
+      }
+      if (char === '\n') out += char;
+      index += 1;
+      continue;
+    }
+    if (state === 'rawString') {
+      const closing = `"${'#'.repeat(rawStringHashes.length)}`;
+      if (source.startsWith(closing, index)) {
+        out += closing;
+        index += closing.length;
+        state = 'code';
+        rawStringHashes = '';
+        continue;
+      }
+      out += char;
+      index += 1;
+      continue;
+    }
+    // string literal: keep the bytes so literal payloads stay visible to the
+    // forbids, and honour escapes.
+    out += char;
+    if (char === '\\') {
+      if (next !== undefined) out += next;
+      index += 2;
+      continue;
+    }
+    if (char === '"') {
+      state = 'code';
+    }
+    index += 1;
+  }
+  return out;
 }
 
 function requireOrdered(source, owner, phrases, label = 'Req04') {

@@ -213,7 +213,7 @@ fn response_reasoning_summary_and_text_stay_separate_through_chat_process() {
 }
 
 #[test]
-fn resp03_repairs_tool_call_finish_reason_before_tool_governance() {
+fn resp03_preserves_completed_tool_call_response_before_tool_governance() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -242,14 +242,14 @@ fn resp03_repairs_tool_call_finish_reason_before_tool_governance() {
         V3HubServertoolResponseAction::None
     );
     let payload = resp03.finalized_payload();
-    assert_eq!(payload["status"], "requires_action");
-    assert_eq!(payload["finish_reason"], "tool_calls");
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["finish_reason"], "stop");
     assert_eq!(payload["output"][0]["call_id"], "call_real_exec");
     assert_eq!(payload["output"][0]["name"], "exec_command");
 }
 
 #[test]
-fn resp05_consumes_resp03_repaired_payload_without_semantic_repair() {
+fn resp05_consumes_resp03_governed_payload_without_semantic_repair() {
     let hooks = compile_v3_hub_relay_response_hooks();
     let resp02 = hooks
         .normalize(relay_raw(
@@ -272,8 +272,8 @@ fn resp05_consumes_resp03_repaired_payload_without_semantic_repair() {
         .unwrap();
     assert_eq!(resp03.terminality(), V3HubResponseTerminality::NonTerminal);
     let payload = resp03.finalized_payload();
-    assert_eq!(payload["status"], "requires_action");
-    assert_eq!(payload["finish_reason"], "tool_calls");
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["finish_reason"], "stop");
     assert_eq!(payload["output"][0]["type"], "custom_tool_call");
 }
 

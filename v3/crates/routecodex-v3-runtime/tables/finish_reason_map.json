@@ -2,11 +2,11 @@
   "table_id": "finish_reason_map",
   "kind": "protocol_value_map",
   "protocols": ["responses", "openai_chat", "anthropic"],
-  "description": "finish_reason / stop_reason 双向映射。Anthropic 当前闭合枚举为 end_turn/max_tokens/stop_sequence/tool_use/pause_turn/refusal/model_context_window_exceeded。openai_chat 入站 stop 无法区分 hub stop / stop_sequence，故 openai_chat 的 stop_sequence 折叠拆为独立 outbound-only 行；Responses pause_turn/model_context_window_exceeded 是保留源身份的已登记扩展值，不伪造标准 incomplete_details.reason。",
+  "description": "finish_reason / stop_reason 双向映射。Anthropic 当前闭合枚举为 end_turn/max_tokens/stop_sequence/tool_use/pause_turn/refusal/model_context_window_exceeded。openai_chat 入站 stop 无法区分 hub stop / stop_sequence，故 openai_chat 的 stop_sequence 折叠拆为独立 outbound-only 行；Responses pause_turn/model_context_window_exceeded 是保留源身份的已登记扩展值，不伪造标准 incomplete_details.reason。Responses 协议没有 finish_reason 字段：tool_calls 语义由 output 中的 function_call/custom_tool_call 项与 status=completed 承载，故 tool_calls 行不登记 responses 值，RouteCodex 不得向 Responses 客户端伪造 requires_action 或 finish_reason。",
   "values": [
     { "hub": "stop", "responses": "end_turn", "openai_chat": "stop", "anthropic": "end_turn" },
     { "hub": "max_tokens", "responses": "max_tokens", "openai_chat": "length", "anthropic": "max_tokens" },
-    { "hub": "tool_calls", "responses": "requires_action", "openai_chat": "tool_calls", "anthropic": "tool_use" },
+    { "hub": "tool_calls", "openai_chat": "tool_calls", "anthropic": "tool_use" },
     { "hub": "stop_sequence", "responses": "stop_sequence", "anthropic": "stop_sequence" },
     { "hub": "stop_sequence", "direction": "outbound", "openai_chat": "stop" },
     { "hub": "pause_turn", "responses": "pause_turn", "anthropic": "pause_turn" },

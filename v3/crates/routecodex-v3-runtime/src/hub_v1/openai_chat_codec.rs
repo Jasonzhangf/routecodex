@@ -230,36 +230,28 @@ pub(crate) fn project_v3_openai_chat_client_response_from_canonical(
             _ => {}
         }
     }
-    let status = object
-        .get("status")
+    // A tool call is expressed by the projected `tool_calls` themselves; the
+    // canonical `status` no longer carries a fabricated `requires_action`.
+    // `finish_reason` is a Chat-only field: it is derived here from the
+    // canonical `incomplete_details`, never read from a Responses client
+    // object, which has no such field.
+    let finish_reason = if !tool_calls.is_empty() {
+        Value::from("tool_calls")
+    } else if let Some(reason) = object
+        .get("incomplete_details")
+        .and_then(|details| details.get("reason"))
         .and_then(Value::as_str)
-        .unwrap_or("completed");
-    let finish_reason = if !tool_calls.is_empty() || status == "requires_action" {
-        "tool_calls"
-    } else {
-        // responses finish_reason -> hub -> openai_chat（查表；未命中默认 "stop"，与原手写 match 兜底一致）
-        match object.get("finish_reason").and_then(Value::as_str) {
-            Some(value) => table_map_value(
-                V3TableKind::FinishReason,
-                "responses",
-                value,
-                V3TableDirection::Inbound,
-            )
-            .ok()
-            .flatten()
-            .and_then(|hub| {
-                table_map_value(
-                    V3TableKind::FinishReason,
-                    "openai_chat",
-                    hub,
-                    V3TableDirection::Outbound,
-                )
-                .ok()
-                .flatten()
-            })
-            .unwrap_or("stop"),
-            None => "stop",
+    {
+        match reason {
+            "max_output_tokens" => Value::from("length"),
+            "content_filter" => Value::from("content_filter"),
+            _ => Value::from("stop"),
         }
+    } else {
+        // Chat 终态只有 stop/length/content_filter/tool_calls/stop_sequence：
+        // canonical 的 in_progress 是 Responses 语义，投影到 Chat 时按普通
+        // 结束收口，不得产出 Chat 协议之外的 null finish_reason。
+        Value::from("stop")
     };
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String("assistant".to_string()));

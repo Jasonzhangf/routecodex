@@ -9546,6 +9546,11 @@ operator_registry:
         explicit_history_pairing: resource
         servertool_policy: resource
         tool_thinking_turn_context: resource
+    - operator: routecodex.v3.operation.project_completed_function_call_response
+      operator_version: "2"
+      params:
+        response_tool_binding: resource
+        execution_disposition: resource
     - operator: routecodex.v3.operation.inverse_project_client_response
       operator_version: "1"
       params:

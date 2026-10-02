@@ -302,7 +302,9 @@ pub(crate) fn v3_responses_sse_error_event_chunk(
             }
         }
     });
-    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
+    // Responses 客户端帧只由协议终态收口：`response.failed` 就是终态，
+    // 不得追加 Chat Completions 的 [DONE] 终止符。
+    format!("event: response.failed\ndata: {event}\n\n").into_bytes()
 }
 
 fn v3_sse_runtime_error_source_chunk_for_protocol(

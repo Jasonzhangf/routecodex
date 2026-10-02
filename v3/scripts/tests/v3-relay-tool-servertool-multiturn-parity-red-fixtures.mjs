@@ -37,6 +37,7 @@ const copyPaths = [
   'docs/architecture/v3-mainline-call-map.yml',
   'docs/architecture/v3-verification-map.yml',
   'docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md',
+  'v3/crates/routecodex-v3-server/src/frame_builders.rs',
   'package.json',
 ];
 
@@ -78,19 +79,19 @@ const cases = [
     diagnostic: /project_v3_apply_patch_freeform_calls_at_resp03/,
   },
   {
-    name: 'Resp03 semantic repair reordered after apply_patch projection',
+    name: 'Responses tool-continuation fabrication revived in Resp03',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: '    let input = complete_or_repair_v3_resp03_tool_frames(input);',
+    marker: 'fn inspect_v3_resp03_finish_reason(',
     mutation:
-      '    let input = project_v3_apply_patch_freeform_calls_at_resp03(input);\n    let input = complete_or_repair_v3_resp03_tool_frames(input);',
-    diagnostic: /Resp03 response governance/,
+      'fn complete_or_repair_v3_resp03_tool_frames(mut input: V3HubRespInbound02Normalized) -> V3HubRespInbound02Normalized {\n    let mut next = input.provider_payload().as_ref().clone();\n    if let Some(object) = next.as_object_mut() {\n        if let Some(status) = object.get("status").and_then(Value::as_str) {\n            if status == "completed" {\n                object.insert("status".to_string(), Value::String("requires_action".to_string()));\n            }\n        }\n        object.insert("finish_reason".to_string(), Value::String("tool_calls".to_string()));\n    }\n    input\n}\nfn inspect_v3_resp03_finish_reason(',
+    diagnostic: /fabricating Responses tool-continuation repair in Resp03/,
   },
   {
-    name: 'Resp03 repair step removed',
-    file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs',
-    marker: 'complete_or_repair_v3_resp03_tool_frames',
-    mutation: 'resp03_tool_frame_repair_removed',
-    diagnostic: /complete_or_repair_v3_resp03_tool_frames|Resp03 response governance/,
+    name: 'Resp03 completed tool-call preservation characterization renamed away',
+    file: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_response_semantics.rs',
+    marker: 'fn resp03_preserves_completed_tool_call_response_before_tool_governance()',
+    mutation: 'fn resp03_preserves_completed_tool_call_response_removed()',
+    diagnostic: /resp03_preserves_completed_tool_call_response_before_tool_governance/,
   },
   {
     name: 'Resp03 finish reason inspector removed',
@@ -117,13 +118,19 @@ const cases = [
     diagnostic: /response\.requires_action client SSE terminal projection/,
   },
   {
-    name: 'Responses client SSE done terminal removed',
+    name: 'Responses client SSE non-protocol response.done terminator reintroduced',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    marker:
-      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",',
+    marker: 'frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
     mutation:
-      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.closed",\n            &json!({\n                "type": "response.closed",',
-    diagnostic: /response\.done/,
+      'frames.push(build_v3_runtime_sse_json_frame(\n            "response.done",\n            &json!({\n                "type": "response.done",\n                "response": terminal_response,\n            }),\n        ));\n        frames.push(build_v3_runtime_sse_json_frame(\n            terminal_event,',
+    diagnostic: /non-Responses client SSE terminator/,
+  },
+  {
+    name: 'Responses client SSE error path regains the Chat [DONE] terminator',
+    file: 'v3/crates/routecodex-v3-server/src/frame_builders.rs',
+    marker: 'format!("event: response.failed\\ndata: {event}\\n\\n").into_bytes()',
+    mutation: 'format!("event: response.failed\\ndata: {event}\\n\\ndata: [DONE]\\n\\n").into_bytes()',
+    diagnostic: /Chat-completions \[DONE\] terminator on the Responses client SSE error path/,
   },
   {
     name: 'Responses client SSE incomplete remerged into failed terminal',

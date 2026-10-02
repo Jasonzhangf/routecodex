@@ -831,21 +831,48 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
             completed.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
             "completed response.output must use message shape consistent with output_item.done: {completed}"
         );
-    let done = text
-        .find("event: response.done")
-        .map(|index| &text[index..])
-        .expect("response.done frame must be present");
+    // Responses 客户端帧序列与上游 provider/Direct 路径一致：协议没有
+    // `response.done` 事件，`data: [DONE]` 是 Chat Completions 约定，终态只能由
+    // response.completed/response.incomplete/response.failed 承载。
     assert!(
-            done.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
-            "done response.output must use message shape consistent with output_item.done: {done}"
-        );
+        !text.contains("event: response.done"),
+        "Responses client stream must not carry a response.done frame: {text}"
+    );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "Responses client stream must not carry a Chat-completions [DONE] terminator: {text}"
+    );
+    assert!(
+        text.contains("event: response.in_progress"),
+        "response.in_progress frame must be present: {text}"
+    );
+    let created_frame = {
+        let rest = text
+            .find("event: response.created")
+            .map(|index| &text[index..])
+            .expect("response.created frame must be present");
+        // 截到该 SSE 帧结束（空行）；只截首个换行会退化成 `event:` 行而永真。
+        &rest[..rest.find("\n\n").unwrap_or(rest.len())]
+    };
+    assert!(
+        created_frame.contains(r#""status":"in_progress""#)
+            && created_frame.contains(r#""output":[]"#),
+        "response.created must carry an in-progress snapshot with empty output: {created_frame}"
+    );
+    // in-progress 快照必须以 null 显式表达终态字段尚未产生，而不是省略或填充。
+    for absent in [r#""usage":{"#, r#""incomplete_details":{"#] {
+        assert!(!created_frame.contains(absent), "{created_frame}");
+    }
+    for present in [r#""usage":null"#, r#""incomplete_details":null"#] {
+        assert!(created_frame.contains(present), "{created_frame}");
+    }
 }
 
 #[tokio::test]
 async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
     // response.incomplete 是 Responses 协议合法终态：必须保留部分输出并投影
-    // response.created + output_item.done + response.incomplete + response.done
-    // + [DONE]，禁止映射成 response.failed 丢弃部分输出。
+    // response.created + output_item.done + response.incomplete，禁止映射成
+    // response.failed 丢弃部分输出，也不得追加非协议终止帧。
     let projected = collect_projected_sse(
         build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
             "id": "resp_incomplete_shape",
@@ -889,8 +916,12 @@ async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
         "partial output must not be dropped: {text}"
     );
     assert!(
-        text.contains("event: response.done") && text.contains("data: [DONE]"),
-        "incomplete terminal must close with response.done + [DONE]: {text}"
+        !text.contains("event: response.done"),
+        "incomplete terminal must not add a non-protocol response.done frame: {text}"
+    );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "incomplete terminal must not add a Chat-completions [DONE] terminator: {text}"
     );
 }
 
@@ -1045,7 +1076,8 @@ data: {"type":"message_stop"}
     assert_eq!(response["id"], "msg_dup");
     assert_eq!(response["model"], "claude-fable-5");
     assert_eq!(response["status"], "completed");
-    assert_eq!(response["finish_reason"], "end_turn");
+    // Responses objects carry no `finish_reason`; terminality is `status` alone.
+    assert!(response.get("finish_reason").is_none(), "{response}");
     assert_eq!(
         response["output"][0]["content"][0]["text"],
         "duplicate start tolerated"
@@ -1456,20 +1488,4 @@ async fn responses_provider_sse_stream_output_without_identity_does_not_overwrit
         response["output"][1]["summary"][0]["text"],
         "terminal reasoning"
     );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
-        )]));
-    let error =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("response.reasoning_summary.delta is unsupported"));
 }

@@ -509,3 +509,18 @@ fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
         "{wire}"
     );
 }
+#[tokio::test]
+async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
+        )]));
+    let error =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("response.reasoning_summary.delta is unsupported"));
+}

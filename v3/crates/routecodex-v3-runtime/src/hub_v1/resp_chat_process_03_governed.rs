@@ -1118,7 +1118,6 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
-    let input = complete_or_repair_v3_resp03_tool_frames(input);
     let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
         input.provider_payload().as_ref(),
     );
@@ -1314,67 +1313,6 @@ enum V3Resp03FinishReasonBranch {
 struct V3Resp03ProtocolGovernance {
     status_terminality: V3HubResponseTerminality,
     tool_calls: Vec<V3HubResponseToolCall>,
-}
-
-fn complete_or_repair_v3_resp03_tool_frames(
-    mut input: V3HubRespInbound02Normalized,
-) -> V3HubRespInbound02Normalized {
-    if input.semantic_protocol() != V3HubProviderWireProtocol::Responses {
-        return input;
-    }
-    let mut next = input.provider_payload().as_ref().clone();
-    let Some(object) = next.as_object_mut() else {
-        return input;
-    };
-    let has_tool_call = object
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|item| {
-            matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call")
-            )
-        });
-    if !has_tool_call {
-        return input;
-    }
-    let Some(status) = object.get("status").and_then(Value::as_str) else {
-        return input;
-    };
-    if !matches!(
-        status,
-        "completed" | "requires_action" | "in_progress" | "queued"
-    ) {
-        return input;
-    }
-    let mut changed = false;
-    if status == "completed" {
-        object.insert(
-            "status".to_string(),
-            Value::String("requires_action".to_string()),
-        );
-        changed = true;
-    }
-    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
-        if object.contains_key(key) && object.get(key).and_then(Value::as_str) != Some("tool_calls")
-        {
-            object.insert(key.to_string(), Value::String("tool_calls".to_string()));
-            changed = true;
-        }
-    }
-    if !object.contains_key("finish_reason") {
-        object.insert(
-            "finish_reason".to_string(),
-            Value::String("tool_calls".to_string()),
-        );
-        changed = true;
-    }
-    if changed {
-        *input.provider_payload_mut() = Arc::new(next);
-    }
-    input
 }
 
 fn inspect_v3_resp03_finish_reason(
