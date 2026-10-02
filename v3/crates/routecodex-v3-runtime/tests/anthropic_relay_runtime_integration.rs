@@ -126,7 +126,10 @@ data: {"type":"message_stop"}
     );
     // Responses objects carry no `finish_reason`; truncation is carried by
     // `status=incomplete` + `incomplete_details.reason`.
-    assert!(json_response.get("finish_reason").is_none(), "{json_response}");
+    assert!(
+        json_response.get("finish_reason").is_none(),
+        "{json_response}"
+    );
     assert!(
         sse_error
             .to_string()

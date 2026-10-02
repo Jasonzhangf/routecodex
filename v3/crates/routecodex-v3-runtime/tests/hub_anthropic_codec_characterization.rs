@@ -2467,7 +2467,14 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
         ),
     ];
 
-    for (payload, expected_status, expected_stop_sequence, expected_incomplete_reason, expected_stop_details_category) in cases {
+    for (
+        payload,
+        expected_status,
+        expected_stop_sequence,
+        expected_incomplete_reason,
+        expected_stop_details_category,
+    ) in cases
+    {
         let response = project_v3_anthropic_message_as_responses_response(&payload)
             .unwrap_or_else(|error| panic!("registered terminal value must project: {error}"));
         assert_eq!(response["status"], expected_status, "{response}");
@@ -2487,7 +2494,9 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
             None => assert!(response.get("stop_sequence").is_none(), "{response}"),
         }
         match expected_stop_details_category {
-            Some(category) => assert_eq!(response["stop_details"]["category"], category, "{response}"),
+            Some(category) => {
+                assert_eq!(response["stop_details"]["category"], category, "{response}")
+            }
             None => assert!(response.get("stop_details").is_none(), "{response}"),
         }
     }
