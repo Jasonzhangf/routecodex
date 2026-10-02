@@ -43,7 +43,7 @@ impl V3ProviderHealthPersistenceTicket {
 }
 
 impl V3ProviderHealthPersistenceWriter {
-    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Self {
+    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
         let alarm = Arc::new(RwLock::new(None));
         let writer_alarm = Arc::clone(&alarm);
@@ -99,10 +99,8 @@ impl V3ProviderHealthPersistenceWriter {
                     }
                 }
             })
-            .unwrap_or_else(|error| {
-                panic!("provider health persistence writer start failed: {error}")
-            });
-        Self { sender, alarm }
+            .map_err(|error| format!("provider health persistence writer start failed: {error}"))?;
+        Ok(Self { sender, alarm })
     }
 
     fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
@@ -142,6 +140,16 @@ impl V3ProviderHealthPersistenceWriter {
     }
 }
 
+impl V3ProviderHealthPersistenceWriter {
+    fn disabled(message: String) -> Self {
+        let (sender, _receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
+        Self {
+            sender,
+            alarm: Arc::new(RwLock::new(Some(message))),
+        }
+    }
+}
+
 pub(super) fn start_provider_health_persistence(
     manifest: &V3Config05ManifestPublished,
     persistence_path: Option<PathBuf>,
@@ -150,22 +158,25 @@ pub(super) fn start_provider_health_persistence(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
 )> {
-    let mut coordinator = persistence_path.map(|path| {
-        load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path)
-            .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
-    });
-    coordinator.as_mut().map(|coordinator| {
-        coordinator
-            .reset_probe_schedule_for_startup()
-            .unwrap_or_else(|error| {
-                panic!("provider cooldown startup probe reset failed: {error}")
-            });
-        let entries = coordinator.persisted_entries();
-        (
-            V3ProviderHealthPersistenceWriter::start(coordinator.clone()),
-            entries,
-        )
-    })
+    let path = persistence_path?;
+    let mut coordinator =
+        match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
+            Ok(coordinator) => coordinator,
+            Err(error) => return Some((disabled_persistence_writer(error), Vec::new())),
+        };
+    if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
+        return Some((disabled_persistence_writer(error), Vec::new()));
+    }
+    let entries = coordinator.persisted_entries();
+    match V3ProviderHealthPersistenceWriter::start(coordinator) {
+        Ok(writer) => Some((writer, entries)),
+        Err(error) => Some((disabled_persistence_writer(error), Vec::new())),
+    }
+}
+
+fn disabled_persistence_writer(error: String) -> V3ProviderHealthPersistenceWriter {
+    eprintln!("[RouteCodexV3] provider cooldown persistence disabled: {error}");
+    V3ProviderHealthPersistenceWriter::disabled(error)
 }
 
 fn load_provider_cooldown_coordinator(
@@ -497,13 +508,71 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     }
 
     #[test]
+    fn unsupported_persisted_schema_disables_persistence_without_panicking_or_overwriting() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let contents = br#"{"schema_version":3,"entries":[]}"#;
+        std::fs::write(&path, contents).expect("write unsupported persisted schema");
+
+        let result = std::panic::catch_unwind(|| {
+            start_provider_health_persistence(
+                &manifest("server", "127.0.0.1", 1234),
+                Some(path.clone()),
+                None,
+            )
+        });
+
+        assert!(
+            result.is_ok(),
+            "unsupported persistence state must not panic"
+        );
+        let (writer, entries) = result
+            .expect("startup must return normally")
+            .expect("disabled persistence must remain observable");
+        assert!(entries.is_empty());
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its failure")
+            .contains("unsupported provider cooldown state schema 3"));
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
+    }
+
+    #[test]
+    fn corrupted_persisted_state_disables_persistence_without_panicking_or_overwriting() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let contents = br#"{"schema_version":2,"entries":["#;
+        std::fs::write(&path, contents).expect("write corrupted persisted state");
+
+        let result = std::panic::catch_unwind(|| {
+            start_provider_health_persistence(
+                &manifest("server", "127.0.0.1", 1234),
+                Some(path.clone()),
+                None,
+            )
+        });
+
+        assert!(result.is_ok(), "corrupted persistence state must not panic");
+        let (writer, entries) = result
+            .expect("startup must return normally")
+            .expect("disabled persistence must remain observable");
+        assert!(entries.is_empty());
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its failure")
+            .contains("decode provider cooldown state"));
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
+    }
+
+    #[test]
     fn health_persistence_isolation_flushes_latest_snapshot_in_order() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             path.clone(),
             60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -567,7 +636,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
                 crate::global_cooldown::V3ProviderCooldownObservation::default(),
             )
             .expect("seed auth cooldown");
-        let writer = V3ProviderHealthPersistenceWriter::start(coordinator);
+        let writer = V3ProviderHealthPersistenceWriter::start(coordinator)
+            .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -616,7 +686,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             root.clone(),
             60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
