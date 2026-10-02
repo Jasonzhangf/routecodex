@@ -228,10 +228,18 @@ fn map_sse_transport_error(
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
         },
-        SseTransportError::UpstreamRead { message } => V3ProviderError::ResponseBody {
+        // A failed upstream read and a read timeout are network transport
+        // failures, not response-body or SSE framing failures: they must not
+        // project as a response-stage 599.
+        SseTransportError::UpstreamRead { message } => V3ProviderError::Transport {
             request_id: request_id.to_string(),
             provider_id: provider_id.to_string(),
             reason: message,
+        },
+        SseTransportError::Timeout { timeout } => V3ProviderError::Transport {
+            request_id: request_id.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("SSE transport timed out after {timeout:?}"),
         },
         other => V3ProviderError::MalformedSse {
             request_id: request_id.to_string(),

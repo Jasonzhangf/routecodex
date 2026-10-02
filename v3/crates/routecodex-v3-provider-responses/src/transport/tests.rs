@@ -756,6 +756,39 @@ async fn transport_http_status_preserves_real_code_on_body_decode_failure() {
 }
 
 #[tokio::test]
+async fn transport_success_body_read_failure_is_a_network_failure() {
+    let addr = spawn_http_error_response(
+        200,
+        &[
+            ("content-type", "application/json"),
+            ("content-length", "64"),
+        ],
+        b"short",
+    )
+    .await;
+    let request = http_transport_request(
+        "req-success-corrupt-body",
+        format!("http://{addr}/v1/responses"),
+        None,
+    );
+    let error = ProviderResponsesTransport::default()
+        .send(request)
+        .await
+        .expect_err("truncated success body must fail");
+    // No usable upstream response body arrived, so this is a network transport
+    // failure and must not project as a response-stage 599.
+    match error {
+        V3ProviderError::Transport { reason, .. } => {
+            assert!(
+                reason.contains("error decoding response body"),
+                "unexpected reason: {reason}"
+            );
+        }
+        other => panic!("expected transport error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn transport_http_status_body_read_cancellation_remains_client_disconnect() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
